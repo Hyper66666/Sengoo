@@ -2,46 +2,58 @@
 
 use miette::Result;
 use std::collections::HashMap;
-use std::path::PathBuf;
-use tokio::sync::RwLock;
+use std::sync::Arc;
 use tower_lsp::jsonrpc::Result as LspResult;
 use tower_lsp::lsp_types::*;
 use tower_lsp::{Client, LanguageServer, LspService, Server};
 
+mod completion;
+mod completion_context;
 mod dependency_sources;
 mod diagnostics;
 mod formatting;
+#[cfg(test)]
+mod golden_tests;
+mod protocol;
 mod semantic;
 mod signatures;
 mod stdlib;
 mod symbols;
 mod text_editing;
 mod workspace;
-use diagnostics::{build_diagnostics, compiler_diagnostics_from_sgc_json, quick_fix_actions};
+mod workspace_index;
+use completion::{completion_items_for_request, resolve_completion_item};
+use diagnostics::{build_diagnostics, quick_fix_actions, semantic_diagnostics_for_document};
 use formatting::{full_document_range, normalized_format, range_format_edit};
+use protocol::completion_experimental_capability;
 #[cfg(test)]
 use semantic::SemanticKind;
 use semantic::{semantic_legend, semantic_tokens_for};
 #[cfg(test)]
+use signatures::active_call_site;
+#[cfg(test)]
 use signatures::collect_function_signatures;
-use signatures::{active_call_site, FunctionSignatureInfo};
-use stdlib::{
-    stdlib_definition_for_content, stdlib_signatures_for_content, stdlib_symbol_detail_for_content,
-    stdlib_symbols_for_content,
+use signatures::signature_help_for_request;
+#[cfg(test)]
+use stdlib::stdlib_definition_for_content;
+#[cfg(test)]
+use symbols::{collect_ast_symbols, find_declaration_in_text};
+use symbols::{
+    completion_kind_to_symbol_kind, extract_identifier_at, find_symbol_occurrences,
+    valid_identifier_name,
 };
 #[cfg(test)]
-use symbols::find_declaration_in_text;
-use symbols::{
-    collect_ast_symbols, completion_kind_to_symbol_kind, extract_identifier_at,
-    find_symbol_occurrences, valid_identifier_name,
-};
-use text_editing::{apply_content_changes, folding_ranges_for, position_to_byte_index};
+use text_editing::apply_content_changes;
+use text_editing::folding_ranges_for;
+#[cfg(test)]
+use workspace::workspace_documents_for_roots_and_open_documents;
+#[cfg(test)]
 use workspace::{
     completion_symbols_for_documents, find_symbol_detail_in_documents,
-    function_signatures_for_documents, goto_definition_in_documents, references_in_documents,
-    rename_in_documents, workspace_documents_for_roots_and_open_documents,
-    workspace_roots_from_initialize, workspace_symbols_for_documents,
+    goto_definition_in_documents, workspace_symbols_for_documents,
 };
+use workspace::{references_in_documents, rename_in_documents, workspace_roots_from_initialize};
+use workspace_index::{rebuild_workspace_index, run_index_operation, WorkspaceIndex};
 
 const SGLSP_VERSION: &str = concat!(
     env!("CARGO_PKG_VERSION"),
@@ -49,6 +61,14 @@ const SGLSP_VERSION: &str = concat!(
     env!("SENGOO_BUILD_HASH"),
     ")"
 );
+
+fn smart_completion_options() -> CompletionOptions {
+    CompletionOptions {
+        resolve_provider: Some(true),
+        trigger_characters: Some(vec![".".into(), ":".into(), "#".into()]),
+        ..Default::default()
+    }
+}
 
 #[tokio::main]
 async fn main() -> Result<()> {
@@ -85,8 +105,7 @@ impl Default for ServerConfig {
 #[derive(Debug)]
 struct SengooLanguageServer {
     client: Client,
-    documents: RwLock<HashMap<Url, String>>,
-    workspace_roots: RwLock<Vec<PathBuf>>,
+    index: Arc<WorkspaceIndex>,
     config: ServerConfig,
 }
 
@@ -94,19 +113,20 @@ impl SengooLanguageServer {
     fn new(client: Client) -> Self {
         Self {
             client,
-            documents: RwLock::new(HashMap::new()),
-            workspace_roots: RwLock::new(Vec::new()),
+            index: Arc::new(WorkspaceIndex::default()),
             config: ServerConfig::default(),
         }
     }
 
     async fn document_text(&self, uri: &Url) -> Option<String> {
-        self.documents.read().await.get(uri).cloned()
+        self.index
+            .document(uri)
+            .map(|document| document.content.to_string())
     }
 
     async fn publish_diagnostics(&self, uri: &Url) {
         let content = self.document_text(uri).await.unwrap_or_default();
-        let mut diagnostics = compiler_diagnostics_from_sgc_json(uri, &content);
+        let mut diagnostics = semantic_diagnostics_for_document(&self.index, uri, &content);
         let mut style = build_diagnostics(&content, self.config.max_problems);
         diagnostics.append(&mut style);
         diagnostics.truncate(self.config.max_problems);
@@ -115,23 +135,29 @@ impl SengooLanguageServer {
             .await;
     }
 
-    async fn all_documents(&self) -> HashMap<Url, String> {
-        self.documents.read().await.clone()
+    async fn workspace_documents(&self) -> HashMap<Url, String> {
+        self.index.documents()
     }
 
-    async fn workspace_documents(&self) -> HashMap<Url, String> {
-        let roots = self.workspace_roots.read().await.clone();
-        let open_documents = self.all_documents().await;
-        workspace_documents_for_roots_and_open_documents(&roots, &open_documents)
+    async fn record_index_result(&self, operation: &str, uri: &Url, published: bool) {
+        if !published {
+            self.client
+                .log_message(
+                    MessageType::LOG,
+                    format!(
+                        "ignored stale or cancelled workspace-index {operation} result for {uri}"
+                    ),
+                )
+                .await;
+        }
     }
 }
 
 fn stdlib_definition_for_cursor_fallback(
     uri: &Url,
-    content: &str,
-    symbol_name: &str,
     symbol_range: Range,
     definition: &Option<GotoDefinitionResponse>,
+    stdlib_definition: Option<Location>,
 ) -> Option<GotoDefinitionResponse> {
     let definition_points_at_cursor = matches!(
         definition,
@@ -142,7 +168,7 @@ fn stdlib_definition_for_cursor_fallback(
         return None;
     }
 
-    stdlib_definition_for_content(content, symbol_name).map(GotoDefinitionResponse::Scalar)
+    stdlib_definition.map(GotoDefinitionResponse::Scalar)
 }
 
 fn document_highlights_for_content(
@@ -176,7 +202,30 @@ fn prepare_rename_for_content(content: &str, position: Position) -> Option<Prepa
 #[tower_lsp::async_trait]
 impl LanguageServer for SengooLanguageServer {
     async fn initialize(&self, params: InitializeParams) -> LspResult<InitializeResult> {
-        *self.workspace_roots.write().await = workspace_roots_from_initialize(&params);
+        let roots = workspace_roots_from_initialize(&params);
+        if let Err(error) = rebuild_workspace_index(Arc::clone(&self.index), roots).await {
+            self.client
+                .log_message(
+                    MessageType::WARNING,
+                    format!("workspace index initialization failed: {error}"),
+                )
+                .await;
+        }
+        let snapshot = self.index.snapshot();
+        let metrics = self.index.metrics();
+        self.client
+            .log_message(
+                MessageType::INFO,
+                format!(
+                    "indexed {} Sengoo documents (generation {}, scans {}, parses {}, stdlib metadata v{})",
+                    snapshot.documents.len(),
+                    snapshot.generation,
+                    metrics.recursive_scans,
+                    metrics.parsed_documents,
+                    snapshot.stdlib_metadata_revision,
+                ),
+            )
+            .await;
         Ok(InitializeResult {
             capabilities: ServerCapabilities {
                 text_document_sync: Some(TextDocumentSyncCapability::Options(
@@ -187,11 +236,7 @@ impl LanguageServer for SengooLanguageServer {
                         ..Default::default()
                     },
                 )),
-                completion_provider: Some(CompletionOptions {
-                    resolve_provider: Some(false),
-                    trigger_characters: Some(vec![".".to_string(), ":".to_string()]),
-                    ..Default::default()
-                }),
+                completion_provider: Some(smart_completion_options()),
                 definition_provider: Some(OneOf::Left(true)),
                 references_provider: Some(OneOf::Left(true)),
                 rename_provider: Some(OneOf::Right(RenameOptions {
@@ -221,6 +266,7 @@ impl LanguageServer for SengooLanguageServer {
                 code_action_provider: Some(CodeActionProviderCapability::Simple(true)),
                 document_formatting_provider: Some(OneOf::Left(true)),
                 document_range_formatting_provider: Some(OneOf::Left(true)),
+                experimental: Some(completion_experimental_capability()),
                 ..Default::default()
             },
             ..Default::default()
@@ -240,74 +286,89 @@ impl LanguageServer for SengooLanguageServer {
     async fn did_open(&self, params: DidOpenTextDocumentParams) {
         let uri = params.text_document.uri;
         let content = params.text_document.text;
-        self.documents.write().await.insert(uri.clone(), content);
+        let index = Arc::clone(&self.index);
+        let operation_uri = uri.clone();
+        let published = run_index_operation(move |cancellation| {
+            index.open(
+                operation_uri,
+                params.text_document.version,
+                content,
+                &cancellation,
+            )
+        })
+        .await;
+        self.record_index_result("open", &uri, published).await;
         self.publish_diagnostics(&uri).await;
     }
 
     async fn did_change(&self, params: DidChangeTextDocumentParams) {
         let uri = params.text_document.uri;
-        let content_changes = params.content_changes;
-        let mut documents = self.documents.write().await;
-        if let Some(current) = documents.get_mut(&uri) {
-            apply_content_changes(current, content_changes);
-        } else if let Some(last) = content_changes.last() {
-            documents.insert(uri.clone(), last.text.clone());
-        }
-        drop(documents);
+        let index = Arc::clone(&self.index);
+        let operation_uri = uri.clone();
+        let published = run_index_operation(move |cancellation| {
+            index.change(
+                &operation_uri,
+                params.text_document.version,
+                params.content_changes,
+                &cancellation,
+            )
+        })
+        .await;
+        self.record_index_result("change", &uri, published).await;
+        self.publish_diagnostics(&uri).await;
+    }
+
+    async fn did_save(&self, params: DidSaveTextDocumentParams) {
+        let uri = params.text_document.uri;
+        let index = Arc::clone(&self.index);
+        let operation_uri = uri.clone();
+        let published = run_index_operation(move |cancellation| {
+            index.save(&operation_uri, params.text, &cancellation)
+        })
+        .await;
+        self.record_index_result("save", &uri, published).await;
         self.publish_diagnostics(&uri).await;
     }
 
     async fn did_close(&self, params: DidCloseTextDocumentParams) {
         let uri = params.text_document.uri;
-        self.documents.write().await.remove(&uri);
+        self.index.close(&uri);
         self.client.publish_diagnostics(uri, Vec::new(), None).await;
+    }
+
+    async fn did_change_watched_files(&self, params: DidChangeWatchedFilesParams) {
+        for change in params.changes {
+            match change.typ {
+                FileChangeType::DELETED => {
+                    let published = self.index.remove_file(&change.uri);
+                    self.record_index_result("delete", &change.uri, published)
+                        .await;
+                }
+                FileChangeType::CREATED | FileChangeType::CHANGED => {
+                    let index = Arc::clone(&self.index);
+                    let uri = change.uri;
+                    let operation_uri = uri.clone();
+                    let published = run_index_operation(move |cancellation| {
+                        index.refresh_file(&operation_uri, &cancellation)
+                    })
+                    .await;
+                    self.record_index_result("refresh", &uri, published).await;
+                }
+                _ => {}
+            }
+        }
     }
 
     async fn completion(&self, params: CompletionParams) -> LspResult<Option<CompletionResponse>> {
         let uri = params.text_document_position.text_document.uri;
-        let content = self.document_text(&uri).await.unwrap_or_default();
-        let documents = self.workspace_documents().await;
-        let ast_symbols = completion_symbols_for_documents(&uri, &documents);
+        let position = params.text_document_position.position;
+        Ok(Some(CompletionResponse::Array(
+            completion_items_for_request(&self.index, &uri, position),
+        )))
+    }
 
-        let mut items = vec![
-            CompletionItem::new_simple("fn".to_string(), "Define a function".to_string()),
-            CompletionItem::new_simple("struct".to_string(), "Define a struct".to_string()),
-            CompletionItem::new_simple("let".to_string(), "Declare a local variable".to_string()),
-            CompletionItem::new_simple("const".to_string(), "Declare a constant".to_string()),
-            CompletionItem::new_simple("match".to_string(), "Pattern matching".to_string()),
-        ];
-
-        let mut seen = std::collections::HashSet::new();
-        for symbol in ast_symbols
-            .into_iter()
-            .chain(stdlib_symbols_for_content(&content))
-        {
-            if seen.insert(symbol.name.clone()) {
-                items.push(CompletionItem {
-                    label: symbol.name,
-                    kind: Some(symbol.kind),
-                    detail: Some(symbol.detail),
-                    ..Default::default()
-                });
-            }
-        }
-
-        for line in content.lines() {
-            for token in line.split(|c: char| !c.is_ascii_alphanumeric() && c != '_') {
-                if token.len() < 2 || !valid_identifier_name(token) {
-                    continue;
-                }
-                if seen.insert(token.to_string()) {
-                    items.push(CompletionItem {
-                        label: token.to_string(),
-                        kind: Some(CompletionItemKind::VARIABLE),
-                        ..Default::default()
-                    });
-                }
-            }
-        }
-
-        Ok(Some(CompletionResponse::Array(items)))
+    async fn completion_resolve(&self, item: CompletionItem) -> LspResult<CompletionItem> {
+        Ok(resolve_completion_item(&self.index, item))
     }
 
     async fn goto_definition(
@@ -316,20 +377,18 @@ impl LanguageServer for SengooLanguageServer {
     ) -> LspResult<Option<GotoDefinitionResponse>> {
         let uri = params.text_document_position_params.text_document.uri;
         let position = params.text_document_position_params.position;
-        let documents = self.workspace_documents().await;
-        let content = documents.get(&uri).cloned();
+        let content = self.document_text(&uri).await;
         let symbol = content
             .as_deref()
             .and_then(|content| extract_identifier_at(content, position));
-        let definition = goto_definition_in_documents(&uri, position, &documents);
+        let definition = self.index.goto_definition(&uri, position);
 
-        if let (Some(content), Some(symbol)) = (content.as_deref(), symbol.as_ref()) {
+        if let Some(symbol) = symbol.as_ref() {
             if let Some(stdlib_definition) = stdlib_definition_for_cursor_fallback(
                 &uri,
-                content,
-                &symbol.name,
                 symbol.range,
                 &definition,
+                self.index.stdlib_definition(&uri, &symbol.name),
             ) {
                 return Ok(Some(stdlib_definition));
             }
@@ -366,16 +425,13 @@ impl LanguageServer for SengooLanguageServer {
     async fn hover(&self, params: HoverParams) -> LspResult<Option<Hover>> {
         let uri = params.text_document_position_params.text_document.uri;
         let position = params.text_document_position_params.position;
-        let documents = self.workspace_documents().await;
-        let Some(content) = documents.get(&uri).cloned() else {
+        let Some(content) = self.document_text(&uri).await else {
             return Ok(None);
         };
         let Some(symbol) = extract_identifier_at(&content, position) else {
             return Ok(None);
         };
-        if let Some(item) = find_symbol_detail_in_documents(&uri, &symbol.name, &documents)
-            .or_else(|| stdlib_symbol_detail_for_content(&content, &symbol.name))
-        {
+        if let Some(item) = self.index.symbol_detail(&uri, &symbol.name) {
             return Ok(Some(Hover {
                 contents: HoverContents::Markup(MarkupContent {
                     kind: MarkupKind::Markdown,
@@ -400,67 +456,16 @@ impl LanguageServer for SengooLanguageServer {
     ) -> LspResult<Option<SignatureHelp>> {
         let uri = params.text_document_position_params.text_document.uri;
         let position = params.text_document_position_params.position;
-        let documents = self.workspace_documents().await;
-        let Some(content) = documents.get(&uri).cloned() else {
+        let Some(content) = self.document_text(&uri).await else {
             return Ok(None);
         };
 
-        let Some(offset) = position_to_byte_index(&content, position) else {
-            return Ok(None);
-        };
-        let Some((call_name, active_param)) = active_call_site(&content, offset) else {
-            return Ok(None);
-        };
-
-        let mut signatures = function_signatures_for_documents(&uri, &documents)
-            .into_iter()
-            .chain(stdlib_signatures_for_content(&content))
-            .filter(|sig| sig.name == call_name)
-            .collect::<Vec<_>>();
-
-        if call_name == "print" && signatures.is_empty() {
-            signatures.push(FunctionSignatureInfo {
-                name: "print".to_string(),
-                label: "def print(value: Any) -> unit".to_string(),
-                params: vec!["value: Any".to_string()],
-                range: full_document_range(&content),
-            });
-        }
-
-        if signatures.is_empty() {
-            return Ok(None);
-        }
-
-        let signature_items = signatures
-            .iter()
-            .map(|sig| SignatureInformation {
-                label: sig.label.clone(),
-                documentation: None,
-                parameters: Some(
-                    sig.params
-                        .iter()
-                        .map(|param| ParameterInformation {
-                            label: ParameterLabel::Simple(param.clone()),
-                            documentation: None,
-                        })
-                        .collect(),
-                ),
-                active_parameter: None,
-            })
-            .collect::<Vec<_>>();
-
-        let first_param_count = signatures.first().map(|sig| sig.params.len()).unwrap_or(0);
-        let clamped_active_param = if first_param_count == 0 {
-            0
-        } else {
-            active_param.min((first_param_count.saturating_sub(1)) as u32)
-        };
-
-        Ok(Some(SignatureHelp {
-            signatures: signature_items,
-            active_signature: Some(0),
-            active_parameter: Some(clamped_active_param),
-        }))
+        Ok(signature_help_for_request(
+            &self.index,
+            &uri,
+            &content,
+            position,
+        ))
     }
 
     async fn document_symbol(
@@ -468,11 +473,11 @@ impl LanguageServer for SengooLanguageServer {
         params: DocumentSymbolParams,
     ) -> LspResult<Option<DocumentSymbolResponse>> {
         let uri = params.text_document.uri;
-        let Some(content) = self.document_text(&uri).await else {
+        let Some(_content) = self.document_text(&uri).await else {
             return Ok(None);
         };
 
-        let symbols = collect_ast_symbols(&content);
+        let symbols = self.index.document_symbols(&uri);
         if symbols.is_empty() {
             return Ok(None);
         }
@@ -497,8 +502,7 @@ impl LanguageServer for SengooLanguageServer {
         &self,
         params: WorkspaceSymbolParams,
     ) -> LspResult<Option<Vec<SymbolInformation>>> {
-        let documents = self.workspace_documents().await;
-        let symbols = workspace_symbols_for_documents(&params.query, &documents);
+        let symbols = self.index.workspace_symbols(&params.query);
         if symbols.is_empty() {
             Ok(None)
         } else {
@@ -537,7 +541,7 @@ impl LanguageServer for SengooLanguageServer {
             return Ok(None);
         };
 
-        let actions = quick_fix_actions(uri, &content, params.context.diagnostics);
+        let actions = quick_fix_actions(&self.index, uri, &content, params.context.diagnostics);
 
         if actions.is_empty() {
             Ok(None)
@@ -611,6 +615,16 @@ impl LanguageServer for SengooLanguageServer {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn completion_capability_advertises_hash_trigger_and_resolve() {
+        let options = smart_completion_options();
+        assert_eq!(options.resolve_provider, Some(true));
+        assert!(options
+            .trigger_characters
+            .as_ref()
+            .is_some_and(|triggers| triggers.iter().any(|trigger| trigger == "#")));
+    }
     use crate::workspace::workspace_symbols_for_roots_and_documents;
     use std::fs;
     use std::time::{SystemTime, UNIX_EPOCH};
@@ -1143,10 +1157,9 @@ manifest = "Sengoo.toml"
 
         let definition = stdlib_definition_for_cursor_fallback(
             &uri,
-            content,
-            &symbol.name,
             symbol.range,
             &cursor_fallback,
+            stdlib_definition_for_content(content, &symbol.name),
         )
         .expect("stdlib definition should replace cursor fallback");
 
@@ -1261,9 +1274,9 @@ manifest = "Sengoo.toml"
     fn active_call_site_counts_nested_arguments() {
         let src = "def main() -> i64 {\n    foo(1, bar(2, 3), 4)\n}\n";
         let cursor = src.find("4)").expect("third arg should exist");
-        let (name, active_param) = active_call_site(src, cursor).expect("call site should exist");
-        assert_eq!(name, "foo");
-        assert_eq!(active_param, 2);
+        let call = active_call_site(src, cursor).expect("call site should exist");
+        assert_eq!(call.callee, "foo");
+        assert_eq!(call.argument_index, 2);
     }
     #[test]
     fn folding_ranges_include_regions_and_comment_blocks() {

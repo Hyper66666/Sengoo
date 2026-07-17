@@ -554,7 +554,7 @@ fn install_success_executable(path: &Path) {
     use std::os::unix::fs::PermissionsExt;
 
     fs::create_dir_all(path.parent().unwrap()).unwrap();
-    fs::copy("/bin/true", path).unwrap();
+    fs::write(path, "#!/bin/sh\nexit 0\n").unwrap();
     let mut permissions = fs::metadata(path).unwrap().permissions();
     permissions.set_mode(0o755);
     fs::set_permissions(path, permissions).unwrap();
@@ -574,6 +574,19 @@ fn fake_sgfmt(dir: &Path) -> PathBuf {
     perms.set_mode(0o755);
     fs::set_permissions(&script, perms).unwrap();
     script
+}
+
+#[test]
+fn install_success_executable_creates_runnable_binary() {
+    let dir = temp_dir("install_success_executable");
+    let path = dir.join(if cfg!(windows) { "ok.exe" } else { "ok" });
+    install_success_executable(&path);
+    assert!(path.is_file(), "expected executable at {}", path.display());
+    let output = Command::new(&path)
+        .output()
+        .expect("installed executable should run");
+    assert!(output.status.success(), "status: {:?}", output.status);
+    let _ = fs::remove_dir_all(dir);
 }
 
 #[test]

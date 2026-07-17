@@ -1,0 +1,4 @@
+import std::io;
+
+def local_symbol(value: i64) -> i64 { value }
+def unicode_probe() -> i64 { let text = "😀"; loc }

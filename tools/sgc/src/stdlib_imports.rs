@@ -28,6 +28,7 @@ const STDLIB_SOURCE_ORDER: &[&str] = &[
     "dir",
     "fs",
     "io",
+    "stream",
     "env",
     "time",
     "random",
@@ -61,6 +62,7 @@ fn source_module_needs_result_family(module: &str) -> bool {
             | "file"
             | "dir"
             | "io"
+            | "stream"
             | "env"
             | "path"
             | "process"
@@ -87,11 +89,14 @@ fn source_module_direct_dependencies(module: &str) -> &'static [&'static str] {
         "math" => &["option", "status"],
         "string" => &["ffi"],
         "file" | "io" | "env" | "process" | "args" | "strconv" | "time" => &["status"],
+        "stream" => &["status", "ffi", "io", "file", "net"],
         "path" | "dir" => &["status", "string"],
         "fmt" => &["strconv", "status"],
         "regex" | "log" | "config" | "hash" | "encoding" | "compress" | "fs" => &["status"],
         "async" => &["status", "result"],
-        "http" | "net" => &["ffi", "status"],
+        // Keep `async` out of net's transitive deps so C-only fallback bundles
+        // that only import std::net do not require async mutex/sleep symbols.
+        "http" | "net" => &["ffi", "status", "string"],
         "db" | "lua54" | "proto" => &["ffi"],
         "assert" => &[],
         _ => &[],

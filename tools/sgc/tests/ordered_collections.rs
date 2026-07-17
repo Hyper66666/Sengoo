@@ -223,6 +223,22 @@ def main() -> i64 {
 }
 
 #[test]
+fn native_runtime_reports_frozen_whole_bundle_abi_v1() {
+    run_native(
+        "runtime-abi-version",
+        r#"
+extern "C" {
+    fn sengoo_runtime_abi_version() -> i64;
+}
+
+def main() -> i64 {
+    if sengoo_runtime_abi_version() == 1 { 0 } else { 1 }
+}
+"#,
+    );
+}
+
+#[test]
 fn generic_vec_i64_constructor_executes_through_raw_vec_runtime() {
     run_native(
         "generic-vec-i64",

@@ -18,8 +18,11 @@ cargo run -p sgpm -- test --locked --manifest-path examples/realworld/workspace-
 cargo run -p sgpm -- fmt --check --locked --manifest-path examples/realworld/workspace-audit/Sengoo.toml
 cargo run -p sgpm -- doc --locked --manifest-path examples/realworld/workspace-audit/Sengoo.toml
 cargo run -p sgpm -- build --locked --manifest-path examples/realworld/workspace-audit/Sengoo.toml
+cargo run -p sgpm -- run --locked --manifest-path examples/realworld/workspace-audit/Sengoo.toml
 ```
 
-Directory walking remains cooperative, while independent score dimensions use
-the current scalar `ArcMutex<i64>` transition surface. Fully generic
-`Arc<Mutex<T>>` remains tracked by the concurrency OpenSpec change.
+Directory walking remains cooperative, while four independent score dimensions
+run as joined worker jobs over an `ArcMutex<i64>` whose owned inner value is the
+generic `Arc<Mutex<i64>>` surface. The app compares every concurrent result to
+the pure `WorkspaceSummary::score()` serial oracle; the package test also locks
+that equality to a fixed known score.

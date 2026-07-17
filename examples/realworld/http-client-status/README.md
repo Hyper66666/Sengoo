@@ -29,6 +29,7 @@ sgpm test --locked
 sgpm fmt --check --locked
 sgpm doc --locked
 sgpm build --locked
+sgpm run --locked
 ```
 
 HTTP/TLS support claims are tracked in `../SUPPORT_MATRIX.md`.

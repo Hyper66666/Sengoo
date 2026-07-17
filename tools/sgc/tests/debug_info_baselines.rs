@@ -1,8 +1,6 @@
-mod common;
-
-use common::source_sgc_command;
-use std::fs;
+se std::fs;
 use std::path::{Path, PathBuf};
+use std::process::Command;
 use std::time::{SystemTime, UNIX_EPOCH};
 
 const OPT_LEVEL: &str = "0";
@@ -57,6 +55,10 @@ impl Drop for TempProject {
     }
 }
 
+fn sgc() -> PathBuf {
+    PathBuf::from(env!("CARGO_BIN_EXE_sgc"))
+}
+
 fn workspace_root() -> PathBuf {
     PathBuf::from(env!("CARGO_MANIFEST_DIR"))
         .parent()
@@ -98,7 +100,7 @@ fn copy_fixture_source(project: &TempProject, fixture: &str) -> PathBuf {
 }
 
 fn run_sgc_build(source_path: &Path, debug_info: bool) -> String {
-    let mut command = source_sgc_command();
+    let mut command = Command::new(sgc());
     command
         .arg("build")
         .arg(source_path)
@@ -143,6 +145,10 @@ fn fnv1a64_hex(text: &str) -> String {
     format!("{hash:016x}")
 }
 
+fn normalize_newlines(text: &str) -> String {
+    text.replace("\r\n", "\n")
+}
+
 fn switch_terminator_has_debug_location(ir: &str) -> bool {
     ir.match_indices("switch i64 ").any(|(start, _)| {
         ir[start..]
@@ -166,9 +172,8 @@ fn assert_fixture_behavior(spec: &FixtureSpec) {
         expected_hash_path.display()
     );
 
-    let expected_ir = fs::read_to_string(&expected_ir_path)
-        .expect("read baseline LLVM IR")
-        .replace("\r\n", "\n");
+    let expected_ir =
+        normalize_newlines(&fs::read_to_string(&expected_ir_path).expect("read baseline LLVM IR"));
     let expected_hash = fs::read_to_string(&expected_hash_path)
         .expect("read baseline hash")
         .trim()
@@ -177,7 +182,7 @@ fn assert_fixture_behavior(spec: &FixtureSpec) {
     let project = TempProject::new(spec.name);
     let source_path = copy_fixture_source(&project, spec.name);
 
-    let no_debug_ir = run_sgc_build(&source_path, false);
+    let no_debug_ir = normalize_newlines(&run_sgc_build(&source_path, false));
     assert!(
         !no_debug_ir.contains("!DICompileUnit") && !no_debug_ir.contains("!dbg !"),
         "non-debug LLVM IR unexpectedly contains DI metadata for {}:\n{}",

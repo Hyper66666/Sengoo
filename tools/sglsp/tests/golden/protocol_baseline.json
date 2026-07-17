@@ -1,0 +1,63 @@
+{
+  "utf16Character": 49,
+  "normal": [
+    {
+      "label": "local_symbol",
+      "detail": "function from $MAIN",
+      "data": {
+        "schemaVersion": 1,
+        "symbolId": "$MAIN#<document>::function::local_symbol::def local_symbol(value: i64) -> i64",
+        "origin": "currentDocument",
+        "category": "projectSymbol",
+        "documentUri": "$MAIN",
+        "documentRevision": 7,
+        "resolveKind": "documentation"
+      }
+    }
+  ],
+  "brokenLastGood": [
+    {
+      "label": "dependency_symbol",
+      "detail": "function from $DEPENDENCY",
+      "data": {
+        "schemaVersion": 1,
+        "symbolId": "$DEPENDENCY#<document>::function::dependency_symbol::def dependency_symbol(value: i64) -> i64",
+        "origin": "dependency",
+        "category": "projectSymbol",
+        "documentUri": "$MAIN",
+        "documentRevision": 8,
+        "resolveKind": "documentationAndAutoImport"
+      }
+    },
+    {
+      "label": "local_symbol",
+      "detail": "function from $MAIN",
+      "data": {
+        "schemaVersion": 1,
+        "symbolId": "$MAIN#<document>::function::local_symbol::def local_symbol(value: i64) -> i64",
+        "origin": "currentDocument",
+        "category": "projectSymbol",
+        "documentUri": "$MAIN",
+        "documentRevision": 8,
+        "resolveKind": "documentation"
+      }
+    },
+    {
+      "label": "io_i64_result",
+      "detail": "function from sengoo-stdlib:/indexed-symbols.sg",
+      "data": {
+        "schemaVersion": 1,
+        "symbolId": "sengoo-stdlib:/indexed-symbols.sg#<document>::function::io_i64_result::function",
+        "origin": "standardLibrary",
+        "category": "standardLibrary",
+        "documentUri": "$MAIN",
+        "documentRevision": 8,
+        "resolveKind": "documentation"
+      }
+    }
+  ],
+  "signatures": [
+    "def local_symbol(value: i64) -> i64",
+    "def dependency_symbol(value: i64) -> i64"
+  ]
+}

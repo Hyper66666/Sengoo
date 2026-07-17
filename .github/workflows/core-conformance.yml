@@ -24,9 +24,11 @@ jobs:
       - name: Install pinned LLVM toolchain
         run: |
           sudo apt-get update
-          sudo apt-get install -y clang-${LLVM_VERSION} lld-${LLVM_VERSION}
+          sudo apt-get install -y clang-${LLVM_VERSION} lld-${LLVM_VERSION} lldb-${LLVM_VERSION}
           sudo update-alternatives --install /usr/bin/clang clang /usr/bin/clang-${LLVM_VERSION} 100
+          sudo update-alternatives --install /usr/bin/lldb lldb /usr/bin/lldb-${LLVM_VERSION} 100
           clang --version
+          lldb --version
 
       - name: Validate OpenSpec
         run: npx --yes @fission-ai/openspec@1.4.1 validate codegen-ir-correctness-and-gate --strict
@@ -34,11 +36,28 @@ jobs:
       - name: Run core conformance examples
         run: cargo test --locked -p sgc core_conformance_examples_compile_link_and_run -- --nocapture
 
-      - name: Run portable target smoke tests
-        run: cargo test --locked -p sgc --test portable_targets -- --nocapture --test-threads=1
+      - name: Run portable target and ABI contract smoke tests
+        run: |
+          cargo test --locked -p sgc --test portable_targets -- --nocapture --test-threads=1
+          cargo test --locked -p sgc --test portable_abi_contract -- --nocapture
+          cargo test --locked -p sengoo-compiler --test mir_target_contract -- --nocapture
+
+      - name: Capture required LLDB debugger evidence
+        env:
+          SENGOO_REQUIRE_NATIVE_DEBUGGER: "1"
+          SENGOO_DEBUGGER_TRANSCRIPT_DIR: ${{ github.workspace }}/debugger-transcripts
+        run: cargo test --locked -p sgc --test debugger_native -- --nocapture --test-threads=1
 
       - name: Run workspace tests
         run: cargo test --workspace --locked -- --test-threads=1
+
+      - name: Upload LLDB debugger transcripts
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: debugger-native-lldb-transcripts
+          path: debugger-transcripts/
+          if-no-files-found: error
 
   binary-io-native:
     name: binary I/O native (${{ matrix.os }})
@@ -605,3 +624,4 @@ jobs:
             ${{ runner.temp }}/senline-pkg-${{ matrix.artifact }}/worker-a/**
             ${{ runner.temp }}/senline-pkg-${{ matrix.artifact }}/http-a/**
           if-no-files-found: warn
+

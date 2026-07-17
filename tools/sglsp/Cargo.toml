@@ -7,6 +7,10 @@ edition = "2021"
 name = "sglsp"
 path = "src/main.rs"
 
+[[bin]]
+name = "attribute-evidence-verifier"
+path = "src/bin/attribute_evidence_verifier.rs"
+
 [dependencies]
 # 编译器核心
 sengoo-compiler = { path = "../../compiler" }

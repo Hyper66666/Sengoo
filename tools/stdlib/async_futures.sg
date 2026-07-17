@@ -9,8 +9,23 @@ struct AsyncContext {
     handle: i64,
 }
 
+extern "C" {
+    fn sengoo_async_context_wake(handle: i64) -> bool;
+    fn sengoo_async_context_wake_after(handle: i64, delay_ms: i64) -> bool;
+}
+
 impl !Send for AsyncContext {}
 impl !Sync for AsyncContext {}
+
+impl AsyncContext {
+    def wake(&self) -> bool {
+        sengoo_async_context_wake(self.handle)
+    }
+
+    def wake_after(&self, delay_ms: i64) -> bool {
+        sengoo_async_context_wake_after(self.handle, delay_ms)
+    }
+}
 
 trait Future<T> {
     def poll(&mut self, ctx: AsyncContext) -> Poll<T> {

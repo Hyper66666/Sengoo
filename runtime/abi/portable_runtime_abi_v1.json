@@ -1,0 +1,293 @@
+{
+  "schema": "sengoo.portable_runtime_abi.v1",
+  "portable_runtime_abi_version": 1,
+  "mir_semantic_abi_version": 1,
+  "layouts": [
+    {
+      "id": 101,
+      "name": "owned_string",
+      "fields": [
+        {
+          "logical_index": 0,
+          "name": "code_units_ref",
+          "role": "owned_utf8_code_units"
+        },
+        {
+          "logical_index": 1,
+          "name": "length_units",
+          "role": "initialized_utf8_code_units"
+        },
+        {
+          "logical_index": 2,
+          "name": "capacity_units",
+          "role": "reserved_utf8_code_units"
+        }
+      ]
+    },
+    {
+      "id": 102,
+      "name": "generic_vec",
+      "fields": [
+        {
+          "logical_index": 0,
+          "name": "elements_ref",
+          "role": "owned_element_sequence"
+        },
+        {
+          "logical_index": 1,
+          "name": "length_units",
+          "role": "initialized_element_count"
+        },
+        {
+          "logical_index": 2,
+          "name": "capacity_units",
+          "role": "reserved_element_count"
+        },
+        {
+          "logical_index": 3,
+          "name": "element_abi_ref",
+          "role": "generic_element_runtime_shape"
+        }
+      ]
+    },
+    {
+      "id": 103,
+      "name": "dyn_trait_fat_ref",
+      "fields": [
+        {
+          "logical_index": 0,
+          "name": "data_ref",
+          "role": "referenced_value_storage"
+        },
+        {
+          "logical_index": 1,
+          "name": "table_ref",
+          "role": "dyn_dispatch_table"
+        }
+      ]
+    },
+    {
+      "id": 104,
+      "name": "async_frame",
+      "fields": [
+        {
+          "logical_index": 0,
+          "name": "state_tag",
+          "role": "frame_lifecycle_state"
+        },
+        {
+          "logical_index": 1,
+          "name": "resume_index",
+          "role": "next_suspend_point"
+        },
+        {
+          "logical_index": 2,
+          "name": "wake_epoch",
+          "role": "wake_coalescing_generation"
+        },
+        {
+          "logical_index": 3,
+          "name": "cancel_state",
+          "role": "cooperative_cancel_state"
+        },
+        {
+          "logical_index": 4,
+          "name": "storage_ref",
+          "role": "owned_frame_storage"
+        }
+      ]
+    }
+  ],
+  "ownership_transitions": [
+    {
+      "id": 201,
+      "name": "move_in",
+      "from_state": "uninitialized_slot",
+      "to_state": "owned_slot"
+    },
+    {
+      "id": 202,
+      "name": "move_out",
+      "from_state": "owned_slot",
+      "to_state": "moved_slot"
+    },
+    {
+      "id": 203,
+      "name": "borrow_shared",
+      "from_state": "owned_slot",
+      "to_state": "shared_borrow"
+    },
+    {
+      "id": 204,
+      "name": "borrow_mut",
+      "from_state": "owned_slot",
+      "to_state": "exclusive_borrow"
+    },
+    {
+      "id": 205,
+      "name": "return_owned",
+      "from_state": "owned_slot",
+      "to_state": "caller_owned_slot"
+    },
+    {
+      "id": 206,
+      "name": "drop_owned",
+      "from_state": "owned_slot",
+      "to_state": "dropped_slot"
+    }
+  ],
+  "dyn_dispatch": {
+    "drop_slot_ordinal": 0,
+    "method_slots": {
+      "entries": [
+        {
+          "id": 401,
+          "name": "first_trait_method",
+          "ordinal": 1,
+          "role": "first_user_declared_dyn_method"
+        },
+        {
+          "id": 402,
+          "name": "reserved_runtime_hook",
+          "ordinal": 2,
+          "role": "runtime_reserved_extension_slot"
+        }
+      ]
+    }
+  },
+  "async_lifecycle": {
+    "states": [
+      "created",
+      "ready",
+      "suspended",
+      "canceled",
+      "dropped"
+    ],
+    "operations": {
+      "entries": [
+        {
+          "id": 601,
+          "name": "poll",
+          "from_states": [
+            "created",
+            "ready",
+            "suspended"
+          ],
+          "to_states": [
+            "ready",
+            "suspended"
+          ]
+        },
+        {
+          "id": 602,
+          "name": "wake",
+          "from_states": [
+            "suspended"
+          ],
+          "to_states": [
+            "ready"
+          ]
+        },
+        {
+          "id": 603,
+          "name": "cancel",
+          "from_states": [
+            "created",
+            "ready",
+            "suspended"
+          ],
+          "to_states": [
+            "canceled"
+          ]
+        },
+        {
+          "id": 604,
+          "name": "drop",
+          "from_states": [
+            "ready",
+            "suspended",
+            "canceled"
+          ],
+          "to_states": [
+            "dropped"
+          ]
+        }
+      ]
+    },
+    "invariants": [
+      "cancel_is_terminal_for_user_progress",
+      "drop_releases_owned_frame_storage",
+      "wake_must_not_skip_next_poll"
+    ]
+  },
+  "host_calls": [
+    {
+      "id": 501,
+      "name": "args_read",
+      "call_version": 1,
+      "resource_limit_category": "args_total_units"
+    },
+    {
+      "id": 502,
+      "name": "env_read",
+      "call_version": 1,
+      "resource_limit_category": "env_total_units"
+    },
+    {
+      "id": 503,
+      "name": "stdout_write",
+      "call_version": 1,
+      "resource_limit_category": "stdout_write_units"
+    },
+    {
+      "id": 504,
+      "name": "stderr_write",
+      "call_version": 1,
+      "resource_limit_category": "stderr_write_units"
+    },
+    {
+      "id": 505,
+      "name": "time_now_unix_ms",
+      "call_version": 1,
+      "resource_limit_category": "time_query_units"
+    },
+    {
+      "id": 506,
+      "name": "file_open_read",
+      "call_version": 1,
+      "resource_limit_category": "file_io_units"
+    }
+  ],
+  "resource_limit_categories": [
+    {
+      "id": 701,
+      "name": "args_total_units",
+      "measure": "utf8_code_units"
+    },
+    {
+      "id": 702,
+      "name": "env_total_units",
+      "measure": "utf8_code_units"
+    },
+    {
+      "id": 703,
+      "name": "stdout_write_units",
+      "measure": "utf8_code_units"
+    },
+    {
+      "id": 704,
+      "name": "stderr_write_units",
+      "measure": "utf8_code_units"
+    },
+    {
+      "id": 705,
+      "name": "time_query_units",
+      "measure": "logical_time_queries"
+    },
+    {
+      "id": 706,
+      "name": "file_io_units",
+      "measure": "file_operation_units"
+    }
+  ]
+}

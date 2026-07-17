@@ -26,6 +26,15 @@ pub struct DeprecatedDecl {
     pub name: String,
     pub kind: String,
     pub message: Option<String>,
+    pub replacement: Option<String>,
+    pub removal: Option<String>,
+}
+
+#[derive(Debug, Clone, Default)]
+struct DeprecatedMetadata {
+    message: Option<String>,
+    replacement: Option<String>,
+    removal: Option<String>,
 }
 
 #[derive(Debug, Default)]
@@ -178,7 +187,7 @@ pub(super) fn process_surface_attributes(source: &str) -> Result<Cow<'_, str>> {
 enum ParsedAttribute {
     Derive,
     Cfg(CfgPredicate),
-    Deprecated(Option<String>),
+    Deprecated(DeprecatedMetadata),
     Unsupported { name: String, span_start: usize },
 }
 
@@ -272,7 +281,7 @@ fn evaluate_attributes(
                 }
                 mask_ranges.push((rel_start, rel_end));
             }
-            ParsedAttribute::Deprecated(message) => {
+            ParsedAttribute::Deprecated(metadata) => {
                 if !allows_deprecated(decl_kind) {
                     return Err(attribute_error(
                         start,
@@ -282,7 +291,7 @@ fn evaluate_attributes(
                         ),
                     ));
                 }
-                record_deprecated(decl_kind, decl_name, message);
+                record_deprecated(decl_kind, decl_name, metadata);
                 mask_ranges.push((rel_start, rel_end));
             }
             ParsedAttribute::Unsupported { name, span_start } => {
@@ -301,13 +310,15 @@ fn evaluate_attributes(
     Ok(AttributeAction::Keep { mask_ranges })
 }
 
-fn record_deprecated(kind: SurfaceDeclKind, name: &str, message: Option<String>) {
+fn record_deprecated(kind: SurfaceDeclKind, name: &str, metadata: DeprecatedMetadata) {
     ATTRIBUTE_STATE.with(|state| {
         if let Some(entry) = state.borrow_mut().as_mut() {
             entry.deprecated.push(DeprecatedDecl {
                 name: name.to_string(),
                 kind: decl_kind_label(kind).to_string(),
-                message,
+                message: metadata.message,
+                replacement: metadata.replacement,
+                removal: metadata.removal,
             });
         }
     });
@@ -478,14 +489,14 @@ fn parse_surface_attribute(
             ParsedAttribute::Cfg(predicate)
         }
         "deprecated" => {
-            let message = if bytes.get(cursor) == Some(&b'(') {
+            let metadata = if bytes.get(cursor) == Some(&b'(') {
                 let (inner_start, inner_end, after) = parse_balanced(bytes, cursor, b'(', b')')?;
                 cursor = after;
-                Some(parse_deprecated_message(&source[inner_start..inner_end])?)
+                parse_deprecated_metadata(&source[inner_start..inner_end])?
             } else {
-                None
+                DeprecatedMetadata::default()
             };
-            ParsedAttribute::Deprecated(message)
+            ParsedAttribute::Deprecated(metadata)
         }
         other => ParsedAttribute::Unsupported {
             name: other.to_string(),
@@ -667,8 +678,85 @@ impl<'a> CfgPredicateParser<'a> {
     }
 }
 
-fn parse_deprecated_message(inner: &str) -> Result<String> {
-    parse_string_literal_token(inner.trim())
+fn parse_deprecated_metadata(inner: &str) -> Result<DeprecatedMetadata> {
+    let inner = inner.trim();
+    if inner.starts_with('"') {
+        return Ok(DeprecatedMetadata {
+            message: Some(parse_string_literal_token(inner)?),
+            ..DeprecatedMetadata::default()
+        });
+    }
+
+    let mut metadata = DeprecatedMetadata::default();
+    for entry in split_deprecated_entries(inner)? {
+        let Some((key, value)) = entry.split_once('=') else {
+            return Err(parse_error(
+                "deprecated metadata requires `key = \"value\"` entries",
+            ));
+        };
+        let key = key.trim();
+        let value = parse_string_literal_token(value.trim())?;
+        let slot = match key {
+            "note" | "message" => &mut metadata.message,
+            "replacement" => &mut metadata.replacement,
+            "removal" => &mut metadata.removal,
+            _ => {
+                return Err(parse_error(format!(
+                    "unsupported deprecated metadata key `{key}`"
+                )))
+            }
+        };
+        if slot.replace(value).is_some() {
+            return Err(parse_error(format!(
+                "duplicate deprecated metadata key `{key}`"
+            )));
+        }
+    }
+
+    if metadata.replacement.is_none() || metadata.removal.is_none() {
+        return Err(parse_error(
+            "structured deprecated metadata requires `replacement` and `removal`",
+        ));
+    }
+    Ok(metadata)
+}
+
+fn split_deprecated_entries(value: &str) -> Result<Vec<&str>> {
+    let bytes = value.as_bytes();
+    let mut entries = Vec::new();
+    let mut start = 0usize;
+    let mut cursor = 0usize;
+    let mut quoted = false;
+    while cursor < bytes.len() {
+        match bytes[cursor] {
+            b'\\' if quoted => cursor = cursor.saturating_add(2),
+            b'"' => {
+                quoted = !quoted;
+                cursor += 1;
+            }
+            b',' if !quoted => {
+                let entry = value[start..cursor].trim();
+                if entry.is_empty() {
+                    return Err(parse_error("empty deprecated metadata entry"));
+                }
+                entries.push(entry);
+                cursor += 1;
+                start = cursor;
+            }
+            _ => cursor += 1,
+        }
+    }
+    if quoted {
+        return Err(parse_error(
+            "unclosed string literal in deprecated metadata",
+        ));
+    }
+    let entry = value[start..].trim();
+    if entry.is_empty() {
+        return Err(parse_error("deprecated metadata cannot be empty"));
+    }
+    entries.push(entry);
+    Ok(entries)
 }
 
 fn parse_string_literal_token(value: &str) -> Result<String> {

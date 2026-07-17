@@ -1,0 +1,9 @@
+version = 2
+[[dependency]]
+from = "root"
+alias = "dep"
+to = "dep@1"
+[[dependency]]
+from = "root"
+alias = "dep"
+to = "dep@2"

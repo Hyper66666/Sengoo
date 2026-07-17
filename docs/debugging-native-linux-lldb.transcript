@@ -1,0 +1,85 @@
+Linux LLDB source-debugging transcript captured on 2026-07-14
+
+Host:
+  GitHub Actions ubuntu-latest x86_64
+Debugger:
+  LLDB 19
+Build:
+  sgc build debugger_composite_probe.sg -O 0 --debug-info --force-rebuild
+Test:
+  cargo test --locked -p sgc --test debugger_native -- --nocapture --test-threads=1
+Evidence:
+  https://github.com/Hyper66666/Sengoo/actions/runs/29305786087
+Artifact:
+  debugger-native-lldb-transcripts
+
+The retained Actions artifact contains the raw scalar and composite sessions.
+This selected excerpt normalizes addresses, process identifiers, and temporary
+paths while preserving commands, source lines, types, and values.
+
+```text
+(lldb) breakpoint set --file debugger_composite_probe.sg --line 21
+Breakpoint 1: inspect_composites at debugger_composite_probe.sg:21:1
+(lldb) run
+Process <pid> stopped
+frame #0: inspect_composites at debugger_composite_probe.sg:21:1
+-> 21      let observed = pair.left + text.len() + values.len();
+(lldb) frame variable pair
+(Pair) pair = (left = 21, enabled = true)
+(lldb) frame variable pair.left
+(long) pair.left = 21
+(lldb) frame variable pair.enabled
+(bool) pair.enabled = true
+(lldb) frame variable picked
+(enum) picked = (discriminant = 1, payload = "\a")
+(lldb) frame variable picked.discriminant
+(long) picked.discriminant = 1
+(lldb) frame variable text
+(String) text = (handle = 4294967297)
+(lldb) frame variable text.handle
+(long) text.handle = 4294967297
+(lldb) frame variable values
+(Vec_i64) values = (handle = 4294967297, marker = 0)
+(lldb) frame variable values.handle
+(long) values.handle = 4294967297
+(lldb) frame variable values.marker
+(long) values.marker = 0
+
+(lldb) continue
+Process <pid> stopped
+frame #0: call_surface(value=21) at debugger_composite_probe.sg:25:1
+(lldb) thread backtrace
+frame #0: call_surface(value=21) at debugger_composite_probe.sg:25:1
+frame #1: main at debugger_composite_probe.sg:38:1
+(lldb) frame variable value
+(long) value = 21
+(lldb) step
+Process <pid> stopped
+frame #0: scalar_helper(value=21) at debugger_composite_probe.sg:10:1
+(lldb) frame variable value
+(long) value = 21
+(lldb) step
+Process <pid> stopped
+frame #0: scalar_helper at debugger_composite_probe.sg:11:1
+-> 11      let adjusted = value + 1;
+
+(lldb) continue
+Process <pid> stopped
+frame #0: closure_surface at debugger_composite_probe.sg:32:1
+-> 32      let closed = add(2);
+(lldb) thread backtrace
+frame #0: closure_surface at debugger_composite_probe.sg:32:1
+frame #1: main at debugger_composite_probe.sg:39:1
+(lldb) next
+Process <pid> stopped
+frame #0: closure_surface at debugger_composite_probe.sg:33:1
+-> 33      let result = closed + 1;
+(lldb) continue
+Process <pid> exited with status = 0
+SENGOO_DEBUG_EXIT_ZERO
+```
+
+Result:
+  PASS - LLDB read every required scalar/composite representation, preserved
+  source backtraces, stepped from the caller into the helper entry and body,
+  stepped over the closure invocation, and completed normally.

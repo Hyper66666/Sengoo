@@ -20,6 +20,7 @@ use crate::{
 };
 
 pub(crate) const MINIMUM_CLANG_MAJOR: u32 = 15;
+pub(crate) const SENGOO_RUNTIME_ABI_VERSION: u32 = 1;
 static RUNTIME_OBJECT_TEMP_COUNTER: AtomicU64 = AtomicU64::new(0);
 
 fn effective_target(target: Option<&NativeBuildTarget>) -> NativeBuildTarget {
@@ -104,9 +105,63 @@ const RUNTIME_SPLIT_C_SOURCES: &[&str] = &[
     "runtime_collections.c",
     "runtime_json.c",
     "runtime_process.c",
+    "runtime_stream.c",
     "runtime_string.c",
 ];
 const RUNTIME_SHARED_HEADER: &str = "runtime_shared.h";
+
+fn runtime_shared_header_path(runtime_c_path: &Path) -> Option<PathBuf> {
+    let local = runtime_c_path.parent()?.join(RUNTIME_SHARED_HEADER);
+    if local.is_file() {
+        return Some(local);
+    }
+    canonical_stdlib_runtime_dir()
+        .map(|directory| directory.join(RUNTIME_SHARED_HEADER))
+        .filter(|header| header.is_file())
+}
+
+fn parse_runtime_abi_version(header: &str) -> Result<u32> {
+    for line in header.lines() {
+        let tokens = line.split_whitespace().collect::<Vec<_>>();
+        if tokens.len() >= 3 && tokens[0] == "#define" && tokens[1] == "SENGOO_RUNTIME_ABI_VERSION"
+        {
+            return tokens[2].parse::<u32>().map_err(|error| {
+                miette::miette!(
+                    "invalid SENGOO_RUNTIME_ABI_VERSION `{}`: {error}",
+                    tokens[2]
+                )
+            });
+        }
+    }
+    Err(miette::miette!(
+        "runtime ABI declaration missing SENGOO_RUNTIME_ABI_VERSION"
+    ))
+}
+
+fn validate_runtime_abi_compatibility(runtime_c_path: &Path) -> Result<()> {
+    let header_path = runtime_shared_header_path(runtime_c_path).ok_or_else(|| {
+        miette::miette!(
+            "runtime ABI declaration missing: no {RUNTIME_SHARED_HEADER} beside {}",
+            runtime_c_path.display()
+        )
+    })?;
+    let header = fs::read_to_string(&header_path)
+        .into_diagnostic()
+        .map_err(|error| {
+            miette::miette!(
+                "failed to read runtime ABI declaration {}: {error}",
+                header_path.display()
+            )
+        })?;
+    let available = parse_runtime_abi_version(&header)?;
+    if available != SENGOO_RUNTIME_ABI_VERSION {
+        return Err(miette::miette!(
+            "runtime ABI mismatch: toolchain requires {SENGOO_RUNTIME_ABI_VERSION}, runtime provides {available} ({})",
+            header_path.display()
+        ));
+    }
+    Ok(())
+}
 
 fn push_existing_split_sources(sources: &mut Vec<PathBuf>, runtime_dir: &Path) {
     for sibling in RUNTIME_SPLIT_C_SOURCES {
@@ -147,9 +202,8 @@ pub(crate) fn runtime_source_bundle(runtime_c: &str) -> Result<Vec<PathBuf>> {
 
 fn runtime_bundle_fingerprint_inputs(runtime_c: &str) -> Result<Vec<PathBuf>> {
     let mut inputs = runtime_source_bundle(runtime_c)?;
-    if let Some(runtime_dir) = Path::new(runtime_c).parent() {
-        let header = runtime_dir.join(RUNTIME_SHARED_HEADER);
-        if header.exists() {
+    if let Some(header) = runtime_shared_header_path(Path::new(runtime_c)) {
+        if !inputs.iter().any(|input| input == &header) {
             inputs.push(header);
         }
     }
@@ -287,6 +341,7 @@ pub(crate) fn ensure_runtime_objects(
 /// staticlib, compiling out fallback stubs that would otherwise shadow the
 /// real implementations during symbol resolution.
 pub(crate) const NATIVE_NET_RUNTIME_DEFINE: &str = "SENGOO_NATIVE_NET_RUNTIME";
+pub(crate) const NATIVE_ASYNC_RUNTIME_DEFINE: &str = "SENGOO_NATIVE_ASYNC_RUNTIME";
 
 pub(crate) fn ensure_runtime_objects_with_defines(
     clang_exe: &str,
@@ -297,6 +352,7 @@ pub(crate) fn ensure_runtime_objects_with_defines(
 ) -> Result<Vec<PathBuf>> {
     let target = effective_target(target);
     let runtime_c_path = Path::new(runtime_c);
+    validate_runtime_abi_compatibility(runtime_c_path)?;
     let sources = runtime_source_bundle(runtime_c)?;
     let bundle_fingerprint = runtime_bundle_fingerprint(runtime_c)?;
     let mut object_paths = Vec::with_capacity(sources.len());
@@ -487,7 +543,7 @@ pub(crate) fn append_native_runtime_inputs(
             runtime_c,
             opt_level,
             target,
-            &[NATIVE_NET_RUNTIME_DEFINE],
+            &[NATIVE_NET_RUNTIME_DEFINE, NATIVE_ASYNC_RUNTIME_DEFINE],
         )?);
     }
     object_paths.push(ensure_async_runtime_staticlib(opt_level, target)?);
@@ -1458,6 +1514,42 @@ mod tests {
             plain, native_net,
             "C-only and native-net runtime objects must not share a cache slot"
         );
+        let _ = fs::remove_dir_all(&root);
+    }
+
+    #[test]
+    fn runtime_abi_header_parser_accepts_the_frozen_define() {
+        assert_eq!(
+            parse_runtime_abi_version(
+                "#define SENGOO_COLLECTIONS_ABI_VERSION 1\n#define SENGOO_RUNTIME_ABI_VERSION 7\n"
+            )
+            .unwrap(),
+            7
+        );
+        let error = parse_runtime_abi_version("#define SENGOO_OTHER_VERSION 1\n").unwrap_err();
+        assert!(error
+            .to_string()
+            .contains("missing SENGOO_RUNTIME_ABI_VERSION"));
+    }
+
+    #[test]
+    fn runtime_abi_validation_reports_required_and_available_versions() {
+        let root = temp_test_dir("runtime-abi-mismatch");
+        let runtime_c = root.join("runtime.c");
+        let header = root.join(RUNTIME_SHARED_HEADER);
+        fs::create_dir_all(&root).unwrap();
+        fs::write(&runtime_c, "#include \"runtime_shared.h\"\n").unwrap();
+        fs::write(&header, "#define SENGOO_RUNTIME_ABI_VERSION 99\n").unwrap();
+
+        let error = validate_runtime_abi_compatibility(&runtime_c).unwrap_err();
+        let message = error.to_string();
+        assert!(message.contains("runtime ABI mismatch"), "{message}");
+        assert!(
+            message.contains(&format!("requires {SENGOO_RUNTIME_ABI_VERSION}")),
+            "{message}"
+        );
+        assert!(message.contains("provides 99"), "{message}");
+
         let _ = fs::remove_dir_all(&root);
     }
 

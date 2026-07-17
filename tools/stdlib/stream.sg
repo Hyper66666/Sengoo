@@ -1,0 +1,391 @@
+/// Synchronous byte stream traits and bounded helpers for the v0.2 profile.
+///
+/// `Ok(0)` from Reader means EOF. A zero-capacity destination with unread data
+/// returns STATUS_BUFFER_TOO_SMALL. Helpers never grow caller-owned buffers.
+
+extern "C" {
+    fn sengoo_stream_cursor_from_buffer(buffer_handle: i64) -> i64;
+    fn sengoo_stream_cursor_with_capacity(capacity: i64) -> i64;
+    fn sengoo_stream_cursor_position(cursor_handle: i64) -> i64;
+    fn sengoo_stream_cursor_read(cursor_handle: i64, out_buffer_handle: i64) -> i64;
+    fn sengoo_stream_cursor_write(cursor_handle: i64, data_buffer_handle: i64, used_len: i64) -> i64;
+    fn sengoo_stream_cursor_free(cursor_handle: i64) -> i64;
+    fn sengoo_stream_cursor_live_handle_count() -> i64;
+}
+
+trait Reader {
+    def read_into(&mut self, out: &mut Buffer) -> Result<i64, i64> {}
+}
+
+trait Writer {
+    def write_buffer(&mut self, data: &Buffer, used_len: i64) -> Result<i64, i64> {}
+    def flush(&mut self) -> Result<bool, i64> {}
+}
+
+/// In-memory cursor owning a bounded runtime byte store and position.
+struct Cursor {
+    handle: i64,
+}
+
+def cursor_result(raw: i64) -> Result<Cursor, i64> {
+    if raw > 0 {
+        Result { is_ok: true, value: Cursor { handle: raw }, error: 0 }
+    } else {
+        Result {
+            is_ok: false,
+            value: Cursor { handle: 0 },
+            error: sengoo_status_from_raw_ffi(raw),
+        }
+    }
+}
+
+def stream_byte_count_result(raw: i64) -> Result<i64, i64> {
+    if raw >= 0 {
+        Result { is_ok: true, value: raw, error: 0 }
+    } else {
+        Result { is_ok: false, value: 0, error: sengoo_status_from_raw_ffi(raw) }
+    }
+}
+
+/// Copy Buffer bytes into independently owned Cursor storage.
+def cursor_new(buffer: &Buffer) -> Result<Cursor, i64> {
+    cursor_result(sengoo_stream_cursor_from_buffer(buffer.raw_handle()))
+}
+
+def cursor_with_capacity(capacity: i64) -> Result<Cursor, i64> {
+    cursor_result(sengoo_stream_cursor_with_capacity(capacity))
+}
+
+def cursor_from_bytes(data: &str) -> Result<Cursor, i64> {
+    let created = ffi_buffer_from_bytes(data);
+    if created.is_ok {
+        cursor_new(&created.value)
+    } else {
+        Result {
+            is_ok: false,
+            value: Cursor { handle: 0 },
+            error: created.error,
+        }
+    }
+}
+
+def cursor_free(cursor: Cursor) -> bool {
+    sengoo_stream_cursor_free(cursor.handle) == 0
+}
+
+impl Cursor {
+    def raw_handle(&self) -> i64 {
+        self.handle
+    }
+
+    def position(&self) -> i64 {
+        sengoo_stream_cursor_position(self.handle)
+    }
+}
+
+impl Drop for Cursor {
+    def drop(&mut self) {
+        if self.handle != 0 {
+            sengoo_stream_cursor_free(self.handle);
+        }
+    }
+}
+
+def cursor_read_into(cursor: &mut Cursor, out: &mut Buffer) -> Result<i64, i64> {
+    stream_byte_count_result(sengoo_stream_cursor_read(cursor.raw_handle(), out.raw_handle()))
+}
+
+def cursor_write_buffer(
+    cursor: &mut Cursor,
+    data: &Buffer,
+    used_len: i64,
+) -> Result<i64, i64> {
+    stream_byte_count_result(
+        sengoo_stream_cursor_write(cursor.raw_handle(), data.raw_handle(), used_len)
+    )
+}
+
+impl Reader for Cursor {
+    def read_into(&mut self, out: &mut Buffer) -> Result<i64, i64> {
+        stream_byte_count_result(sengoo_stream_cursor_read(self.handle, out.raw_handle()))
+    }
+}
+
+impl Writer for Cursor {
+    def write_buffer(&mut self, data: &Buffer, used_len: i64) -> Result<i64, i64> {
+        stream_byte_count_result(
+            sengoo_stream_cursor_write(self.handle, data.raw_handle(), used_len)
+        )
+    }
+
+    def flush(&mut self) -> Result<bool, i64> {
+        Result { is_ok: true, value: true, error: 0 }
+    }
+}
+
+/// Owned file-descriptor adapter for files and stdin/stdout/stderr handles.
+struct FdStream {
+    fd: i64,
+}
+
+def fd_stream_new(fd: i64) -> FdStream {
+    FdStream { fd: fd }
+}
+
+impl FdStream {
+    def raw_fd(self) -> i64 {
+        self.fd
+    }
+}
+
+impl Reader for FdStream {
+    def read_into(&mut self, out: &mut Buffer) -> Result<i64, i64> {
+        io_i64_result(sengoo_io_fd_read(self.fd, out.ptr(), out.len()))
+    }
+}
+
+impl Writer for FdStream {
+    def write_buffer(&mut self, data: &Buffer, used_len: i64) -> Result<i64, i64> {
+        if used_len < 0 {
+            Result { is_ok: false, value: 0, error: STATUS_INVALID_ARGUMENT() }
+        } else {
+            io_i64_result(sengoo_io_fd_write(self.fd, data.ptr(), used_len))
+        }
+    }
+
+    def flush(&mut self) -> Result<bool, i64> {
+        Result { is_ok: true, value: true, error: 0 }
+    }
+}
+
+def fd_read_into(stream: &mut FdStream, out: &mut Buffer) -> Result<i64, i64> {
+    io_i64_result(sengoo_io_fd_read(stream.raw_fd(), out.ptr(), out.len()))
+}
+
+def fd_write_buffer(
+    stream: &mut FdStream,
+    data: &Buffer,
+    used_len: i64,
+) -> Result<i64, i64> {
+    if used_len < 0 {
+        Result { is_ok: false, value: 0, error: STATUS_INVALID_ARGUMENT() }
+    } else {
+        io_i64_result(sengoo_io_fd_write(stream.raw_fd(), data.ptr(), used_len))
+    }
+}
+
+impl Reader for AsyncFile {
+    def read_into(&mut self, out: &mut Buffer) -> Result<i64, i64> {
+        file_status_i64_result(sengoo_async_file_read_into(self.handle, out.ptr(), out.len()))
+    }
+}
+
+impl Reader for TcpStream {
+    def read_into(&mut self, out: &mut Buffer) -> Result<i64, i64> {
+        let received = sengoo_tcp_recv(self.handle, out.ptr(), out.len(), 0);
+        if received >= 0 {
+            Result { is_ok: true, value: received, error: 0 }
+        } else {
+            Result { is_ok: false, value: 0, error: net_last_status() }
+        }
+    }
+}
+
+impl Writer for TcpStream {
+    def write_buffer(&mut self, data: &Buffer, used_len: i64) -> Result<i64, i64> {
+        if used_len < 0 {
+            return Result { is_ok: false, value: 0, error: STATUS_INVALID_ARGUMENT() };
+        }
+        let sent = sengoo_tcp_send(self.handle, data.ptr(), used_len);
+        if sent >= 0 {
+            Result { is_ok: true, value: sent, error: 0 }
+        } else {
+            Result { is_ok: false, value: 0, error: net_last_status() }
+        }
+    }
+
+    def flush(&mut self) -> Result<bool, i64> {
+        Result { is_ok: true, value: true, error: 0 }
+    }
+}
+
+def read_to_end<R: Reader>(reader: &mut R, out: &mut Buffer) -> Result<i64, i64> {
+    let mut total: i64 = 0;
+    let mut done = false;
+    let mut failed = false;
+    let mut error: i64 = 0;
+
+    while !done && !failed {
+        let remaining = out.capacity() - out.used_len();
+        let chunk_capacity = if remaining > 0 { remaining } else { 1 };
+        let created = ffi_buffer_new(chunk_capacity);
+        if !created.is_ok {
+            failed = true;
+            error = created.error;
+        } else {
+            let mut chunk = created.value;
+            let read = reader.read_into(&mut chunk);
+            if !read.is_ok {
+                failed = true;
+                error = read.error;
+            } else if read.value == 0 {
+                done = true;
+            } else if remaining <= 0 {
+                failed = true;
+                error = STATUS_BUFFER_TOO_SMALL();
+            } else {
+                let next = total + read.value;
+                if next < total {
+                    failed = true;
+                    error = STATUS_OVERFLOW();
+                } else {
+                    let appended = out.append_from(chunk, 0, read.value);
+                    if !appended.is_ok {
+                        failed = true;
+                        error = appended.error;
+                    } else {
+                        total = next;
+                    }
+                }
+            }
+        }
+    }
+
+    if failed {
+        Result { is_ok: false, value: 0, error: error }
+    } else {
+        Result { is_ok: true, value: total, error: 0 }
+    }
+}
+
+def write_all<W: Writer>(
+    writer: &mut W,
+    data: &Buffer,
+    used_len: i64,
+) -> Result<i64, i64> {
+    if used_len < 0 {
+        return Result { is_ok: false, value: 0, error: STATUS_INVALID_ARGUMENT() };
+    }
+
+    let mut offset: i64 = 0;
+    let mut zero_streak: i64 = 0;
+    let mut failed = false;
+    let mut error: i64 = 0;
+    while offset < used_len && !failed {
+        let remaining = used_len - offset;
+        let created = ffi_buffer_new(remaining);
+        if !created.is_ok {
+            failed = true;
+            error = created.error;
+        } else {
+            let mut slice = created.value;
+            let ranged = data.copy_range(offset, remaining, slice);
+            if !ranged.is_ok {
+                failed = true;
+                error = ranged.error;
+            } else {
+                let wrote = writer.write_buffer(&slice, remaining);
+                if !wrote.is_ok {
+                    failed = true;
+                    error = wrote.error;
+                } else if wrote.value == 0 {
+                    zero_streak = zero_streak + 1;
+                    if zero_streak >= 2 {
+                        failed = true;
+                        error = STATUS_IO();
+                    }
+                } else {
+                    zero_streak = 0;
+                    offset = offset + wrote.value;
+                }
+            }
+        }
+    }
+
+    if failed {
+        Result { is_ok: false, value: 0, error: error }
+    } else {
+        let flushed = writer.flush();
+        if flushed.is_ok {
+            Result { is_ok: true, value: offset, error: 0 }
+        } else {
+            Result { is_ok: false, value: 0, error: flushed.error }
+        }
+    }
+}
+
+def copy_stream<R: Reader, W: Writer>(
+    reader: &mut R,
+    writer: &mut W,
+    scratch: &mut Buffer,
+) -> Result<i64, i64> {
+    let mut total: i64 = 0;
+    let mut done = false;
+    let mut failed = false;
+    let mut error: i64 = 0;
+
+    while !done && !failed {
+        scratch.clear();
+        let read = reader.read_into(scratch);
+        if !read.is_ok {
+            failed = true;
+            error = read.error;
+        } else if read.value == 0 {
+            done = true;
+        } else {
+            let mut offset: i64 = 0;
+            let mut zero_streak: i64 = 0;
+            while offset < read.value && !failed {
+                let remaining = read.value - offset;
+                let created = ffi_buffer_new(remaining);
+                if !created.is_ok {
+                    failed = true;
+                    error = created.error;
+                } else {
+                    let mut slice = created.value;
+                    let ranged = scratch.copy_range(offset, remaining, slice);
+                    if !ranged.is_ok {
+                        failed = true;
+                        error = ranged.error;
+                    } else {
+                        let wrote = writer.write_buffer(&slice, remaining);
+                        if !wrote.is_ok {
+                            failed = true;
+                            error = wrote.error;
+                        } else if wrote.value == 0 {
+                            zero_streak = zero_streak + 1;
+                            if zero_streak >= 2 {
+                                failed = true;
+                                error = STATUS_IO();
+                            }
+                        } else {
+                            zero_streak = 0;
+                            offset = offset + wrote.value;
+                        }
+                    }
+                }
+            }
+
+            if !failed {
+                let next = total + offset;
+                if next < total {
+                    failed = true;
+                    error = STATUS_OVERFLOW();
+                } else {
+                    total = next;
+                }
+            }
+        }
+    }
+
+    if failed {
+        Result { is_ok: false, value: 0, error: error }
+    } else {
+        let flushed = writer.flush();
+        if flushed.is_ok {
+            Result { is_ok: true, value: total, error: 0 }
+        } else {
+            Result { is_ok: false, value: 0, error: flushed.error }
+        }
+    }
+}

@@ -360,6 +360,14 @@ impl TypeChecker {
                     args: vec![],
                 }))),
             )),
+            "raw_channel_send" | "raw_channel_recv" => Some(Ty::new(
+                0,
+                TyKind::Future(Box::new(self.env.int_ty(IntKind::I64))),
+            )),
+            "raw_rwlock_read_async" | "raw_rwlock_write_async" => Some(Ty::new(
+                0,
+                TyKind::Future(Box::new(self.env.int_ty(IntKind::I64))),
+            )),
             "mutex_lock_async" => Some(Ty::new(
                 0,
                 TyKind::Future(Box::new(self.env.new_ty(TyKind::Adt {
@@ -367,13 +375,19 @@ impl TypeChecker {
                     args: vec![],
                 }))),
             )),
-            "HttpServer_next_request_async" => Some(Ty::new(
+            "raw_mutex_lock_async" => Some(Ty::new(
                 0,
-                TyKind::Future(Box::new(self.env.new_ty(TyKind::Adt {
-                    name: "HttpServerNextRequestOutcome".to_string(),
-                    args: vec![],
-                }))),
+                TyKind::Future(Box::new(self.env.int_ty(IntKind::I64))),
             )),
+            "HttpServer_next_request_async" | "HttpServer_next_request_router_async" => {
+                Some(Ty::new(
+                    0,
+                    TyKind::Future(Box::new(self.env.new_ty(TyKind::Adt {
+                        name: "HttpServerNextRequestOutcome".to_string(),
+                        args: vec![],
+                    }))),
+                ))
+            }
             _ => None,
         }
     }
@@ -532,6 +546,74 @@ impl TypeChecker {
         Ok(())
     }
 
+    fn check_spawn_future_send(&mut self, boundary: &str, future: &Expr) -> TyResult<()> {
+        match &future.kind {
+            ExprKind::Call { func, args } => {
+                let direct_function = Self::direct_callable_name(func).is_some_and(|name| {
+                    self.async_functions.contains(&name)
+                        || self.env.lookup(&name).is_some_and(|symbol| {
+                            matches!(symbol.kind, SymbolKind::Function { .. })
+                        })
+                        || matches!(
+                            name.as_str(),
+                            "sleep"
+                                | "timeout"
+                                | "spawn_blocking_future_i64"
+                                | "channel_send_i64"
+                                | "channel_recv_i64"
+                                | "raw_channel_send"
+                                | "raw_channel_recv"
+                                | "raw_rwlock_read_async"
+                                | "raw_rwlock_write_async"
+                                | "mutex_lock_async"
+                                | "raw_mutex_lock_async"
+                                | "HttpServer_next_request_async"
+                                | "HttpServer_next_request_router_async"
+                                | "sengoo_http_server_next_request_async__start"
+                                | "sengoo_http_server_next_request_router_async__start"
+                        )
+                });
+                if !direct_function {
+                    return Err(TypeckError::Other(format!(
+                        "cross-thread {boundary} requires a directly called async function or async block"
+                    )));
+                }
+                for arg in args {
+                    let arg_ty = self.check_expr(arg)?;
+                    if !self.is_cross_thread_send_ty(&arg_ty) {
+                        return Err(TypeckError::Other(format!(
+                            "cross-thread {boundary} future argument is not Send"
+                        )));
+                    }
+                }
+                Ok(())
+            }
+            ExprKind::AsyncBlock(block) | ExprKind::ParallelBlock(block) => {
+                let params = HashSet::new();
+                let mut captures = Vec::new();
+                let mut seen = HashSet::new();
+                Self::collect_capture_from_block(block, &params, &mut captures, &mut seen);
+                for capture in captures {
+                    let Some(symbol) = self.env.lookup(&capture) else {
+                        continue;
+                    };
+                    let Some(ty) = symbol.get_ty() else {
+                        continue;
+                    };
+                    if !self.is_cross_thread_send_ty(ty) {
+                        return Err(TypeckError::Other(format!(
+                            "cross-thread {boundary} future capture `{capture}` is not Send"
+                        )));
+                    }
+                }
+                Ok(())
+            }
+            _ => Err(TypeckError::Other(format!(
+                "cross-thread {boundary} requires a directly constructed Send future"
+            ))),
+        }
+    }
+
     fn check_shared_state_send_argument(&mut self, args: &[Expr]) -> TyResult<()> {
         let Some(shared) = args.first() else {
             return Ok(());
@@ -596,7 +678,9 @@ impl TypeChecker {
             self.check_shared_state_send_argument(args)?;
         }
 
-        if builtin_name == Some("sengoo_http_server_next_request_async__start") {
+        if builtin_name == Some("sengoo_http_server_next_request_async__start")
+            || builtin_name == Some("sengoo_http_server_next_request_router_async__start")
+        {
             if args.len() != 2 {
                 return Err(TypeckError::ArgumentCountMismatch {
                     expected: 2,
@@ -654,6 +738,39 @@ impl TypeChecker {
                         }
                         self.check_expr(&args[0])?;
                     }
+                    "raw_channel_send" => {
+                        if args.len() != 2 {
+                            return Err(TypeckError::ArgumentCountMismatch {
+                                expected: 2,
+                                found: args.len(),
+                            });
+                        }
+                        self.check_expr(&args[0])?;
+                        let value_ty = self.check_expr(&args[1])?;
+                        if Self::type_is_fully_concrete(&value_ty)
+                            && !self.is_cross_thread_send_ty(&value_ty)
+                        {
+                            return Err(Self::cross_thread_send_error("value"));
+                        }
+                    }
+                    "raw_channel_recv" => {
+                        if args.len() != 1 {
+                            return Err(TypeckError::ArgumentCountMismatch {
+                                expected: 1,
+                                found: args.len(),
+                            });
+                        }
+                        self.check_expr(&args[0])?;
+                    }
+                    "raw_rwlock_read_async" | "raw_rwlock_write_async" => {
+                        if args.len() != 1 {
+                            return Err(TypeckError::ArgumentCountMismatch {
+                                expected: 1,
+                                found: args.len(),
+                            });
+                        }
+                        self.check_expr(&args[0])?;
+                    }
                     _ => {}
                 }
                 return Ok(future_ty);
@@ -679,6 +796,7 @@ impl TypeChecker {
                     "spawn requires a Future value".to_string(),
                 ));
             }
+            self.check_spawn_future_send("spawn", &args[0])?;
 
             return Ok(future_ty);
         }
@@ -702,8 +820,55 @@ impl TypeChecker {
                     "spawn_task requires a Future value".to_string(),
                 ));
             }
+            self.check_spawn_future_send("spawn_task", &args[0])?;
 
             return Ok(self.env.int_ty(IntKind::I64));
+        }
+
+        if builtin_name == Some("scope_spawn") {
+            if self.async_context_depth == 0 {
+                return Err(TypeckError::Other(
+                    "scope_spawn is only allowed in async contexts".to_string(),
+                ));
+            }
+            if args.len() != 2 {
+                return Err(TypeckError::ArgumentCountMismatch {
+                    expected: 2,
+                    found: args.len(),
+                });
+            }
+            let scope_ty = self.check_expr(&args[0])?;
+            let valid_scope = matches!(
+                &scope_ty.kind,
+                TyKind::Ref(_, inner)
+                    if matches!(&inner.kind, TyKind::Adt { name, .. } if name == "TaskScope")
+            );
+            if !valid_scope {
+                return Err(TypeckError::Other(
+                    "scope_spawn requires a borrowed TaskScope as its first argument".to_string(),
+                ));
+            }
+            let future_ty = self.check_expr(&args[1])?;
+            if !future_ty.is_future() {
+                return Err(TypeckError::Other(
+                    "scope_spawn requires a Future value".to_string(),
+                ));
+            }
+            self.check_spawn_future_send("scope_spawn", &args[1])?;
+            return Ok(self.env.int_ty(IntKind::I64));
+        }
+
+        if builtin_name == Some("task_scope") {
+            if !args.is_empty() {
+                return Err(TypeckError::ArgumentCountMismatch {
+                    expected: 0,
+                    found: args.len(),
+                });
+            }
+            return Ok(self.env.new_ty(TyKind::Adt {
+                name: "TaskScope".to_string(),
+                args: Vec::new(),
+            }));
         }
 
         if builtin_name == Some("sleep") {
@@ -930,7 +1095,9 @@ impl TypeChecker {
         }
 
         if let ExprKind::Path(path) = &func.kind {
-            if let Some(result) = self.check_associated_function(path, args, call_span.lo)? {
+            if let Some(result) =
+                self.check_associated_function(path, args, call_span.lo, expected_return)?
+            {
                 return Ok(result);
             }
         }
@@ -1050,12 +1217,118 @@ impl TypeChecker {
         path: &crate::ast::Path,
         args: &[Expr],
         call_site: u32,
+        expected_return: Option<&Ty>,
     ) -> TyResult<Option<Ty>> {
         if path.segments.len() != 2 {
             return Ok(None);
         }
-        let type_name = &path.segments[0].name;
+        let head_name = &path.segments[0].name;
         let method_name = &path.segments[1].name;
+        let expected_key = expected_return
+            .map(|ty| self.infer.apply_subst(ty))
+            .filter(|ty| {
+                !matches!(
+                    ty.kind,
+                    TyKind::Var(_) | TyKind::Inferred | TyKind::Error | TyKind::SelfType
+                )
+            })
+            .map(|ty| type_key(&ty));
+
+        // D5: `Trait::method(args)` — head names a trait, select unique matching impl.
+        if self.trait_registry.contains(head_name) {
+            let actual_types = args
+                .iter()
+                .map(|arg| self.check_expr(arg))
+                .collect::<TyResult<Vec<_>>>()?;
+            let mut candidates = Vec::new();
+            for type_key_name in self.impl_registry.trait_impl_type_keys(head_name) {
+                for (impl_info, method_ty) in
+                    self.impl_registry
+                        .lookup_trait_methods(head_name, &type_key_name, method_name)
+                {
+                    if method_ty.has_self || method_ty.param_types.len() != actual_types.len() {
+                        continue;
+                    }
+                    if method_ty.param_types.iter().zip(actual_types.iter()).all(
+                        |(expected, actual)| {
+                            type_key(&self.infer.apply_subst(expected))
+                                == type_key(&self.infer.apply_subst(actual))
+                        },
+                    ) && expected_key.as_ref().is_none_or(|expected| {
+                        let resolved_return = self.infer.apply_subst(&method_ty.return_type);
+                        let return_key = if matches!(resolved_return.kind, TyKind::SelfType) {
+                            type_key_name.clone()
+                        } else {
+                            type_key(&resolved_return)
+                        };
+                        &return_key == expected
+                    }) {
+                        candidates.push((
+                            type_key_name.clone(),
+                            impl_info.clone(),
+                            method_ty.clone(),
+                        ));
+                    }
+                }
+            }
+            let (target_key, impl_info, method_ty) = match candidates.as_slice() {
+                [] => {
+                    return Err(TypeckError::Other(format!(
+                        "no matching associated function `{head_name}::{method_name}` for the given arguments"
+                    )));
+                }
+                [candidate] => candidate.clone(),
+                many => {
+                    let labels = many
+                        .iter()
+                        .map(|(type_key, impl_info, _)| {
+                            format!(
+                                "{} as {}",
+                                type_key,
+                                crate::typeck::r#trait::trait_impl_label(
+                                    head_name,
+                                    &impl_info.trait_args
+                                )
+                            )
+                        })
+                        .collect::<Vec<_>>();
+                    return Err(TypeckError::diagnostic(
+                        "ambiguous-trait-associated-function",
+                        format!(
+                            "ambiguous associated function `{head_name}::{method_name}`: {}",
+                            labels.join(", ")
+                        ),
+                        call_site,
+                        call_site,
+                    ));
+                }
+            };
+            for (expected, actual) in method_ty.param_types.iter().zip(actual_types.iter()) {
+                self.infer.unify(expected, actual)?;
+            }
+            let trait_args = impl_info
+                .trait_args
+                .iter()
+                .map(type_key)
+                .collect::<Vec<_>>();
+            let suffix = if trait_args.is_empty() {
+                String::new()
+            } else {
+                format!("_{}", trait_args.join("_"))
+            };
+            self.env.record_associated_function(
+                call_site,
+                format!("{target_key}_{head_name}{suffix}_{method_name}"),
+            );
+            let resolved_return = self.infer.apply_subst(&method_ty.return_type);
+            if let Some(expected) = expected_return {
+                self.infer.unify(&resolved_return, expected)?;
+            }
+            return Ok(Some(self.infer.apply_subst(&resolved_return)));
+        }
+
+        // `Type::method(args)` — head names a type (or ADT path segment).
+        let type_name = head_name;
         let target_ty = self
             .env
             .lookup(type_name)
@@ -1087,7 +1360,11 @@ impl TypeChecker {
                 let actual = self.check_expr_with_expected(arg, expected)?;
                 self.infer.unify(expected, &actual)?;
             }
-            return Ok(Some(self.infer.apply_subst(&method_ty.return_type)));
+            let resolved_return = self.infer.apply_subst(&method_ty.return_type);
+            if let Some(expected) = expected_return {
+                self.infer.unify(&resolved_return, expected)?;
+            }
+            return Ok(Some(self.infer.apply_subst(&resolved_return)));
         }
 
         let actual_types = args
@@ -1108,7 +1385,9 @@ impl TypeChecker {
                         type_key(&self.infer.apply_subst(expected))
                             == type_key(&self.infer.apply_subst(actual))
                     },
-                ) {
+                ) && expected_key.as_ref().is_none_or(|expected| {
+                    type_key(&self.infer.apply_subst(&method_ty.return_type)) == *expected
+                }) {
                     candidates.push((trait_name.clone(), impl_info.clone(), method_ty.clone()));
                 }
             }
@@ -1124,11 +1403,12 @@ impl TypeChecker {
                         crate::typeck::r#trait::trait_impl_label(trait_name, &impl_info.trait_args)
                     })
                     .collect::<Vec<_>>();
-                return Err(TypeckError::Other(ambiguous_method_error(
-                    method_name,
-                    &target_key,
-                    &labels,
-                )));
+                return Err(TypeckError::diagnostic(
+                    "ambiguous-trait-associated-function",
+                    ambiguous_method_error(method_name, &target_key, &labels),
+                    call_site,
+                    call_site,
+                ));
             }
         };
         for (expected, actual) in method_ty.param_types.iter().zip(actual_types.iter()) {
@@ -1148,7 +1428,11 @@ impl TypeChecker {
             call_site,
             format!("{target_key}_{trait_name}{suffix}_{method_name}"),
         );
-        Ok(Some(self.infer.apply_subst(&method_ty.return_type)))
+        let resolved_return = self.infer.apply_subst(&method_ty.return_type);
+        if let Some(expected) = expected_return {
+            self.infer.unify(&resolved_return, expected)?;
+        }
+        Ok(Some(self.infer.apply_subst(&resolved_return)))
     }
 
     fn enforce_generic_function_constraints(
@@ -1430,12 +1714,12 @@ impl TypeChecker {
         }
 
         if matches!(&receiver_ty.kind, TyKind::Adt { name, .. } if name == "HttpServer")
-            && method_name == "next_request_async"
+            && (method_name == "next_request_async" || method_name == "next_request_router_async")
         {
             if self.async_context_depth == 0 {
-                return Err(TypeckError::Other(
-                    "HttpServer.next_request_async is only allowed in async contexts".to_string(),
-                ));
+                return Err(TypeckError::Other(format!(
+                    "HttpServer.{method_name} is only allowed in async contexts"
+                )));
             }
             if args.len() != 1 {
                 return Err(TypeckError::ArgumentCountMismatch {

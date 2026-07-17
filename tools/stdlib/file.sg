@@ -11,6 +11,22 @@ extern "C" {
     fn sengoo_file_kind(path: i64) -> i64;
     fn sengoo_file_size(path: i64) -> i64;
     fn sengoo_file_modified_unix_ms(path: i64) -> i64;
+    fn sengoo_async_file_open_read(path: i64) -> i64;
+    fn sengoo_async_file_close(handle: i64) -> bool;
+    fn sengoo_async_file_read_into(handle: i64, out_buffer: i64, out_capacity: i64) -> i64;
+    fn sengoo_async_file_wait_readable__start(handle: i64, timeout_ms: i64) -> i64;
+}
+
+struct AsyncFile {
+    handle: i64,
+}
+
+impl !Sync for AsyncFile {}
+
+struct FileReadinessOutcome {
+    is_ok: bool,
+    value: bool,
+    error: i64,
 }
 
 def PATH_KIND_FILE() -> i64 { 1 }
@@ -149,4 +165,42 @@ def file_modified_unix_ms_raw(path_ptr: i64) -> Result<i64, i64> {
 
 def file_modified_unix_ms(path: &str) -> Result<i64, i64> {
     file_modified_unix_ms_raw(sengoo_stdlib_str_ptr(path))
+}
+
+def async_file_open(path: &str) -> Result<AsyncFile, i64> {
+    let handle = sengoo_async_file_open_read(sengoo_stdlib_str_ptr(path));
+    if handle > 0 {
+        Result { is_ok: true, value: AsyncFile { handle: handle }, error: 0 }
+    } else {
+        Result {
+            is_ok: false,
+            value: AsyncFile { handle: 0 },
+            error: status_from_raw_ffi(handle),
+        }
+    }
+}
+
+impl AsyncFile {
+    def wait_readable(&self, timeout_ms: i64) -> Future<FileReadinessOutcome> {
+        sengoo_async_file_wait_readable__start(self.handle, timeout_ms)
+    }
+
+    def read_into(&self, buffer: &mut Buffer) -> Result<i64, i64> {
+        file_status_i64_result(sengoo_async_file_read_into(self.handle, buffer.ptr(), buffer.len()))
+    }
+
+    def close(self) -> bool {
+        if self.handle <= 0 {
+            return false;
+        }
+        sengoo_async_file_close(self.handle)
+    }
+}
+
+impl Drop for AsyncFile {
+    def drop(&mut self) {
+        if self.handle > 0 {
+            sengoo_async_file_close(self.handle);
+        }
+    }
 }

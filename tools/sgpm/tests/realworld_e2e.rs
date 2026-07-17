@@ -46,6 +46,22 @@ fn realworld_fixture(name: &str) -> PathBuf {
     workspace_root().join("examples/realworld").join(name)
 }
 
+fn realworld_fixture_names() -> Vec<String> {
+    let mut fixtures = fs::read_dir(workspace_root().join("examples/realworld"))
+        .expect("read examples/realworld")
+        .filter_map(|entry| {
+            let entry = entry.ok()?;
+            let path = entry.path();
+            if !path.is_dir() || !path.join("Sengoo.toml").is_file() {
+                return None;
+            }
+            Some(entry.file_name().to_string_lossy().into_owned())
+        })
+        .collect::<Vec<_>>();
+    fixtures.sort();
+    fixtures
+}
+
 fn temp_dir(name: &str) -> PathBuf {
     let stamp = SystemTime::now()
         .duration_since(UNIX_EPOCH)
@@ -179,6 +195,18 @@ fn senline_worker_publish_archive_contains_no_rejected_protocol_canaries() {
     );
 
     let _ = fs::remove_dir_all(dir);
+fn workflow_step_block<'a>(workflow: &'a str, step_name: &str) -> &'a str {
+    let marker = format!("- name: {step_name}");
+    let start = workflow
+        .find(&marker)
+        .unwrap_or_else(|| panic!("workflow should contain step `{step_name}`"));
+    let rest = &workflow[start..];
+    let next = rest
+        .match_indices("\n      - name: ")
+        .next()
+        .map(|(index, _)| index)
+        .unwrap_or(rest.len());
+    &rest[..next]
 }
 
 #[test]
@@ -220,6 +248,9 @@ fn realworld_locked_loop_uses_real_toolchain_binaries() {
     ] {
         let package = dir.join(fixture);
         copy_dir_filtered(&realworld_fixture(fixture), &package);
+    for fixture in realworld_fixture_names() {
+        let package = dir.join(&fixture);
+        copy_dir_filtered(&realworld_fixture(&fixture), &package);
 
         let update = Command::new(sgpm())
             .args(["update"])
@@ -245,6 +276,9 @@ fn realworld_locked_loop_uses_real_toolchain_binaries() {
             vec!["fmt", "--check", "--locked"],
             vec!["--runtime-mode", "source-development", "doc", "--locked"],
             vec!["--runtime-mode", "source-development", "build", "--locked"],
+            vec!["doc", "--locked"],
+            vec!["build", "--locked"],
+            vec!["run", "--locked"],
         ] {
             let output = Command::new(sgpm())
                 .args(&args)
@@ -274,4 +308,82 @@ fn realworld_locked_loop_uses_real_toolchain_binaries() {
     }
 
     let _ = fs::remove_dir_all(dir);
+}
+
+#[test]
+fn realworld_workflow_packages_and_installs_release_toolchain_before_running_every_fixture() {
+    let workflow = fs::read_to_string(workspace_root().join(".github/workflows/realworld-e2e.yml"))
+        .expect("read realworld-e2e workflow");
+    let build_step = workflow_step_block(&workflow, "Build toolchain binaries");
+    let package_step = workflow_step_block(&workflow, "Package toolchain");
+    let realworld_step = workflow_step_block(&workflow, "Run installed realworld fixture loop");
+    let official_step = workflow_step_block(&workflow, "Verify reviewed official package set");
+
+    for target in [
+        "ubuntu-latest",
+        "windows-latest",
+        "macos-15",
+        "macos-15-intel",
+    ] {
+        assert!(
+            workflow.contains(target),
+            "workflow should cover supported host `{target}`"
+        );
+    }
+    assert!(
+        build_step.contains("cargo build --release -p sgc -p sgpm -p sgfmt -p sglsp"),
+        "workflow should build release toolchain binaries before packaging"
+    );
+    assert!(
+        package_step.contains("./scripts/package-toolchain.ps1 -Version 0.1.0-ci -NoBuild"),
+        "workflow should package the prebuilt release binaries with -NoBuild"
+    );
+    assert!(
+        workflow.find("cargo build --release -p sgc -p sgpm -p sgfmt -p sglsp")
+            < workflow.find("./scripts/package-toolchain.ps1 -Version 0.1.0-ci -NoBuild"),
+        "release build step should appear before package-toolchain -NoBuild"
+    );
+    for needle in [
+        "actions/setup-python@v5",
+        "Install package (POSIX)",
+        "Install package (Windows)",
+        "target/install-smoke",
+        "Get-ChildItem examples/realworld -Directory",
+        "Sengoo.toml",
+        "sgpm update",
+        "sgpm check --locked",
+        "sgpm test --locked",
+        "sgpm fmt --check --locked",
+        "sgpm doc --locked",
+        "sgpm build --locked",
+        "sgpm run --locked",
+    ] {
+        assert!(
+            realworld_step.contains(needle) || workflow.contains(needle),
+            "workflow should contain `{needle}`"
+        );
+    }
+    for needle in [
+        "cli-json-audit",
+        "workspace-audit",
+        "http-client-status",
+        "http-echo-service",
+        "package-release-loop",
+        "python-hot-path",
+        "metadata --format json --locked",
+        "publish --dry-run --locked --format json",
+        "publish --registry local --locked --format json",
+        "python smoke",
+        "ctypes",
+        ".sgreflect.json",
+    ] {
+        assert!(
+            official_step.contains(needle),
+            "official package review step should contain `{needle}`"
+        );
+    }
+    assert!(
+        !official_step.contains("documented host-only gap"),
+        "official package review step should stop claiming Python interop as a documented gap"
+    );
 }

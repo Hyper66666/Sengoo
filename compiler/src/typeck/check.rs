@@ -296,10 +296,12 @@ impl TypeChecker {
             return;
         };
         self.warnings
-            .push(crate::error::CompileWarning::deprecated_use(
+            .push(crate::error::CompileWarning::deprecated_use_with_metadata(
                 info.kind,
                 info.name,
                 info.message,
+                info.replacement,
+                info.removal,
                 Some((span.lo, span.hi)),
             ));
     }
@@ -1425,6 +1427,11 @@ impl TypeChecker {
                         "AsyncContext is opaque and cannot be constructed by user code".to_string(),
                     ));
                 }
+                if name == "TaskScope" {
+                    return Err(TypeckError::Other(
+                        "TaskScope is opaque and cannot be constructed by user code".to_string(),
+                    ));
+                }
 
                 let field_defs = self
                     .struct_field_defs
@@ -1683,10 +1690,13 @@ impl TypeChecker {
     }
 
     pub(super) fn type_satisfies_auto_marker_bound(&self, trait_name: &str, ty: &Ty) -> bool {
+        let resolved = self.infer.apply_subst(ty);
+        if trait_name == "Copy" {
+            return resolved.is_copy_value();
+        }
         if !matches!(trait_name, "Send" | "Sync") {
             return false;
         }
-        let resolved = self.infer.apply_subst(ty);
         self.ty_satisfies_auto_marker(trait_name, &resolved, &mut HashSet::new())
     }
 

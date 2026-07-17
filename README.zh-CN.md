@@ -26,6 +26,27 @@ $archive = Get-Content target/dist/latest-archive.txt
 .\scripts\install.ps1 -Archive $archive -InstallDir target/install-smoke
 ```
 
+已发布预发布安装 / 升级（当前公开 tag）：
+
+```powershell
+.\scripts\install.ps1 -Version 0.1.0-rc.1
+```
+
+```sh
+sh scripts/install.sh --version 0.1.0-rc.1
+```
+
+公开预发布：[`v0.1.0-rc.1`](https://github.com/Hyper66666/Sengoo/releases/tag/v0.1.0-rc.1)。
+v0.2 主线见 `sengoo-v0-2-mainstream-core`，此处不宣称已发布 v0.2.0。
+
+**v0.2 mainstream-core 本地门禁证据 SHA：**
+`084b623037f007344d76ce50f2e0d01fac57b565`（分支 `codex/sengoo-v0-2-openspec`，
+[PR #47](https://github.com/Hyper66666/Sengoo/pull/47)）。该提交对应已归档的
+M1–M4 OpenSpec 子变更与本地 fmt / Clippy `-D warnings` / 聚焦工具测试 /
+`openspec validate --all --strict` 绿证据；**不**宣称多主机 Actions 成功，
+也不宣称 HTTP handlers/keep-alive/streaming/TLS server 为 Supported（见
+`examples/realworld/SUPPORT_MATRIX.md` 与 umbrella `RESIDUAL.md`）。
+
 原生 debug-info 构建使用 `-g` / `--debug-info`：
 
 ```powershell
@@ -419,7 +440,7 @@ alias。
 `args.sg`、`env.sg`、`math.sg`、`error.sg`，以及 `ffi.sg`、`db.sg`、
 `lua54.sg`、`net.sg`、`proto.sg` 等反射 wrapper。运行时桥接分布在
 `runtime.c`、`runtime_collections.c`、`runtime_json.c`、
-`runtime_process.c`、`runtime_string.c`。模块说明和当前延期项见
+`runtime_process.c`、`runtime_stream.c`、`runtime_string.c`。模块说明和当前延期项见
 `tools/stdlib/README.md`。
 
 可以直接在 Sengoo 源码里导入标准库模块：

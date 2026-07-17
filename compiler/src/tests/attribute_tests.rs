@@ -166,6 +166,44 @@ def main() -> i64 {
 }
 
 #[test]
+fn deprecated_use_preserves_structured_migration_metadata() {
+    let source = r#"
+#[deprecated(replacement = "new_main", removal = "v0.3.0", note = "use the fallible entry point")]
+def old_main() -> i64 { 1 }
+
+def new_main() -> i64 { 2 }
+
+def main() -> i64 { old_main() }
+"#;
+    let program = Parser::parse(source).expect("structured deprecated attribute should parse");
+    let mut checker = TypeChecker::new();
+    checker
+        .check_program(&program)
+        .expect("deprecated use should remain valid");
+
+    let warning = checker.warnings().first().expect("deprecated warning");
+    assert_eq!(warning.replacement(), Some("new_main"));
+    assert_eq!(warning.removal(), Some("v0.3.0"));
+    assert!(warning.to_string().contains("use the fallible entry point"));
+}
+
+#[test]
+fn structured_deprecated_metadata_requires_replacement_and_removal() {
+    let source = r#"
+#[deprecated(replacement = "new_main")]
+def old_main() -> i64 { 1 }
+def main() -> i64 { old_main() }
+"#;
+    let error = Parser::parse(source).expect_err("missing removal horizon must fail");
+    assert!(
+        error
+            .to_string()
+            .contains("requires `replacement` and `removal`"),
+        "unexpected diagnostic: {error}"
+    );
+}
+
+#[test]
 fn derive_on_class_still_expands() {
     let source = r#"
 #[derive(Auto)]

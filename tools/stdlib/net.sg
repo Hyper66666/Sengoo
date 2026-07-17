@@ -1,4 +1,4 @@
-extern "C" {
+﻿extern "C" {
     fn sengoo_stdlib_str_ptr(value: &str) -> i64;
     fn sengoo_string_from_bytes_copy(bytes_ptr: i64, len: i64) -> i64;
     fn sengoo_ffi_buffer_commit_used_len(buffer_handle: i64, used_len: i64) -> i64;
@@ -21,14 +21,26 @@ extern "C" {
     fn sengoo_http_body_copy(handle: i64, buffer: i64, capacity: i64) -> i64;
     fn sengoo_http_close(handle: i64) -> i64;
     fn sengoo_http_server_bind(host: i64, port: i64) -> i64;
+    fn sengoo_http_server_bind_tls(
+        host: i64,
+        port: i64,
+        cert_pem: i64,
+        cert_len: i64,
+        key_pem: i64,
+        key_len: i64
+    ) -> i64;
     fn sengoo_http_server_local_port(handle: i64) -> i64;
     fn sengoo_http_server_set_limits(handle: i64, max_header_bytes: i64, max_body_bytes: i64) -> i64;
+    fn sengoo_http_server_set_keep_alive(handle: i64, enabled: i64) -> i64;
     fn sengoo_http_server_add_route(handle: i64, method: i64, path_pattern: i64, status: i64, body: i64, body_len: i64) -> i64;
     fn sengoo_http_server_add_middleware_require_header(handle: i64, name: i64, expected_value: i64, reject_status: i64, reject_body: i64, reject_body_len: i64) -> i64;
     fn sengoo_http_server_add_ws_echo_route(handle: i64, path_pattern: i64) -> i64;
     fn sengoo_http_server_serve_once(handle: i64, timeout_ms: i64) -> i64;
     fn sengoo_http_server_close(handle: i64) -> i64;
     fn sengoo_http_server_next_request(handle: i64, timeout_ms: i64) -> i64;
+    fn sengoo_http_server_next_request_router(handle: i64, timeout_ms: i64) -> i64;
+    fn sengoo_http_server_claim_serve_mode(handle: i64, mode: i64) -> i64;
+    fn sengoo_http_server_next_request_router_async__start(handle: i64, timeout_ms: i64) -> i64;
     fn sengoo_http_request_method_len(handle: i64) -> i64;
     fn sengoo_http_request_method_copy(handle: i64, buffer: i64, capacity: i64) -> i64;
     fn sengoo_http_request_path_len(handle: i64) -> i64;
@@ -44,6 +56,11 @@ extern "C" {
     fn sengoo_http_request_respond(handle: i64, status: i64, body: i64, body_len: i64) -> i64;
     fn sengoo_http_request_respond_with_content_type(handle: i64, status: i64, content_type: i64, body: i64, body_len: i64) -> i64;
     fn sengoo_http_request_close(handle: i64) -> i64;
+    fn sengoo_http_request_begin_stream(handle: i64, status: i64) -> i64;
+    fn sengoo_http_request_begin_stream_with_length(handle: i64, status: i64, content_length: i64) -> i64;
+    fn sengoo_http_response_stream_write(handle: i64, data: i64, len: i64) -> i64;
+    fn sengoo_http_response_stream_finish(handle: i64) -> i64;
+    fn sengoo_http_response_stream_close(handle: i64) -> i64;
     fn sengoo_ws_connect(url: i64, timeout_ms: i64) -> i64;
     fn sengoo_ws_send_text(handle: i64, data: i64, len: i64) -> i64;
     fn sengoo_ws_recv_text(handle: i64, buffer: i64, capacity: i64, timeout_ms: i64) -> i64;
@@ -72,6 +89,10 @@ struct HttpServer {
 }
 
 struct HttpServerRequest {
+    handle: i64,
+}
+
+struct HttpResponseStream {
     handle: i64,
 }
 
@@ -312,6 +333,29 @@ def http_server_bind(host: &str, port: i64) -> Result<HttpServer, i64> {
     http_server_bind_raw(sengoo_stdlib_str_ptr(host), port)
 }
 
+def http_server_bind_tls(
+    host: &str,
+    port: i64,
+    cert_ptr: i64,
+    cert_len: i64,
+    key_ptr: i64,
+    key_len: i64
+) -> Result<HttpServer, i64> {
+    let handle = sengoo_http_server_bind_tls(
+        sengoo_stdlib_str_ptr(host),
+        port,
+        cert_ptr,
+        cert_len,
+        key_ptr,
+        key_len
+    );
+    if handle != 0 {
+        Result { is_ok: true, value: HttpServer { handle: handle }, error: 0 }
+    } else {
+        Result { is_ok: false, value: HttpServer { handle: 0 }, error: net_last_status() }
+    }
+}
+
 impl HttpServer {
     def local_port(self) -> Result<i64, i64> {
         let port = sengoo_http_server_local_port(self.handle);
@@ -324,6 +368,18 @@ impl HttpServer {
 
     def set_limits(self, max_header_bytes: i64, max_body_bytes: i64) -> Result<bool, i64> {
         let status = sengoo_http_server_set_limits(self.handle, max_header_bytes, max_body_bytes);
+        if status != 0 {
+            Result { is_ok: true, value: true, error: 0 }
+        } else {
+            Result { is_ok: false, value: false, error: net_last_status() }
+        }
+    }
+
+    /// Opt in (`enabled != 0`) to HTTP/1.1 keep-alive. Bounds are fixed:
+    /// max 100 requests per connection and 30s idle timeout. Default is off
+    /// (`Connection: close` every response).
+    def set_keep_alive(self, enabled: i64) -> Result<bool, i64> {
+        let status = sengoo_http_server_set_keep_alive(self.handle, enabled);
         if status != 0 {
             Result { is_ok: true, value: true, error: 0 }
         } else {
@@ -397,8 +453,21 @@ impl HttpServer {
         sengoo_http_server_next_request_async__start(self.handle, timeout_ms)
     }
 
+    def next_request_router_async(self, timeout_ms: i64) -> Future<HttpServerNextRequestOutcome> {
+        sengoo_http_server_next_request_router_async__start(self.handle, timeout_ms)
+    }
+
     def close(self) -> bool {
         sengoo_http_server_close(self.handle) != 0
+    }
+
+    def claim_serve_mode(self, mode: i64) -> Result<bool, i64> {
+        let status = sengoo_http_server_claim_serve_mode(self.handle, mode);
+        if status != 0 {
+            Result { is_ok: true, value: true, error: 0 }
+        } else {
+            Result { is_ok: false, value: false, error: net_last_status() }
+        }
     }
 }
 
@@ -658,6 +727,26 @@ impl HttpServerRequest {
         }
     }
 
+    /// Begin a chunked streamed response. Consumes this request (answer-once).
+    def begin_stream(self, status: i64) -> Result<HttpResponseStream, i64> {
+        let handle = sengoo_http_request_begin_stream(self.handle, status);
+        if handle != 0 {
+            Result { is_ok: true, value: HttpResponseStream { handle: handle }, error: 0 }
+        } else {
+            Result { is_ok: false, value: HttpResponseStream { handle: 0 }, error: net_last_status() }
+        }
+    }
+
+    /// Begin a fixed-length streamed response. Consumes this request.
+    def begin_stream_with_length(self, status: i64, content_length: i64) -> Result<HttpResponseStream, i64> {
+        let handle = sengoo_http_request_begin_stream_with_length(self.handle, status, content_length);
+        if handle != 0 {
+            Result { is_ok: true, value: HttpResponseStream { handle: handle }, error: 0 }
+        } else {
+            Result { is_ok: false, value: HttpResponseStream { handle: 0 }, error: net_last_status() }
+        }
+    }
+
     // Closing an unanswered request first writes a deterministic 504 fallback.
     def close(self) -> bool {
         sengoo_http_request_close(self.handle) != 0
@@ -667,6 +756,48 @@ impl HttpServerRequest {
 impl Drop for HttpServerRequest {
     def drop(&mut self) {
         sengoo_http_request_close(self.handle);
+    }
+}
+
+impl HttpResponseStream {
+    /// Write one body chunk. Chunks larger than 65536 fail with STATUS_INVALID_ARGUMENT.
+    /// Disconnect → STATUS_IO; write timeout → STATUS_TIMEOUT.
+    def write_buffer(self, buffer: Buffer, used_len: i64) -> Result<bool, i64> {
+        let status = sengoo_http_response_stream_write(self.handle, buffer.ptr(), used_len);
+        if status != 0 {
+            Result { is_ok: true, value: true, error: 0 }
+        } else {
+            Result { is_ok: false, value: false, error: net_last_status() }
+        }
+    }
+
+    def write_raw(self, data_ptr: i64, len: i64) -> Result<bool, i64> {
+        let status = sengoo_http_response_stream_write(self.handle, data_ptr, len);
+        if status != 0 {
+            Result { is_ok: true, value: true, error: 0 }
+        } else {
+            Result { is_ok: false, value: false, error: net_last_status() }
+        }
+    }
+
+    def finish(self) -> Result<bool, i64> {
+        let status = sengoo_http_response_stream_finish(self.handle);
+        if status != 0 {
+            Result { is_ok: true, value: true, error: 0 }
+        } else {
+            Result { is_ok: false, value: false, error: net_last_status() }
+        }
+    }
+
+    def close(self) -> bool {
+        sengoo_http_response_stream_close(self.handle) != 0
+    }
+}
+
+impl Drop for HttpResponseStream {
+    def drop(&mut self) {
+        // Unfinished Drop aborts the stream and closes the connection.
+        sengoo_http_response_stream_close(self.handle);
     }
 }
 
@@ -762,3 +893,208 @@ def net_bench_run_raw(connections: i64, rtt_messages_per_connection: i64, broadc
 def net_bench_run(connections: i64, rtt_messages_per_connection: i64, broadcast_rounds: i64, payload_bytes: i64, report: Buffer) -> Result<i64, i64> {
     net_bench_run_raw(connections, rtt_messages_per_connection, broadcast_rounds, payload_bytes, report.ptr(), report.len())
 }
+
+def HTTP_SERVER_MODE_PULL() -> i64 { 1 }
+def HTTP_SERVER_MODE_ROUTER() -> i64 { 2 }
+
+// Handler returns 1=answered, 0=not answered (500), negative=error.
+// Design: fn(&mut HttpServerRequest) -> Result<bool, i64>; i64 form is the
+// concrete stdlib encoding until fn-returning-Result is broadly supported.
+struct HttpRouter {
+    count: i64,
+    r0_used: bool,
+    r0_method: String,
+    r0_path: String,
+    r0_handler: fn(HttpServerRequest) -> i64,
+    r1_used: bool,
+    r1_method: String,
+    r1_path: String,
+    r1_handler: fn(HttpServerRequest) -> i64,
+    r2_used: bool,
+    r2_method: String,
+    r2_path: String,
+    r2_handler: fn(HttpServerRequest) -> i64,
+    r3_used: bool,
+    r3_method: String,
+    r3_path: String,
+    r3_handler: fn(HttpServerRequest) -> i64,
+    has_default: bool,
+    default_handler: fn(HttpServerRequest) -> i64,
+}
+
+def http_router_noop_handler(request: HttpServerRequest) -> i64 { 0 }
+
+def http_router_new() -> HttpRouter {
+    HttpRouter {
+        count: 0,
+        r0_used: false,
+        r0_method: String { handle: 0 },
+        r0_path: String { handle: 0 },
+        r0_handler: http_router_noop_handler,
+        r1_used: false,
+        r1_method: String { handle: 0 },
+        r1_path: String { handle: 0 },
+        r1_handler: http_router_noop_handler,
+        r2_used: false,
+        r2_method: String { handle: 0 },
+        r2_path: String { handle: 0 },
+        r2_handler: http_router_noop_handler,
+        r3_used: false,
+        r3_method: String { handle: 0 },
+        r3_path: String { handle: 0 },
+        r3_handler: http_router_noop_handler,
+        has_default: false,
+        default_handler: http_router_noop_handler,
+    }
+}
+
+def http_router_route(
+    router: HttpRouter,
+    method: &str,
+    path: &str,
+    handler: fn(HttpServerRequest) -> i64,
+) -> Result<HttpRouter, i64> {
+    let mut out = router;
+    if !out.r0_used {
+        out.r0_used = true;
+        out.r0_method = string_from_str(method).unwrap_or(String { handle: 0 });
+        out.r0_path = string_from_str(path).unwrap_or(String { handle: 0 });
+        out.r0_handler = handler;
+        out.count = out.count + 1;
+        Result { is_ok: true, value: out, error: 0 }
+    } else if !out.r1_used {
+        out.r1_used = true;
+        out.r1_method = string_from_str(method).unwrap_or(String { handle: 0 });
+        out.r1_path = string_from_str(path).unwrap_or(String { handle: 0 });
+        out.r1_handler = handler;
+        out.count = out.count + 1;
+        Result { is_ok: true, value: out, error: 0 }
+    } else if !out.r2_used {
+        out.r2_used = true;
+        out.r2_method = string_from_str(method).unwrap_or(String { handle: 0 });
+        out.r2_path = string_from_str(path).unwrap_or(String { handle: 0 });
+        out.r2_handler = handler;
+        out.count = out.count + 1;
+        Result { is_ok: true, value: out, error: 0 }
+    } else if !out.r3_used {
+        out.r3_used = true;
+        out.r3_method = string_from_str(method).unwrap_or(String { handle: 0 });
+        out.r3_path = string_from_str(path).unwrap_or(String { handle: 0 });
+        out.r3_handler = handler;
+        out.count = out.count + 1;
+        Result { is_ok: true, value: out, error: 0 }
+    } else {
+        Result { is_ok: false, value: out, error: STATUS_BUFFER_TOO_SMALL() }
+    }
+}
+
+def http_router_default(
+    router: HttpRouter,
+    handler: fn(HttpServerRequest) -> i64,
+) -> Result<HttpRouter, i64> {
+    let mut out = router;
+    if out.has_default {
+        Result { is_ok: false, value: out, error: STATUS_ALREADY_EXISTS() }
+    } else {
+        out.has_default = true;
+        out.default_handler = handler;
+        Result { is_ok: true, value: out, error: 0 }
+    }
+}
+
+def http_router_match_handles(
+    used: bool,
+    route_method_handle: i64,
+    route_path_handle: i64,
+    req_method_handle: i64,
+    req_path_handle: i64,
+) -> bool {
+    if !used {
+        false
+    } else {
+        sengoo_string_eq(route_method_handle, req_method_handle) != 0
+            and sengoo_string_eq(route_path_handle, req_path_handle) != 0
+    }
+}
+
+def http_server_next_request_router(server: HttpServer, timeout_ms: i64) -> Result<HttpServerRequest, i64> {
+    let handle = sengoo_http_server_next_request_router(server.handle, timeout_ms);
+    if handle != 0 {
+        Result { is_ok: true, value: HttpServerRequest { handle: handle }, error: 0 }
+    } else {
+        Result { is_ok: false, value: HttpServerRequest { handle: 0 }, error: net_last_status() }
+    }
+}
+
+/// Dispatch one already-pulled request through `router` (exact method+path).
+/// Unmatched → 404; handler return != 1 and unanswered → 500.
+/// Returns the router so callers can rebuild-free multi-request loops.
+/// Prefer this after `await server.next_request_async_router(...)` so fn-bearing
+/// routers never cross async frame await points (rebuild in a sync helper instead).
+def http_router_dispatch(router: HttpRouter, request: HttpServerRequest) -> HttpRouter {
+    let method_r = request.method_string();
+    let path_r = request.path_string();
+    if !method_r.is_ok or !path_r.is_ok {
+        let ignored = request.respond(500, "internal error");
+        router
+    } else {
+        let method = method_r.value;
+        let path = path_r.value;
+        let mut handler_ok = false;
+        let mut matched = false;
+        if http_router_match_handles(router.r0_used, router.r0_method.handle, router.r0_path.handle, method.handle, path.handle) {
+            let h0 = router.r0_handler; handler_ok = h0(request) == 1;
+            matched = true;
+        } else if http_router_match_handles(router.r1_used, router.r1_method.handle, router.r1_path.handle, method.handle, path.handle) {
+            let h1 = router.r1_handler; handler_ok = h1(request) == 1;
+            matched = true;
+        } else if http_router_match_handles(router.r2_used, router.r2_method.handle, router.r2_path.handle, method.handle, path.handle) {
+            let h2 = router.r2_handler; handler_ok = h2(request) == 1;
+            matched = true;
+        } else if http_router_match_handles(router.r3_used, router.r3_method.handle, router.r3_path.handle, method.handle, path.handle) {
+            let h3 = router.r3_handler; handler_ok = h3(request) == 1;
+            matched = true;
+        } else if router.has_default {
+            let hd = router.default_handler; handler_ok = hd(request) == 1;
+            matched = true;
+        } else {
+            let ignored = request.respond(404, "not found");
+            matched = true;
+            handler_ok = true;
+        }
+        if matched and !handler_ok {
+            let ignored = request.respond(500, "handler error");
+        }
+        router
+    }
+}
+
+/// Serve one request under router mode (blocking pull). Returns the router on
+/// both success and error so multi-request hosts can loop without rebuilding.
+/// `is_ok` means one request was dispatched; timeout/mode/pull failures are
+/// `is_ok=false` with the router still returned.
+/// Note: blocking pull does not yield the cooperative scheduler — async hosts
+/// should `claim_serve_mode(ROUTER)`, `await next_request_router_async`, then
+/// `http_router_dispatch` from a sync helper that rebuilds the router.
+def serve_http_once(server: HttpServer, router: HttpRouter, timeout_ms: i64) -> Result<HttpRouter, i64> {
+    let claimed = server.claim_serve_mode(HTTP_SERVER_MODE_ROUTER());
+    if !claimed.is_ok {
+        Result { is_ok: false, value: router, error: claimed.error }
+    } else {
+        let pull = http_server_next_request_router(server, timeout_ms);
+        if !pull.is_ok {
+            Result { is_ok: false, value: router, error: pull.error }
+        } else {
+            let out = http_router_dispatch(router, pull.value);
+            Result { is_ok: true, value: out, error: 0 }
+        }
+    }
+}
+
+/// Serve one request under router mode (blocking). Call in a loop for
+/// multi-request hosts. Returns the router for reuse (see `serve_http_once`).
+def serve_http(server: HttpServer, router: HttpRouter, timeout_ms: i64) -> Result<HttpRouter, i64> {
+    serve_http_once(server, router, timeout_ms)
+}
+
+

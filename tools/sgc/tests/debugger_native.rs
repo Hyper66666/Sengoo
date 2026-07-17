@@ -8,6 +8,12 @@ use std::time::{SystemTime, UNIX_EPOCH};
 
 const BREAK_MARKER: &str = "SENGOO_DEBUG_BREAK";
 const STEP_MARKER: &str = "SENGOO_DEBUG_STEP";
+const COMPOSITE_MARKER: &str = "SENGOO_DEBUG_COMPOSITES";
+const CALL_MARKER: &str = "SENGOO_DEBUG_CALL";
+const CALL_STEP_MARKER: &str = "SENGOO_DEBUG_CALL_STEP";
+const CALL_BODY_MARKER: &str = "SENGOO_DEBUG_CALL_BODY";
+const CLOSURE_MARKER: &str = "SENGOO_DEBUG_CLOSURE";
+const CLOSURE_STEP_MARKER: &str = "SENGOO_DEBUG_CLOSURE_STEP";
 const EXIT_MARKER: &str = "SENGOO_DEBUG_EXIT_ZERO";
 const PROBE_SOURCE_FILE: &str = "debugger_probe.sg";
 const PROBE_SOURCE: &str = r#"def debug_probe(value: i64) -> i64 {
@@ -18,6 +24,50 @@ const PROBE_SOURCE: &str = r#"def debug_probe(value: i64) -> i64 {
 
 def main() -> i64 {
     if debug_probe(21) == 43 { 0 } else { 1 }
+}
+"#;
+const COMPOSITE_PROBE_SOURCE_FILE: &str = "debugger_composite_probe.sg";
+const COMPOSITE_PROBE_SOURCE: &str = r#"import std::collections;
+
+struct Pair {
+    left: i64,
+    enabled: bool,
+}
+
+enum Choice { Empty, Value(i64) }
+
+def scalar_helper(value: i64) -> i64 {
+    let adjusted = value + 1;
+    adjusted
+}
+
+def inspect_composites(value: i64) -> i64 {
+    let pair = Pair { left: value, enabled: true };
+    let picked = Choice::Value(7);
+    let text = string_from_str("hi").unwrap_or(String { handle: 0 });
+    let values = vec_new_i64();
+    values.push(3);
+    let observed = pair.left + text.len() + values.len();
+    if pair.enabled { observed } else { 0 }
+}
+
+def call_surface(value: i64) -> i64 {
+    let called = scalar_helper(value);
+    called
+}
+
+def closure_surface(value: i64) -> i64 {
+    let add = |extra| value + extra;
+    let closed = add(2);
+    let result = closed + 1;
+    result
+}
+
+def main() -> i64 {
+    let composites = inspect_composites(21);
+    let called = call_surface(21);
+    let closed = closure_surface(21);
+    if composites == 24 && called == 22 && closed == 24 { 0 } else { 1 }
 }
 "#;
 
@@ -31,6 +81,16 @@ enum DebuggerFlavor {
 struct ProbeLayout {
     break_line: usize,
     step_line: usize,
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+struct CompositeProbeLayout {
+    composite_line: usize,
+    call_entry_line: usize,
+    helper_entry_line: usize,
+    helper_line: usize,
+    closure_call_line: usize,
+    closure_step_line: usize,
 }
 
 struct TempProject {
@@ -61,6 +121,20 @@ impl TempProject {
             "debugger_probe.exe"
         } else {
             "debugger_probe"
+        };
+        self.root.join("build").join(name)
+    }
+
+    fn composite_source_path(&self) -> PathBuf {
+        self.root.join(COMPOSITE_PROBE_SOURCE_FILE)
+    }
+
+    #[cfg(unix)]
+    fn composite_executable_path(&self) -> PathBuf {
+        let name = if cfg!(windows) {
+            "debugger_composite_probe.exe"
+        } else {
+            "debugger_composite_probe"
         };
         self.root.join("build").join(name)
     }
@@ -148,6 +222,67 @@ fn lldb_arguments(executable: &Path, source: &Path, layout: &ProbeLayout) -> Vec
     ]
     .into_iter()
     .collect()
+}
+
+fn composite_lldb_arguments(
+    executable: &Path,
+    source: &Path,
+    layout: &CompositeProbeLayout,
+) -> Vec<String> {
+    let file_name = source_file_name(source);
+    let mut args = vec!["--batch".to_string()];
+    for line in [
+        layout.composite_line,
+        layout.call_entry_line,
+        layout.helper_line,
+        layout.closure_call_line,
+    ] {
+        args.extend([
+            "-o".to_string(),
+            format!("breakpoint set --file {file_name} --line {line}"),
+        ]);
+    }
+    for command in [
+        "run".to_string(),
+        format!("script print(\"{COMPOSITE_MARKER}\")"),
+        "frame info".to_string(),
+        "frame variable pair".to_string(),
+        "frame variable pair.left".to_string(),
+        "frame variable pair.enabled".to_string(),
+        "frame variable picked".to_string(),
+        "frame variable picked.discriminant".to_string(),
+        "frame variable text".to_string(),
+        "frame variable text.handle".to_string(),
+        "frame variable values".to_string(),
+        "frame variable values.handle".to_string(),
+        "frame variable values.marker".to_string(),
+        "continue".to_string(),
+        format!("script print(\"{CALL_MARKER}\")"),
+        "frame info".to_string(),
+        "thread backtrace".to_string(),
+        "frame variable value".to_string(),
+        "step".to_string(),
+        format!("script print(\"{CALL_STEP_MARKER}\")"),
+        "frame info".to_string(),
+        "frame variable value".to_string(),
+        "step".to_string(),
+        format!("script print(\"{CALL_BODY_MARKER}\")"),
+        "frame info".to_string(),
+        "finish".to_string(),
+        "continue".to_string(),
+        format!("script print(\"{CLOSURE_MARKER}\")"),
+        "frame info".to_string(),
+        "thread backtrace".to_string(),
+        "next".to_string(),
+        format!("script print(\"{CLOSURE_STEP_MARKER}\")"),
+        "frame info".to_string(),
+        "continue".to_string(),
+        format!("script print(\"{EXIT_MARKER}\")"),
+    ] {
+        args.extend(["-o".to_string(), command]);
+    }
+    args.extend(["--".to_string(), executable.to_string_lossy().into_owned()]);
+    args
 }
 
 fn cdb_script(source: &Path, layout: &ProbeLayout) -> String {
@@ -274,6 +409,149 @@ fn validate_debugger_output(
     Ok(())
 }
 
+fn marker_segment<'a>(output: &'a str, start: &str, end: &str) -> Result<&'a str, String> {
+    output_after_marker(output, start)?
+        .split_once(end)
+        .map(|(segment, _)| segment)
+        .ok_or_else(|| format!("debugger did not reach marker `{end}` after `{start}`:\n{output}"))
+}
+
+fn segment_has_named_nonzero_value(segment: &str, name: &str) -> bool {
+    segment.lines().any(|line| {
+        if !line.contains(name) {
+            return false;
+        }
+        let compact = line.replace(' ', "").to_ascii_lowercase();
+        let Some((_, value)) = compact.rsplit_once('=') else {
+            return false;
+        };
+        let value = value.trim_matches(|character: char| !character.is_ascii_alphanumeric());
+        !value.is_empty() && !matches!(value, "0" | "0x0" | "0n0")
+    })
+}
+
+fn segment_has_named_zero_value(segment: &str, name: &str) -> bool {
+    segment.lines().any(|line| {
+        if !line.contains(name) {
+            return false;
+        }
+        let compact = line.replace(' ', "").to_ascii_lowercase();
+        let Some((_, value)) = compact.rsplit_once('=') else {
+            return false;
+        };
+        let value = value.trim_matches(|character: char| !character.is_ascii_alphanumeric());
+        matches!(value, "0" | "0x0" | "0n0")
+    })
+}
+
+fn validate_composite_debugger_output(
+    output: &str,
+    source: &Path,
+    layout: &CompositeProbeLayout,
+) -> Result<(), String> {
+    let composites = marker_segment(output, COMPOSITE_MARKER, CALL_MARKER)?;
+    if !contains_source_location(composites, source, layout.composite_line) {
+        return Err(format!(
+            "debugger did not stop on the composite inspection line:\n{output}"
+        ));
+    }
+    for (name, expected_type) in [
+        ("pair", "Pair"),
+        ("picked", "enum"),
+        ("text", "String"),
+        ("values", "Vec_i64"),
+    ] {
+        if !composites
+            .lines()
+            .any(|line| line.contains(name) && line.contains(expected_type))
+        {
+            return Err(format!(
+                "debugger did not expose `{name}` with type `{expected_type}`:\n{output}"
+            ));
+        }
+    }
+    for (name, decimal, hex) in [("pair.left", 21, "15"), ("picked.discriminant", 1, "1")] {
+        if !composites
+            .lines()
+            .any(|line| line_has_named_value(line, name, decimal, hex))
+        {
+            return Err(format!(
+                "debugger did not expose `{name}` with value {decimal}:\n{output}"
+            ));
+        }
+    }
+    if !composites
+        .lines()
+        .any(|line| line.contains("pair.enabled") && line.to_ascii_lowercase().contains("true"))
+    {
+        return Err(format!(
+            "debugger did not expose `pair.enabled` as true:\n{output}"
+        ));
+    }
+    for name in ["text.handle", "values.handle"] {
+        if !segment_has_named_nonzero_value(composites, name) {
+            return Err(format!(
+                "debugger did not expose `{name}` as a live non-zero value:\n{output}"
+            ));
+        }
+    }
+    if !segment_has_named_zero_value(composites, "values.marker") {
+        return Err(format!(
+            "debugger did not expose `values.marker` as the zero-valued phantom field:\n{output}"
+        ));
+    }
+
+    let call = marker_segment(output, CALL_MARKER, CALL_STEP_MARKER)?;
+    if !contains_source_location(call, source, layout.call_entry_line)
+        || !call.contains("call_surface")
+        || !call.contains("main")
+        || !call
+            .lines()
+            .any(|line| line_has_named_value(line, "value", 21, "15"))
+    {
+        return Err(format!(
+            "debugger did not expose the call_surface entry stack and live parameter:\n{output}"
+        ));
+    }
+    let call_step = marker_segment(output, CALL_STEP_MARKER, CALL_BODY_MARKER)?;
+    if !contains_source_location(call_step, source, layout.helper_entry_line)
+        || !call_step.contains("scalar_helper")
+        || !call_step
+            .lines()
+            .any(|line| line_has_named_value(line, "value", 21, "15"))
+    {
+        return Err(format!(
+            "debugger did not step from call_surface into scalar_helper with its live parameter:\n{output}"
+        ));
+    }
+    let call_body = marker_segment(output, CALL_BODY_MARKER, CLOSURE_MARKER)?;
+    if !contains_source_location(call_body, source, layout.helper_line)
+        || !call_body.contains("scalar_helper")
+    {
+        return Err(format!(
+            "debugger did not step from scalar_helper entry to its first statement:\n{output}"
+        ));
+    }
+
+    let closure = marker_segment(output, CLOSURE_MARKER, CLOSURE_STEP_MARKER)?;
+    if !contains_source_location(closure, source, layout.closure_call_line)
+        || !closure.contains("closure_surface")
+    {
+        return Err(format!(
+            "debugger did not stop at the closure invocation:\n{output}"
+        ));
+    }
+    let closure_step = marker_segment(output, CLOSURE_STEP_MARKER, EXIT_MARKER)?;
+    if !contains_source_location(closure_step, source, layout.closure_step_line)
+        || !closure_step.contains("closure_surface")
+    {
+        return Err(format!(
+            "debugger did not step over the closure invocation to the next statement:\n{output}"
+        ));
+    }
+    Ok(())
+}
+
 fn combined_output(output: &Output) -> String {
     format!(
         "{}\n{}",
@@ -284,6 +562,29 @@ fn combined_output(output: &Output) -> String {
 
 fn skip(reason: &str) {
     eprintln!("SKIP debugger_native::native_debugger_breaks_steps_and_reads_local: {reason}");
+}
+
+fn skip_or_fail(reason: &str) {
+    if std::env::var("SENGOO_REQUIRE_NATIVE_DEBUGGER").as_deref() == Ok("1") {
+        panic!("required native debugger evidence unavailable: {reason}");
+    }
+    skip(reason);
+}
+
+fn persist_transcript(name: &str, transcript: &str) {
+    let Some(directory) = std::env::var_os("SENGOO_DEBUGGER_TRANSCRIPT_DIR") else {
+        return;
+    };
+    let directory = PathBuf::from(directory);
+    fs::create_dir_all(&directory).unwrap_or_else(|error| {
+        panic!(
+            "create debugger transcript directory {}: {error}",
+            directory.display()
+        )
+    });
+    let path = directory.join(name);
+    fs::write(&path, transcript)
+        .unwrap_or_else(|error| panic!("write debugger transcript {}: {error}", path.display()));
 }
 
 #[test]
@@ -397,21 +698,182 @@ SENGOO_DEBUG_EXIT_ZERO
     .is_err());
 }
 
+fn composite_probe_layout() -> CompositeProbeLayout {
+    CompositeProbeLayout {
+        composite_line: source_line_number(COMPOSITE_PROBE_SOURCE, "let observed ="),
+        call_entry_line: source_line_number(COMPOSITE_PROBE_SOURCE, "def call_surface"),
+        helper_entry_line: source_line_number(COMPOSITE_PROBE_SOURCE, "def scalar_helper"),
+        helper_line: source_line_number(COMPOSITE_PROBE_SOURCE, "let adjusted ="),
+        closure_call_line: source_line_number(COMPOSITE_PROBE_SOURCE, "let closed = add"),
+        closure_step_line: source_line_number(COMPOSITE_PROBE_SOURCE, "let result ="),
+    }
+}
+
+#[test]
+fn lldb_composite_commands_inspect_live_values_calls_and_closures() {
+    let layout = composite_probe_layout();
+    let args = composite_lldb_arguments(
+        Path::new("/tmp/debugger_composite_probe"),
+        Path::new("/tmp/debugger_composite_probe.sg"),
+        &layout,
+    );
+    let joined = args.join("\n");
+
+    for line in [
+        layout.composite_line,
+        layout.call_entry_line,
+        layout.helper_line,
+        layout.closure_call_line,
+    ] {
+        assert!(joined.contains(&format!(
+            "breakpoint set --file debugger_composite_probe.sg --line {line}"
+        )));
+    }
+    for expression in [
+        "value",
+        "pair",
+        "pair.left",
+        "pair.enabled",
+        "picked",
+        "picked.discriminant",
+        "text",
+        "text.handle",
+        "values",
+        "values.handle",
+        "values.marker",
+    ] {
+        assert!(
+            joined.contains(&format!("frame variable {expression}")),
+            "missing live inspection for {expression}:\n{joined}"
+        );
+    }
+    assert!(joined.contains("thread backtrace"));
+    assert!(joined.contains("step"));
+    assert!(joined.contains("finish"));
+    assert!(joined.contains("next"));
+    for marker in [
+        COMPOSITE_MARKER,
+        CALL_MARKER,
+        CALL_STEP_MARKER,
+        CALL_BODY_MARKER,
+        CLOSURE_MARKER,
+        CLOSURE_STEP_MARKER,
+        EXIT_MARKER,
+    ] {
+        assert!(
+            joined.contains(marker),
+            "missing marker {marker}:\n{joined}"
+        );
+    }
+}
+
+#[test]
+fn composite_debugger_output_requires_live_layouts_and_surface_steps() {
+    let layout = composite_probe_layout();
+    let transcript = format!(
+        r#"
+Breakpoint 1: debugger_composite_probe.sg:{composite_line}:5
+{COMPOSITE_MARKER}
+frame #0: inspect_composites at debugger_composite_probe.sg:{composite_line}:5
+(Pair) pair = (left = 21, enabled = true)
+(i64) pair.left = 21
+(bool) pair.enabled = true
+(enum) picked = (discriminant = 1, payload = {{...}})
+(i64) picked.discriminant = 1
+(String) text = (handle = 14)
+(i64) text.handle = 14
+(Vec_i64) values = (handle = 18, marker = 0)
+(i64) values.handle = 18
+(i64) values.marker = 0
+{CALL_MARKER}
+frame #0: call_surface at debugger_composite_probe.sg:{call_entry_line}:5
+thread backtrace:
+frame #0: call_surface at debugger_composite_probe.sg:{call_entry_line}:5
+frame #1: main
+(i64) value = 21
+{CALL_STEP_MARKER}
+frame #0: scalar_helper at debugger_composite_probe.sg:{helper_entry_line}:5
+(i64) value = 21
+{CALL_BODY_MARKER}
+frame #0: scalar_helper at debugger_composite_probe.sg:{helper_line}:5
+{CLOSURE_MARKER}
+frame #0: closure_surface at debugger_composite_probe.sg:{closure_call_line}:5
+{CLOSURE_STEP_MARKER}
+frame #0: closure_surface at debugger_composite_probe.sg:{closure_step_line}:5
+{EXIT_MARKER}
+"#,
+        composite_line = layout.composite_line,
+        call_entry_line = layout.call_entry_line,
+        helper_entry_line = layout.helper_entry_line,
+        helper_line = layout.helper_line,
+        closure_call_line = layout.closure_call_line,
+        closure_step_line = layout.closure_step_line,
+    );
+
+    assert!(validate_composite_debugger_output(
+        &transcript,
+        Path::new("/tmp/debugger_composite_probe.sg"),
+        &layout,
+    )
+    .is_ok());
+
+    let missing_member = transcript.replace("(i64) pair.left = 21\n", "");
+    assert!(validate_composite_debugger_output(
+        &missing_member,
+        Path::new("/tmp/debugger_composite_probe.sg"),
+        &layout,
+    )
+    .is_err());
+
+    let zero_handle = transcript.replace("(i64) text.handle = 14", "(i64) text.handle = 0");
+    assert!(validate_composite_debugger_output(
+        &zero_handle,
+        Path::new("/tmp/debugger_composite_probe.sg"),
+        &layout,
+    )
+    .is_err());
+
+    let wrong_marker = transcript.replace("(i64) values.marker = 0", "(i64) values.marker = 7");
+    assert!(validate_composite_debugger_output(
+        &wrong_marker,
+        Path::new("/tmp/debugger_composite_probe.sg"),
+        &layout,
+    )
+    .is_err());
+
+    let wrong_closure_line = transcript.replace(
+        &format!(
+            "debugger_composite_probe.sg:{}:5\n{EXIT_MARKER}",
+            layout.closure_step_line
+        ),
+        &format!(
+            "debugger_composite_probe.sg:{}:5\n{EXIT_MARKER}",
+            layout.closure_call_line
+        ),
+    );
+    assert!(validate_composite_debugger_output(
+        &wrong_closure_line,
+        Path::new("/tmp/debugger_composite_probe.sg"),
+        &layout,
+    )
+    .is_err());
+}
+
 #[test]
 fn native_debugger_breaks_steps_and_reads_local() {
     let layout = probe_layout();
     let Some((flavor, debugger_name)) = host_debugger() else {
-        skip("host platform has no supported LLDB/CDB driver");
+        skip_or_fail("host platform has no supported LLDB/CDB driver");
         return;
     };
     let Some(debugger) = find_tool(debugger_name) else {
-        skip(&format!(
+        skip_or_fail(&format!(
             "required debugger `{debugger_name}` was not found on PATH"
         ));
         return;
     };
     if find_tool(if cfg!(windows) { "clang.exe" } else { "clang" }).is_none() {
-        skip("native clang toolchain was not found on PATH");
+        skip_or_fail("native clang toolchain was not found on PATH");
         return;
     }
 
@@ -461,12 +923,85 @@ fn native_debugger_breaks_steps_and_reads_local() {
         }
     };
     let transcript = combined_output(&output);
+    persist_transcript(
+        &format!("debugger-native-{debugger_name}-scalar.txt"),
+        &transcript,
+    );
     assert!(
         output.status.success(),
         "{debugger_name} batch session failed:\n{transcript}"
     );
     validate_debugger_output(&transcript, &source, &layout)
         .unwrap_or_else(|error| panic!("{debugger_name} validation failed: {error}"));
+}
+
+#[test]
+fn composite_probe_builds_for_native_debugging() {
+    let project = TempProject::new();
+    let source = project.composite_source_path();
+    fs::write(&source, COMPOSITE_PROBE_SOURCE).expect("write composite debugger probe source");
+
+    let check = Command::new(sgc())
+        .arg("check")
+        .arg(&source)
+        .output()
+        .expect("check composite debugger probe");
+    assert!(
+        check.status.success(),
+        "composite debugger probe did not type-check:\n{}",
+        combined_output(&check)
+    );
+}
+
+#[test]
+#[cfg(unix)]
+fn native_lldb_steps_and_inspects_composite_surfaces() {
+    let Some(debugger) = find_tool("lldb") else {
+        skip_or_fail("required debugger `lldb` was not found on PATH");
+        return;
+    };
+    if find_tool("clang").is_none() {
+        skip_or_fail("native clang toolchain was not found on PATH");
+        return;
+    }
+
+    let layout = composite_probe_layout();
+    let project = TempProject::new();
+    let source = project.composite_source_path();
+    fs::write(&source, COMPOSITE_PROBE_SOURCE).expect("write composite debugger probe source");
+
+    let build = Command::new(sgc())
+        .arg("build")
+        .arg(&source)
+        .args(["-O", "0", "--debug-info", "--force-rebuild"])
+        .output()
+        .expect("run composite sgc debug build");
+    assert!(
+        build.status.success(),
+        "composite sgc debug build failed:\n{}",
+        combined_output(&build)
+    );
+
+    let executable = project.composite_executable_path();
+    assert!(
+        executable.is_file(),
+        "sgc did not create expected composite debug executable {}\nbuild output:\n{}",
+        executable.display(),
+        combined_output(&build)
+    );
+
+    let output = Command::new(debugger)
+        .args(composite_lldb_arguments(&executable, &source, &layout))
+        .output()
+        .expect("run composite LLDB batch session");
+    let transcript = combined_output(&output);
+    persist_transcript("debugger-native-lldb-composites.txt", &transcript);
+    assert!(
+        output.status.success(),
+        "LLDB composite batch session failed:\n{transcript}"
+    );
+    validate_composite_debugger_output(&transcript, &source, &layout)
+        .unwrap_or_else(|error| panic!("LLDB composite validation failed: {error}"));
 }
 
 #[test]

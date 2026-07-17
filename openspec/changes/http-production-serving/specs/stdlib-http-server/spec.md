@@ -1,39 +1,43 @@
 ## ADDED Requirements
 
-### Requirement: Requests SHALL be routable to registered handlers
+### Requirement: Requests SHALL be routable via a Sengoo-side HttpRouter
 
-The HTTP server SHALL support registering per-route handlers (exact path
-plus method) and a default handler, dispatch matched requests to handlers
-through the answer-exactly-once mechanism, and answer unmatched routes with
-the documented status response. A listener SHALL use either the pull API or
-handler routing, not both.
+The stdlib SHALL expose `HttpRouter` registration of exact method+path
+handlers and a single default handler, plus `serve_http` that dispatches by
+pulling requests through the existing async pull API. Handler functions SHALL
+have the signature `fn(&mut HttpServerRequest) -> Result<bool, i64>`. Method
+and path matching SHALL be exact byte equality with no pattern matching,
+normalization, or automatic decoding. The implementation SHALL NOT introduce
+a reverse-call ABI in which the Rust runtime invokes Sengoo function
+pointers. A listener SHALL use either the pull API or router mode, not both.
 
 #### Scenario: A matched request is answered by its handler
 
-- **WHEN** a request arrives whose path and method match a registered
-  handler
-- **THEN** that handler produces the response through the
-  answer-exactly-once handle
-- **AND** the application does not hand-pull the request
+- **WHEN** a request arrives whose method and path equal a registered
+  route's method and path bytes
+- **THEN** `serve_http` invokes that handler with `&mut HttpServerRequest`
+- **AND** the handler answers through answer-exactly-once APIs
+- **AND** the application does not hand-pull the request outside the router
 
 #### Scenario: An unmatched route gets the documented response
 
 - **WHEN** a request matches no registration and no default handler exists
-- **THEN** the server answers with the documented not-found status response
-  automatically
+- **THEN** the server answers with HTTP 404 automatically
 
 #### Scenario: Handler failure maps to a server error response
 
-- **WHEN** a handler fails with a status-returning error
-- **THEN** the server answers with the documented 500-family response
+- **WHEN** a handler returns `Err(...)`, returns `Ok(false)`, or returns
+  without answering
+- **THEN** the server answers with HTTP 500 if the request was not already
+  answered
 - **AND** the connection follows the active connection policy
 
-#### Scenario: Mixing pull and handler modes is rejected
+#### Scenario: Mixing pull and router modes is rejected
 
-- **WHEN** an application attempts to use the pull API on a listener with
-  registered handlers (or vice versa)
-- **THEN** the call fails with a stable status and the serving invariants
-  remain intact
+- **WHEN** an application attempts to use the pull API on a listener already
+  in router mode (or attaches a router after pull has been used)
+- **THEN** the call fails with a stable status and serving invariants remain
+  intact
 
 ### Requirement: Keep-alive SHALL be opt-in and bounded
 

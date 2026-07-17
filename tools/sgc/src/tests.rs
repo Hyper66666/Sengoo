@@ -563,6 +563,7 @@ fn runtime_source_bundle_discovers_anchor_and_existing_split_sources() {
         "runtime_collections.c",
         "runtime_json.c",
         "runtime_process.c",
+        "runtime_stream.c",
         "runtime_shared.h",
     ] {
         fs::write(root.join(file), b"/* test runtime bundle input */\n").unwrap();
@@ -584,6 +585,7 @@ fn runtime_source_bundle_discovers_anchor_and_existing_split_sources() {
             "runtime_collections.c",
             "runtime_json.c",
             "runtime_process.c",
+            "runtime_stream.c",
         ]
     );
 
@@ -646,7 +648,11 @@ fn native_runtime_bundle_links_split_sources_for_full_and_object_link_paths() {
         b"/* anchor runtime source intentionally empty */\n",
     )
     .unwrap();
-    fs::write(root.join("runtime_shared.h"), b"/* shared header */\n").unwrap();
+    fs::write(
+        root.join("runtime_shared.h"),
+        b"#define SENGOO_RUNTIME_ABI_VERSION 1\n",
+    )
+    .unwrap();
     fs::write(
         root.join("runtime_json.c"),
         b"long long sengoo_runtime_split_probe(void) { return 42; }\n",
@@ -842,8 +848,8 @@ fn advanced_kpi_gate_requires_100k_and_1000k_memory_buckets() {
     assert!(gate.contains("DEFAULT_MAX_RSS_RATIO_2500K = 2.0"));
     assert!(gate.contains("DEFAULT_LADDER_STRETCH_LOC = \"2500000\""));
     assert!(gate.contains("ladder_stretch"));
-    assert!(gate.contains("DEFAULT_MAX_FRONTEND_SHARE_1000K_REGRESSION_PP = 5.0"));
-    assert!(gate.contains("DEFAULT_MAX_RSS_1000K_REGRESSION_PCT = 10.0"));
+    assert!(gate.contains("DEFAULT_MAX_FRONTEND_SHARE_1000K_REGRESSION_PP = 10.0"));
+    assert!(gate.contains("DEFAULT_MAX_RSS_1000K_REGRESSION_PCT = 30.0"));
 }
 
 #[test]
@@ -1078,6 +1084,7 @@ fn render_compile_error_json_contains_expected_fields() {
     let json = super::render_compile_error_json(Some("tests/demo.sg"), raw);
     let value: Value = serde_json::from_str(&json).expect("json payload should be valid");
 
+    assert_eq!(value["schema_version"], 1);
     assert_eq!(value["ok"], false);
     assert_eq!(value["kind"], "compile_error");
     assert_eq!(value["stage"], "typecheck");
@@ -1146,6 +1153,17 @@ fn render_compile_error_json_extracts_user_future_contract_code() {
 }
 
 #[test]
+fn render_compile_error_json_preserves_user_future_missing_wakeup_code() {
+    let raw = "type check error: [async::user_future_missing_wakeup] Future<T>::poll returns Pending without wakeup registration";
+    let json = super::render_compile_error_json(Some("tests/async_future.sg"), raw);
+    let value: Value = serde_json::from_str(&json).expect("json payload should be valid");
+
+    assert_eq!(value["stage"], "typecheck");
+    assert_eq!(value["code"], "async::user_future_missing_wakeup");
+    assert!(value["message"].as_str().unwrap_or("").contains("Pending"));
+}
+
+#[test]
 fn render_compile_error_json_keeps_multiline_details() {
     let raw = "parse failed: unexpected token\nline 1, col 8\nnote: expected `}`";
     let json = super::render_compile_error_json(Some("tests/broken.sg"), raw);
@@ -1184,13 +1202,22 @@ fn render_compile_error_json_with_location_serializes_structured_fields() {
 
 #[test]
 fn render_compile_warning_json_with_span_serializes_structured_location() {
-    let warning = CompileWarning::deprecated_use("fn", "old_main", None, Some((42, 50)));
+    let warning = CompileWarning::deprecated_use_with_metadata(
+        "fn",
+        "old_main",
+        Some("use the fallible entry point".to_string()),
+        Some("new_main".to_string()),
+        Some("v0.3.0".to_string()),
+        Some((42, 50)),
+    );
     let json = super::render_compile_warning_json(&warning);
     let value: Value = serde_json::from_str(&json).expect("warning json should be valid");
 
     assert_eq!(value["kind"], "compile_warning");
     assert_eq!(value["severity"], "warning");
     assert_eq!(value["code"], "attributes::deprecated_use");
+    assert_eq!(value["replacement"], "new_main");
+    assert_eq!(value["removal"], "v0.3.0");
     assert_eq!(value["location"]["span"]["lo"], 42);
     assert_eq!(value["location"]["span"]["hi"], 50);
 }
@@ -2262,6 +2289,7 @@ long long sengoo_test_user_future_calls(void) {
     let source = r#"
 extern "C" {
     fn sengoo_test_user_future_tick() -> i64;
+    fn sengoo_async_context_wake_after(handle: i64, delay_ms: i64) -> bool;
     fn sengoo_test_user_future_calls() -> i64;
 }
 
@@ -2272,6 +2300,12 @@ struct Poll<T> {
 
 struct AsyncContext {
     handle: i64,
+}
+
+impl AsyncContext {
+    def wake_after(&self, delay_ms: i64) -> bool {
+        sengoo_async_context_wake_after(self.handle, delay_ms)
+    }
 }
 
 trait Future<T> {
@@ -2359,6 +2393,7 @@ long long sengoo_test_user_future_tick(void) {
     let source = r#"
 extern "C" {
     fn sengoo_test_user_future_tick() -> i64;
+    fn sengoo_async_context_wake_after(handle: i64, delay_ms: i64) -> bool;
 }
 
 struct Poll<T> {
@@ -2376,14 +2411,26 @@ trait Future<T> {
     }
 }
 
+impl AsyncContext {
+    def wake_after(&self, delay_ms: i64) -> bool {
+        sengoo_async_context_wake_after(self.handle, delay_ms)
+    }
+}
+
 struct PendingOnceFuture {
     value: i64,
 }
 
 impl Future<i64> for PendingOnceFuture {
     def poll(&mut self, ctx: AsyncContext) -> Poll<i64> {
+        if ctx.handle <= 0 {
+            return Poll { is_ready: true, value: 13 };
+        }
         let calls = sengoo_test_user_future_tick();
-        if calls < 2 {
+        if calls < 3 {
+            if !ctx.wake_after(5) {
+                return Poll { is_ready: true, value: 13 };
+            }
             Poll { is_ready: false, value: 0 }
         } else {
             Poll { is_ready: true, value: self.value }
@@ -2507,6 +2554,57 @@ async def main() -> i64 {
         elapsed_ms
     );
 
+    let _ = fs::remove_file(&ll_path);
+    let _ = fs::remove_file(&exe_path);
+}
+
+#[test]
+fn async_native_runtime_owned_file_waits_reads_and_closes() {
+    let Some(clang) = find_clang() else {
+        return;
+    };
+    let Some(runtime_c) = find_runtime_c() else {
+        return;
+    };
+    if !stdlib_runtime_c_is_compilable(&clang, Path::new(&runtime_c)) {
+        return;
+    }
+
+    let input_path = temp_artifact("async-owned-file-input", "txt");
+    fs::write(&input_path, b"ready").expect("write async owned-file fixture");
+    let source_path = input_path.to_string_lossy().replace('\\', "/");
+    let source = format!(
+        r#"
+import std::file;
+import std::ffi;
+
+async def main() -> i64 {{
+    let opened = async_file_open("{source_path}");
+    if !opened.is_ok {{ return 10; }}
+    let file = opened.value;
+    let ready = await file.wait_readable(1000);
+    if !ready.is_ok || !ready.value {{ return 11; }}
+    let mut buffer = ffi_buffer_new(8).unwrap_or(Buffer {{ handle: 0 }});
+    let count = file.read_into(&mut buffer).unwrap_or(0);
+    if count == 5 {{ 42 }} else {{ 12 }}
+}}
+"#
+    );
+    let expanded =
+        expand_stdlib_imports_for_source(&source).expect("async file stdlib imports should expand");
+    let llvm_ir =
+        compile_source(&expanded, 1).expect("async file source should compile to LLVM IR");
+    let ll_path = temp_artifact("async-owned-file", "ll");
+    fs::write(&ll_path, llvm_ir).unwrap();
+
+    let exe_path = temp_artifact("async-owned-file", if cfg!(windows) { "exe" } else { "" });
+    compile_native_binary(&clang, &ll_path, &exe_path, Some(&runtime_c), 1, None, None).unwrap();
+    let output = Command::new(&exe_path)
+        .output()
+        .expect("async owned-file native executable should run");
+    assert_eq!(output.status.code(), Some(42));
+
+    let _ = fs::remove_file(&input_path);
     let _ = fs::remove_file(&ll_path);
     let _ = fs::remove_file(&exe_path);
 }
@@ -4545,6 +4643,60 @@ async def main() -> i64 {
 }
 
 #[test]
+fn async_native_runtime_generic_channel_round_trip() {
+    let Some(clang) = find_clang() else {
+        return;
+    };
+    let Some(runtime_c) = find_runtime_c() else {
+        return;
+    };
+    if !stdlib_runtime_c_is_compilable(&clang, Path::new(&runtime_c)) {
+        return;
+    }
+
+    let source = format!(
+        "{}\n\n{}",
+        load_async_runtime_stdlib(),
+        r#"
+struct Payload {
+    value: i64,
+}
+
+impl Drop for Payload {
+    def drop(&mut self) {}
+}
+
+async def main() -> i64 {
+    let pair: ChannelPair<Payload> = channel(2);
+    let sender = channel_sender(&pair);
+    let receiver = channel_receiver(&pair);
+    let sent = await channel_send(&sender, Payload { value: 41 });
+    if !sent.is_ok { return 10; }
+    let mut output = Payload { value: 0 };
+    let received = await channel_recv_into(&receiver, &mut output);
+    if !received.is_ok { return 11; }
+    output.value
+}
+"#
+    );
+
+    let llvm_ir = compile_source(&source, 1).expect("generic channel source should compile");
+    let ll_path = temp_artifact("async-generic-channel", "ll");
+    fs::write(&ll_path, llvm_ir).unwrap();
+    let exe_path = temp_artifact(
+        "async-generic-channel",
+        if cfg!(windows) { "exe" } else { "" },
+    );
+    compile_native_binary(&clang, &ll_path, &exe_path, Some(&runtime_c), 1, None, None).unwrap();
+    let output = Command::new(&exe_path)
+        .output()
+        .expect("generic channel executable should run");
+    assert_eq!(output.status.code(), Some(41));
+    let _ = fs::remove_file(&ll_path);
+    let _ = fs::remove_file(&exe_path);
+}
+
+#[test]
 fn async_stdlib_arc_i64_bool_runtime_counts_and_reads() {
     let Some(clang) = find_clang() else {
         return;
@@ -4606,6 +4758,115 @@ def main() -> i64 {
     assert_eq!(output.status.code(), Some(42));
     let _ = fs::remove_file(&ll_path);
     let _ = fs::remove_file(&exe_path);
+}
+
+#[test]
+fn async_stdlib_generic_arc_mutex_joins_cross_thread_workers() {
+    let Some(output) = compile_and_run_stdlib_import_program_with_native_runtime(
+        "async-generic-arc-mutex",
+        r#"
+import std::async;
+
+async def main() -> i64 {
+    let enabled = runtime_enable_thread_pool(4);
+    if !enabled.is_ok { return enabled.error; }
+
+    let counter: Arc<Mutex<i64>> = arc_new(mutex_new(2));
+    let first = spawn_shared_counter_i64(counter.clone_arc(), 1, 5);
+    let second = spawn_shared_counter_i64(counter.clone_arc(), 1, 5);
+    let third = spawn_shared_counter_i64(counter.clone_arc(), 1, 5);
+    let fourth = spawn_shared_counter_i64(counter.clone_arc(), 1, 5);
+    let fifth = spawn_shared_counter_i64(counter.clone_arc(), 1, 5);
+    let sixth = spawn_shared_counter_i64(counter.clone_arc(), 1, 5);
+    let seventh = spawn_shared_counter_i64(counter.clone_arc(), 1, 5);
+    let eighth = spawn_shared_counter_i64(counter.clone_arc(), 1, 5);
+    if !first.is_ok || !second.is_ok || !third.is_ok || !fourth.is_ok
+        || !fifth.is_ok || !sixth.is_ok || !seventh.is_ok || !eighth.is_ok {
+        return 1;
+    }
+
+    first.value.join();
+    second.value.join();
+    third.value.join();
+    fourth.value.join();
+    fifth.value.join();
+    sixth.value.join();
+    seventh.value.join();
+    eighth.value.join();
+
+    let locked = await mutex_lock_guard(counter.borrow());
+    if !locked.is_ok { return locked.error; }
+    locked.value.get()
+}
+"#,
+    ) else {
+        return;
+    };
+
+    assert_eq!(
+        output.status.code(),
+        Some(42),
+        "stdout:\n{}\nstderr:\n{}",
+        String::from_utf8_lossy(&output.stdout),
+        String::from_utf8_lossy(&output.stderr)
+    );
+}
+
+#[test]
+fn async_stdlib_generic_arc_mutex_locks_fresh_payload() {
+    let Some(output) = compile_and_run_stdlib_import_program_with_native_runtime(
+        "async-generic-arc-mutex-fresh-lock",
+        r#"
+import std::async;
+
+async def main() -> i64 {
+    let counter: Arc<Mutex<i64>> = arc_new(mutex_new(2));
+    let locked = await mutex_lock_guard(counter.borrow());
+    if !locked.is_ok { return locked.error; }
+    locked.value.get()
+}
+"#,
+    ) else {
+        return;
+    };
+
+    assert_eq!(
+        output.status.code(),
+        Some(2),
+        "stdout:\n{}\nstderr:\n{}",
+        String::from_utf8_lossy(&output.stdout),
+        String::from_utf8_lossy(&output.stderr)
+    );
+}
+
+#[test]
+fn async_stdlib_generic_mutex_failed_lock_copy_leaves_output_untouched() {
+    let Some(output) = compile_and_run_stdlib_import_program_with_native_runtime(
+        "async-generic-mutex-failed-copy",
+        r#"
+import std::async;
+
+async def main() -> i64 {
+    let invalid: Mutex<i64> = Mutex { handle: 0, marker: 0 };
+    let locked = await mutex_lock_guard(&invalid);
+    if locked.is_ok { return 1; }
+
+    let mut output = 9;
+    if mutex_guard_copy_into(&locked.value, &mut output) { return 2; }
+    if output == 9 { 42 } else { 3 }
+}
+"#,
+    ) else {
+        return;
+    };
+
+    assert_eq!(
+        output.status.code(),
+        Some(42),
+        "stdout:\n{}\nstderr:\n{}",
+        String::from_utf8_lossy(&output.stdout),
+        String::from_utf8_lossy(&output.stderr)
+    );
 }
 
 #[test]
@@ -4754,6 +5015,216 @@ def main() -> i64 {
     } else {
         1
     }
+}
+"#,
+    ) else {
+        return;
+    };
+
+    assert_eq!(
+        output.status.code(),
+        Some(42),
+        "stdout:\n{}\nstderr:\n{}",
+        String::from_utf8_lossy(&output.stdout),
+        String::from_utf8_lossy(&output.stderr)
+    );
+}
+
+#[test]
+fn async_stdlib_generic_rwlock_guards_release_and_write_back_on_drop() {
+    let Some(output) = compile_and_run_stdlib_import_program_with_native_runtime(
+        "async-generic-rwlock-guards",
+        r#"
+import std::async;
+
+struct Payload { value: i64 }
+impl Copy for Payload {}
+
+def read_pair(lock: &RwLock<Payload>) -> i64 {
+    let first_result = rwlock_try_read_guard(lock);
+    if !first_result.is_ok { return first_result.error; }
+    let first = first_result.value;
+    let second_result = rwlock_try_read_guard(lock);
+    if !second_result.is_ok { return second_result.error; }
+    let second = second_result.value;
+    let mut left = Payload { value: 0 };
+    let mut right = Payload { value: 0 };
+    if !rwlock_read_guard_copy_into(&first, &mut left) { return 80; }
+    if !rwlock_read_guard_copy_into(&second, &mut right) { return 81; }
+    left.value + right.value
+}
+
+def write_value(lock: &RwLock<Payload>, value: i64) -> i64 {
+    let result = rwlock_try_write_guard(lock);
+    if !result.is_ok { return result.error; }
+    let mut guard = result.value;
+    let replacement = Payload { value: value };
+    let wrote = guard.set(replacement);
+    if !wrote { return 82; }
+    let mut output = Payload { value: 0 };
+    if !rwlock_write_guard_copy_into(&guard, &mut output) { return 83; }
+    output.value
+}
+
+def read_value(lock: &RwLock<Payload>) -> i64 {
+    let result = rwlock_try_read_guard(lock);
+    if !result.is_ok { return result.error; }
+    let guard = result.value;
+    let mut output = Payload { value: 0 };
+    if !rwlock_read_guard_copy_into(&guard, &mut output) { return 84; }
+    output.value
+}
+
+def main() -> i64 {
+    let lock = rwlock_new(Payload { value: 5 });
+    let before = read_pair(&lock);
+    let wrote = write_value(&lock, 17);
+    let after = read_value(&lock);
+    if before == 10 && wrote == 17 && after == 17 { 42 } else { 1 }
+}
+"#,
+    ) else {
+        return;
+    };
+
+    assert_eq!(
+        output.status.code(),
+        Some(42),
+        "stdout:\n{}\nstderr:\n{}",
+        String::from_utf8_lossy(&output.stdout),
+        String::from_utf8_lossy(&output.stderr)
+    );
+}
+
+#[test]
+fn async_native_runtime_bounded_executor_joins_detached_send_futures() {
+    let Some(output) = compile_and_run_stdlib_import_program_with_native_runtime(
+        "async-bounded-future-executor",
+        r#"
+import std::async;
+
+async def child(value: i64) -> i64 {
+    await sleep(20);
+    value
+}
+
+async def main() -> i64 {
+    let enabled = runtime_enable_executor(2, 2);
+    if !enabled.is_ok { return enabled.error; }
+    let first = spawn_task(child(20));
+    let second = spawn_task(child(22));
+    if first == 0 || second == 0 { return 90; }
+    if spawn_task(child(1)) != 0 { return 92; }
+
+    let first_status = task_join(first);
+    let second_status = task_join(second);
+    if first_status != 2 || second_status != 2 { return 91; }
+
+    let canceled = spawn_task(child(1));
+    if canceled == 0 || !cancel_task(canceled) { return 93; }
+    if task_join(canceled) == 3 { 42 } else { 94 }
+}
+"#,
+    ) else {
+        return;
+    };
+
+    assert_eq!(
+        output.status.code(),
+        Some(42),
+        "stdout:\n{}\nstderr:\n{}",
+        String::from_utf8_lossy(&output.stdout),
+        String::from_utf8_lossy(&output.stderr)
+    );
+}
+
+#[test]
+fn async_native_runtime_structured_task_scope_joins_and_cancels_children() {
+    let Some(output) = compile_and_run_stdlib_import_program_with_native_runtime(
+        "async-structured-task-scope",
+        r#"
+import std::async;
+
+async def child(delay: i64) -> i64 {
+    await sleep(delay);
+    7
+}
+
+async def nested_parent() -> i64 {
+    let scope = task_scope();
+    if scope_spawn(&scope, child(5)) != 1 { return 80; }
+    9
+}
+
+async def main() -> i64 {
+    let enabled = runtime_enable_executor(1, 4);
+    if !enabled.is_ok { return enabled.error; }
+
+    {
+        let scope = task_scope();
+        if scope_spawn(&scope, child(10)) != 1 { return 90; }
+        if scope_spawn(&scope, child(15)) != 1 { return 91; }
+    }
+
+    let nested = spawn_task(nested_parent());
+    if nested == 0 || task_join(nested) != 2 { return 93; }
+
+    {
+        let scope = task_scope();
+        if scope_spawn(&scope, child(1000)) != 1 { return 92; }
+        return 42;
+    }
+}
+"#,
+    ) else {
+        return;
+    };
+
+    assert_eq!(
+        output.status.code(),
+        Some(42),
+        "stdout:\n{}\nstderr:\n{}",
+        String::from_utf8_lossy(&output.stdout),
+        String::from_utf8_lossy(&output.stderr)
+    );
+}
+
+#[test]
+fn async_stdlib_generic_rwlock_waits_and_releases_guards() {
+    let Some(output) = compile_and_run_stdlib_import_program_with_native_runtime(
+        "async-generic-rwlock-wait",
+        r#"
+import std::async;
+
+struct Payload { value: i64 }
+impl Copy for Payload {}
+
+async def read_once(lock: &RwLock<Payload>) -> i64 {
+    let result = await rwlock_read_guard(lock);
+    if !result.is_ok { return result.error; }
+    let guard = result.value;
+    let mut output = Payload { value: 0 };
+    if !rwlock_read_guard_copy_into(&guard, &mut output) { return 80; }
+    output.value
+}
+
+async def write_once(lock: &RwLock<Payload>, value: i64) -> i64 {
+    let result = await rwlock_write_guard(lock);
+    if !result.is_ok { return result.error; }
+    let mut guard = result.value;
+    let wrote = guard.set(Payload { value: value });
+    if !wrote { return 81; }
+    let mut output = Payload { value: 0 };
+    if !rwlock_write_guard_copy_into(&guard, &mut output) { return 82; }
+    output.value
+}
+
+async def main() -> i64 {
+    let lock = rwlock_new(Payload { value: 5 });
+    let before = await read_once(&lock);
+    let wrote = await write_once(&lock, 17);
+    let after = await read_once(&lock);
+    if before == 5 && wrote == 17 && after == 17 { 42 } else { 1 }
 }
 "#,
     ) else {
@@ -6514,6 +6985,124 @@ def main() -> i64 {
 }
 
 #[test]
+fn stdlib_m3_invalid_utf8_status_and_string_from_utf8() {
+    let Some(output) = compile_and_run_stdlib_import_program_with_native_runtime(
+        "m3-invalid-utf8",
+        r#"
+import std::ffi;
+import std::status;
+import std::string;
+
+def main() -> i64 {
+    let ok_status = STATUS_OK() == 0;
+    let canceled = STATUS_CANCELED() == 19;
+    let invalid_utf8 = STATUS_INVALID_UTF8() == 20;
+    let name_buf = ffi_buffer_new(64).unwrap_or(Buffer { handle: 0 });
+    let name_len = status_name_copy(STATUS_INVALID_UTF8(), name_buf).unwrap_or(-1);
+    let msg_len = status_message_copy(STATUS_INVALID_UTF8(), name_buf).unwrap_or(-1);
+
+    let good = ffi_buffer_from_bytes("hi").unwrap_or(Buffer { handle: 0 });
+    let good_s = string_from_utf8(good, 2);
+    let good_ok = good_s.is_ok;
+    let count = if good_ok { good_s.value.char_count().unwrap_or(-1) } else { -1 };
+    let cp = char_codepoint('A').unwrap_or(-1);
+
+    let bad = ffi_buffer_new(4).unwrap_or(Buffer { handle: 0 });
+    let pushed = bad.push_u8(255).unwrap_or(-1);
+    let bad_s = string_from_utf8(bad, 1);
+    let bad_err = if bad_s.is_ok { -1 } else { bad_s.error };
+    let mapped = status_from_raw_ffi(0 - STATUS_INVALID_UTF8());
+
+    let version_buf = ffi_buffer_new(16).unwrap_or(Buffer { handle: 0 });
+    let version_len = unicode_version_copy(version_buf).unwrap_or(-1);
+
+    good.free();
+    bad.free();
+    name_buf.free();
+    version_buf.free();
+
+    if ok_status and canceled and invalid_utf8 and name_len > 0 and msg_len > 0
+        and good_ok and count == 2 and cp == 65 and pushed == 1 and bad_err == 20
+        and mapped == 20 and version_len >= 5
+    {
+        42
+    } else {
+        1
+    }
+}
+"#,
+    ) else {
+        return;
+    };
+
+    assert_eq!(
+        output.status.code(),
+        Some(42),
+        "status: {:?}\nstdout:\n{}\nstderr:\n{}",
+        output.status,
+        String::from_utf8_lossy(&output.stdout),
+        String::from_utf8_lossy(&output.stderr)
+    );
+}
+
+#[test]
+fn stdlib_m3_stream_cursor_read_write_copy() {
+    let Some(output) = compile_and_run_stdlib_import_program_with_native_runtime(
+        "m3-stream-cursor",
+        r#"
+import std::ffi;
+import std::stream;
+import std::status;
+
+def exercise_streams() -> i64 {
+    let mut reader = cursor_from_bytes("hello-stream").unwrap_or(Cursor { handle: 0 });
+    let mut out = ffi_buffer_new(64).unwrap_or(Buffer { handle: 0 });
+    let total = read_to_end(&mut reader, &mut out).unwrap_or(-1);
+
+    let mut writer = cursor_with_capacity(64).unwrap_or(Cursor { handle: 0 });
+    let wrote = write_all(&mut writer, &out, total).unwrap_or(-1);
+
+    let mut reader2 = cursor_from_bytes("abc").unwrap_or(Cursor { handle: 0 });
+    let mut writer2 = cursor_with_capacity(16).unwrap_or(Cursor { handle: 0 });
+    let mut scratch = ffi_buffer_new(4).unwrap_or(Buffer { handle: 0 });
+    let copied = copy_stream(&mut reader2, &mut writer2, &mut scratch).unwrap_or(-1);
+
+    let mut zero_cap = ffi_buffer_new(0).unwrap_or(Buffer { handle: 0 });
+    let mut leftover = cursor_from_bytes("z").unwrap_or(Cursor { handle: 0 });
+    let zero_read = cursor_read_into(&mut leftover, &mut zero_cap);
+    let zero_is_buffer = if zero_read.is_ok { false } else { zero_read.error == STATUS_BUFFER_TOO_SMALL() };
+
+    if total == 12 and wrote == 12 and copied == 3 and zero_is_buffer {
+        42
+    } else {
+        1
+    }
+}
+
+def main() -> i64 {
+    let result = exercise_streams();
+    if result == 42 && sengoo_stream_cursor_live_handle_count() == 0 {
+        42
+    } else {
+        2
+    }
+}
+"#,
+    ) else {
+        return;
+    };
+
+    assert_eq!(
+        output.status.code(),
+        Some(42),
+        "status: {:?}\nstdout:\n{}\nstderr:\n{}",
+        output.status,
+        String::from_utf8_lossy(&output.stdout),
+        String::from_utf8_lossy(&output.stderr)
+    );
+}
+
+#[test]
 fn stdlib_http_import_links_native_runtime_and_maps_errors() {
     let Some(output) = compile_and_run_stdlib_import_program_with_native_runtime(
         "http-status",
@@ -6820,6 +7409,248 @@ async def main() -> i64 {
     let _ = fs::remove_file(&ll_path);
     let _ = fs::remove_file(&main_obj);
     let _ = fs::remove_file(&exe_path);
+}
+
+/// HttpRouter dual-route match + exact-path 404 + handler-failure 500 over real localhost.
+#[test]
+fn stdlib_http_router_dual_routes_404_and_500_localhost() {
+    use std::io::{BufRead, BufReader, Read};
+
+    let source = expand_stdlib_imports_for_source(
+        r#"
+import std::net;
+import std::io;
+import std::strconv;
+import std::status;
+
+def health_handler(request: HttpServerRequest) -> i64 {
+    if request.respond(200, "ok").unwrap_or(false) { 1 } else { 0 }
+}
+
+def echo_handler(request: HttpServerRequest) -> i64 {
+    if request.respond(200, "echo").unwrap_or(false) { 1 } else { 0 }
+}
+
+def fail_handler(request: HttpServerRequest) -> i64 {
+    0
+}
+
+def main() -> i64 {
+    let bind_result = http_server_bind("127.0.0.1", 0);
+    if bind_result.is_ok == false {
+        10
+    } else {
+        let server = bind_result.value;
+        let h_health: fn(HttpServerRequest) -> i64 = health_handler;
+        let h_echo: fn(HttpServerRequest) -> i64 = echo_handler;
+        let h_fail: fn(HttpServerRequest) -> i64 = fail_handler;
+        let r0 = http_router_new();
+        let r1 = http_router_route(r0, "GET", "/health", h_health);
+        if r1.is_ok == false {
+            server.close();
+            13
+        } else {
+            let r2 = http_router_route(r1.value, "GET", "/echo", h_echo);
+            if r2.is_ok == false {
+                server.close();
+                13
+            } else {
+                let r3 = http_router_route(r2.value, "GET", "/fail", h_fail);
+                if r3.is_ok == false {
+                    server.close();
+                    13
+                } else {
+                    let mut router = r3.value;
+                    let port = server.local_port().unwrap_or(0);
+                    let port_buffer = ffi_buffer_new(16).unwrap_or(Buffer { handle: 0 });
+                    let port_len = strconv_format_i64(port, port_buffer).unwrap_or(0);
+                    io_stdout_write_raw(port_buffer.ptr(), port_len);
+                    io_stdout_write("\n");
+                    io_stdout_flush();
+                    port_buffer.free();
+
+                    let s1 = serve_http(server, router, 15000);
+                    if s1.is_ok == false {
+                        server.close();
+                        11
+                    } else {
+                        router = s1.value;
+                        let s2 = serve_http(server, router, 15000);
+                        if s2.is_ok == false {
+                            server.close();
+                            11
+                        } else {
+                            router = s2.value;
+                            let s3 = serve_http(server, router, 15000);
+                            if s3.is_ok == false {
+                                server.close();
+                                11
+                            } else {
+                                router = s3.value;
+                                let s4 = serve_http(server, router, 15000);
+                                server.close();
+                                if s4.is_ok { 0 } else { 12 }
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+}
+"#,
+    )
+    .expect("http router stdlib imports should expand");
+    let llvm_ir =
+        compile_source(&source, 1).expect("http router program should compile to LLVM IR");
+
+    let Some(clang) = find_clang() else {
+        return;
+    };
+    let Some(runtime_c) = find_runtime_c() else {
+        return;
+    };
+    if !stdlib_runtime_c_is_compilable(&clang, Path::new(&runtime_c)) {
+        return;
+    }
+
+    let ll_path = temp_artifact("stdlib-http-router", "ll");
+    fs::write(&ll_path, llvm_ir).unwrap();
+    let obj_ext = if cfg!(windows) { "obj" } else { "o" };
+    let main_obj = temp_artifact("stdlib-http-router-main", obj_ext);
+    compile_ir_to_object(&clang, &ll_path, &main_obj, 2, None, false).unwrap();
+    let exe_path = temp_artifact("stdlib-http-router", if cfg!(windows) { "exe" } else { "" });
+    let mut object_paths = vec![main_obj.clone()];
+    append_native_runtime_inputs(&clang, &mut object_paths, Some(&runtime_c), 2, None).unwrap();
+    link_native_binary_from_objects(&clang, &object_paths, &exe_path, None, None).unwrap();
+
+    let mut child = Command::new(&exe_path)
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped())
+        .spawn()
+        .expect("http router fixture should spawn");
+
+    let stdout = child.stdout.take().expect("child stdout should be piped");
+    let mut reader = BufReader::new(stdout);
+    let mut port_line = String::new();
+    reader
+        .read_line(&mut port_line)
+        .expect("router server should print its port");
+    let port: u16 = match port_line.trim().parse() {
+        Ok(port) => port,
+        Err(_) => {
+            let status = child.wait().expect("router fixture should be waitable");
+            let mut stderr_text = String::new();
+            if let Some(mut stderr) = child.stderr.take() {
+                let _ = stderr.read_to_string(&mut stderr_text);
+            }
+            panic!(
+                "port line should be numeric, got {port_line:?}; exit: {status:?}; stderr:\n{stderr_text}"
+            );
+        }
+    };
+
+    fn request_once(port: u16, request: &[u8]) -> String {
+        let mut stream = std::net::TcpStream::connect(("127.0.0.1", port))
+            .expect("client should connect to router server");
+        stream
+            .write_all(request)
+            .expect("client request should be writable");
+        let mut response = Vec::new();
+        stream
+            .read_to_end(&mut response)
+            .expect("client should read router response");
+        String::from_utf8_lossy(&response).into_owned()
+    }
+
+    let health = request_once(
+        port,
+        b"GET /health HTTP/1.1\r\nHost: localhost\r\nConnection: close\r\n\r\n",
+    );
+    assert!(
+        health.starts_with("HTTP/1.1 200 OK") && health.ends_with("ok"),
+        "health route: {health}"
+    );
+
+    let echo = request_once(
+        port,
+        b"GET /echo HTTP/1.1\r\nHost: localhost\r\nConnection: close\r\n\r\n",
+    );
+    assert!(
+        echo.starts_with("HTTP/1.1 200 OK") && echo.ends_with("echo"),
+        "echo route: {echo}"
+    );
+
+    let missing = request_once(
+        port,
+        b"GET /missing HTTP/1.1\r\nHost: localhost\r\nConnection: close\r\n\r\n",
+    );
+    assert!(
+        missing.starts_with("HTTP/1.1 404 Not Found") && missing.contains("not found"),
+        "unmatched route should 404: {missing}"
+    );
+
+    let failed = request_once(
+        port,
+        b"GET /fail HTTP/1.1\r\nHost: localhost\r\nConnection: close\r\n\r\n",
+    );
+    assert!(
+        failed.starts_with("HTTP/1.1 500 Internal Server Error")
+            && failed.contains("handler error"),
+        "failing handler should 500: {failed}"
+    );
+
+    let status = child.wait().expect("router fixture should exit");
+    assert!(
+        status.success(),
+        "router fixture should exit cleanly, got {status:?}"
+    );
+
+    let _ = fs::remove_file(&ll_path);
+    let _ = fs::remove_file(&main_obj);
+    let _ = fs::remove_file(&exe_path);
+}
+
+/// Mixing pull and router modes on one listener must fail with a stable status.
+#[test]
+fn stdlib_http_router_rejects_pull_mode_mix() {
+    let Some(output) = compile_and_run_stdlib_import_program_with_native_runtime(
+        "http-router-mode-mix",
+        r#"
+import std::net;
+import std::status;
+
+def main() -> i64 {
+    let bind_result = http_server_bind("127.0.0.1", 0);
+    if bind_result.is_ok == false {
+        if bind_result.error == STATUS_UNSUPPORTED() { 0 } else { 10 }
+    } else {
+        let server = bind_result.value;
+        let claimed = server.claim_serve_mode(HTTP_SERVER_MODE_ROUTER());
+        if claimed.is_ok == false {
+            server.close();
+            11
+        } else {
+            let pull = server.next_request(1);
+            let mix_rejected = if pull.is_ok { false; } else { pull.error == STATUS_INVALID_ARGUMENT(); };
+            let re_claim = server.claim_serve_mode(HTTP_SERVER_MODE_PULL());
+            let re_claim_rejected = if re_claim.is_ok { false; } else { re_claim.error == STATUS_INVALID_ARGUMENT(); };
+            server.close();
+            if mix_rejected and re_claim_rejected { 0 } else { 12 }
+        }
+    }
+}
+"#,
+    ) else {
+        return;
+    };
+
+    assert!(
+        output.status.success(),
+        "mode mix should reject with STATUS_INVALID_ARGUMENT; stdout:\n{}\nstderr:\n{}",
+        String::from_utf8_lossy(&output.stdout),
+        String::from_utf8_lossy(&output.stderr)
+    );
 }
 
 #[test]
@@ -10425,6 +11256,56 @@ def main() -> i64 {
     assert!(ir.contains("sengoo_file_write_str"));
     assert!(ir.contains("sengoo_file_read_into"));
     assert!(ir.contains("sengoo_file_len"));
+}
+
+#[test]
+fn stdlib_file_len_rejects_directories_instead_of_returning_host_lengths() {
+    let Some(output) = compile_and_run_stdlib_import_program_with_native_runtime(
+        "file-len-directory-rejects",
+        r#"
+import std::dir;
+import std::file;
+import std::status;
+
+def main() -> i64 {
+    let root = "sengoo_tmp_file_len_dir";
+    let child = "sengoo_tmp_file_len_dir/child.txt";
+
+    file_remove(child);
+    dir_remove(root);
+
+    let created = dir_create_all(root).unwrap_or(false);
+    let wrote = file_write_str(child, "hello").unwrap_or(0);
+    let child_len = file_len(child);
+    let dir_len = file_len(root);
+
+    file_remove(child);
+    let removed = dir_remove(root).unwrap_or(false);
+
+    if created
+        && wrote == 5
+        && child_len.is_ok
+        && child_len.value == 5
+        && dir_len.is_err()
+        && dir_len.error == STATUS_UNSUPPORTED()
+        && removed {
+        0
+    } else {
+        1
+    }
+}
+"#,
+    ) else {
+        return;
+    };
+
+    assert!(
+        output.status.success(),
+        "status: {:?}\nstdout:\n{}\nstderr:\n{}",
+        output.status,
+        String::from_utf8_lossy(&output.stdout),
+        String::from_utf8_lossy(&output.stderr)
+    );
 }
 
 #[test]

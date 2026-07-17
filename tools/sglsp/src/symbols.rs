@@ -1,4 +1,4 @@
-use sengoo_compiler::ast::{ClassMember, Decl, DeclKind, Function, TraitItem};
+use sengoo_compiler::ast::{ClassMember, Decl, DeclKind, Function, Node, TraitItem};
 use sengoo_compiler::Parser as SgParser;
 use tower_lsp::lsp_types::{CompletionItemKind, Position, Range, SymbolKind};
 
@@ -17,6 +17,7 @@ pub(super) struct AstSymbol {
     pub(super) detail: String,
     pub(super) kind: CompletionItemKind,
     pub(super) range: Range,
+    pub(super) container: Option<String>,
 }
 
 fn declaration_kind(kind: &DeclKind) -> (&'static str, CompletionItemKind) {
@@ -39,6 +40,7 @@ fn push_function_symbol(
     function: &Function,
     detail: &'static str,
     kind: CompletionItemKind,
+    container: Option<String>,
     out: &mut Vec<AstSymbol>,
 ) {
     out.push(AstSymbol {
@@ -46,10 +48,24 @@ fn push_function_symbol(
         detail: detail.to_string(),
         kind,
         range: span_to_range(content, function.name.span.lo, function.name.span.hi),
+        container,
     });
 }
 
-fn collect_decl_symbols(content: &str, decl: &Decl, out: &mut Vec<AstSymbol>) {
+fn field_detail(content: &str, field: &sengoo_compiler::ast::StructField) -> String {
+    let span = field.ty.span();
+    let ty = content
+        .get(span.lo as usize..(span.hi as usize).min(content.len()))
+        .unwrap_or_default();
+    format!("field: {}", ty.trim().trim_end_matches([',', ';']).trim())
+}
+
+fn collect_decl_symbols(
+    content: &str,
+    decl: &Decl,
+    container: Option<String>,
+    out: &mut Vec<AstSymbol>,
+) {
     if let Some(name) = decl.name() {
         let (detail, kind) = declaration_kind(&decl.kind);
         out.push(AstSymbol {
@@ -57,25 +73,51 @@ fn collect_decl_symbols(content: &str, decl: &Decl, out: &mut Vec<AstSymbol>) {
             detail: detail.to_string(),
             kind,
             range: span_to_range(content, name.span.lo, name.span.hi),
+            container: container.clone(),
         });
     }
 
     match &decl.kind {
+        DeclKind::Struct(struct_decl) => {
+            for field in &struct_decl.fields {
+                if let Some(name) = &field.name {
+                    out.push(AstSymbol {
+                        name: name.name.clone(),
+                        detail: field_detail(content, field),
+                        kind: CompletionItemKind::FIELD,
+                        range: span_to_range(content, name.span.lo, name.span.hi),
+                        container: Some(struct_decl.name.name.clone()),
+                    });
+                }
+            }
+        }
         DeclKind::Module(module_decl) => {
             for nested in &module_decl.items {
-                collect_decl_symbols(content, nested, out);
+                collect_decl_symbols(content, nested, Some(module_decl.name.name.clone()), out);
             }
         }
         DeclKind::Class(class_decl) => {
             for member in &class_decl.members {
-                if let ClassMember::Method(method) = member {
-                    push_function_symbol(
+                match member {
+                    ClassMember::Field(field) => {
+                        if let Some(name) = &field.name {
+                            out.push(AstSymbol {
+                                name: name.name.clone(),
+                                detail: field_detail(content, field),
+                                kind: CompletionItemKind::FIELD,
+                                range: span_to_range(content, name.span.lo, name.span.hi),
+                                container: Some(class_decl.name.name.clone()),
+                            });
+                        }
+                    }
+                    ClassMember::Method(method) => push_function_symbol(
                         content,
                         method,
                         "method",
                         CompletionItemKind::METHOD,
+                        Some(class_decl.name.name.clone()),
                         out,
-                    );
+                    ),
                 }
             }
         }
@@ -87,14 +129,31 @@ fn collect_decl_symbols(content: &str, decl: &Decl, out: &mut Vec<AstSymbol>) {
                         function,
                         "trait method",
                         CompletionItemKind::METHOD,
+                        Some(trait_decl.name.name.clone()),
                         out,
                     );
                 }
             }
         }
         DeclKind::Impl(impl_decl) => {
+            let start = impl_decl.target_type.span.lo as usize;
+            let end = (impl_decl.target_type.span.hi as usize).min(content.len());
+            let target = content
+                .get(start..end)
+                .unwrap_or("<impl>")
+                .trim()
+                .trim_end_matches('{')
+                .trim()
+                .to_string();
             for method in &impl_decl.items {
-                push_function_symbol(content, method, "method", CompletionItemKind::METHOD, out);
+                push_function_symbol(
+                    content,
+                    method,
+                    "method",
+                    CompletionItemKind::METHOD,
+                    Some(target.clone()),
+                    out,
+                );
             }
         }
         _ => {}
@@ -108,7 +167,7 @@ pub(super) fn collect_ast_symbols(content: &str) -> Vec<AstSymbol> {
 
     let mut symbols = Vec::new();
     for decl in &program.decls {
-        collect_decl_symbols(content, decl, &mut symbols);
+        collect_decl_symbols(content, decl, Some("<document>".to_string()), &mut symbols);
     }
     symbols
 }

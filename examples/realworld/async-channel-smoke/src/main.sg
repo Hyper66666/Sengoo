@@ -3,7 +3,6 @@ import std::async;
 import std::status;
 
 async def fast_value() -> i64 {
-    await sleep(1);
     5;
 }
 

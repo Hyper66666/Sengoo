@@ -1069,6 +1069,17 @@ def main() -> i64 {
     }
 
     #[test]
+    fn import_forms_fixture_is_parser_accepted_and_formatter_canonical() {
+        let source = include_str!("../tests/fixtures/import_forms.sg");
+        let formatted = format_test_source(source, FormatOptions::default());
+        assert_eq!(
+            formatted,
+            include_str!("../tests/fixtures/import_forms.formatted.sg").trim_end()
+        );
+        SgParser::parse(&formatted).expect("canonical import fixture must parse");
+    }
+
+    #[test]
     fn formats_associated_types_and_self_type_without_losing_semantics() {
         let src = r#"
 trait Iterator {

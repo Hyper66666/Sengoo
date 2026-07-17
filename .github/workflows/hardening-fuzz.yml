@@ -1,0 +1,63 @@
+name: hardening-fuzz
+
+on:
+  pull_request:
+    paths:
+      - ".github/workflows/hardening-fuzz.yml"
+      - "fuzz/**"
+      - "compiler/**"
+      - "runtime/**"
+      - "tools/sgc/**"
+      - "tools/sgpm/**"
+      - "tools/stdlib/**"
+      - "Cargo.toml"
+      - "Cargo.lock"
+  push:
+    branches:
+      - main
+  schedule:
+    - cron: "41 2 * * 2,5"
+
+jobs:
+  bounded-input-smoke:
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    env:
+      SENGOO_FUZZ_CASES: ${{ github.event_name == 'schedule' && '4096' || '512' }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: dtolnay/rust-toolchain@master
+        with:
+          toolchain: 1.94.0
+
+      - name: Install native compiler
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y clang-19 lld-19
+          sudo update-alternatives --install /usr/bin/clang clang /usr/bin/clang-19 100
+          command -v clang
+
+      - name: Replay compiler corpus and bounded generated inputs
+        run: |
+          cargo test -p sengoo-compiler --lib retained_compiler_fuzz_corpus_never_panics -- --nocapture
+          cargo test -p sengoo-compiler --lib bounded_fuzz_compiler_pipeline_never_panics -- --nocapture
+          cargo test -p sengoo-compiler --lib prop_compile_to_ir_never_panics_on_arbitrary_input -- --nocapture
+          cargo test -p sengoo-compiler --lib prop_mir_lowering_never_panics_on_stress_inputs -- --nocapture
+          cargo test -p sengoo-compiler --lib prop_compile_to_mir_never_panics -- --nocapture
+
+      - name: Replay package and archive corpus
+        run: |
+          cargo test -p sgpm bounded_fuzz_ -- --nocapture
+          cargo test -p sgpm retained_sgpm_fuzz_corpus_never_panics -- --nocapture
+
+      - name: Exercise runtime parser and decoder boundaries
+        run: cargo test -p sgc runtime_hardening_parser_decoder_bounded_fuzz_smoke -- --nocapture
+
+      - name: Preserve retained corpus
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: hardening-fuzz-corpus-${{ github.run_id }}
+          path: fuzz/corpus
+          if-no-files-found: error

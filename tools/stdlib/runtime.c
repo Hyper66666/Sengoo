@@ -27,6 +27,10 @@
 
 #include "runtime_shared.h"
 
+long long sengoo_runtime_abi_version(void) {
+    return SENGOO_RUNTIME_ABI_VERSION;
+}
+
 extern long long sengoo_string_from_bytes_copy(long long bytes_ptr, long long len);
 extern long long sengoo_string_as_str_ptr(long long handle);
 
@@ -534,6 +538,7 @@ static const char* sengoo_status_name(long long code) {
         case SENGOO_STATUS_TLS_HANDSHAKE: return "tls_handshake";
         case SENGOO_STATUS_TLS_UNAVAILABLE: return "tls_unavailable";
         case SENGOO_STATUS_CANCELED: return "canceled";
+        case SENGOO_STATUS_INVALID_UTF8: return "invalid_utf8";
         default: return "unknown";
     }
 }
@@ -560,6 +565,7 @@ static const char* sengoo_status_message(long long code) {
         case SENGOO_STATUS_TLS_HANDSHAKE: return "TLS handshake failed";
         case SENGOO_STATUS_TLS_UNAVAILABLE: return "TLS backend unavailable";
         case SENGOO_STATUS_CANCELED: return "operation canceled";
+        case SENGOO_STATUS_INVALID_UTF8: return "invalid UTF-8 sequence";
         default: return "unknown failure";
     }
 }
@@ -591,6 +597,7 @@ long long sengoo_status_from_raw_ffi(long long code) {
         case -SENGOO_STATUS_TLS_HANDSHAKE: return SENGOO_STATUS_TLS_HANDSHAKE;
         case -SENGOO_STATUS_TLS_UNAVAILABLE: return SENGOO_STATUS_TLS_UNAVAILABLE;
         case -SENGOO_STATUS_CANCELED: return SENGOO_STATUS_CANCELED;
+        case -SENGOO_STATUS_INVALID_UTF8: return SENGOO_STATUS_INVALID_UTF8;
         case SENGOO_STATUS_UNKNOWN: return SENGOO_STATUS_UNKNOWN;
         case SENGOO_STATUS_INVALID_ARGUMENT: return SENGOO_STATUS_INVALID_ARGUMENT;
         case SENGOO_STATUS_INVALID_HANDLE: return SENGOO_STATUS_INVALID_HANDLE;
@@ -610,6 +617,7 @@ long long sengoo_status_from_raw_ffi(long long code) {
         case SENGOO_STATUS_TLS_HANDSHAKE: return SENGOO_STATUS_TLS_HANDSHAKE;
         case SENGOO_STATUS_TLS_UNAVAILABLE: return SENGOO_STATUS_TLS_UNAVAILABLE;
         case SENGOO_STATUS_CANCELED: return SENGOO_STATUS_CANCELED;
+        case SENGOO_STATUS_INVALID_UTF8: return SENGOO_STATUS_INVALID_UTF8;
         default: return SENGOO_STATUS_UNKNOWN;
     }
 }
@@ -1293,6 +1301,23 @@ long long sengoo_ffi_buffer_append(long long buffer_handle, long long src_ptr, l
     return (long long)append_len;
 }
 
+long long sengoo_ffi_buffer_push_u8(long long buffer_handle, long long byte) {
+    sengoo_ffi_clear_error_state();
+    SengooFfiBuffer* buffer = sengoo_ffi_buffer_from_handle(buffer_handle);
+    if (!buffer) {
+        return sengoo_ffi_set_error(SENGOO_FFI_ERR_INVALID_HANDLE, "buffer handle not found");
+    }
+    if (byte < 0 || byte > 255) {
+        return sengoo_ffi_set_error(SENGOO_FFI_ERR_INVALID_ARGUMENT, "byte out of range");
+    }
+    if (buffer->used_len >= buffer->capacity) {
+        return sengoo_ffi_set_error(SENGOO_FFI_ERR_BUFFER, "buffer capacity too small");
+    }
+    buffer->bytes[buffer->used_len] = (unsigned char)byte;
+    buffer->used_len += 1;
+    return 1;
+}
+
 static int sengoo_bytes_are_utf8(const unsigned char* bytes, size_t len) {
     size_t i = 0;
     while (i < len) {
@@ -1657,27 +1682,40 @@ long long sengoo_file_exists(long long path_ptr) {
     return 1;
 }
 
-long long sengoo_file_len(long long path_ptr) {
-    const char* path = (const char*)(intptr_t)path_ptr;
+static long long sengoo_regular_file_size_cstr(const char* path) {
     if (!path || path[0] == '\0') {
         return -SENGOO_STATUS_INVALID_ARGUMENT;
     }
 
-    FILE* file = fopen(path, "rb");
-    if (!file) {
+#ifdef _WIN32
+    struct _stat64 info;
+    if (_stat64(path, &info) != 0) {
         return sengoo_negative_status_from_errno(errno, SENGOO_STATUS_IO);
     }
-    if (fseek(file, 0, SEEK_END) != 0) {
-        int err = errno;
-        fclose(file);
-        return sengoo_negative_status_from_errno(err, SENGOO_STATUS_IO);
+    if ((info.st_mode & _S_IFREG) == 0) {
+        return -SENGOO_STATUS_UNSUPPORTED;
     }
-    long size = ftell(file);
-    fclose(file);
-    if (size < 0) {
+    if (info.st_size < 0) {
+        return -SENGOO_STATUS_OVERFLOW;
+    }
+    return (long long)info.st_size;
+#else
+    struct stat info;
+    if (stat(path, &info) != 0) {
         return sengoo_negative_status_from_errno(errno, SENGOO_STATUS_IO);
     }
-    return (long long)size;
+    if (!S_ISREG(info.st_mode)) {
+        return -SENGOO_STATUS_UNSUPPORTED;
+    }
+    if (info.st_size < 0 || (uintmax_t)info.st_size > (uintmax_t)LLONG_MAX) {
+        return -SENGOO_STATUS_OVERFLOW;
+    }
+    return (long long)info.st_size;
+#endif
+}
+
+long long sengoo_file_len(long long path_ptr) {
+    return sengoo_regular_file_size_cstr((const char*)(intptr_t)path_ptr);
 }
 
 long long sengoo_file_read_into(long long path_ptr, long long out_buffer, long long out_capacity) {
@@ -1954,37 +1992,7 @@ long long sengoo_file_kind(long long path_ptr) {
 }
 
 long long sengoo_file_size(long long path_ptr) {
-    const char* path = (const char*)(intptr_t)path_ptr;
-    if (!path || path[0] == '\0') {
-        return -SENGOO_STATUS_INVALID_ARGUMENT;
-    }
-
-#ifdef _WIN32
-    WIN32_FILE_ATTRIBUTE_DATA info;
-    if (!GetFileAttributesExA(path, GetFileExInfoStandard, &info)) {
-        return -SENGOO_STATUS_NOT_FOUND;
-    }
-    if (info.dwFileAttributes & FILE_ATTRIBUTE_DIRECTORY) {
-        return -SENGOO_STATUS_UNSUPPORTED;
-    }
-    unsigned long long size = ((unsigned long long)info.nFileSizeHigh << 32) | info.nFileSizeLow;
-    if (size > (unsigned long long)LLONG_MAX) {
-        return -SENGOO_STATUS_OVERFLOW;
-    }
-    return (long long)size;
-#else
-    struct stat info;
-    if (stat(path, &info) != 0) {
-        return -SENGOO_STATUS_NOT_FOUND;
-    }
-    if (!S_ISREG(info.st_mode)) {
-        return -SENGOO_STATUS_UNSUPPORTED;
-    }
-    if (info.st_size < 0) {
-        return -SENGOO_STATUS_OVERFLOW;
-    }
-    return (long long)info.st_size;
-#endif
+    return sengoo_regular_file_size_cstr((const char*)(intptr_t)path_ptr);
 }
 
 long long sengoo_file_modified_unix_ms(long long path_ptr) {

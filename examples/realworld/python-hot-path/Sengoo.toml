@@ -1,0 +1,11 @@
+[package]
+name = "python_hot_path"
+version = "0.1.0"
+edition = "2026"
+description = "Realworld Python ctypes hot-path fixture using reflection metadata from an installed sgc."
+
+[bin]
+path = "src/main.sg"
+
+[lib]
+path = "src/lib.sg"
