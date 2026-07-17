@@ -425,25 +425,48 @@ jobs:
             throw "http dogfood READY line missing/invalid: '$readyLine'"
           }
           $port = [int]$Matches[1]
-          $body = [IO.File]::ReadAllText((Resolve-Path $requestPath))
-          # HTTP harness only accepts execution_mode=fixture; eligible fixture already does.
-          try {
-            $resp = Invoke-WebRequest -Uri "http://127.0.0.1:$port/v1/submit-envelope" `
-              -Method POST -ContentType "application/json" -Body $body -TimeoutSec 15 -UseBasicParsing
-          } catch {
-            if (-not $httpProc.HasExited) { $httpProc.Kill() }
-            throw "localhost HTTP product POST failed: $($_.Exception.Message)"
+          # Harness requires Content-Type exactly "application/json" (no charset).
+          # Prefer curl for cross-platform exact headers; fall back to WebRequest.
+          $bodyFile = Join-Path $pkgRoot "http-probe-body.json"
+          Copy-Item -LiteralPath (Resolve-Path $requestPath) -Destination $bodyFile -Force
+          $respBodyFile = Join-Path $pkgRoot "http-probe-resp.json"
+          $statusCode = 0
+          $respText = ""
+          $curlExe = $null
+          foreach ($candidate in @("curl.exe", "curl")) {
+            $cmd = Get-Command $candidate -ErrorAction SilentlyContinue
+            if ($cmd -and $cmd.Source -notmatch 'Alias') { $curlExe = $cmd.Source; break }
           }
-          if ($resp.StatusCode -ne 200) {
-            if (-not $httpProc.HasExited) { $httpProc.Kill() }
-            throw "http dogfood status $($resp.StatusCode)"
+          if ($curlExe) {
+            $curlOut = & $curlExe -sS -o $respBodyFile -w "%{http_code}" `
+              -X POST "http://127.0.0.1:$port/v1/submit-envelope" `
+              -H "Content-Type: application/json" `
+              --data-binary "@$bodyFile"
+            $statusCode = [int]$curlOut
+            if (Test-Path -LiteralPath $respBodyFile) {
+              $respText = [IO.File]::ReadAllText($respBodyFile)
+            }
+          } else {
+            try {
+              $headers = @{ "Content-Type" = "application/json" }
+              $bodyBytes = [IO.File]::ReadAllBytes($bodyFile)
+              $resp = Invoke-WebRequest -Uri "http://127.0.0.1:$port/v1/submit-envelope" `
+                -Method POST -Headers $headers -Body $bodyBytes -TimeoutSec 15 -UseBasicParsing
+              $statusCode = [int]$resp.StatusCode
+              $respText = $resp.Content
+            } catch {
+              if (-not $httpProc.HasExited) { $httpProc.Kill() }
+              throw "localhost HTTP product POST failed: $($_.Exception.Message)"
+            }
           }
-          $respBytes = [Text.Encoding]::UTF8.GetBytes($resp.Content)
-          # Response may already be a string; compare normalized JSON kind.
-          $respJson = $resp.Content | ConvertFrom-Json
+          if ($statusCode -ne 200) {
+            if (-not $httpProc.HasExited) { $httpProc.Kill() }
+            throw "http dogfood status $statusCode body=$($respText.Substring(0, [Math]::Min(200, $respText.Length)))"
+          }
+          $respJson = $respText | ConvertFrom-Json
           if ($respJson.kind -ne "plan") {
             if (-not $httpProc.HasExited) { $httpProc.Kill() }
-            throw "http dogfood did not return plan kind: $($resp.Content.Substring(0, [Math]::Min(200, $resp.Content.Length)))"
+            throw "http dogfood did not return plan kind: $($respText.Substring(0, [Math]::Min(200, $respText.Length)))"
           }
           if (-not $httpProc.WaitForExit(15000)) {
             $httpProc.Kill()
