@@ -719,6 +719,8 @@ mod tests {
                 max_header_bytes: 16 * 1024,
                 max_body_bytes: 1024 * 1024,
                 serve_mode: 0,
+                keep_alive_enabled: false,
+                live_connection: None,
             })
             .expect("server should store");
 
@@ -759,11 +761,12 @@ mod tests {
             1
         );
 
-        let (_listener, routes, middlewares, max_header_bytes, max_body_bytes) = rt
+        let (_listener, routes, middlewares, max_header_bytes, max_body_bytes, keep_alive) = rt
             .http_server_snapshot(handle)
             .expect("snapshot should exist");
         assert_eq!(max_header_bytes, 128);
         assert_eq!(max_body_bytes, 256);
+        assert!(!keep_alive);
         assert_eq!(routes.len(), 1);
         assert_eq!(routes[0].method, "GET");
         assert_eq!(routes[0].path_pattern, "/hello/:name");
