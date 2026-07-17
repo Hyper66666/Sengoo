@@ -271,6 +271,24 @@ impl BorrowChecker {
         )
     }
 
+    fn expr_has_unconditional_return(expr: &Expr) -> bool {
+        match &expr.kind {
+            ExprKind::Return(_) => true,
+            ExprKind::Block(block) => Self::block_has_unconditional_return_stmt(block),
+            ExprKind::If {
+                then_branch,
+                else_branch,
+                ..
+            } => {
+                Self::block_has_unconditional_return_stmt(then_branch)
+                    && else_branch
+                        .as_ref()
+                        .is_some_and(|else_expr| Self::expr_has_unconditional_return(else_expr))
+            }
+            _ => false,
+        }
+    }
+
     fn end_borrows_with_no_remaining_uses(&mut self) {
         let aliases: Vec<(String, MovePath)> = self
             .borrow_aliases
@@ -384,13 +402,44 @@ impl BorrowChecker {
                 else_branch,
             } => {
                 self.check_expr(cond);
-                self.check_block_inner(
-                    then_branch,
-                    false,
-                    !Self::block_has_unconditional_return_stmt(then_branch),
-                );
+                // Isolate then/else move sets: merge then into parent only after
+                // else is checked from the pre-if moved state. Otherwise exclusive
+                // ownership transfers in both arms (dogfood worker dispatch) false
+                // fail as use-after-move on the second arm.
+                let before_moved = self.moved.clone();
+                let before_spans = self.move_spans.clone();
+                self.check_block_inner(then_branch, false, true);
+                let then_moved = self.moved.clone();
+                let then_spans = self.move_spans.clone();
+                self.moved = before_moved.clone();
+                self.move_spans = before_spans.clone();
                 if let Some(else_expr) = else_branch {
                     self.check_expr(else_expr);
+                    let else_moved = std::mem::take(&mut self.moved);
+                    let else_spans = std::mem::take(&mut self.move_spans);
+                    let then_falls =
+                        !Self::block_has_unconditional_return_stmt(then_branch);
+                    let else_falls = !Self::expr_has_unconditional_return(else_expr);
+                    self.moved = before_moved;
+                    self.move_spans = before_spans;
+                    if then_falls {
+                        self.moved = then_moved;
+                        self.move_spans = then_spans;
+                    }
+                    if else_falls {
+                        for path in else_moved {
+                            if let Some(span) = else_spans.get(&path).copied() {
+                                self.moved.insert(path.clone());
+                                self.move_spans.entry(path).or_insert(span);
+                            }
+                        }
+                    }
+                } else if Self::block_has_unconditional_return_stmt(then_branch) {
+                    self.moved = before_moved;
+                    self.move_spans = before_spans;
+                } else {
+                    self.moved = then_moved;
+                    self.move_spans = then_spans;
                 }
             }
             ExprKind::While { cond, body } => {
