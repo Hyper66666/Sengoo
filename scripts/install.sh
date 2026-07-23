@@ -186,6 +186,34 @@ if [ -z "$payload" ]; then
   exit 1
 fi
 payload_dir=$(dirname "$payload")
+payload_checksums="$payload_dir/payloads.sha256"
+if [ ! -f "$payload_checksums" ]; then
+  echo "archive does not contain payloads.sha256" >&2
+  exit 1
+fi
+while IFS= read -r checksum_line; do
+  payload_path=${checksum_line#*  }
+  case "$payload_path" in
+    ""|/*|../*|*/../*|*/..)
+      echo "invalid payload checksum path: $payload_path" >&2
+      exit 1
+      ;;
+  esac
+done < "$payload_checksums"
+if command -v sha256sum >/dev/null 2>&1; then
+  (cd "$payload_dir" && sha256sum -c payloads.sha256)
+elif command -v shasum >/dev/null 2>&1; then
+  (cd "$payload_dir" && shasum -a 256 -c payloads.sha256)
+else
+  echo "sha256sum or shasum is required for payload verification" >&2
+  exit 1
+fi
+(cd "$payload_dir" && find . -type f ! -name manifest.json ! -name payloads.sha256 -print | sed 's#^\./##' | LC_ALL=C sort) > "$tmp_dir/actual-payloads.txt"
+sed 's/^[0-9a-fA-F]\{64\}  //' "$payload_checksums" | LC_ALL=C sort > "$tmp_dir/listed-payloads.txt"
+if ! cmp -s "$tmp_dir/actual-payloads.txt" "$tmp_dir/listed-payloads.txt"; then
+  echo "archive payload set does not match payloads.sha256" >&2
+  exit 1
+fi
 
 rm -rf "$install_dir"
 mkdir -p "$install_dir"

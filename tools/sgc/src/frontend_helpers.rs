@@ -110,6 +110,22 @@ pub(crate) fn dependency_graph_digest(dependency_edges: &BTreeMap<String, Vec<St
 }
 
 pub(crate) fn resolve_frontend_job_count(requested: FrontendJobs, task_count: usize) -> usize {
+    // Pin-grade dual package builds set SENGOO_DETERMINISTIC_LINK=1; force a
+    // serial frontend so independent rebuilds emit bit-identical IR/object order.
+    let force_serial = match std::env::var("SENGOO_DETERMINISTIC_LINK") {
+        Ok(value) => {
+            let trimmed = value.trim();
+            !(trimmed.is_empty() || trimmed == "0" || trimmed.eq_ignore_ascii_case("false"))
+        }
+        Err(_) => false,
+    };
+    if force_serial {
+        // Serial pin-grade builds always schedule one frontend worker. Do not
+        // write `1.min(task_count.max(1))` ? clippy::min_max treats that as a
+        // constant 1 and fails `-D warnings`.
+        let _ = task_count;
+        return 1;
+    }
     let requested = match requested {
         FrontendJobs::Auto => std::thread::available_parallelism()
             .map(|n| n.get())

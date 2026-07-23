@@ -11,6 +11,8 @@ on:
   pull_request:
     paths:
       - ".github/workflows/toolchain-distribution.yml"
+      - "README-dist.md"
+      - "scripts/compare-distribution-manifests.ps1"
       - "scripts/package-toolchain.ps1"
       - "scripts/install.ps1"
       - "scripts/install.sh"
@@ -35,15 +37,19 @@ jobs:
           - os: ubuntu-latest
             target: x86_64-unknown-linux-gnu
             artifact: linux-x86_64
+            reproducible: true
           - os: windows-latest
             target: x86_64-pc-windows-msvc
             artifact: windows-x86_64
+            reproducible: true
           - os: macos-15
             target: aarch64-apple-darwin
             artifact: macos-arm64
+            reproducible: false
           - os: macos-15-intel
             target: x86_64-apple-darwin
             artifact: macos-x86_64
+            reproducible: false
 
     steps:
       - uses: actions/checkout@v4
@@ -79,7 +85,9 @@ jobs:
           }
           $env:CARGO_BIN_EXE_sgc = Join-Path $releaseBin "sgc$suffix"
           $env:CARGO_BIN_EXE_sgfmt = Join-Path $releaseBin "sgfmt$suffix"
-          & $env:CARGO_BIN_EXE_sgc run examples/01_hello.sg --force-rebuild
+          # Checkout smokes authorize Cargo-built native runtime explicitly.
+          # Installed-mode is proven later against the packaged archive only.
+          & $env:CARGO_BIN_EXE_sgc --runtime-mode source-development run examples/01_hello.sg --force-rebuild
           $helloExit = $LASTEXITCODE
           if ($helloExit -ne 42) {
             throw "sgc hello smoke expected exit 42 on ${{ matrix.os }}, got $helloExit"
@@ -116,7 +124,6 @@ jobs:
       - name: Package toolchain
         shell: pwsh
         env:
-          SENGOO_BUILD_HASH: ${{ github.sha }}
           SENGOO_DIST_TARGET: ${{ matrix.target }}
         run: |
           if ("${{ github.ref_type }}" -eq "tag") {
@@ -124,12 +131,67 @@ jobs:
           } else {
             $version = "0.1.0-ci"
           }
-          ./scripts/package-toolchain.ps1 -Version $version -NoBuild -SmokeEvidence "toolchain-distribution workflow package-smoke ${{ matrix.os }} ${{ github.sha }}"
+
+          $artifact = "${{ matrix.artifact }}"
+          $primaryOutput = "target/dist"
+          $cargoTargetA = Join-Path $env:RUNNER_TEMP "sengoo-cargo-package-a-$artifact"
+          Remove-Item -LiteralPath $primaryOutput -Recurse -Force -ErrorAction SilentlyContinue
+          Remove-Item -LiteralPath $cargoTargetA -Recurse -Force -ErrorAction SilentlyContinue
+          # package-toolchain.ps1 owns deterministic RUSTFLAGS (source+target
+          # remap, Windows /Brepro). Do not set a partial CARGO_ENCODED_RUSTFLAGS
+          # here or it will be overwritten by the packaging script.
+          Remove-Item Env:CARGO_ENCODED_RUSTFLAGS -ErrorAction SilentlyContinue
+          Remove-Item Env:RUSTFLAGS -ErrorAction SilentlyContinue
+          ./scripts/package-toolchain.ps1 `
+            -Version $version `
+            -OutputDir $primaryOutput `
+            -CargoTargetDir $cargoTargetA `
+            -SmokeEvidence "toolchain-distribution workflow build A ${{ matrix.os }} ${{ github.sha }}"
+
+          $manifestA = Join-Path $primaryOutput "sengoo-$version-${{ matrix.target }}/manifest.json"
+          $packageA = Get-Content -LiteralPath $manifestA -Raw | ConvertFrom-Json
+          if (-not $packageA.release_eligible) {
+            throw "package A is not release eligible: $($packageA | ConvertTo-Json -Compress)"
+          }
+
+          if ("${{ matrix.reproducible }}" -eq "true") {
+            $secondaryOutput = "target/dist-repro-b-$artifact"
+            $cargoTargetB = Join-Path $env:RUNNER_TEMP "sengoo-cargo-package-b-$artifact"
+            Remove-Item -LiteralPath $secondaryOutput -Recurse -Force -ErrorAction SilentlyContinue
+            Remove-Item -LiteralPath $cargoTargetB -Recurse -Force -ErrorAction SilentlyContinue
+            Remove-Item Env:CARGO_ENCODED_RUSTFLAGS -ErrorAction SilentlyContinue
+            Remove-Item Env:RUSTFLAGS -ErrorAction SilentlyContinue
+            ./scripts/package-toolchain.ps1 `
+              -Version $version `
+              -OutputDir $secondaryOutput `
+              -CargoTargetDir $cargoTargetB `
+              -SmokeEvidence "toolchain-distribution workflow build B ${{ matrix.os }} ${{ github.sha }}"
+
+            $manifestB = Join-Path $secondaryOutput "sengoo-$version-${{ matrix.target }}/manifest.json"
+            $packageB = Get-Content -LiteralPath $manifestB -Raw | ConvertFrom-Json
+            if (-not $packageB.release_eligible) {
+              throw "package B is not release eligible: $($packageB | ConvertTo-Json -Compress)"
+            }
+
+            $evidenceDir = "target/repro-evidence/$artifact"
+            ./scripts/compare-distribution-manifests.ps1 `
+              -LeftManifest $manifestA `
+              -RightManifest $manifestB `
+              -OutputDir $evidenceDir
+            $comparison = Get-Content -LiteralPath (Join-Path $evidenceDir "comparison.json") -Raw | ConvertFrom-Json
+            if ($comparison.status -ne "reproducible") {
+              throw "independent distribution builds are not reproducible"
+            }
+            foreach ($evidenceFile in @("normalized-a.json", "normalized-b.json", "comparison.json")) {
+              if (-not (Test-Path -LiteralPath (Join-Path $evidenceDir $evidenceFile))) {
+                throw "missing reproducibility evidence: $evidenceFile"
+              }
+            }
+          }
 
       - name: Prepare local release feed
         shell: pwsh
         env:
-          SENGOO_BUILD_HASH: ${{ github.sha }}
           SENGOO_DIST_TARGET: ${{ matrix.target }}
         run: |
           if ("${{ github.ref_type }}" -eq "tag") {
@@ -192,6 +254,20 @@ jobs:
         run: |
           $archive = Get-Content target/dist/latest-archive.txt
           ./scripts/install.ps1 -Archive $archive -InstallDir target/install-smoke
+
+      - name: Install reproducibility build B (POSIX)
+        if: matrix.reproducible && runner.os != 'Windows'
+        shell: bash
+        run: |
+          archive=$(cat "target/dist-repro-b-${{ matrix.artifact }}/latest-archive.txt")
+          sh scripts/install.sh "$archive" target/install-smoke-repro-b
+
+      - name: Install reproducibility build B (Windows)
+        if: matrix.reproducible && runner.os == 'Windows'
+        shell: pwsh
+        run: |
+          $archive = Get-Content "target/dist-repro-b-${{ matrix.artifact }}/latest-archive.txt"
+          ./scripts/install.ps1 -Archive $archive -InstallDir target/install-smoke-repro-b
 
       - name: Installed stdlib smoke
         shell: pwsh
@@ -407,6 +483,20 @@ jobs:
             target/dist/*.tar.gz
             target/dist/*.sha256
             target/dist/*/manifest.json
+
+      - name: Upload reproducibility evidence
+        if: matrix.reproducible
+        uses: actions/upload-artifact@v4
+        with:
+          name: sengoo-reproducibility-${{ matrix.artifact }}
+          path: |
+            target/dist-repro-b-${{ matrix.artifact }}/*.zip
+            target/dist-repro-b-${{ matrix.artifact }}/*.tar.gz
+            target/dist-repro-b-${{ matrix.artifact }}/*.sha256
+            target/dist-repro-b-${{ matrix.artifact }}/*/manifest.json
+            target/repro-evidence/${{ matrix.artifact }}/normalized-a.json
+            target/repro-evidence/${{ matrix.artifact }}/normalized-b.json
+            target/repro-evidence/${{ matrix.artifact }}/comparison.json
 
   publish-release:
     name: publish complete toolchain release

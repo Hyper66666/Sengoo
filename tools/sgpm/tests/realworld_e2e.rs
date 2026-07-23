@@ -156,12 +156,12 @@ fn realworld_locked_loop_uses_real_toolchain_binaries() {
         let before = fs::read_to_string(&lock_path).expect("lockfile should exist after update");
 
         for args in [
-            vec!["check", "--locked"],
-            vec!["test", "--locked"],
+            vec!["--runtime-mode", "source-development", "check", "--locked"],
+            vec!["--runtime-mode", "source-development", "test", "--locked"],
             vec!["fmt", "--check", "--locked"],
-            vec!["doc", "--locked"],
-            vec!["build", "--locked"],
-            vec!["run", "--locked"],
+            vec!["--runtime-mode", "source-development", "doc", "--locked"],
+            vec!["--runtime-mode", "source-development", "build", "--locked"],
+            vec!["--runtime-mode", "source-development", "run", "--locked"],
         ] {
             let output = Command::new(sgpm())
                 .args(&args)

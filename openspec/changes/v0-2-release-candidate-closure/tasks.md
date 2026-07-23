@@ -13,12 +13,17 @@
 
 ## 1. Mainline convergence
 
-- [ ] 1.1 Checkpoint the verified dirty state of
-  `codex/v0-2-http-tls`; retain a reviewable diff and Lore commit evidence.
-- [ ] 1.2 Rebase/merge the HTTP owner from current `origin/main`, resolve shared
-  runtime/stdlib/compiler/docs conflicts by behavior and tests, and open a PR.
-- [ ] 1.3 Prove every other release-relevant branch is merged, superseded, or
+- [x] 1.1 Audit the residual state of `codex/v0-2-http-tls`; the only
+  untracked file is generated test output (`tls_fix.txt`), while every source
+  and test change is retained by its Lore commits and PR #51.
+- [x] 1.2 Merge the HTTP owner through PR #51 from current `origin/main` and
+  verify its compatibility, core, fuzz, safety, performance, realworld, and
+  four-host distribution checks. Merge SHA:
+  `af18e8fadaa20ce99ccea1b087ca57c4c3266859`.
+- [x] 1.3 Prove every other release-relevant branch is merged, superseded, or
   intentionally deferred; preserve unique commits before optional cleanup.
+  `INVENTORY.md` records ancestry, dirty-worktree preservation, and the
+  file-bounded Senline slice disposition.
 - [ ] 1.4 Reconcile active OpenSpec task state with implementation and archive
   historical umbrellas that no longer own work. Do not rewrite archived
   history merely to change old evidence wording.

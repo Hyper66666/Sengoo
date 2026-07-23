@@ -1,5 +1,15 @@
 #define _CRT_SECURE_NO_WARNINGS
 
+/* Expose lstat and related POSIX APIs when clang compiles this bridge as C11. */
+#if !defined(_WIN32)
+#ifndef _DEFAULT_SOURCE
+#define _DEFAULT_SOURCE 1
+#endif
+#ifndef _XOPEN_SOURCE
+#define _XOPEN_SOURCE 700
+#endif
+#endif
+
 #include <assert.h>
 #include <ctype.h>
 #include <errno.h>
@@ -1083,6 +1093,18 @@ long long sengoo_ffi_buffer_used_len(long long buffer_handle) {
         return sengoo_ffi_set_error(SENGOO_FFI_ERR_INVALID_HANDLE, "buffer handle not found");
     }
     return (long long)buffer->used_len;
+}
+
+long long sengoo_ffi_buffer_commit_used_len(long long buffer_handle, long long used_len) {
+    SengooFfiBuffer* buffer = sengoo_ffi_buffer_from_handle(buffer_handle);
+    if (!buffer) {
+        return -SENGOO_STATUS_INVALID_HANDLE;
+    }
+    if (used_len < 0 || (unsigned long long)used_len > (unsigned long long)buffer->capacity) {
+        return -SENGOO_STATUS_INVALID_ARGUMENT;
+    }
+    buffer->used_len = (size_t)used_len;
+    return 1;
 }
 
 long long sengoo_ffi_buffer_ptr(long long buffer_handle) {
