@@ -13,6 +13,7 @@ on:
       - ".github/workflows/toolchain-distribution.yml"
       - "README-dist.md"
       - "scripts/compare-distribution-manifests.ps1"
+      - "scripts/generate-release-evidence.ps1"
       - "scripts/package-toolchain.ps1"
       - "scripts/install.ps1"
       - "scripts/install.sh"
@@ -509,6 +510,8 @@ jobs:
       attestations: write
 
     steps:
+      - uses: actions/checkout@v4
+
       - name: Download all smoke-gated archives
         uses: actions/download-artifact@v4
         with:
@@ -517,11 +520,27 @@ jobs:
           merge-multiple: true
 
       - name: Attest release archives
+        id: archive-provenance
         uses: actions/attest-build-provenance@v2
         with:
           subject-path: |
             target/dist/*.zip
             target/dist/*.tar.gz
+
+      - name: Generate one-SHA release evidence
+        shell: pwsh
+        run: |
+          $version = "${{ github.ref_name }}".Substring(1)
+          ./scripts/generate-release-evidence.ps1 `
+            -DistDir target/dist `
+            -OutputPath target/dist/release-evidence.json `
+            -Version $version `
+            -SourceRevision "${{ github.sha }}" `
+            -Repository "${{ github.repository }}" `
+            -RunId "${{ github.run_id }}" `
+            -RunAttempt "${{ github.run_attempt }}" `
+            -RunUrl "${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}" `
+            -ProvenanceUrl "${{ steps.archive-provenance.outputs['attestation-url'] }}"
 
       - name: Publish GitHub release assets
         uses: softprops/action-gh-release@v2
@@ -531,3 +550,4 @@ jobs:
             target/dist/*.zip
             target/dist/*.tar.gz
             target/dist/*.sha256
+            target/dist/release-evidence.json

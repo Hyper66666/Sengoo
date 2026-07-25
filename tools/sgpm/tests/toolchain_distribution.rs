@@ -167,6 +167,38 @@ fn distribution_workflow_covers_native_macos_architectures() {
 }
 
 #[test]
+fn distribution_release_publishes_one_sha_evidence_manifest() {
+    let root = workspace_root();
+    let workflow = fs::read_to_string(root.join(".github/workflows/toolchain-distribution.yml"))
+        .expect("read toolchain distribution workflow");
+    let generator = fs::read_to_string(root.join("scripts/generate-release-evidence.ps1"))
+        .expect("read release evidence generator");
+
+    assert!(
+        workflow.contains("Generate one-SHA release evidence")
+            && workflow.contains("scripts/generate-release-evidence.ps1")
+            && workflow.contains("target/dist/release-evidence.json")
+            && workflow.contains("steps.archive-provenance.outputs['attestation-url']"),
+        "tag publication should retain one-SHA archive, checksum, workflow, and provenance evidence"
+    );
+    for required in [
+        "x86_64-pc-windows-msvc",
+        "x86_64-unknown-linux-gnu",
+        "x86_64-apple-darwin",
+        "aarch64-apple-darwin",
+        "source revision mismatch",
+        "release eligible",
+        "archive checksum mismatch",
+        "complete_target_set",
+    ] {
+        assert!(
+            generator.contains(required),
+            "release evidence generator should enforce `{required}`"
+        );
+    }
+}
+
+#[test]
 fn installers_detect_darwin_architecture_instead_of_assuming_x86_64() {
     let root = workspace_root();
     let shell = fs::read_to_string(root.join("scripts/install.sh")).expect("read install.sh");
