@@ -218,6 +218,12 @@ fn realworld_workflow_packages_and_installs_release_toolchain_before_running_eve
         "workflow should build release toolchain binaries before packaging"
     );
     assert!(
+        build_step.contains(
+            "cargo build --locked -p sengoo-runtime --lib --features native-bridge --profile staticlib"
+        ),
+        "workflow should build the native runtime static library required by -NoBuild packaging"
+    );
+    assert!(
         package_step.contains("./scripts/package-toolchain.ps1 -Version 0.1.0-ci -NoBuild"),
         "workflow should package the prebuilt release binaries with -NoBuild"
     );

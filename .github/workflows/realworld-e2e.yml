@@ -41,7 +41,9 @@ jobs:
         run: choco install llvm -y
 
       - name: Build toolchain binaries
-        run: cargo build --release -p sgc -p sgpm -p sgfmt -p sglsp
+        run: |
+          cargo build --release -p sgc -p sgpm -p sgfmt -p sglsp
+          cargo build --locked -p sengoo-runtime --lib --features native-bridge --profile staticlib
 
       - name: Run realworld integration tests
         run: cargo test -p sgpm realworld -- --nocapture
