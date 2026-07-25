@@ -278,9 +278,11 @@ fn distribution_workflow_smokes_explicit_upgrade_outside_checkout_without_a_real
         "workflow should stage a semantically newer patch prerelease for the upgrade smoke"
     );
     assert!(
-        prepare_release_feed.contains("$primaryBuildHash = $env:SENGOO_BUILD_HASH")
+        prepare_release_feed.contains(
+            "$primaryBuildHash = \"${{ github.sha }}\".Substring(0, 12)"
+        )
             && prepare_release_feed.contains(
-                "$primaryBuildHash -notmatch '^[0-9a-fA-F]+$'"
+                "$primaryBuildHash -notmatch '^[0-9a-fA-F]{12}$'"
             )
             && prepare_release_feed.contains("$firstNibble = [Convert]::ToInt32($primaryBuildHash.Substring(0, 1), 16)")
             && prepare_release_feed.contains(

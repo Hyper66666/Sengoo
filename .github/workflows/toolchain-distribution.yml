@@ -215,8 +215,8 @@ jobs:
           $parsedBaseVersion = [System.Management.Automation.SemanticVersion]$baseVersion
           $upgradePatch = $parsedBaseVersion.Patch + 1
           $upgradeVersion = "$($parsedBaseVersion.Major).$($parsedBaseVersion.Minor).$upgradePatch-upgrade-smoke"
-          $primaryBuildHash = $env:SENGOO_BUILD_HASH
-          if ($primaryBuildHash -notmatch '^[0-9a-fA-F]+$') {
+          $primaryBuildHash = "${{ github.sha }}".Substring(0, 12)
+          if ($primaryBuildHash -notmatch '^[0-9a-fA-F]{12}$') {
             throw "primary build hash must be hexadecimal, got $primaryBuildHash"
           }
           $firstNibble = [Convert]::ToInt32($primaryBuildHash.Substring(0, 1), 16)
