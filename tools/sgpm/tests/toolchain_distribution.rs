@@ -434,6 +434,8 @@ fn compatibility_workflow_runs_retained_project_with_previous_and_current_toolch
         "doc --locked",
         "build --locked",
         "compatibility-transcript",
+        "runtime_args=(--runtime-mode \"$runtime_mode\")",
+        "run_loop \"current\" \"$GITHUB_WORKSPACE/target/release\" \"source-development\"",
     ] {
         assert!(
             workflow.contains(needle),
