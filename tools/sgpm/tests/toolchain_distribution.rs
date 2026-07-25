@@ -292,9 +292,12 @@ fn distribution_workflow_smokes_explicit_upgrade_outside_checkout_without_a_real
             && prepare_release_feed.contains("$env:SENGOO_BUILD_HASH = $secondaryBuildHash")
             && prepare_release_feed.contains("cargo build -p sgc -p sgpm -p sgfmt -p sglsp --release")
             && prepare_release_feed.contains(
+                "cargo build -p sengoo-runtime --lib --features native-bridge --profile staticlib"
+            )
+            && prepare_release_feed.contains(
                 "./scripts/package-toolchain.ps1 -Version $upgradeVersion -OutputDir $upgradeOutputDir -NoBuild"
             ),
-        "workflow should rebuild release tools with a deterministic secondary hex hash before packaging the synthetic upgrade archive with -NoBuild"
+        "workflow should rebuild release tools and the native runtime with a deterministic secondary hex hash before packaging the synthetic upgrade archive with -NoBuild"
     );
     assert!(
         workflow.contains("outside-checkout"),

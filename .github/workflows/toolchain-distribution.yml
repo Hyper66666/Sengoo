@@ -243,6 +243,10 @@ jobs:
           if ($LASTEXITCODE -ne 0) {
             throw "secondary release build failed"
           }
+          cargo build -p sengoo-runtime --lib --features native-bridge --profile staticlib
+          if ($LASTEXITCODE -ne 0) {
+            throw "secondary native runtime static library build failed"
+          }
           ./scripts/package-toolchain.ps1 -Version $upgradeVersion -OutputDir $upgradeOutputDir -NoBuild -SmokeEvidence "toolchain-distribution workflow upgrade smoke ${{ matrix.os }} ${{ github.sha }}"
           $upgradeArchive = (Get-Content (Join-Path $upgradeOutputDir "latest-archive.txt")).Trim()
           $upgradeReleaseDir = Join-Path $downloadRoot "v$upgradeVersion"
