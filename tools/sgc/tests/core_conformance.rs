@@ -40,6 +40,7 @@ fn run_core_case(tag: &str, relative_path: &str, expected_exit: i32, expected_st
         .iter()
         .map(|mode_args| {
             Command::new(sgc())
+                .args(["--runtime-mode", "source-development"])
                 .arg("run")
                 .arg(&path)
                 .arg("--force-rebuild")
