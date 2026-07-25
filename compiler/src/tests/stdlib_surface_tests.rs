@@ -2115,6 +2115,7 @@ fn stdlib_reflection_wrappers_accept_strings_without_raw_pointers() {
             "status.sg",
             "db.sg",
             "lua54.sg",
+            "collections.sg",
             "net.sg",
         ],
         r#"
@@ -2195,6 +2196,7 @@ fn stdlib_net_wrappers_accept_managed_buffers() {
             "ffi.sg",
             "string.sg",
             "status.sg",
+            "collections.sg",
             "net.sg",
         ],
         r#"
@@ -2236,6 +2238,7 @@ fn stdlib_net_http_server_wrappers_accept_strings() {
             "ffi.sg",
             "string.sg",
             "status.sg",
+            "collections.sg",
             "net.sg",
         ],
         r#"
