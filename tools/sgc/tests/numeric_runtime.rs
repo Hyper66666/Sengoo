@@ -1,6 +1,8 @@
+mod common;
+
+use common::source_sgc_command;
 use std::fs;
 use std::path::PathBuf;
-use std::process::Command;
 use std::time::{SystemTime, UNIX_EPOCH};
 
 struct TempSource {
@@ -82,7 +84,7 @@ def main() -> i64 {
 "#,
     );
 
-    let output = Command::new(env!("CARGO_BIN_EXE_sgc"))
+    let output = source_sgc_command()
         .arg("run")
         .arg(&source.path)
         .arg("--force-rebuild")
@@ -117,7 +119,7 @@ def main() -> i64 {
 "#,
     );
 
-    let output = Command::new(env!("CARGO_BIN_EXE_sgc"))
+    let output = source_sgc_command()
         .arg("run")
         .arg(&source.path)
         .arg("--force-rebuild")

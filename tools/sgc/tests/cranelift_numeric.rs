@@ -1,6 +1,8 @@
+mod common;
+
+use common::source_sgc_command;
 use std::fs;
 use std::path::PathBuf;
-use std::process::Command;
 use std::time::{SystemTime, UNIX_EPOCH};
 
 fn temp_source(name: &str, source: &str) -> PathBuf {
@@ -18,7 +20,7 @@ fn temp_source(name: &str, source: &str) -> PathBuf {
 
 fn run_cranelift(name: &str, source: &str, opt_level: &str) -> std::process::Output {
     let source = temp_source(name, source);
-    let output = Command::new(env!("CARGO_BIN_EXE_sgc"))
+    let output = source_sgc_command()
         .args([
             "run",
             source.to_str().expect("temporary path should be UTF-8"),

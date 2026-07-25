@@ -1,12 +1,10 @@
+mod common;
+
+use common::source_sgc_command;
 use serde_json::Value;
 use std::fs;
 use std::path::{Path, PathBuf};
-use std::process::Command;
 use std::time::{SystemTime, UNIX_EPOCH};
-
-fn sgc() -> PathBuf {
-    PathBuf::from(env!("CARGO_BIN_EXE_sgc"))
-}
 
 fn workspace_root() -> PathBuf {
     PathBuf::from(env!("CARGO_MANIFEST_DIR"))
@@ -31,7 +29,7 @@ fn temp_dir(name: &str) -> PathBuf {
 }
 
 fn assert_sgc_check(path: &Path, module_map: Option<String>) {
-    let mut command = Command::new(sgc());
+    let mut command = source_sgc_command();
     command.arg("check").arg(path);
     if let Some(module_map) = module_map {
         command.env("SENGOO_MODULE_MAP", module_map);
@@ -81,7 +79,7 @@ fn default_library_conformance_runs_generic_string_keyed_map_natively() {
         "default_library_conformance={}",
         fixture.join("src/lib.sg").display()
     );
-    let output = Command::new(sgc())
+    let output = source_sgc_command()
         .arg("run")
         .arg(fixture.join("src/main.sg"))
         .arg("--force-rebuild")
@@ -106,7 +104,7 @@ fn realworld_missing_import_check_reports_json_diagnostic() {
     )
     .unwrap();
 
-    let output = Command::new(sgc())
+    let output = source_sgc_command()
         .arg("--error-format")
         .arg("json")
         .arg("check")
