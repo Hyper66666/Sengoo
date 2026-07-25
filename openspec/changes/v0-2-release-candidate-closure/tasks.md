@@ -75,8 +75,11 @@
 
 ## 4. Candidate 1
 
-- [ ] 4.1 Set coherent workspace/tool/runtime/stdlib versions for
+- [x] 4.1 Set coherent workspace/tool/runtime/stdlib versions for
   `v0.2.0-rc.1`; fail tag/workspace mismatch before publication.
+  Workspace crates now inherit `0.2.0-rc.1`, the four-tool coherence test
+  passes, and the distribution workflow retains its tag/workspace fail-fast
+  check.
 - [ ] 4.2 Pass the complete section 3 matrix on candidate 1 and retain all four
   archives, checksums, provenance, evidence manifest, and compatibility inputs.
 - [ ] 4.3 Prove `v0.1.0-rc.1` retained projects check/test/build/run under
