@@ -222,6 +222,17 @@ fn realworld_workflow_packages_and_installs_release_toolchain_before_running_eve
         "workflow should package the prebuilt release binaries with -NoBuild"
     );
     assert!(
+        package_step.contains(
+            "$env:SENGOO_BUILD_HASH = \"${{ github.sha }}\".Substring(0, 12)"
+        ),
+        "workflow should pass package-toolchain the 12-character build identity embedded in the binaries"
+    );
+    assert!(
+        workflow.contains("validate package-registry-distribution --strict")
+            && !workflow.contains("validate package-release-defaults --strict"),
+        "workflow should validate canonical package truth after package-release-defaults is archived"
+    );
+    assert!(
         workflow.find("cargo build --release -p sgc -p sgpm -p sgfmt -p sglsp")
             < workflow.find("./scripts/package-toolchain.ps1 -Version 0.1.0-ci -NoBuild"),
         "release build step should appear before package-toolchain -NoBuild"

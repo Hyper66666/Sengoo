@@ -58,16 +58,15 @@ jobs:
         if: runner.os == 'Linux'
         run: cargo test -p sengoo-runtime net::tls -- --nocapture
 
-      - name: Validate OpenSpec child change
-        run: npx --yes @fission-ai/openspec@1.4.1 validate package-release-defaults --strict
-        continue-on-error: true
+      - name: Validate canonical package registry spec
+        run: npx --yes @fission-ai/openspec@1.4.1 validate package-registry-distribution --strict
 
       - name: Package toolchain
         shell: pwsh
         env:
-          SENGOO_BUILD_HASH: ${{ github.sha }}
           SENGOO_DIST_TARGET: ${{ matrix.target }}
         run: |
+          $env:SENGOO_BUILD_HASH = "${{ github.sha }}".Substring(0, 12)
           ./scripts/package-toolchain.ps1 -Version 0.1.0-ci -NoBuild -SmokeEvidence "realworld-e2e installed fixture loop ${{ matrix.os }} ${{ github.sha }}"
 
       - name: Install package (POSIX)
