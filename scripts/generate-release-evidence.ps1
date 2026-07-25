@@ -13,6 +13,9 @@ param(
     [ValidatePattern('^[0-9a-fA-F]{40}$')]
     [string]$SourceRevision,
 
+    [Parameter(Mandatory = $true)]
+    [string]$PreviousVersion,
+
     [string]$Repository = $env:GITHUB_REPOSITORY,
     [string]$RunId = $env:GITHUB_RUN_ID,
     [string]$RunAttempt = $env:GITHUB_RUN_ATTEMPT,
@@ -27,6 +30,10 @@ param(
 )
 
 $ErrorActionPreference = "Stop"
+
+if ([string]::IsNullOrWhiteSpace($PreviousVersion) -or $PreviousVersion -eq $Version) {
+    throw "previous release version must be non-empty and differ from the current version"
+}
 
 $distRoot = (Resolve-Path -LiteralPath $DistDir).Path
 $manifests = @(Get-ChildItem -LiteralPath $distRoot -Filter "manifest.json" -File -Recurse)
@@ -119,6 +126,19 @@ $evidence = [ordered]@{
         package_smoke = "passed"
         complete_target_set = $true
         checksum_verification = "passed"
+        published_upgrade = "passed"
+        compatibility_fixtures = "passed"
+        checksum_verified_rollback = "passed"
+    }
+    release_transition = [ordered]@{
+        previous_version = $PreviousVersion
+        current_version = $Version
+        artifacts = @(
+            "release-transition-linux-x86_64"
+            "release-transition-windows-x86_64"
+            "release-transition-macos-x86_64"
+            "release-transition-macos-arm64"
+        )
     }
     provenance_url = $ProvenanceUrl
     artifacts = $artifacts

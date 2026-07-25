@@ -178,8 +178,9 @@ fn distribution_release_publishes_one_sha_evidence_manifest() {
         workflow.contains("Generate one-SHA release evidence")
             && workflow.contains("scripts/generate-release-evidence.ps1")
             && workflow.contains("target/dist/release-evidence.json")
+            && workflow.contains("-PreviousVersion $previousVersion")
             && workflow.contains("steps.archive-provenance.outputs['attestation-url']"),
-        "tag publication should retain one-SHA archive, checksum, workflow, and provenance evidence"
+        "tag publication should retain one-SHA archive, checksum, transition, workflow, and provenance evidence"
     );
     for required in [
         "x86_64-pc-windows-msvc",
@@ -190,6 +191,13 @@ fn distribution_release_publishes_one_sha_evidence_manifest() {
         "release eligible",
         "archive checksum mismatch",
         "complete_target_set",
+        "published_upgrade",
+        "compatibility_fixtures",
+        "checksum_verified_rollback",
+        "release-transition-linux-x86_64",
+        "release-transition-windows-x86_64",
+        "release-transition-macos-x86_64",
+        "release-transition-macos-arm64",
     ] {
         assert!(
             generator.contains(required),
@@ -330,6 +338,56 @@ fn distribution_workflow_smokes_explicit_upgrade_outside_checkout_without_a_real
             && upgrade_windows.contains("if ($upgradedSignature -eq $primarySignature)"),
         "Windows upgrade smoke should compare installed tool payloads against manifest.tool_versions and require the upgraded signature to change"
     );
+}
+
+#[test]
+fn tagged_distribution_requires_published_upgrade_and_rollback_on_every_host() {
+    let root = workspace_root();
+    let workflow = fs::read_to_string(root.join(".github/workflows/toolchain-distribution.yml"))
+        .expect("read toolchain distribution workflow");
+    let transition = workflow_step_block(&workflow, "Verify published upgrade and rollback");
+
+    for needle in [
+        "release-transition:",
+        "needs: package-smoke",
+        "sengoo-toolchain-${{ matrix.artifact }}",
+        "0.2.0-rc.1",
+        "0.2.0-rc.2",
+        "0.2.0",
+        "0.1.0-rc.1",
+        "releases/download/v$previousVersion",
+        "examples/compat/v0.1.0-rc.1",
+        "examples/compat/v0.2.0-rc.1",
+        "release-transition-${{ matrix.artifact }}",
+        "needs: [package-smoke, release-transition]",
+    ] {
+        assert!(
+            workflow.contains(needle),
+            "tagged distribution workflow should contain `{needle}`"
+        );
+    }
+    for needle in [
+        "Invoke-ToolchainInstall $previousVersion $installRoot",
+        "Invoke-ToolchainInstall $currentVersion $installRoot",
+        "$rollbackSignature -ne $previousSignature",
+        "Invoke-CompatibilityFixture \"previous\"",
+        "Invoke-CompatibilityFixture \"upgraded\"",
+        "Invoke-CompatibilityFixture \"rolled-back\"",
+        "Sengoo.toml",
+        "Sengoo.lock",
+        "Get-FileHash",
+        "SGPM_SGC",
+        "@(\"check\", \"--locked\")",
+        "@(\"test\", \"--locked\")",
+        "@(\"fmt\", \"--check\", \"--locked\")",
+        "@(\"doc\", \"--locked\")",
+        "@(\"build\", \"--locked\")",
+    ] {
+        assert!(
+            transition.contains(needle),
+            "published transition step should contain `{needle}`"
+        );
+    }
 }
 
 #[test]
