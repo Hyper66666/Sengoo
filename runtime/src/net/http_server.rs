@@ -161,6 +161,7 @@ impl HttpTlsAcceptor {
     }
 }
 
+#[cfg(windows)]
 fn classify_server_tls_error(message: &str) -> NetErrorCode {
     let lower = message.to_ascii_lowercase();
     if lower.contains("cert")
