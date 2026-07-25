@@ -186,6 +186,22 @@ jobs:
           $summary | ConvertTo-Json -Depth 4 | Set-Content -LiteralPath $summaryPath -Encoding utf8
           "SENGOO_REALWORLD_SUMMARY=$summaryPath" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
 
+      - name: Verify installed sgc HTTP TLS composition
+        shell: pwsh
+        run: |
+          $suffix = ""
+          if ($IsWindows -or $PSVersionTable.PSEdition -eq "Desktop") {
+            $suffix = ".exe"
+          }
+          $env:SENGOO_TEST_INSTALLED_SGC = Join-Path $env:SENGOO_INSTALLED_BIN "sgc$suffix"
+          Remove-Item Env:SENGOO_ROOT -ErrorAction SilentlyContinue
+          Remove-Item Env:SENGOO_STDLIB -ErrorAction SilentlyContinue
+          Remove-Item Env:SENGOO_RUNTIME -ErrorAction SilentlyContinue
+          cargo test -p sgc --test http_request_strings real_sgc_tls_router_keep_alive_streaming_composes_with_verified_ca -- --nocapture --test-threads=1
+          if ($LASTEXITCODE -ne 0) {
+            throw "installed sgc HTTP TLS composition failed on ${{ matrix.os }}"
+          }
+
       - name: Verify reviewed official package set
         shell: pwsh
         run: |

@@ -199,6 +199,36 @@ fn distribution_release_publishes_one_sha_evidence_manifest() {
 }
 
 #[test]
+fn release_host_matrix_proves_http_tls_with_source_and_installed_sgc() {
+    let root = workspace_root();
+    let distribution =
+        fs::read_to_string(root.join(".github/workflows/toolchain-distribution.yml"))
+            .expect("read distribution workflow");
+    let realworld = fs::read_to_string(root.join(".github/workflows/realworld-e2e.yml"))
+        .expect("read realworld workflow");
+    let common = fs::read_to_string(root.join("tools/sgc/tests/common/mod.rs"))
+        .expect("read sgc integration helper");
+    let test_name = "real_sgc_tls_router_keep_alive_streaming_composes_with_verified_ca";
+
+    assert!(
+        distribution.contains("Verify production HTTP TLS composition")
+            && distribution.contains("http_server_tls_router_keep_alive_and_streaming_compose")
+            && distribution.contains(test_name),
+        "every package host should run runtime and real-sgc verified TLS composition"
+    );
+    assert!(
+        realworld.contains("Verify installed sgc HTTP TLS composition")
+            && realworld.contains("SENGOO_TEST_INSTALLED_SGC")
+            && realworld.contains(test_name),
+        "the installed realworld matrix should compile the TLS fixture with packaged sgc"
+    );
+    assert!(
+        common.contains("var_os(\"SENGOO_TEST_INSTALLED_SGC\")"),
+        "the integration harness should honor the explicit installed-sgc path"
+    );
+}
+
+#[test]
 fn installers_detect_darwin_architecture_instead_of_assuming_x86_64() {
     let root = workspace_root();
     let shell = fs::read_to_string(root.join("scripts/install.sh")).expect("read install.sh");

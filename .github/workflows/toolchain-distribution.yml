@@ -76,6 +76,18 @@ jobs:
         shell: pwsh
         run: cargo test -p sengoo-runtime --lib --features native-bridge reactor_ -- --nocapture --test-threads=1
 
+      - name: Verify production HTTP TLS composition
+        shell: pwsh
+        run: |
+          cargo test -p sengoo-runtime --lib --features native-bridge http_server_tls_router_keep_alive_and_streaming_compose -- --nocapture --test-threads=1
+          if ($LASTEXITCODE -ne 0) {
+            throw "runtime HTTP TLS composition failed on ${{ matrix.os }}"
+          }
+          cargo test -p sgc --test http_request_strings real_sgc_tls_router_keep_alive_streaming_composes_with_verified_ca -- --nocapture --test-threads=1
+          if ($LASTEXITCODE -ne 0) {
+            throw "real sgc HTTP TLS composition failed on ${{ matrix.os }}"
+          }
+
       - name: Run release smoke matrix
         shell: pwsh
         run: |
