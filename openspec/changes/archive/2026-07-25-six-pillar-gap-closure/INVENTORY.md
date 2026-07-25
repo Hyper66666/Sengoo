@@ -1,6 +1,20 @@
 # Current Inventory (six-pillar-gap-closure)
 
-## Status Snapshot (June 2026)
+## Closure Snapshot (July 2026)
+
+All six original child changes and their follow-ups are archived into canonical
+capabilities. PR #51 Actions runs `29613261605`, `29613261610`,
+`29613261611`, `29613261614`, and `29613261662` provide the final core,
+compile-scale, sanitizer, four-host package, and installed realworld evidence.
+The current release-closure branch re-ran formatting, six-crate Clippy with
+`-D warnings`, strict OpenSpec validation, native HTTP runtime tests, and the
+real toolchain fixture after the last HTTP owner landed.
+
+Unproven POSIX TLS composition and candidate publication are release-specific
+gates now owned by `v0-2-release-candidate-closure`; they are not missing
+implementation in any of this umbrella's six children.
+
+## Historical Status Snapshot (June 2026)
 
 This umbrella has mostly been consumed by archived child changes. It remains
 active for final verification and remaining POSIX/reference-host evidence. The
@@ -111,16 +125,18 @@ one pass.
 - `stdlib-http-server-handlers` - archived 2026-06-10; pull-based dynamic HTTP server subset landed.
 - `stdlib-https-tls` - archived 2026-06-10 with POSIX/reference-host evidence still called out as required for confidence.
 
-## Current Remaining Blockers Before Umbrella Archive
+## Closure Disposition
 
 - `frontend-1000k-perf-gate` is archived as superseded by
   `compile-scale-production-gate`; Pillar 5 is closed by the passing 100k/1000k
   reference-host evidence recorded there.
-- POSIX CI must run the new staticlib/native-net path through `realworld-e2e`
-  and TLS tests. Windows local evidence exists, but Linux weak-symbol extraction
-  is the risk the CI matrix must close.
-- The umbrella verification section still needs one final green pass or explicit
-  evidenced skips; do not archive the umbrella from child archive evidence alone.
+- PR #51 re-proved the staticlib/native-net path through installed realworld
+  jobs on Linux, Windows, macOS x64, and macOS arm64.
+- POSIX verified-TLS composition remains explicitly Platform-specific and is
+  transferred to the v0.2 release host matrix rather than counted as six-pillar
+  completion evidence.
+- Final verification is tied to the retained PR #51 runs listed in the closure
+  snapshot; no local-only transcript is required to understand the archive.
 
 ## Support-Matrix Rows Moved
 

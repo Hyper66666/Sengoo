@@ -24,9 +24,13 @@
   intentionally deferred; preserve unique commits before optional cleanup.
   `INVENTORY.md` records ancestry, dirty-worktree preservation, and the
   file-bounded Senline slice disposition.
-- [ ] 1.4 Reconcile active OpenSpec task state with implementation and archive
+- [x] 1.4 Reconcile active OpenSpec task state with implementation and archive
   historical umbrellas that no longer own work. Do not rewrite archived
   history merely to change old evidence wording.
+  Archived `six-pillar-gap-closure` and
+  `mainstream-adoption-gap-closure` after reconciling their active task and
+  inventory state against retained PR #51 evidence. Archived child task files
+  were left as historical records.
 - [ ] 1.5 Record the converged remote main SHA; verify no required source, test,
   fixture, certificate, transcript, or evidence exists only untracked or in an
   obsolete worktree.
