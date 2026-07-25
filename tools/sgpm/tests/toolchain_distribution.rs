@@ -797,6 +797,24 @@ fn distribution_packages_and_verifies_the_target_native_runtime_payload() {
 }
 
 #[test]
+fn installers_allow_only_the_checksummed_v010_rc1_legacy_archive() {
+    let root = workspace_root();
+    let powershell =
+        fs::read_to_string(root.join("scripts/install.ps1")).expect("read install.ps1");
+    let shell = fs::read_to_string(root.join("scripts/install.sh")).expect("read install.sh");
+
+    for installer in [&powershell, &shell] {
+        assert!(
+            installer.contains("0.1.0-rc.1")
+                && installer.contains("predates payloads.sha256")
+                && installer.contains("verified release archive SHA-256")
+                && installer.contains("archive does not contain payloads.sha256"),
+            "installer should allow only the named legacy release while keeping new archives fail-closed"
+        );
+    }
+}
+
+#[test]
 fn distribution_workflow_compares_independent_windows_and_linux_builds() {
     let root = workspace_root();
     let workflow = fs::read_to_string(root.join(".github/workflows/toolchain-distribution.yml"))
