@@ -27,10 +27,9 @@ use super::{
     GenericInstanceCacheMetadata, GenericInstanceFingerprint, GenericInstancePlanStats,
     GenericItemFingerprint, LinkerMode, ModuleFingerprint, NativeRuntimeProvenance,
     ReflectionMetadata, ReflectionMode, RunCacheMetadata, RunEngine, RuntimeSourceIdentity,
-    BUILD_GRAPH_SCHEMA_VERSION,
-    DAEMON_PROTOCOL_VERSION, DEFAULT_DAEMON_ADDR, DEFAULT_SYMBOL_FINGERPRINT_MAX_SOURCE_BYTES,
-    FRONTEND_MEMORY_STREAM_THRESHOLD_BYTES, GENERIC_INSTANCE_CACHE_SCHEMA_VERSION,
-    LOW_MEMORY_HINT_AVAILABLE_BYTES,
+    BUILD_GRAPH_SCHEMA_VERSION, DAEMON_PROTOCOL_VERSION, DEFAULT_DAEMON_ADDR,
+    DEFAULT_SYMBOL_FINGERPRINT_MAX_SOURCE_BYTES, FRONTEND_MEMORY_STREAM_THRESHOLD_BYTES,
+    GENERIC_INSTANCE_CACHE_SCHEMA_VERSION, LOW_MEMORY_HINT_AVAILABLE_BYTES,
 };
 use crate::cli::Cli;
 use crate::cross_compile::NativeBuildTarget;
@@ -7386,76 +7385,71 @@ import std::io;
 import std::strconv;
 import std::status;
 
-def health_handler(request: HttpServerRequest) -> i64 {
-    if request.respond(200, "ok").unwrap_or(false) { 1 } else { 0 }
+def health_handler(request: &mut HttpServerRequest) -> Result<bool, i64> {
+    request.respond(200, "ok")
 }
 
-def echo_handler(request: HttpServerRequest) -> i64 {
-    if request.respond(200, "echo").unwrap_or(false) { 1 } else { 0 }
+def echo_handler(request: &mut HttpServerRequest) -> Result<bool, i64> {
+    request.respond(200, "echo")
 }
 
-def fail_handler(request: HttpServerRequest) -> i64 {
-    0
+def fail_handler(request: &mut HttpServerRequest) -> Result<bool, i64> {
+    Result { is_ok: false, value: false, error: STATUS_IO() }
 }
 
-def main() -> i64 {
+def decline_handler(request: &mut HttpServerRequest) -> Result<bool, i64> {
+    Result { is_ok: true, value: false, error: 0 }
+}
+
+def unanswered_handler(request: &mut HttpServerRequest) -> Result<bool, i64> {
+    Result { is_ok: true, value: true, error: 0 }
+}
+
+async def main() -> i64 {
     let bind_result = http_server_bind("127.0.0.1", 0);
     if bind_result.is_ok == false {
         10
     } else {
         let server = bind_result.value;
-        let h_health: fn(HttpServerRequest) -> i64 = health_handler;
-        let h_echo: fn(HttpServerRequest) -> i64 = echo_handler;
-        let h_fail: fn(HttpServerRequest) -> i64 = fail_handler;
-        let r0 = http_router_new();
-        let r1 = http_router_route(r0, "GET", "/health", h_health);
-        if r1.is_ok == false {
+        let created = http_router_new();
+        if !created.is_ok {
             server.close();
             13
         } else {
-            let r2 = http_router_route(r1.value, "GET", "/echo", h_echo);
-            if r2.is_ok == false {
+            let mut router = created.value;
+            let h_health: fn(&mut HttpServerRequest) -> Result<bool, i64> = health_handler;
+            let h_echo: fn(&mut HttpServerRequest) -> Result<bool, i64> = echo_handler;
+            let h_fail: fn(&mut HttpServerRequest) -> Result<bool, i64> = fail_handler;
+            let h_decline: fn(&mut HttpServerRequest) -> Result<bool, i64> = decline_handler;
+            let h_unanswered: fn(&mut HttpServerRequest) -> Result<bool, i64> = unanswered_handler;
+            let r1 = http_router_route(&mut router, "GET", "/health", h_health);
+            let r2 = http_router_route(&mut router, "GET", "/echo", h_echo);
+            let r3 = http_router_route(&mut router, "GET", "/fail", h_fail);
+            let r4 = http_router_route(&mut router, "GET", "/decline", h_decline);
+            let r5 = http_router_route(&mut router, "GET", "/unanswered", h_unanswered);
+            if !r1.is_ok or !r2.is_ok or !r3.is_ok or !r4.is_ok or !r5.is_ok {
                 server.close();
                 13
             } else {
-                let r3 = http_router_route(r2.value, "GET", "/fail", h_fail);
-                if r3.is_ok == false {
-                    server.close();
-                    13
-                } else {
-                    let mut router = r3.value;
-                    let port = server.local_port().unwrap_or(0);
-                    let port_buffer = ffi_buffer_new(16).unwrap_or(Buffer { handle: 0 });
-                    let port_len = strconv_format_i64(port, port_buffer).unwrap_or(0);
-                    io_stdout_write_raw(port_buffer.ptr(), port_len);
-                    io_stdout_write("\n");
-                    io_stdout_flush();
-                    port_buffer.free();
+                let port = server.local_port().unwrap_or(0);
+                let port_buffer = ffi_buffer_new(16).unwrap_or(Buffer { handle: 0 });
+                let port_len = strconv_format_i64(port, port_buffer).unwrap_or(0);
+                io_stdout_write_raw(port_buffer.ptr(), port_len);
+                io_stdout_write("\n");
+                io_stdout_flush();
+                port_buffer.free();
 
-                    let s1 = serve_http(server, router, 15000);
-                    if s1.is_ok == false {
-                        server.close();
-                        11
-                    } else {
-                        router = s1.value;
-                        let s2 = serve_http(server, router, 15000);
-                        if s2.is_ok == false {
-                            server.close();
-                            11
-                        } else {
-                            router = s2.value;
-                            let s3 = serve_http(server, router, 15000);
-                            if s3.is_ok == false {
-                                server.close();
-                                11
-                            } else {
-                                router = s3.value;
-                                let s4 = serve_http(server, router, 15000);
-                                server.close();
-                                if s4.is_ok { 0 } else { 12 }
-                            }
-                        }
-                    }
+                let s1 = await serve_http_timeout(&server, &router, 15000);
+                let s2 = await serve_http_timeout(&server, &router, 15000);
+                let s3 = await serve_http_timeout(&server, &router, 15000);
+                let s4 = await serve_http_timeout(&server, &router, 15000);
+                let s5 = await serve_http_timeout(&server, &router, 15000);
+                let s6 = await serve_http_timeout(&server, &router, 15000);
+                let closed = server.close();
+                if s1.is_ok and s2.is_ok and s3.is_ok and s4.is_ok and s5.is_ok and s6.is_ok and closed {
+                    0
+                } else {
+                    11
                 }
             }
         }
@@ -7561,6 +7555,26 @@ def main() -> i64 {
         failed.starts_with("HTTP/1.1 500 Internal Server Error")
             && failed.contains("handler error"),
         "failing handler should 500: {failed}"
+    );
+
+    let declined = request_once(
+        port,
+        b"GET /decline HTTP/1.1\r\nHost: localhost\r\nConnection: close\r\n\r\n",
+    );
+    assert!(
+        declined.starts_with("HTTP/1.1 500 Internal Server Error")
+            && declined.contains("handler error"),
+        "Ok(false) handler should 500: {declined}"
+    );
+
+    let unanswered = request_once(
+        port,
+        b"GET /unanswered HTTP/1.1\r\nHost: localhost\r\nConnection: close\r\n\r\n",
+    );
+    assert!(
+        unanswered.starts_with("HTTP/1.1 500 Internal Server Error")
+            && unanswered.contains("handler error"),
+        "unanswered Ok(true) handler should 500: {unanswered}"
     );
 
     let status = child.wait().expect("router fixture should exit");

@@ -33,16 +33,23 @@
 
 ## 2. HTTP production owner closure
 
-- [ ] 2.1 Complete every `http-production-serving` task and archive that change
+- [x] 2.1 Complete every `http-production-serving` task and archive that change
   into canonical `stdlib-http-server`.
+  Archived as `2026-07-25-http-production-serving`; repository-wide strict
+  validation passes with the canonical HTTP requirements in place.
 - [ ] 2.2 Run Windows Schannel and POSIX rustls real-handshake tests with CA and
   hostname verification; no `verify=false` or plaintext fallback counts.
 - [ ] 2.3 Prove managed TLS Buffers, Vec Router, keep-alive, and chunked
   streaming compose through installed `sgc` and the locked
   `http-echo-service` fixture.
-- [ ] 2.4 Preserve C-only fallback linkability and `STATUS_UNSUPPORTED` behavior
+- [x] 2.4 Preserve C-only fallback linkability and `STATUS_UNSUPPORTED` behavior
   without shadowing native runtime strong symbols.
-- [ ] 2.5 Update network docs and `SUPPORT_MATRIX.md` from retained host runs.
+  C-only link/idempotence regressions pass, and
+  `real_sgc_tls_router_keep_alive_streaming_composes_with_verified_ca` proves
+  the native runtime strong symbols still win when both inputs are linked.
+- [x] 2.5 Update network docs and `SUPPORT_MATRIX.md` from retained host runs.
+  The matrix keeps POSIX rustls Platform-specific pending the release-host
+  proof rather than promoting the Windows-only local evidence.
 
 ## 3. One-SHA release matrix
 

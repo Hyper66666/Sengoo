@@ -74,11 +74,20 @@ This document defines the current runtime network baseline APIs.
 - `i64 sengoo_http_request_body_len(u64 request_handle)` / `i64 sengoo_http_request_body_copy(u64 request_handle, u8* buffer, usize capacity)`
 - `i64 sengoo_http_request_respond(u64 request_handle, i32 status, const u8* body, usize body_len)`
 - `i64 sengoo_http_request_respond_with_content_type(u64 request_handle, i32 status, const u8* content_type, const u8* body, usize body_len)`
+- `i64 sengoo_http_request_is_pending(u64 request_handle)` - reports whether a router handler still owes an answer
 - `i64 sengoo_http_request_begin_stream(u64 request_handle, i32 status)` / `i64 sengoo_http_request_begin_stream_with_length(u64 request_handle, i32 status, i64 content_length)` — bounded response streaming (chunked or fixed; max chunk 65536)
 - `i64 sengoo_http_response_stream_write(u64 stream_handle, const u8* data, usize len)` / `i64 sengoo_http_response_stream_finish(u64 stream_handle)` / `i64 sengoo_http_response_stream_close(u64 stream_handle)`
 - `i64 sengoo_http_request_close(u64 request_handle)`
 
-Sengoo-side routing uses `HttpRouter` + `serve_http` / `serve_http_once` in `std::net` (exact method+path; pull and router modes are exclusive per listener).
+Sengoo-side routing uses descriptor-backed `Vec<HttpRoute>` storage and never
+passes a Sengoo function pointer into Rust. Handlers have the frozen signature
+`fn(&mut HttpServerRequest) -> Result<bool, i64>`; registration uses
+`http_router_route(&mut router, method, path, handler)`. `await serve_http(...)`
+or `await serve_http_timeout(...)` performs one cooperative async pull and
+dispatch, so repeated calls form the caller-owned serve loop. Exact method/path
+bytes are matched without normalization, and pull/router modes are exclusive
+per listener. `Err`, `Ok(false)`, and `Ok(true)` without an answer all produce
+HTTP 500 while an unmatched request produces 404.
 
 ### Error Mapping
 
@@ -237,17 +246,21 @@ return `STATUS_UNSUPPORTED`.
 
 ## Current Constraints
 
-- HTTPS (`https://`) and secure WebSocket (`wss://`) are not part of this baseline.
-- HTTP keeps baseline behavior (status + body retrieval).
-- WebSocket baseline supports text frames for smoke/e2e paths.
-- HTTP server middleware/handler model is MVP-level (no async middleware chain yet).
-- Dynamic serving remains serial per `HttpServer`: no TLS server, no streaming
-  bodies, no keep-alive, and no callback-style handlers. This change does not
-  claim general task-cancellation propagation beyond the pending request
-  future's own cancel/drop cleanup.
+- HTTPS client/server support is platform-specific: Schannel on Windows and
+  rustls on POSIX. Trust and hostname verification stay enabled; tests use an
+  explicit fixture CA rather than an insecure verification bypass.
+- Dynamic serving remains serial per `HttpServer`, but Sengoo-side exact-route
+  handlers, opt-in bounded keep-alive, and bounded fixed/chunked response
+  streaming compose with the TLS accept path.
+- WebSocket baseline supports text-frame smoke/e2e paths over plain TCP;
+  WebSocket-over-TLS is not productized.
+- HTTP/2, request-body streaming, async middleware chains, and general task-
+  cancellation propagation remain outside this subset.
 
 ## Verification
 
 - Runtime tests: `cargo test -q -p sengoo-runtime net::tests -- --nocapture --test-threads=1`
 - Native async server integration: `cargo test -p sgc stdlib_http_server_async_awaits_and_answers_localhost_request -- --nocapture --test-threads=1`
+- Verified TLS composition: `cargo test -p sengoo-runtime --lib --features native-bridge http_server_tls_router_keep_alive_and_streaming_compose -- --test-threads=1`
+- Real `sgc` router/stream composition: `cargo test -p sgc --test http_request_strings real_sgc_tls_router_keep_alive_streaming_composes_with_verified_ca -- --test-threads=1`
 - Integrated smoke: `bench/scripts/e2e-smoke.sh` and `bench/scripts/e2e-smoke.ps1`
