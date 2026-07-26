@@ -18,6 +18,10 @@ There is **no** new reverse-call ABI where Rust invokes Sengoo function
 pointers. The runtime continues to own accept/read/answer accounting; the
 stdlib router loop pulls requests and dispatches in Sengoo.
 
+Route records are stored in descriptor-backed `Vec<HttpRoute>` storage. The
+public async entry points copy only generation-checked server/router handles
+before suspension; they do not retain pointers into a caller's poll stack.
+
 #### Registration surface
 
 ```sg

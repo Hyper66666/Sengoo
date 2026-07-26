@@ -12,8 +12,9 @@ FFI callback ABI), dual-route registration, and exactly-once `respond`.
   clients against `/health` and `/echo`, dispatches both through `serve_http`,
   and closes the server cleanly. On C-only fallback hosts the bind itself maps
   to `STATUS_UNSUPPORTED` and the smoke records that as the supported outcome.
-- Unmatched paths answer `404`; handlers that return `0` (not answered) map to
-  `500`. Pull and router modes are exclusive on one listener.
+- Handlers use `fn(&mut HttpServerRequest) -> Result<bool, i64>`. Unmatched
+  paths answer `404`; `Err`, `Ok(false)`, and a returned `Ok(true)` without an
+  answer map to `500`. Pull and router modes are exclusive on one listener.
 - Full dual-route / 404 / 500 / mode-mix proof is also covered by
   `cargo test -p sgc stdlib_http_router_dual_routes_404_and_500_localhost` and
   `stdlib_http_router_rejects_pull_mode_mix`.
@@ -28,8 +29,10 @@ sgpm build --locked
 sgpm run --locked
 ```
 
-Dynamic serving limits (exact method+path only, plaintext only, default
-`Connection: close`, pending cap 64, no percent-decoding, no reverse Sengoo
-callback ABI) are documented in `../../../docs/network-runtime.md`; support
-claims live in `../SUPPORT_MATRIX.md`. Keep-alive, response streaming, and TLS
-server remain residual under open owner `http-production-serving`.
+The package's default smoke intentionally stays plaintext and close-mode for a
+small self-contained loop. The same router handlers are exercised with opt-in
+keep-alive, chunked streaming, and a verified test-CA TLS server by
+`tools/sgc/tests/http_request_strings.rs::real_sgc_tls_router_keep_alive_streaming_composes_with_verified_ca`.
+Exact path matching, pending cap 64, no percent-decoding, and no reverse Sengoo
+callback ABI remain documented in `../../../docs/network-runtime.md`; support
+claims live in `../SUPPORT_MATRIX.md`.

@@ -70,6 +70,30 @@ impl Write for HttpServerConn {
 }
 
 impl HttpServerConn {
+    /// Probe transport readiness without consuming bytes or mutating the
+    /// blocking mode of the stream owned by the HTTP/TLS state machine.
+    fn is_readable(&self) -> Result<bool, NetErrorCode> {
+        let socket = match self {
+            HttpServerConn::Plain(stream) => stream,
+            #[cfg(windows)]
+            HttpServerConn::Tls(stream) => stream.get_ref(),
+            #[cfg(not(windows))]
+            HttpServerConn::Tls(stream) => &stream.sock,
+        };
+        let probe = socket
+            .try_clone()
+            .map_err(|error| classify_io_error(&error))?;
+        probe
+            .set_nonblocking(true)
+            .map_err(|error| classify_io_error(&error))?;
+        let mut byte = [0_u8; 1];
+        match probe.peek(&mut byte) {
+            Ok(_) => Ok(true),
+            Err(error) if error.kind() == ErrorKind::WouldBlock => Ok(false),
+            Err(error) => Err(classify_io_error(&error)),
+        }
+    }
+
     fn set_read_timeout(&self, timeout: Option<Duration>) -> std::io::Result<()> {
         match self {
             HttpServerConn::Plain(s) => s.set_read_timeout(timeout),
@@ -137,6 +161,7 @@ impl HttpTlsAcceptor {
     }
 }
 
+#[cfg(windows)]
 fn classify_server_tls_error(message: &str) -> NetErrorCode {
     let lower = message.to_ascii_lowercase();
     if lower.contains("cert")
@@ -355,6 +380,8 @@ pub(super) struct LiveHttpConnection {
     stream: HttpServerConn,
     /// Number of fully answered requests already completed on this connection.
     answered_count: u32,
+    /// Start of the bounded idle period after the previous response completed.
+    idle_since: Instant,
 }
 
 #[derive(Debug)]
@@ -397,7 +424,12 @@ pub(super) struct HttpRequestEntry {
 
 /// Cap of pulled-but-unanswered request handles per server (design D5).
 const MAX_PENDING_DYNAMIC_REQUESTS: usize = 64;
-const ASYNC_HTTP_IO_SLICE: Duration = Duration::from_millis(5);
+/// Once a socket is reported readable, allow a bounded interval to complete
+/// TLS post-handshake processing and one HTTP request. Readiness polling itself
+/// still wakes every 5ms; this bound is only entered for an accepted/readable
+/// connection and prevents legitimate TLS clients from being cut off by a
+/// scheduler-sized 5ms timeout.
+const ASYNC_HTTP_IO_SLICE: Duration = Duration::from_millis(250);
 /// Max streaming chunk size (design D-C3).
 pub(super) const HTTP_STREAM_MAX_CHUNK: usize = 65_536;
 
@@ -438,10 +470,13 @@ type HttpServerSnapshot = (
     bool, // keep_alive_enabled
 );
 
-#[derive(Debug, Clone, Copy)]
+#[derive(Debug)]
 enum DynamicRequestPoll {
     Ready(u64),
     NotReady,
+    /// A keep-alive connection produced no application bytes during the short
+    /// cooperative I/O slice and must remain owned by the server.
+    Idle(LiveHttpConnection),
 }
 
 #[derive(Debug, Clone, Copy)]
@@ -589,6 +624,31 @@ impl NetRuntime {
         handle: u64,
     ) -> Result<Option<LiveHttpConnection>, NetErrorCode> {
         self.http_server_with_state(handle, |state| state.live_connection.take())
+    }
+
+    /// Async pull must not consume an idle keep-alive connection merely to
+    /// discover that the next request has not arrived yet. Peek first, expire
+    /// at the pinned idle bound, and only transfer ownership when readable.
+    fn http_server_take_readable_live_connection(
+        &self,
+        handle: u64,
+    ) -> Result<Option<LiveHttpConnection>, NetErrorCode> {
+        self.http_server_with_state(handle, |state| {
+            let Some(live) = state.live_connection.as_ref() else {
+                return Ok(None);
+            };
+            if live.idle_since.elapsed()
+                >= Duration::from_millis(u64::from(HTTP_KEEP_ALIVE_IDLE_TIMEOUT_MS))
+            {
+                state.live_connection = None;
+                return Ok(None);
+            }
+            if live.stream.is_readable()? {
+                Ok(state.live_connection.take())
+            } else {
+                Ok(None)
+            }
+        })?
     }
 
     fn http_server_put_live_connection(
@@ -914,6 +974,7 @@ fn read_http_request(
     stream: &mut HttpServerConn,
     max_header_bytes: usize,
     max_body_bytes: usize,
+    saw_application_bytes: &mut bool,
 ) -> Result<HttpServerRequest, NetErrorCode> {
     let mut raw = Vec::new();
     let mut buf = [0u8; 1024];
@@ -924,6 +985,7 @@ fn read_http_request(
         if n == 0 {
             return Err(NetErrorCode::RemoteClosed);
         }
+        *saw_application_bytes = true;
         raw.extend_from_slice(&buf[..n]);
         if raw.len()
             > max_header_bytes
@@ -958,6 +1020,7 @@ fn read_http_request(
             if n == 0 {
                 break;
             }
+            *saw_application_bytes = true;
             body_bytes.extend_from_slice(&buf[..n]);
             if body_bytes.len() > max_body_bytes.saturating_add(4096) {
                 return Err(NetErrorCode::HttpProtocolError);
@@ -989,6 +1052,7 @@ fn read_http_request(
             if n == 0 {
                 return Err(NetErrorCode::HttpProtocolError);
             }
+            *saw_application_bytes = true;
             body_bytes.extend_from_slice(&buf[..n]);
         }
         body_bytes[..content_length].to_vec()
@@ -1152,7 +1216,13 @@ fn process_http_server_connection(
     max_header_bytes: usize,
     max_body_bytes: usize,
 ) -> Result<(), NetErrorCode> {
-    let request = match read_http_request(stream, max_header_bytes, max_body_bytes) {
+    let mut saw_application_bytes = false;
+    let request = match read_http_request(
+        stream,
+        max_header_bytes,
+        max_body_bytes,
+        &mut saw_application_bytes,
+    ) {
         Ok(req) => req,
         Err(_) => {
             let _ = write_http_response(
@@ -1342,11 +1412,16 @@ fn poll_next_dynamic_request_once(
             max_body_bytes,
             idle_timeout,
             live.answered_count,
+            Some(live.idle_since),
+            false,
         ) {
             Ok(DynamicRequestPoll::Ready(handle)) => return Ok(DynamicRequestPoll::Ready(handle)),
             Ok(DynamicRequestPoll::NotReady) => {
                 // Live connection had no usable dynamic request (idle/error/static).
                 // Fall through to accept a fresh client.
+            }
+            Ok(DynamicRequestPoll::Idle(connection)) => {
+                let _ = net_runtime().http_server_put_live_connection(server_handle, connection);
             }
             Err(NetErrorCode::Timeout) => {
                 // Idle timeout: drop live connection and accept new.
@@ -1369,6 +1444,8 @@ fn poll_next_dynamic_request_once(
         max_body_bytes,
         io_timeout,
         /*answered_before=*/ 0,
+        None,
+        false,
     )
 }
 
@@ -1382,6 +1459,8 @@ fn process_dynamic_request_stream(
     max_body_bytes: usize,
     io_timeout: Duration,
     answered_before: u32,
+    idle_since: Option<Instant>,
+    preserve_empty_timeout: bool,
 ) -> Result<DynamicRequestPoll, NetErrorCode> {
     stream
         .set_read_timeout(Some(io_timeout))
@@ -1390,8 +1469,26 @@ fn process_dynamic_request_stream(
         .set_write_timeout(Some(io_timeout))
         .map_err(|err| classify_io_error(&err))?;
 
-    let request = match read_http_request(&mut stream, max_header_bytes, max_body_bytes) {
+    let mut saw_application_bytes = false;
+    let request = match read_http_request(
+        &mut stream,
+        max_header_bytes,
+        max_body_bytes,
+        &mut saw_application_bytes,
+    ) {
         Ok(request) => request,
+        Err(code)
+            if matches!(code, NetErrorCode::Timeout)
+                && answered_before > 0
+                && preserve_empty_timeout
+                && !saw_application_bytes =>
+        {
+            return Ok(DynamicRequestPoll::Idle(LiveHttpConnection {
+                stream,
+                answered_count: answered_before,
+                idle_since: idle_since.unwrap_or_else(Instant::now),
+            }));
+        }
         Err(code) if matches!(code, NetErrorCode::Timeout) && answered_before > 0 => {
             // Idle keep-alive timeout: close quietly.
             return Err(NetErrorCode::Timeout);
@@ -1794,6 +1891,9 @@ fn http_server_next_request_impl(handle: u64, timeout_ms: u32) -> u64 {
                 let remaining = deadline.saturating_duration_since(now);
                 thread::sleep(remaining.min(Duration::from_millis(2)));
             }
+            Ok(DynamicRequestPoll::Idle(connection)) => {
+                let _ = net_runtime().http_server_put_live_connection(handle, connection);
+            }
             Err(code) => return fail_handle(code),
         }
     }
@@ -1937,7 +2037,23 @@ pub unsafe extern "C" fn sengoo_http_server_next_request_async__poll(handle: i64
         ASYNC_HTTP_IO_SLICE.min(state.deadline.saturating_duration_since(Instant::now()));
 
     // Prefer server-owned keep-alive connection before accept interest.
-    if let Ok(Some(live)) = net_runtime().http_server_take_live_connection(state.server_handle) {
+    let readable_live =
+        match net_runtime().http_server_take_readable_live_connection(state.server_handle) {
+            Ok(live) => live,
+            Err(code) => {
+                if let Some(interest) = state.listener_interest.take() {
+                    crate::async_runtime::http_listener_unregister(interest);
+                }
+                state.outcome = AsyncNextRequestOutcome::Ready {
+                    is_ok: false,
+                    value: 0,
+                    error: super::status_from_net_error_code(code),
+                };
+                guard.mark_ready();
+                return 1;
+            }
+        };
+    if let Some(live) = readable_live {
         let idle = Duration::from_millis(u64::from(HTTP_KEEP_ALIVE_IDLE_TIMEOUT_MS)).min(io_slice);
         match process_dynamic_request_stream(
             state.server_handle,
@@ -1948,6 +2064,8 @@ pub unsafe extern "C" fn sengoo_http_server_next_request_async__poll(handle: i64
             max_body_bytes,
             idle,
             live.answered_count,
+            Some(live.idle_since),
+            true,
         ) {
             Ok(DynamicRequestPoll::Ready(request_handle)) => {
                 if let Some(interest) = state.listener_interest.take() {
@@ -1962,6 +2080,10 @@ pub unsafe extern "C" fn sengoo_http_server_next_request_async__poll(handle: i64
                 return 1;
             }
             Ok(DynamicRequestPoll::NotReady) | Err(NetErrorCode::Timeout) => {}
+            Ok(DynamicRequestPoll::Idle(connection)) => {
+                let _ =
+                    net_runtime().http_server_put_live_connection(state.server_handle, connection);
+            }
             Err(code) => {
                 if let Some(interest) = state.listener_interest.take() {
                     crate::async_runtime::http_listener_unregister(interest);
@@ -2040,6 +2162,8 @@ pub unsafe extern "C" fn sengoo_http_server_next_request_async__poll(handle: i64
         max_body_bytes,
         io_slice,
         /*answered_before=*/ 0,
+        None,
+        false,
     ) {
         Ok(DynamicRequestPoll::Ready(request_handle)) => {
             state.outcome = AsyncNextRequestOutcome::Ready {
@@ -2073,6 +2197,15 @@ pub unsafe extern "C" fn sengoo_http_server_next_request_async__poll(handle: i64
                     1
                 }
             }
+        }
+        Ok(DynamicRequestPoll::Idle(connection)) => {
+            let _ = net_runtime().http_server_put_live_connection(state.server_handle, connection);
+            crate::async_runtime::record_external_poll_wakeup_hint(
+                state
+                    .deadline
+                    .min(Instant::now() + Duration::from_millis(5)),
+            );
+            0
         }
         Err(code) => {
             state.outcome = AsyncNextRequestOutcome::Ready {
@@ -2124,6 +2257,20 @@ pub unsafe extern "C" fn sengoo_http_server_next_request_async__result(
     }
 }
 
+fn release_abandoned_async_next_request(state: &AsyncNextRequestState) {
+    if let Some(interest) = state.listener_interest {
+        crate::async_runtime::http_listener_unregister(interest);
+    }
+    if let AsyncNextRequestOutcome::Ready {
+        is_ok: true, value, ..
+    } = state.outcome
+    {
+        if let Ok(mut entry) = net_runtime().http_request_take(value) {
+            let _ = write_http_response(&mut entry.stream, &gateway_timeout_response(), false);
+        }
+    }
+}
+
 #[no_mangle]
 /// # Safety
 ///
@@ -2133,9 +2280,7 @@ pub unsafe extern "C" fn sengoo_http_server_next_request_async__cancel(handle: i
     let Some(state) = (unsafe { async_handle_take_box::<AsyncNextRequestState>(handle) }) else {
         return false;
     };
-    if let Some(interest) = state.listener_interest {
-        crate::async_runtime::http_listener_unregister(interest);
-    }
+    release_abandoned_async_next_request(&state);
     true
 }
 
@@ -2148,9 +2293,7 @@ pub unsafe extern "C" fn sengoo_http_server_next_request_async__drop(handle: i64
     let Some(state) = (unsafe { async_handle_take_box::<AsyncNextRequestState>(handle) }) else {
         return;
     };
-    if let Some(interest) = state.listener_interest {
-        crate::async_runtime::http_listener_unregister(interest);
-    }
+    release_abandoned_async_next_request(&state);
 }
 
 // Router-mode async lifecycle aliases: same state machine as pull, different start only.
@@ -2495,6 +2638,7 @@ fn respond_impl(
                     LiveHttpConnection {
                         stream: entry.stream,
                         answered_count: answered_after,
+                        idle_since: Instant::now(),
                     },
                 );
             }
@@ -2530,6 +2674,18 @@ pub extern "C" fn sengoo_http_request_respond_with_content_type(
         Err(code) => return fail_bool(code),
     };
     respond_impl(handle, status, Some(content_type), body, body_len)
+}
+
+/// Returns 1 while the request handle is still owned by the pending-request
+/// table. Responding, beginning a stream, or closing consumes the handle.
+#[no_mangle]
+pub extern "C" fn sengoo_http_request_is_pending(handle: u64) -> i64 {
+    reset_last_error();
+    match net_runtime().http_request_with_entry(handle, |_| ()) {
+        Ok(()) => 1,
+        Err(NetErrorCode::HandleNotFound) => 0,
+        Err(code) => fail_bool(code),
+    }
 }
 
 /// Closing an unanswered request writes the deterministic 504 fallback first.
@@ -2655,6 +2811,7 @@ pub extern "C" fn sengoo_http_response_stream_finish(stream_handle: u64) -> i64 
             LiveHttpConnection {
                 stream: entry.stream,
                 answered_count: answered_after,
+                idle_since: Instant::now(),
             },
         );
     }
@@ -2696,11 +2853,42 @@ mod tests {
             1024 * 1024,
             Duration::ZERO,
             0,
+            None,
+            false,
         );
 
         assert!(
             result.is_err(),
             "invalid socket timeout configuration must not be reported as NotReady"
+        );
+        drop(client);
+    }
+
+    #[test]
+    fn dynamic_request_stream_preserves_empty_keep_alive_slice() {
+        let _guard = super::super::net_test_lock();
+        let listener = TcpListener::bind(("127.0.0.1", 0)).expect("bind test listener");
+        let address = listener.local_addr().expect("read test listener address");
+        let client = TcpStream::connect(address).expect("connect test client");
+        let (server, _) = listener.accept().expect("accept test client");
+        let idle_since = Instant::now();
+
+        let result = process_dynamic_request_stream(
+            0,
+            HttpServerConn::Plain(server),
+            &[],
+            &[],
+            16 * 1024,
+            1024 * 1024,
+            Duration::from_millis(1),
+            1,
+            Some(idle_since),
+            true,
+        );
+
+        assert!(
+            matches!(result, Ok(DynamicRequestPoll::Idle(_))),
+            "an empty cooperative slice must retain the keep-alive stream"
         );
         drop(client);
     }
@@ -2813,6 +3001,96 @@ mod tests {
             assert_eq!(sengoo_http_request_respond(req, 200, b"ok".as_ptr(), 2), 1);
         }
         worker.join().expect("client join");
+        assert_eq!(sengoo_http_server_close(server), 1);
+    }
+
+    #[test]
+    fn keep_alive_request_cap_closes_after_final_response() {
+        use std::io::Write;
+        use std::thread;
+
+        let _guard = super::super::net_test_lock();
+        let server = sengoo_http_server_bind(std::ptr::null(), 0);
+        assert_ne!(server, 0);
+        assert_eq!(sengoo_http_server_set_keep_alive(server, 1), 1);
+        let port = sengoo_http_server_local_port(server);
+
+        let worker = thread::spawn(move || {
+            let mut stream =
+                TcpStream::connect(("127.0.0.1", port as u16)).expect("client connect");
+            for index in 0..HTTP_KEEP_ALIVE_MAX_REQUESTS {
+                stream
+                    .write_all(b"GET /cap HTTP/1.1\r\nHost: localhost\r\n\r\n")
+                    .expect("write capped request");
+                let response = read_http_response_message(&mut stream);
+                let lower = response.to_ascii_lowercase();
+                if index + 1 == HTTP_KEEP_ALIVE_MAX_REQUESTS {
+                    assert!(
+                        lower.contains("connection: close"),
+                        "cap response must close: {response}"
+                    );
+                } else {
+                    assert!(
+                        lower.contains("connection: keep-alive"),
+                        "pre-cap response must stay live: {response}"
+                    );
+                }
+            }
+        });
+
+        for _ in 0..HTTP_KEEP_ALIVE_MAX_REQUESTS {
+            let request = sengoo_http_server_next_request(server, 5_000);
+            assert_ne!(request, 0, "request within cap should be pulled");
+            assert_eq!(
+                sengoo_http_request_respond(request, 200, b"ok".as_ptr(), 2),
+                1
+            );
+        }
+        worker.join().expect("client join");
+        assert!(
+            net_runtime()
+                .http_server_take_live_connection(server)
+                .expect("read live slot")
+                .is_none(),
+            "the capped response must not retain a live connection"
+        );
+        assert_eq!(sengoo_http_server_close(server), 1);
+    }
+
+    #[test]
+    fn keep_alive_idle_bound_expires_server_owned_connection() {
+        let _guard = super::super::net_test_lock();
+        let server = sengoo_http_server_bind(std::ptr::null(), 0);
+        assert_ne!(server, 0);
+
+        let listener = TcpListener::bind(("127.0.0.1", 0)).expect("bind socket pair");
+        let address = listener.local_addr().expect("read socket pair address");
+        let client = TcpStream::connect(address).expect("connect socket pair");
+        let (server_stream, _) = listener.accept().expect("accept socket pair");
+        net_runtime()
+            .http_server_put_live_connection(
+                server,
+                LiveHttpConnection {
+                    stream: HttpServerConn::Plain(server_stream),
+                    answered_count: 1,
+                    idle_since: Instant::now()
+                        - Duration::from_millis(u64::from(HTTP_KEEP_ALIVE_IDLE_TIMEOUT_MS)),
+                },
+            )
+            .expect("install expired live connection");
+
+        assert!(net_runtime()
+            .http_server_take_readable_live_connection(server)
+            .expect("expire live connection")
+            .is_none());
+        assert!(
+            net_runtime()
+                .http_server_take_live_connection(server)
+                .expect("inspect live slot")
+                .is_none(),
+            "expired connection must be removed from server ownership"
+        );
+        drop(client);
         assert_eq!(sengoo_http_server_close(server), 1);
     }
 
@@ -3061,12 +3339,76 @@ mod tests {
     }
 
     #[test]
-    fn http_server_tls_handshake_and_pull_response() {
+    fn http_server_tls_router_keep_alive_and_streaming_compose() {
         use std::io::{Read, Write};
         use std::thread;
 
         trait ReadWrite: Read + Write {}
         impl<T: Read + Write> ReadWrite for T {}
+
+        fn read_http_line(stream: &mut dyn ReadWrite) -> Vec<u8> {
+            let mut line = Vec::new();
+            loop {
+                let mut byte = [0_u8; 1];
+                stream.read_exact(&mut byte).expect("read HTTP line byte");
+                line.push(byte[0]);
+                if line.ends_with(b"\r\n") {
+                    return line;
+                }
+                assert!(line.len() < 8192, "HTTP line exceeds test bound");
+            }
+        }
+
+        fn read_http_response(stream: &mut dyn ReadWrite) -> (String, Vec<u8>) {
+            let mut headers = Vec::new();
+            while !headers.ends_with(b"\r\n\r\n") {
+                let mut byte = [0_u8; 1];
+                stream
+                    .read_exact(&mut byte)
+                    .expect("read HTTP response header byte");
+                headers.push(byte[0]);
+                assert!(headers.len() < 8192, "HTTP headers exceed test bound");
+            }
+            let header_text = String::from_utf8(headers).expect("HTTP headers are UTF-8");
+            let chunked = header_text.lines().any(|line| {
+                line.split_once(':').is_some_and(|(name, value)| {
+                    name.eq_ignore_ascii_case("transfer-encoding")
+                        && value.trim().eq_ignore_ascii_case("chunked")
+                })
+            });
+            let content_length = header_text.lines().find_map(|line| {
+                let (name, value) = line.split_once(':')?;
+                name.eq_ignore_ascii_case("content-length")
+                    .then(|| value.trim().parse::<usize>().ok())
+                    .flatten()
+            });
+
+            let mut body = Vec::new();
+            if chunked {
+                loop {
+                    let size_line = read_http_line(stream);
+                    let size_text = std::str::from_utf8(&size_line[..size_line.len() - 2])
+                        .expect("chunk size is ASCII");
+                    let size = usize::from_str_radix(size_text.trim(), 16)
+                        .expect("chunk size is hexadecimal");
+                    if size == 0 {
+                        assert_eq!(read_http_line(stream), b"\r\n");
+                        break;
+                    }
+                    let start = body.len();
+                    body.resize(start + size, 0);
+                    stream
+                        .read_exact(&mut body[start..])
+                        .expect("read response chunk");
+                    assert_eq!(read_http_line(stream), b"\r\n");
+                }
+            } else {
+                let size = content_length.expect("non-chunked response has Content-Length");
+                body.resize(size, 0);
+                stream.read_exact(&mut body).expect("read response body");
+            }
+            (header_text, body)
+        }
 
         let _guard = super::super::net_test_lock();
         let (cert_pem, key_pem) = test_server_pem_bundle();
@@ -3095,16 +3437,16 @@ mod tests {
             tcp.set_write_timeout(Some(Duration::from_secs(5)))
                 .expect("write timeout");
 
-            // Self-signed fixture is not in the system trust store. Prove the
-            // *server* handshake with a test client that accepts the presented
-            // cert (not a production trust configuration).
+            // Trust only the committed test root and keep normal hostname
+            // verification enabled. `localhost` is present in the fixture SAN.
             // Windows product stack uses native-tls; POSIX uses rustls — match
             // the client backend so `native_tls` is not required off-Windows.
             #[cfg(windows)]
             let mut tls: Box<dyn ReadWrite> = {
+                let root = native_tls::Certificate::from_pem(&cert_pem)
+                    .expect("parse test root certificate");
                 let connector = native_tls::TlsConnector::builder()
-                    .danger_accept_invalid_certs(true)
-                    .danger_accept_invalid_hostnames(true)
+                    .add_root_certificate(root)
                     .build()
                     .expect("test connector");
                 Box::new(
@@ -3115,59 +3457,19 @@ mod tests {
             };
             #[cfg(not(windows))]
             let mut tls: Box<dyn ReadWrite> = {
-                use rustls::client::danger::{
-                    HandshakeSignatureValid, ServerCertVerified, ServerCertVerifier,
-                };
-                use rustls::pki_types::{CertificateDer, ServerName, UnixTime};
-                use rustls::{
-                    ClientConfig, ClientConnection, DigitallySignedStruct, Error as TlsError,
-                    SignatureScheme, StreamOwned,
-                };
+                use rustls::pki_types::{CertificateDer, ServerName};
+                use rustls::{ClientConfig, ClientConnection, RootCertStore, StreamOwned};
                 use std::sync::Arc;
 
-                #[derive(Debug)]
-                struct AcceptAnyCert;
-                impl ServerCertVerifier for AcceptAnyCert {
-                    fn verify_server_cert(
-                        &self,
-                        _end_entity: &CertificateDer<'_>,
-                        _intermediates: &[CertificateDer<'_>],
-                        _server_name: &ServerName<'_>,
-                        _ocsp_response: &[u8],
-                        _now: UnixTime,
-                    ) -> Result<ServerCertVerified, TlsError> {
-                        Ok(ServerCertVerified::assertion())
-                    }
-
-                    fn verify_tls12_signature(
-                        &self,
-                        _message: &[u8],
-                        _cert: &CertificateDer<'_>,
-                        _dss: &DigitallySignedStruct,
-                    ) -> Result<HandshakeSignatureValid, TlsError> {
-                        Ok(HandshakeSignatureValid::assertion())
-                    }
-
-                    fn verify_tls13_signature(
-                        &self,
-                        _message: &[u8],
-                        _cert: &CertificateDer<'_>,
-                        _dss: &DigitallySignedStruct,
-                    ) -> Result<HandshakeSignatureValid, TlsError> {
-                        Ok(HandshakeSignatureValid::assertion())
-                    }
-
-                    fn supported_verify_schemes(&self) -> Vec<SignatureScheme> {
-                        rustls::crypto::ring::default_provider()
-                            .signature_verification_algorithms
-                            .supported_schemes()
-                    }
+                let mut roots = RootCertStore::empty();
+                for (_, der) in decode_pem_blocks(&cert_pem).expect("decode test root PEM") {
+                    roots
+                        .add(CertificateDer::from(der))
+                        .expect("add test root certificate");
                 }
-
                 let _ = rustls::crypto::ring::default_provider().install_default();
                 let config = ClientConfig::builder()
-                    .dangerous()
-                    .with_custom_certificate_verifier(Arc::new(AcceptAnyCert))
+                    .with_root_certificates(roots)
                     .with_no_client_auth();
                 let name = ServerName::try_from("localhost").expect("server name");
                 let conn = ClientConnection::new(Arc::new(config), name).expect("client conn");
@@ -3181,56 +3483,61 @@ mod tests {
                 Box::new(stream)
             };
 
-            tls.write_all(b"GET /tls HTTP/1.1\r\nHost: localhost\r\nConnection: close\r\n\r\n")
-                .expect("write request over TLS");
+            tls.write_all(
+                b"GET /stream HTTP/1.1\r\nHost: localhost\r\nConnection: keep-alive\r\n\r\n",
+            )
+            .expect("write streaming request over TLS");
             tls.flush().expect("flush");
-            let mut out = Vec::new();
-            let mut buf = [0u8; 512];
-            let header_end = loop {
-                match tls.read(&mut buf) {
-                    Ok(0) => panic!("EOF before HTTP headers over TLS"),
-                    Ok(n) => out.extend_from_slice(&buf[..n]),
-                    Err(err) => panic!("read tls headers: {err}"),
-                }
-                if let Some(pos) = out.windows(4).position(|w| w == b"\r\n\r\n") {
-                    break pos;
-                }
-                assert!(out.len() < 8192, "headers too large");
-            };
-            let headers = String::from_utf8_lossy(&out[..header_end]);
-            let content_length = headers
-                .lines()
-                .find_map(|line| {
-                    let (name, value) = line.split_once(':')?;
-                    if name.eq_ignore_ascii_case("content-length") {
-                        value.trim().parse::<usize>().ok()
-                    } else {
-                        None
-                    }
-                })
-                .unwrap_or(0);
-            let mut body = out[header_end + 4..].to_vec();
-            while body.len() < content_length {
-                match tls.read(&mut buf) {
-                    Ok(0) => break,
-                    Ok(n) => body.extend_from_slice(&buf[..n]),
-                    Err(err) if err.kind() == ErrorKind::WouldBlock => break,
-                    Err(err) if err.kind() == ErrorKind::TimedOut => break,
-                    Err(err) => panic!("read tls body: {err}"),
-                }
-            }
-            body.truncate(content_length);
-            let text = format!("{}\r\n\r\n{}", headers, String::from_utf8_lossy(&body));
+            let (stream_headers, stream_body) = read_http_response(tls.as_mut());
             assert!(
-                text.contains("HTTP/1.1 200") && text.contains("tls-ok"),
-                "TLS HTTP response: {text}"
+                stream_headers.starts_with("HTTP/1.1 200")
+                    && stream_headers
+                        .to_ascii_lowercase()
+                        .contains("transfer-encoding: chunked")
+                    && stream_headers
+                        .to_ascii_lowercase()
+                        .contains("connection: keep-alive")
+                    && stream_body == b"tls-stream",
+                "TLS streaming response: {stream_headers:?} {stream_body:?}"
+            );
+
+            tls.write_all(b"GET /done HTTP/1.1\r\nHost: localhost\r\nConnection: close\r\n\r\n")
+                .expect("write second request on the TLS connection");
+            tls.flush().expect("flush second request");
+            let (done_headers, done_body) = read_http_response(tls.as_mut());
+            assert!(
+                done_headers.starts_with("HTTP/1.1 200")
+                    && done_headers
+                        .to_ascii_lowercase()
+                        .contains("connection: close")
+                    && done_body == b"done",
+                "TLS keep-alive response: {done_headers:?} {done_body:?}"
             );
         });
 
-        let req = sengoo_http_server_next_request(server, 10_000);
-        assert_ne!(req, 0, "TLS pull should deliver request after handshake");
+        assert_eq!(sengoo_http_server_set_keep_alive(server, 1), 1);
         assert_eq!(
-            sengoo_http_request_respond(req, 200, b"tls-ok".as_ptr(), 6),
+            sengoo_http_server_claim_serve_mode(server, HTTP_SERVER_MODE_ROUTER),
+            1
+        );
+        let req = sengoo_http_server_next_request_router(server, 10_000);
+        assert_ne!(req, 0, "TLS router mode should deliver first request");
+        let response_stream = sengoo_http_request_begin_stream(req, 200);
+        assert_ne!(response_stream, 0, "TLS request should begin a stream");
+        assert_eq!(
+            sengoo_http_response_stream_write(response_stream, b"tls-".as_ptr(), 4),
+            1
+        );
+        assert_eq!(
+            sengoo_http_response_stream_write(response_stream, b"stream".as_ptr(), 6),
+            1
+        );
+        assert_eq!(sengoo_http_response_stream_finish(response_stream), 1);
+
+        let second = sengoo_http_server_next_request_router(server, 10_000);
+        assert_ne!(second, 0, "TLS keep-alive should deliver second request");
+        assert_eq!(
+            sengoo_http_request_respond(second, 200, b"done".as_ptr(), 4),
             1
         );
         worker.join().expect("tls client join");

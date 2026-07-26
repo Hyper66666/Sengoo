@@ -39,13 +39,14 @@ sh scripts/install.sh --version 0.1.0-rc.1
 公开预发布：[`v0.1.0-rc.1`](https://github.com/Hyper66666/Sengoo/releases/tag/v0.1.0-rc.1)。
 v0.2 主线见 `sengoo-v0-2-mainstream-core`，此处不宣称已发布 v0.2.0。
 
-**v0.2 mainstream-core 本地门禁证据 SHA：**
+**v0.2 mainstream-core 历史门禁证据 SHA：**
 `084b623037f007344d76ce50f2e0d01fac57b565`（分支 `codex/sengoo-v0-2-openspec`，
-[PR #47](https://github.com/Hyper66666/Sengoo/pull/47)）。该提交对应已归档的
-M1–M4 OpenSpec 子变更与本地 fmt / Clippy `-D warnings` / 聚焦工具测试 /
-`openspec validate --all --strict` 绿证据；**不**宣称多主机 Actions 成功，
-也不宣称 HTTP handlers/keep-alive/streaming/TLS server 为 Supported（见
-`examples/realworld/SUPPORT_MATRIX.md` 与 umbrella `RESIDUAL.md`）。
+[PR #47](https://github.com/Hyper66666/Sengoo/pull/47)）。后续 PR #51 已通过
+核心语言、编译规模、sanitizer、四主机工具链打包和安装版 realworld 门禁。
+生产 HTTP 现已包含精确路由 Sengoo handler、有界 opt-in keep-alive、有界
+响应流和 TLS server 子集。Windows Schannel 组合已经验证；POSIX rustls 在
+v0.2 release-host 矩阵记录真实握手前仍标为 Platform-specific。准确支持范围
+以 `examples/realworld/SUPPORT_MATRIX.md` 为准。
 
 原生 debug-info 构建使用 `-g` / `--debug-info`：
 

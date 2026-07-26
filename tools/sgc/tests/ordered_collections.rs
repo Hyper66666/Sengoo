@@ -1,3 +1,6 @@
+mod common;
+
+use common::source_sgc_command;
 use std::fs;
 use std::path::PathBuf;
 use std::process::Command;
@@ -33,7 +36,7 @@ impl Drop for TempSource {
 
 fn run_native(name: &str, source: &str) {
     let source = TempSource::new(name, source);
-    let output = Command::new(env!("CARGO_BIN_EXE_sgc"))
+    let output = source_sgc_command()
         .arg("run")
         .arg(&source.path)
         .arg("--force-rebuild")

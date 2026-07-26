@@ -1273,6 +1273,103 @@ def main() -> i64 {
 }
 
 #[test]
+fn lambda_by_value_string_param_is_dropped_on_return() {
+    // Regression for senline worker long-session growth: field-allowlist
+    // callbacks take `String` by value and previously never ran Drop glue.
+    let mir = compile_with_owned_string(
+        r#"
+def main() -> i64 {
+    let allowed: fn(String) -> bool = |key| true;
+    let owned = string_from_str("contract_version").value;
+    if allowed(owned) { 1 } else { 0 }
+}
+"#,
+    );
+    let lambda = mir
+        .iter()
+        .find(|f| f.name.contains("lambda") || f.name.starts_with("$__"))
+        .or_else(|| {
+            mir.iter()
+                .find(|f| f.name != "main" && f.name != "string_from_str")
+        })
+        .expect("expected a lowered lambda function");
+    assert!(
+        !string_drop_calls(lambda).is_empty()
+            || !named_drop_calls(lambda, "String_Drop_drop").is_empty(),
+        "lambda taking String by value must drop its parameter; lambda IR name={}",
+        lambda.name
+    );
+}
+
+#[test]
+fn if_else_both_branches_move_owned_aggregate_no_parent_drop() {
+    // When both branches move an owned aggregate into callees, the parent must
+    // not Drop it (would double-free). Each callee owns the value.
+    let mir = compile_with_owned_string(
+        r#"
+struct Bundle {
+    label: String,
+}
+
+def take_a(b: Bundle) -> i64 { 1 }
+def take_b(b: Bundle) -> i64 { 2 }
+
+def route(flag: bool, b: Bundle) -> i64 {
+    if flag { take_a(b) } else { take_b(b) }
+}
+
+def main() -> i64 {
+    let owned = string_from_str("x").value;
+    route(true, Bundle { label: owned })
+}
+"#,
+    );
+    let route = mir
+        .iter()
+        .find(|f| f.name == "route" || f.name.ends_with("route"))
+        .expect("expected route function");
+    // Parent route should not Drop Bundle.label; ownership transferred.
+    assert!(
+        string_drop_calls(route).is_empty()
+            && named_drop_calls(route, "String_Drop_drop").is_empty(),
+        "parent must not drop aggregate moved on both branches:\n{:?}",
+        route
+    );
+}
+
+#[test]
+fn reject_helper_drops_nested_string_fields_of_owned_aggregate_param() {
+    // Worker unsupported-version path moves WorkerRequest-like aggregates into a
+    // helper that only borrows fields; the helper must still Drop nested Strings.
+    let mir = compile_with_owned_string(
+        r#"
+struct Bundle {
+    label: String,
+}
+
+def reject(b: Bundle) -> i64 {
+    b.label.len()
+}
+
+def main() -> i64 {
+    let owned = string_from_str("fixture").value;
+    reject(Bundle { label: owned })
+}
+"#,
+    );
+    let reject = mir
+        .iter()
+        .find(|f| f.name == "reject" || f.name.ends_with("reject"))
+        .expect("expected reject helper");
+    assert!(
+        !string_drop_calls(reject).is_empty()
+            || !named_drop_calls(reject, "String_Drop_drop").is_empty(),
+        "owning helper must drop nested String fields of aggregate params; ir={}",
+        reject.name
+    );
+}
+
+#[test]
 fn concrete_generic_method_return_moves_owned_aggregate_without_early_drop() {
     let mir = compile_to_mir(
         r#"

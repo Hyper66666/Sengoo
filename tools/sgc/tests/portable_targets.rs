@@ -7,6 +7,12 @@ fn sgc() -> PathBuf {
     PathBuf::from(env!("CARGO_BIN_EXE_sgc"))
 }
 
+fn source_sgc() -> Command {
+    let mut command = Command::new(sgc());
+    command.args(["--runtime-mode", "source-development"]);
+    command
+}
+
 fn temp_dir(name: &str) -> PathBuf {
     let stamp = SystemTime::now()
         .duration_since(UNIX_EPOCH)
@@ -66,7 +72,7 @@ fn bytecode_target_builds_and_runs_without_native_toolchain() {
     let dir = temp_dir("bytecode");
     let source = write_scalar_program(&dir);
     let artifact = dir.join("app.sgbc");
-    let build = Command::new(sgc())
+    let build = source_sgc()
         .args([
             "build",
             source.to_str().unwrap(),
@@ -89,7 +95,7 @@ fn bytecode_target_builds_and_runs_without_native_toolchain() {
         "bytecode artifact should carry the stable magic"
     );
 
-    let run = Command::new(sgc())
+    let run = source_sgc()
         .args(["run", source.to_str().unwrap(), "--target", "bytecode"])
         .env_remove("PATH")
         .output()
@@ -108,12 +114,12 @@ fn bytecode_target_builds_and_runs_without_native_toolchain() {
 fn bytecode_target_matches_native_for_recursive_scalar_program() {
     let dir = temp_dir("bytecode_recursive");
     let source = write_recursive_program(&dir);
-    let native = Command::new(sgc())
+    let native = source_sgc()
         .args(["run", source.to_str().unwrap(), "--force-rebuild"])
         .output()
         .expect("run native");
 
-    let bytecode = Command::new(sgc())
+    let bytecode = source_sgc()
         .args(["run", source.to_str().unwrap(), "--target", "bytecode"])
         .env_remove("PATH")
         .output()
@@ -135,7 +141,7 @@ fn wasm_target_emits_a_valid_exported_main_module() {
     let dir = temp_dir("wasm");
     let source = write_scalar_program(&dir);
     let artifact = dir.join("app.wasm");
-    let build = Command::new(sgc())
+    let build = source_sgc()
         .args([
             "build",
             source.to_str().unwrap(),
@@ -191,7 +197,7 @@ def main() -> i64 {
 "#,
     )
     .unwrap();
-    let build = Command::new(sgc())
+    let build = source_sgc()
         .args(["build", source.to_str().unwrap(), "--target", "bytecode"])
         .output()
         .expect("build unsupported bytecode");
@@ -225,7 +231,7 @@ fn wasm_run_rejects_hostile_type_count_without_panic() {
     bytes.extend_from_slice(&[0xFF, 0xFF, 0xFF, 0xFF, 0x0F]); // huge ULEB count
     fs::write(&artifact, &bytes).unwrap();
 
-    let run = Command::new(sgc())
+    let run = source_sgc()
         .args(["run", artifact.to_str().unwrap(), "--target", "wasm"])
         .output()
         .expect("run hostile wasm");
@@ -263,7 +269,7 @@ def main(value: i64) -> i64 {
     )
     .unwrap();
 
-    let build = Command::new(sgc())
+    let build = source_sgc()
         .args(["build", source.to_str().unwrap(), "--target", "wasm"])
         .output()
         .expect("build wasm main-with-params");
@@ -311,7 +317,7 @@ def main(value: i64) -> i64 {
 
     let artifact = dir.join("bad-main.wasm");
     fs::write(&artifact, &ordered).unwrap();
-    let run = Command::new(sgc())
+    let run = source_sgc()
         .args(["run", artifact.to_str().unwrap(), "--target", "wasm"])
         .output()
         .expect("run wasm bad-main artifact");
@@ -348,7 +354,7 @@ fn write_raw_wasm_section(module: &mut Vec<u8>, id: u8, payload: &[u8]) {
 fn wasm_target_runs_scalar_main_with_host_runtime() {
     let dir = temp_dir("wasm_run");
     let source = write_scalar_program(&dir);
-    let run = Command::new(sgc())
+    let run = source_sgc()
         .args(["run", source.to_str().unwrap(), "--target", "wasm"])
         .output()
         .expect("run wasm");
@@ -383,7 +389,7 @@ def main() -> i64 {
 "#,
     )
     .unwrap();
-    let build = Command::new(sgc())
+    let build = source_sgc()
         .args(["build", source.to_str().unwrap(), "--target", "wasm"])
         .output()
         .expect("build aggregate wasm");
@@ -417,11 +423,11 @@ def main() -> i64 {
     )
     .unwrap();
 
-    let native = Command::new(sgc())
+    let native = source_sgc()
         .args(["run", source.to_str().unwrap(), "--force-rebuild"])
         .output()
         .expect("run native unsigned compare");
-    let wasm = Command::new(sgc())
+    let wasm = source_sgc()
         .args(["run", source.to_str().unwrap(), "--target", "wasm"])
         .output()
         .expect("run wasm unsigned compare");
@@ -456,11 +462,11 @@ def main() -> i64 {
     )
     .unwrap();
 
-    let native = Command::new(sgc())
+    let native = source_sgc()
         .args(["run", source.to_str().unwrap(), "--force-rebuild"])
         .output()
         .expect("run native narrowing cast");
-    let wasm = Command::new(sgc())
+    let wasm = source_sgc()
         .args(["run", source.to_str().unwrap(), "--target", "wasm"])
         .output()
         .expect("run wasm narrowing cast");
@@ -499,11 +505,11 @@ def main() -> i64 {
     )
     .unwrap();
 
-    let native = Command::new(sgc())
+    let native = source_sgc()
         .args(["run", source.to_str().unwrap(), "--force-rebuild"])
         .output()
         .expect("run native cast extensions");
-    let wasm = Command::new(sgc())
+    let wasm = source_sgc()
         .args(["run", source.to_str().unwrap(), "--target", "wasm"])
         .output()
         .expect("run wasm cast extensions");
@@ -525,7 +531,7 @@ fn wasm_artifact_rejects_tampered_abi_version_before_run() {
     let dir = temp_dir("wasm_abi_tamper");
     let source = write_scalar_program(&dir);
     let artifact = dir.join("app.wasm");
-    let build = Command::new(sgc())
+    let build = source_sgc()
         .args([
             "build",
             source.to_str().unwrap(),
@@ -559,7 +565,7 @@ fn wasm_artifact_rejects_tampered_abi_version_before_run() {
     bytes[version_pos] = 2;
     fs::write(&artifact, &bytes).unwrap();
 
-    let run = Command::new(sgc())
+    let run = source_sgc()
         .args(["run", artifact.to_str().unwrap(), "--target", "wasm"])
         .output()
         .expect("run tampered wasm");
@@ -582,7 +588,7 @@ fn wasm_target_uses_wasm32_pointer_sized_literal_bounds() {
     let source = dir.join("main.sg");
     fs::write(&source, "def main() -> usize { 4294967296usize }\n").unwrap();
 
-    let build = Command::new(sgc())
+    let build = source_sgc()
         .args(["build", source.to_str().unwrap(), "--target", "wasm"])
         .output()
         .expect("build wasm32 usize boundary");

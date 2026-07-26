@@ -1,6 +1,8 @@
+mod common;
+
+use common::source_sgc_command;
 use std::fs;
 use std::path::{Path, PathBuf};
-use std::process::Command;
 use std::time::{SystemTime, UNIX_EPOCH};
 
 const OPT_LEVEL: &str = "0";
@@ -55,10 +57,6 @@ impl Drop for TempProject {
     }
 }
 
-fn sgc() -> PathBuf {
-    PathBuf::from(env!("CARGO_BIN_EXE_sgc"))
-}
-
 fn workspace_root() -> PathBuf {
     PathBuf::from(env!("CARGO_MANIFEST_DIR"))
         .parent()
@@ -100,7 +98,7 @@ fn copy_fixture_source(project: &TempProject, fixture: &str) -> PathBuf {
 }
 
 fn run_sgc_build(source_path: &Path, debug_info: bool) -> String {
-    let mut command = Command::new(sgc());
+    let mut command = source_sgc_command();
     command
         .arg("build")
         .arg(source_path)

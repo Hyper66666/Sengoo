@@ -7,6 +7,37 @@
 //! _Requirements: 4.1, 4.2, 4.3, 4.5_
 
 use crate::compile_to_ir;
+use std::io::Write;
+use std::process::{Command, Stdio};
+
+fn assert_clang_accepts_ir(ir: &str) {
+    let output_path = if cfg!(windows) { "NUL" } else { "/dev/null" };
+    let mut child = ["clang", "clang.exe"]
+        .iter()
+        .find_map(|candidate| {
+            Command::new(candidate)
+                .args(["-x", "ir", "-c", "-o", output_path, "-"])
+                .stdin(Stdio::piped())
+                .stdout(Stdio::piped())
+                .stderr(Stdio::piped())
+                .spawn()
+                .ok()
+        })
+        .expect("clang is required to validate generated LLVM IR");
+    child
+        .stdin
+        .take()
+        .expect("clang stdin should be piped")
+        .write_all(ir.as_bytes())
+        .expect("generated LLVM IR should be writable to clang");
+    let output = child.wait_with_output().expect("clang should finish");
+    assert!(
+        output.status.success(),
+        "clang rejected generated LLVM IR:\n{}\nIR:\n{}",
+        String::from_utf8_lossy(&output.stderr),
+        ir
+    );
+}
 
 /// Test that `struct Point { x: i64, y: i64 }` with construction and field access
 /// generates valid LLVM IR containing `insertvalue` and `extractvalue`.
@@ -39,6 +70,66 @@ def main() -> i64 {
         "Expected IR to contain 'extractvalue' for struct field access, got:\n{}",
         ir
     );
+}
+
+#[test]
+fn local_value_reference_generates_valid_ir() {
+    let source = r#"
+struct Token { value: i64 }
+
+def inspect(value: &Token) -> i64 { 0 }
+
+def main() -> i64 {
+    let token = Token { value: 7 };
+    inspect(&token)
+}
+"#;
+    let ir = compile_to_ir(source).expect("local value reference should lower to LLVM IR");
+    assert_clang_accepts_ir(&ir);
+}
+
+#[test]
+fn local_struct_field_reference_generates_valid_ir() {
+    let source = r#"
+struct Token { value: i64 }
+struct Container { token: Token }
+
+def inspect(value: &Token) -> i64 { 0 }
+
+def main() -> i64 {
+    let container = Container { token: Token { value: 7 } };
+    inspect(&container.token)
+}
+"#;
+    let ir = compile_to_ir(source).expect("struct field reference should lower to LLVM IR");
+    assert_clang_accepts_ir(&ir);
+}
+
+#[test]
+fn nested_owned_string_parameter_field_reference_generates_valid_ir() {
+    let source = r#"
+struct String { handle: i64 }
+struct Identifiers { correlation_ref: String }
+struct Plan { identifiers: Identifiers }
+
+def inspect(value: &String) -> i64 { 0 }
+
+def encode(plan: Plan) -> i64 {
+    inspect(&plan.identifiers.correlation_ref)
+}
+
+def main() -> i64 {
+    let plan = Plan {
+        identifiers: Identifiers {
+            correlation_ref: String { handle: 7 },
+        },
+    };
+    encode(plan)
+}
+"#;
+    let ir = compile_to_ir(source)
+        .expect("nested owned String parameter field reference should lower to LLVM IR");
+    assert_clang_accepts_ir(&ir);
 }
 
 /// Test that constructing a struct with missing fields produces a compile error.

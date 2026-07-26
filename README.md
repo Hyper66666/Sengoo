@@ -44,15 +44,15 @@ GitHub build provenance after platform smoke. The published prerelease tag is
 A later v0.2.0 channel is the target of the `sengoo-v0-2-mainstream-core`
 program and is not claimed installed here.
 
-**v0.2 mainstream-core local gate evidence SHA:**
+**v0.2 mainstream-core historical gate SHA:**
 `084b623037f007344d76ce50f2e0d01fac57b565` (branch `codex/sengoo-v0-2-openspec`,
-[PR #47](https://github.com/Hyper66666/Sengoo/pull/47)). That commit carries the
-archived M1–M4 OpenSpec children and green local fmt / Clippy `-D warnings` /
-focused tool tests / `openspec validate --all --strict` evidence. It does not
-claim multi-host Actions success or production HTTP handlers/keep-alive/
-streaming/TLS server support; those remain residual (see
-`examples/realworld/SUPPORT_MATRIX.md` and
-`openspec/changes/archive/2026-07-16-sengoo-v0-2-mainstream-core/RESIDUAL.md`).
+[PR #47](https://github.com/Hyper66666/Sengoo/pull/47)). The later PR #51
+matrix passed core language, compile-scale, sanitizer, four-host package, and
+installed realworld gates. Production HTTP now includes exact-route Sengoo
+handlers, bounded opt-in keep-alive, bounded response streaming, and a TLS
+server subset. Windows Schannel composition is verified; POSIX rustls remains
+Platform-specific until the v0.2 release-host matrix records its handshake.
+See `examples/realworld/SUPPORT_MATRIX.md` for the exact supported subsets.
 
 Native debug-info builds use `-g` / `--debug-info`:
 

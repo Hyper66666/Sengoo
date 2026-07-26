@@ -27,6 +27,7 @@ tracing = "0.1"
 tracing-subscriber = { version = "0.3", features = ["env-filter"] }
 serde = { workspace = true }
 serde_json = { workspace = true }
+sha2 = "=0.10.9"
 toml = "0.8"
 which = "7.0"
 cranelift-codegen = "0.110"

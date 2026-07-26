@@ -92,6 +92,15 @@ impl<'a> LoweringContext<'a> {
     }
 
     pub(super) fn record_drop_binding_if_needed(&mut self, local: Local) {
+        // Legacy handle params are skipped here: by-value `self`/`String` args
+        // are still lowered as handle *copies* for many stdlib methods (`len`,
+        // `as_str`, …). Auto-Drop on those params would free the live object
+        // while the caller's local still holds the same handle.
+        //
+        // True ownership transfer into lambdas uses
+        // [`Self::force_record_owned_param_drop`] instead. Free-standing workers
+        // should take `&str`/`&String` (or move into an owning helper that only
+        // borrows fields) rather than relying on this skip being removed.
         if local.kind == LocalKind::Param
             && Self::is_legacy_idempotent_handle_mir_type(self.get_local_type(local))
         {
@@ -335,6 +344,38 @@ impl<'a> LoweringContext<'a> {
                     || name.starts_with("HashMapIter_")
             }
             _ => false,
+        }
+    }
+
+    /// Register drop glue for a by-value parameter even when the type is a
+    /// legacy idempotent handle (`String`/`Buffer`/`JsonDoc`).
+    ///
+    /// Ordinary function params skip those types because method receivers are
+    /// still lowered as handle copies (see `record_drop_binding_if_needed`).
+    /// Lambdas that take `String` by value (e.g. field-allowlist callbacks)
+    /// must free the owned handle on every return path.
+    pub(super) fn force_record_owned_param_drop(&mut self, local: Local) {
+        if local.kind != LocalKind::Param {
+            self.record_drop_binding_if_needed(local);
+            return;
+        }
+        let mut bindings = Vec::new();
+        if let Some(drop_func) = self.drop_func_for_local(local) {
+            bindings.push(DropBinding {
+                local,
+                field_path: Vec::new(),
+                drop_func,
+            });
+        } else {
+            let ty = self.get_local_type(local).clone();
+            self.collect_field_drop_bindings(local, &ty, &mut Vec::new(), &mut bindings);
+        }
+        for binding in bindings {
+            if !self.drop_bindings.iter().any(|existing| {
+                existing.local == binding.local && existing.field_path == binding.field_path
+            }) {
+                self.drop_bindings.push(binding);
+            }
         }
     }
 

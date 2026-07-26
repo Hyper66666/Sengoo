@@ -7,6 +7,7 @@ use std::process::Command;
 use std::sync::atomic::{AtomicU64, Ordering};
 
 use crate::cross_compile::{linux_sysroot_from_env, windows_cross_sdk_include_paths};
+use crate::installed_runtime::resolve_installed_native_runtime;
 use crate::module_graph::collect_module_sources_with_edges;
 use crate::native_link::{
     append_native_library_link_args, format_native_link_failure_message,
@@ -485,7 +486,17 @@ fn find_async_runtime_staticlib(profile: &str) -> Option<PathBuf> {
         .or_else(|| find_async_runtime_staticlib_in_dir(&profile_dir.join("deps")))
 }
 
-pub(crate) fn ensure_async_runtime_staticlib(opt_level: u8) -> Result<PathBuf> {
+pub(crate) fn ensure_async_runtime_staticlib(
+    opt_level: u8,
+    target: Option<&NativeBuildTarget>,
+) -> Result<PathBuf> {
+    let target = effective_target(target);
+    if let Some(runtime) = resolve_installed_native_runtime(&target)? {
+        return Ok(runtime.library);
+    }
+    eprintln!(
+        "[toolchain::source_runtime_development] runtime_mode=source-development artifact_provenance=source-cargo-development release_eligible=false senline_pin_evidence=false"
+    );
     let profile = async_runtime_profile(opt_level);
     let workspace_root = workspace_root();
     let mut command = Command::new("cargo");
@@ -535,18 +546,72 @@ pub(crate) fn append_native_runtime_inputs(
             &[NATIVE_NET_RUNTIME_DEFINE, NATIVE_ASYNC_RUNTIME_DEFINE],
         )?);
     }
-    object_paths.push(ensure_async_runtime_staticlib(opt_level)?);
+    object_paths.push(ensure_async_runtime_staticlib(opt_level, target)?);
     Ok(())
 }
 
 fn platform_linker_args(target: &NativeBuildTarget) -> Vec<&'static str> {
-    if target.triple.ends_with("-apple-macosx") {
+    if target.triple.ends_with("-apple-darwin") || target.triple.ends_with("-apple-macosx") {
         vec!["-framework", "Security", "-framework", "CoreFoundation"]
     } else if target.is_linux_gnu() {
         vec!["-lm"]
     } else {
         Vec::new()
     }
+}
+
+/// Pin-grade dual-build identity: enabled only when package scripts (or tests)
+/// explicitly set `SENGOO_DETERMINISTIC_LINK` to a truthy value. Default off so
+/// ordinary developer builds are unaffected.
+fn deterministic_link_requested() -> bool {
+    match std::env::var("SENGOO_DETERMINISTIC_LINK") {
+        Ok(value) => {
+            let trimmed = value.trim();
+            !(trimmed.is_empty() || trimmed == "0" || trimmed.eq_ignore_ascii_case("false"))
+        }
+        Err(_) => false,
+    }
+}
+
+fn append_deterministic_link_args(command: &mut Command, target: &NativeBuildTarget) {
+    if !deterministic_link_requested() {
+        return;
+    }
+    if target.is_linux_gnu() || target.triple.contains("linux") {
+        // Drop GNU build-id notes that embed non-content identity.
+        command.arg("-Wl,--build-id=none");
+        command.arg("-Wl,--hash-style=gnu");
+    } else if target.is_windows_msvc() {
+        // clang driver path (cross or lld): /Brepro zeros PE timestamps.
+        command.arg("-Wl,/Brepro");
+    }
+}
+
+fn sorted_object_paths(object_paths: &[PathBuf]) -> Vec<PathBuf> {
+    // Sort only relocatable objects. Static archives (.a/.lib) must stay after
+    // the objects that reference them (Unix linkers resolve archive symbols in
+    // left-to-right order). Reordering archives to the front caused
+    // `undefined reference to sengoo_net_last_error` on Linux core-language CI.
+    let mut objects = Vec::new();
+    let mut archives = Vec::new();
+    for path in object_paths {
+        let is_archive = path
+            .extension()
+            .and_then(|ext| ext.to_str())
+            .is_some_and(|ext| {
+                ext.eq_ignore_ascii_case("a")
+                    || ext.eq_ignore_ascii_case("lib")
+                    || ext.eq_ignore_ascii_case("rlib")
+            });
+        if is_archive {
+            archives.push(path.clone());
+        } else {
+            objects.push(path.clone());
+        }
+    }
+    objects.sort();
+    objects.extend(archives);
+    objects
 }
 
 fn link_cross_target(
@@ -563,13 +628,15 @@ fn link_cross_target(
     if target.is_linux_gnu() {
         command.arg("-fuse-ld=lld");
     }
-    for object in object_paths {
+    let objects = sorted_object_paths(object_paths);
+    for object in &objects {
         command.arg(object);
     }
     append_native_library_link_args(&mut command, native_link_libraries, target, &search_paths);
     for arg in platform_linker_args(target) {
         command.arg(arg);
     }
+    append_deterministic_link_args(&mut command, target);
     command.arg("-o").arg(executable_path);
     let status = command
         .status()
@@ -703,9 +770,13 @@ fn run_windows_link_command(
     let search_paths = native_library_search_paths_from_env();
     let mut link_cmd = Command::new(link_exe);
     link_cmd.arg("/NOLOGO");
-    let links_async_runtime = object_paths
-        .iter()
-        .any(|path| is_async_runtime_staticlib(path));
+    if deterministic_link_requested() {
+        // Zero PE timestamps / non-deterministic COFF metadata for dual-build
+        // pin-grade package identity (MSVC link.exe /Brepro).
+        link_cmd.arg("/Brepro");
+    }
+    let objects = sorted_object_paths(object_paths);
+    let links_async_runtime = objects.iter().any(|path| is_async_runtime_staticlib(path));
     if links_async_runtime {
         // Keep compiler-generated async dispatch symbols that are only referenced
         // from the Rust async runtime static library.
@@ -715,7 +786,7 @@ fn run_windows_link_command(
         link_cmd.arg(format!("/LIBPATH:{}", lib_path.display()));
     }
     append_native_library_link_args(&mut link_cmd, native_link_libraries, &target, &search_paths);
-    for object in object_paths {
+    for object in &objects {
         link_cmd.arg(object);
     }
     for lib in [
@@ -996,13 +1067,15 @@ fn run_link_command(
     if use_lld {
         clang_cmd.arg("-fuse-ld=lld");
     }
-    for object in object_paths {
+    let objects = sorted_object_paths(object_paths);
+    for object in &objects {
         clang_cmd.arg(object);
     }
     append_native_library_link_args(&mut clang_cmd, native_link_libraries, target, &search_paths);
     for arg in platform_linker_args(target) {
         clang_cmd.arg(arg);
     }
+    append_deterministic_link_args(&mut clang_cmd, target);
     clang_cmd.arg("-o").arg(executable_path);
     clang_cmd
         .status()
@@ -1579,13 +1652,15 @@ mod tests {
 
     #[test]
     fn native_link_adds_macos_security_and_corefoundation_frameworks() {
-        let target = NativeBuildTarget {
-            triple: "aarch64-apple-macosx".to_string(),
-        };
-        assert_eq!(
-            platform_linker_args(&target),
-            vec!["-framework", "Security", "-framework", "CoreFoundation"]
-        );
+        for triple in ["aarch64-apple-darwin", "aarch64-apple-macosx"] {
+            let target = NativeBuildTarget {
+                triple: triple.to_string(),
+            };
+            assert_eq!(
+                platform_linker_args(&target),
+                vec!["-framework", "Security", "-framework", "CoreFoundation"]
+            );
+        }
     }
 
     #[test]

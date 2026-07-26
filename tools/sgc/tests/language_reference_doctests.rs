@@ -1,6 +1,9 @@
+mod common;
+
+use common::source_sgc_command;
 use std::fs;
 use std::path::{Path, PathBuf};
-use std::process::{Command, Output};
+use std::process::Output;
 use std::time::{SystemTime, UNIX_EPOCH};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -96,7 +99,7 @@ fn run_sgc(mode: DoctestMode, source: &Path) -> Output {
         DoctestMode::Compile => "check",
         DoctestMode::Run => "run",
     };
-    Command::new(env!("CARGO_BIN_EXE_sgc"))
+    source_sgc_command()
         .arg(command)
         .arg(source)
         .args((mode == DoctestMode::Run).then_some("--force-rebuild"))

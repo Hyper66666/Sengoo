@@ -1512,6 +1512,11 @@ long long sengoo_http_request_respond_with_content_type(
     return sengoo_net_fallback_bool_error(SENGOO_NET_ERR_HANDLE_NOT_FOUND);
 }
 
+long long sengoo_http_request_is_pending(long long handle) {
+    (void)handle;
+    return 0;
+}
+
 long long sengoo_http_request_close(long long handle) {
     (void)handle;
     return sengoo_net_fallback_close();

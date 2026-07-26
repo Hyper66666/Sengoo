@@ -117,6 +117,8 @@ pub(crate) struct TestOptions<'a> {
 }
 
 pub(crate) fn cmd_test(options: TestOptions<'_>) -> Result<()> {
+    crate::installed_runtime::validate_installed_native_runtime_for_host()?;
+
     if options.locked {
         ensure_lockfile_current(options.root, options.manifest_path)?;
     }
@@ -162,8 +164,13 @@ pub(crate) fn cmd_test(options: TestOptions<'_>) -> Result<()> {
             .then(create_coverage_report_path)
             .transpose()?;
         let mut command = Command::new(&sgc);
+        command.current_dir(options.root);
+        if crate::installed_runtime::native_runtime_mode()
+            == crate::installed_runtime::NativeRuntimeMode::SourceDevelopment
+        {
+            command.args(["--runtime-mode", "source-development"]);
+        }
         command
-            .current_dir(options.root)
             .arg("run")
             .arg(&test.path)
             .arg("-O")
