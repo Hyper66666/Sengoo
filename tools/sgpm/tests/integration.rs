@@ -4012,8 +4012,10 @@ fn build_locked_rejects_stale_lockfile_before_invoking_sgc() {
 
     assert!(!output.status.success());
     let stderr = String::from_utf8_lossy(&output.stderr);
+    // Unparseable garbage is reported as malformed (not "out of date"),
+    // still pointing at `sgpm update` as the remedy.
     assert!(
-        stderr.contains("Sengoo.lock is out of date") && stderr.contains("sgpm update"),
+        stderr.contains("malformed") && stderr.contains("sgpm update"),
         "stderr:\n{}",
         stderr
     );
