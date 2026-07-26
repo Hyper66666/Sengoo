@@ -60,10 +60,12 @@
   as platform-specific with the blocking reason (do not claim it).
   POSIX rustls implemented but not executed on this Windows workstation;
   matrix row is Platform-specific (not Supported).
-- [ ] 5.4 TLS composes with handlers, keep-alive, and streaming in at least
+- [x] 5.4 TLS composes with handlers, keep-alive, and streaming in at least
   one end-to-end test on a proven host.
-  Residual: proven path is TLS bind + pull + respond only; dedicated
-  keep-alive/stream/router composition over TLS remains open.
+  `tls_composes_with_router_keep_alive_and_streaming` (Windows Schannel) drives
+  three path-dispatched requests over one TLS connection: routed buffered
+  answer (keep-alive), routed chunked stream whose `finish()` retains the
+  connection, and a routed `Connection: close` answer.
 
 ## 6. Docs and matrix
 
@@ -80,8 +82,10 @@
   (43 passed including TLS handshake on Windows)
 - [x] 7.3 `cargo test -p sgc stdlib_http_server_async_awaits` localhost smoke green
   Residual: full `cargo test -p sgc` suite not re-run end-to-end in this session.
-- [ ] 7.4 Realworld fixture locked loop (`sgpm test --locked` etc.) green
-  Residual: not re-run here; prior PR #50 CI green on four hosts.
+- [x] 7.4 Realworld fixture locked loop (`sgpm test --locked` etc.) green
+  `examples/realworld/http-echo-service` on Windows with release `sgpm`:
+  `update --check`, `check`, `test` (1 passed), `fmt --check`, `doc`, and
+  `build` all exit 0 under `--locked`.
 - [x] 7.5 `openspec validate http-production-serving --strict`
 
 ## Archive Gate
@@ -95,6 +99,6 @@
 - [x] Existing pull/static/bounds/drain/fallback requirements remain green
   and unchanged. (runtime net suite 43/43)
 - [x] Matrix updated with proof; umbrella records Pillar C completion.
-  Residual for full archive: task 5.4 TLS composition e2e and 7.4 locked
-  loop re-run may stay open until a follow-up or CI green on this PR.
+  TLS composition e2e (5.4) and the locked realworld loop (7.4) are both
+  proven on Windows; POSIX rustls remains Platform-specific per 5.3.
 

@@ -2764,6 +2764,62 @@ mod tests {
         format!("{}\r\n\r\n{}", headers, String::from_utf8_lossy(&body))
     }
 
+    /// Read one `Transfer-Encoding: chunked` response, stopping at the
+    /// terminating zero-length chunk so the connection stays usable for the
+    /// next request on a keep-alive connection.
+    fn read_chunked_response_message(stream: &mut impl Read) -> String {
+        let mut raw = Vec::new();
+        let mut buf = [0u8; 256];
+        let header_end = loop {
+            let n = stream.read(&mut buf).expect("read chunked headers");
+            assert!(n > 0, "unexpected EOF while reading chunked headers");
+            raw.extend_from_slice(&buf[..n]);
+            if let Some(pos) = raw.windows(4).position(|w| w == b"\r\n\r\n") {
+                break pos;
+            }
+            assert!(raw.len() < 8192, "response headers too large");
+        };
+        let headers = String::from_utf8_lossy(&raw[..header_end]).into_owned();
+        assert!(
+            headers
+                .to_ascii_lowercase()
+                .contains("transfer-encoding: chunked"),
+            "expected a chunked response, got: {headers}"
+        );
+
+        // Decode chunks until the terminating `0\r\n\r\n`, reading more only
+        // when the buffered bytes are incomplete.
+        let mut rest = raw[header_end + 4..].to_vec();
+        let mut body = Vec::new();
+        let mut cursor = 0usize;
+        loop {
+            let line_end = loop {
+                if let Some(pos) = rest[cursor..].windows(2).position(|w| w == b"\r\n") {
+                    break cursor + pos;
+                }
+                let n = stream.read(&mut buf).expect("read chunk size line");
+                assert!(n > 0, "unexpected EOF while reading chunk size");
+                rest.extend_from_slice(&buf[..n]);
+            };
+            let size_text = String::from_utf8_lossy(&rest[cursor..line_end]).into_owned();
+            let size = usize::from_str_radix(size_text.trim(), 16).expect("chunk size hex");
+            cursor = line_end + 2;
+
+            // Chunk payload plus its trailing CRLF.
+            while rest.len() < cursor + size + 2 {
+                let n = stream.read(&mut buf).expect("read chunk payload");
+                assert!(n > 0, "unexpected EOF while reading chunk payload");
+                rest.extend_from_slice(&buf[..n]);
+            }
+            if size == 0 {
+                break;
+            }
+            body.extend_from_slice(&rest[cursor..cursor + size]);
+            cursor += size + 2;
+        }
+        format!("{}\r\n\r\n{}", headers, String::from_utf8_lossy(&body))
+    }
+
     #[test]
     fn keep_alive_reuses_connection_for_sequential_requests() {
         use std::io::Write;
@@ -3060,17 +3116,107 @@ mod tests {
         );
     }
 
-    #[test]
-    fn http_server_tls_handshake_and_pull_response() {
-        use std::io::{Read, Write};
-        use std::thread;
+    trait ReadWrite: Read + Write {}
+    impl<T: Read + Write> ReadWrite for T {}
 
-        trait ReadWrite: Read + Write {}
-        impl<T: Read + Write> ReadWrite for T {}
+    /// Connect a TLS client to the local test server.
+    ///
+    /// The self-signed fixture is not in the system trust store, so this
+    /// client accepts the presented cert to prove the *server* handshake (not
+    /// a production trust configuration). Windows uses the product native-tls
+    /// stack; POSIX uses rustls so `native_tls` is not required off-Windows.
+    fn connect_test_tls_client(port: i64) -> Box<dyn ReadWrite> {
+        let tcp = TcpStream::connect(("127.0.0.1", port as u16)).expect("tcp connect");
+        tcp.set_read_timeout(Some(Duration::from_secs(5)))
+            .expect("read timeout");
+        tcp.set_write_timeout(Some(Duration::from_secs(5)))
+            .expect("write timeout");
 
-        let _guard = super::super::net_test_lock();
+        #[cfg(windows)]
+        {
+            let connector = native_tls::TlsConnector::builder()
+                .danger_accept_invalid_certs(true)
+                .danger_accept_invalid_hostnames(true)
+                .build()
+                .expect("test connector");
+            Box::new(
+                connector
+                    .connect("localhost", tcp)
+                    .expect("windows native-tls client handshake"),
+            )
+        }
+        #[cfg(not(windows))]
+        {
+            use rustls::client::danger::{
+                HandshakeSignatureValid, ServerCertVerified, ServerCertVerifier,
+            };
+            use rustls::pki_types::{CertificateDer, ServerName, UnixTime};
+            use rustls::{
+                ClientConfig, ClientConnection, DigitallySignedStruct, Error as TlsError,
+                SignatureScheme, StreamOwned,
+            };
+            use std::sync::Arc;
+
+            #[derive(Debug)]
+            struct AcceptAnyCert;
+            impl ServerCertVerifier for AcceptAnyCert {
+                fn verify_server_cert(
+                    &self,
+                    _end_entity: &CertificateDer<'_>,
+                    _intermediates: &[CertificateDer<'_>],
+                    _server_name: &ServerName<'_>,
+                    _ocsp_response: &[u8],
+                    _now: UnixTime,
+                ) -> Result<ServerCertVerified, TlsError> {
+                    Ok(ServerCertVerified::assertion())
+                }
+
+                fn verify_tls12_signature(
+                    &self,
+                    _message: &[u8],
+                    _cert: &CertificateDer<'_>,
+                    _dss: &DigitallySignedStruct,
+                ) -> Result<HandshakeSignatureValid, TlsError> {
+                    Ok(HandshakeSignatureValid::assertion())
+                }
+
+                fn verify_tls13_signature(
+                    &self,
+                    _message: &[u8],
+                    _cert: &CertificateDer<'_>,
+                    _dss: &DigitallySignedStruct,
+                ) -> Result<HandshakeSignatureValid, TlsError> {
+                    Ok(HandshakeSignatureValid::assertion())
+                }
+
+                fn supported_verify_schemes(&self) -> Vec<SignatureScheme> {
+                    rustls::crypto::ring::default_provider()
+                        .signature_verification_algorithms
+                        .supported_schemes()
+                }
+            }
+
+            let _ = rustls::crypto::ring::default_provider().install_default();
+            let config = ClientConfig::builder()
+                .dangerous()
+                .with_custom_certificate_verifier(Arc::new(AcceptAnyCert))
+                .with_no_client_auth();
+            let name = ServerName::try_from("localhost").expect("server name");
+            let conn = ClientConnection::new(Arc::new(config), name).expect("client conn");
+            let mut stream = StreamOwned::new(conn, tcp);
+            while stream.conn.is_handshaking() {
+                stream
+                    .conn
+                    .complete_io(&mut stream.sock)
+                    .expect("posix rustls handshake");
+            }
+            Box::new(stream)
+        }
+    }
+
+    /// Bind a TLS test server on an ephemeral port, returning (handle, port).
+    fn bind_test_tls_server() -> (u64, i64) {
         let (cert_pem, key_pem) = test_server_pem_bundle();
-
         let server = sengoo_http_server_bind_tls(
             std::ptr::null(),
             0,
@@ -3087,99 +3233,28 @@ mod tests {
         );
         let port = sengoo_http_server_local_port(server);
         assert!(port > 0);
+        (server, port)
+    }
+
+    /// Read the request path of a pulled request handle (router dispatch key).
+    fn request_path(handle: u64) -> String {
+        let len = sengoo_http_request_path_len(handle);
+        assert!(len >= 0, "path len should not error");
+        let mut buf = vec![0u8; len as usize];
+        let copied = sengoo_http_request_path_copy(handle, buf.as_mut_ptr(), buf.len());
+        assert_eq!(copied, len, "path copy should fill the reported length");
+        String::from_utf8_lossy(&buf).into_owned()
+    }
+
+    #[test]
+    fn http_server_tls_handshake_and_pull_response() {
+        use std::thread;
+
+        let _guard = super::super::net_test_lock();
+        let (server, port) = bind_test_tls_server();
 
         let worker = thread::spawn(move || {
-            let tcp = TcpStream::connect(("127.0.0.1", port as u16)).expect("tcp connect");
-            tcp.set_read_timeout(Some(Duration::from_secs(5)))
-                .expect("read timeout");
-            tcp.set_write_timeout(Some(Duration::from_secs(5)))
-                .expect("write timeout");
-
-            // Self-signed fixture is not in the system trust store. Prove the
-            // *server* handshake with a test client that accepts the presented
-            // cert (not a production trust configuration).
-            // Windows product stack uses native-tls; POSIX uses rustls — match
-            // the client backend so `native_tls` is not required off-Windows.
-            #[cfg(windows)]
-            let mut tls: Box<dyn ReadWrite> = {
-                let connector = native_tls::TlsConnector::builder()
-                    .danger_accept_invalid_certs(true)
-                    .danger_accept_invalid_hostnames(true)
-                    .build()
-                    .expect("test connector");
-                Box::new(
-                    connector
-                        .connect("localhost", tcp)
-                        .expect("windows native-tls client handshake"),
-                )
-            };
-            #[cfg(not(windows))]
-            let mut tls: Box<dyn ReadWrite> = {
-                use rustls::client::danger::{
-                    HandshakeSignatureValid, ServerCertVerified, ServerCertVerifier,
-                };
-                use rustls::pki_types::{CertificateDer, ServerName, UnixTime};
-                use rustls::{
-                    ClientConfig, ClientConnection, DigitallySignedStruct, Error as TlsError,
-                    SignatureScheme, StreamOwned,
-                };
-                use std::sync::Arc;
-
-                #[derive(Debug)]
-                struct AcceptAnyCert;
-                impl ServerCertVerifier for AcceptAnyCert {
-                    fn verify_server_cert(
-                        &self,
-                        _end_entity: &CertificateDer<'_>,
-                        _intermediates: &[CertificateDer<'_>],
-                        _server_name: &ServerName<'_>,
-                        _ocsp_response: &[u8],
-                        _now: UnixTime,
-                    ) -> Result<ServerCertVerified, TlsError> {
-                        Ok(ServerCertVerified::assertion())
-                    }
-
-                    fn verify_tls12_signature(
-                        &self,
-                        _message: &[u8],
-                        _cert: &CertificateDer<'_>,
-                        _dss: &DigitallySignedStruct,
-                    ) -> Result<HandshakeSignatureValid, TlsError> {
-                        Ok(HandshakeSignatureValid::assertion())
-                    }
-
-                    fn verify_tls13_signature(
-                        &self,
-                        _message: &[u8],
-                        _cert: &CertificateDer<'_>,
-                        _dss: &DigitallySignedStruct,
-                    ) -> Result<HandshakeSignatureValid, TlsError> {
-                        Ok(HandshakeSignatureValid::assertion())
-                    }
-
-                    fn supported_verify_schemes(&self) -> Vec<SignatureScheme> {
-                        rustls::crypto::ring::default_provider()
-                            .signature_verification_algorithms
-                            .supported_schemes()
-                    }
-                }
-
-                let _ = rustls::crypto::ring::default_provider().install_default();
-                let config = ClientConfig::builder()
-                    .dangerous()
-                    .with_custom_certificate_verifier(Arc::new(AcceptAnyCert))
-                    .with_no_client_auth();
-                let name = ServerName::try_from("localhost").expect("server name");
-                let conn = ClientConnection::new(Arc::new(config), name).expect("client conn");
-                let mut stream = StreamOwned::new(conn, tcp);
-                while stream.conn.is_handshaking() {
-                    stream
-                        .conn
-                        .complete_io(&mut stream.sock)
-                        .expect("posix rustls handshake");
-                }
-                Box::new(stream)
-            };
+            let mut tls = connect_test_tls_client(port);
 
             tls.write_all(b"GET /tls HTTP/1.1\r\nHost: localhost\r\nConnection: close\r\n\r\n")
                 .expect("write request over TLS");
@@ -3234,6 +3309,116 @@ mod tests {
             1
         );
         worker.join().expect("tls client join");
+        assert_eq!(sengoo_http_server_close(server), 1);
+    }
+
+    /// Task 5.4: TLS composes with handler routing, keep-alive, and streaming.
+    ///
+    /// One TLS connection carries three sequential requests:
+    /// 1. `/plain` — routed buffered response, connection kept alive;
+    /// 2. `/stream` — routed chunked streaming response, connection kept alive
+    ///    across the stream `finish()`;
+    /// 3. `/bye` with `Connection: close` — routed response that closes.
+    ///
+    /// Dispatch is by request path, matching the Sengoo-side router contract
+    /// (exact byte match on the pulled request), so this proves the runtime
+    /// path that `serve_http` drives.
+    #[test]
+    fn tls_composes_with_router_keep_alive_and_streaming() {
+        use std::thread;
+
+        let _guard = super::super::net_test_lock();
+        let (server, port) = bind_test_tls_server();
+        assert_eq!(
+            sengoo_http_server_set_keep_alive(server, 1),
+            1,
+            "keep-alive should be enabled for the composition test"
+        );
+
+        let worker = thread::spawn(move || {
+            let mut tls = connect_test_tls_client(port);
+
+            // 1. Routed buffered response over TLS, connection kept alive.
+            tls.write_all(b"GET /plain HTTP/1.1\r\nHost: localhost\r\n\r\n")
+                .expect("write /plain");
+            tls.flush().expect("flush /plain");
+            let first = read_http_response_message(&mut tls);
+            assert!(
+                first.contains("HTTP/1.1 200")
+                    && first.to_ascii_lowercase().contains("keep-alive")
+                    && first.contains("plain-ok"),
+                "first (routed, keep-alive): {first}"
+            );
+
+            // 2. Routed streaming response reusing the same TLS connection.
+            tls.write_all(b"GET /stream HTTP/1.1\r\nHost: localhost\r\n\r\n")
+                .expect("write /stream");
+            tls.flush().expect("flush /stream");
+            let second = read_chunked_response_message(&mut tls);
+            assert!(
+                second.contains("HTTP/1.1 200")
+                    && second.to_ascii_lowercase().contains("keep-alive")
+                    && second.contains("Transfer-Encoding: chunked")
+                    && second.contains("alpha")
+                    && second.contains("omega"),
+                "second (routed, streamed, keep-alive): {second}"
+            );
+
+            // 3. Client-requested close still ends the TLS connection cleanly.
+            tls.write_all(b"GET /bye HTTP/1.1\r\nHost: localhost\r\nConnection: close\r\n\r\n")
+                .expect("write /bye");
+            tls.flush().expect("flush /bye");
+            let third = read_http_response_message(&mut tls);
+            assert!(
+                third.contains("HTTP/1.1 200")
+                    && third.to_ascii_lowercase().contains("connection: close")
+                    && third.contains("bye-ok"),
+                "third (routed, close): {third}"
+            );
+        });
+
+        // Request 1: dispatch on path, buffered answer.
+        let req = sengoo_http_server_next_request(server, 10_000);
+        assert_ne!(req, 0, "TLS keep-alive pull should deliver /plain");
+        assert_eq!(request_path(req), "/plain", "first routed path");
+        assert_eq!(
+            sengoo_http_request_respond(req, 200, b"plain-ok".as_ptr(), 8),
+            1
+        );
+
+        // Request 2: dispatch on path, chunked stream over the reused TLS conn.
+        let req = sengoo_http_server_next_request(server, 10_000);
+        assert_ne!(req, 0, "reused TLS connection should deliver /stream");
+        assert_eq!(request_path(req), "/stream", "second routed path");
+        let stream = sengoo_http_request_begin_stream(req, 200);
+        assert_ne!(stream, 0, "streaming should begin over TLS");
+        assert_eq!(
+            sengoo_http_response_stream_write(stream, b"alpha".as_ptr(), 5),
+            1
+        );
+        assert_eq!(
+            sengoo_http_response_stream_write(stream, b"omega".as_ptr(), 5),
+            1
+        );
+        assert_eq!(
+            sengoo_http_response_stream_finish(stream),
+            1,
+            "finished stream should keep the TLS connection alive"
+        );
+
+        // Request 3: dispatch on path, close-mode answer.
+        let req = sengoo_http_server_next_request(server, 10_000);
+        assert_ne!(
+            req, 0,
+            "connection must survive the finished stream to deliver /bye"
+        );
+        assert_eq!(request_path(req), "/bye", "third routed path");
+        assert_eq!(
+            sengoo_http_request_respond(req, 200, b"bye-ok".as_ptr(), 6),
+            1
+        );
+
+        worker.join().expect("tls composition client join");
         assert_eq!(sengoo_http_server_close(server), 1);
     }
 }

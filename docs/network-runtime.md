@@ -231,14 +231,18 @@ return `STATUS_UNSUPPORTED`.
 
 ## Current Constraints
 
-- HTTPS (`https://`) and secure WebSocket (`wss://`) are not part of this baseline.
+- Secure WebSocket (`wss://`) is not part of this baseline.
 - HTTP keeps baseline behavior (status + body retrieval).
 - WebSocket baseline supports text frames for smoke/e2e paths.
 - HTTP server middleware/handler model is MVP-level (no async middleware chain yet).
-- Dynamic serving remains serial per `HttpServer`: no TLS server, no streaming
-  bodies, no keep-alive, and no callback-style handlers. This change does not
-  claim general task-cancellation propagation beyond the pending request
-  future's own cancel/drop cleanup.
+- Dynamic serving remains serial per `HttpServer`. Routing is Sengoo-side
+  (`HttpRouter` / `serve_http` over the pull API); there is no reverse
+  Rust→Sengoo callback ABI. Keep-alive is opt-in and bounded, response
+  streaming is bounded per chunk, and the TLS server subset composes with all
+  three (`tls_composes_with_router_keep_alive_and_streaming`). Request-body
+  streaming and HTTP/2 remain out of scope. This baseline does not claim
+  general task-cancellation propagation beyond the pending request future's
+  own cancel/drop cleanup.
 
 ## Verification
 
