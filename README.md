@@ -44,10 +44,10 @@ GitHub build provenance after platform smoke. The stable release is
 [release notes](docs/release-notes-v0.2.0.md) and
 [migration guide](docs/migration-v0-1-to-v0-2.md).
 
-**v0.2 release-candidate evidence SHA:**
-`6f9475dd956e63c886c8868278bc233a7044806b` ([PR #55](https://github.com/Hyper66666/Sengoo/pull/55)).
-The six one-SHA main gates and the four-host `v0.2.0-rc.2` release run
-[`30188454330`](https://github.com/Hyper66666/Sengoo/actions/runs/30188454330)
+**v0.2 stable release evidence SHA:**
+`92c8f399f61b73d63990581c637da68572b6e133` ([PR #56](https://github.com/Hyper66666/Sengoo/pull/56)).
+The six one-SHA main gates and the four-host `v0.2.0` release run
+[`30191226253`](https://github.com/Hyper66666/Sengoo/actions/runs/30191226253)
 passed core language, compile-scale, sanitizer, bounded fuzz, compatibility,
 installed realworld, package, upgrade, and rollback checks. Production HTTP
 includes exact-route Sengoo handlers, bounded opt-in keep-alive, bounded

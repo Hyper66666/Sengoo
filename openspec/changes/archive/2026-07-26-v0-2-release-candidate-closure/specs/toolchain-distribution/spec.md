@@ -35,3 +35,19 @@ match the coherent workspace/tool/runtime version.
   target fails packaging, checksum, provenance, or installed smoke
 - **THEN** the workflow fails publication for the release
 - **AND** it does not present a partial target set as a successful release
+
+#### Scenario: A tag produces both target archives
+
+- **WHEN** a release tag matching the workspace version is pushed
+- **THEN** the packaging workflow builds release binaries on native runners
+  for both pinned targets
+- **AND** publishes one archive plus one `.sha256` per target containing
+  all four tools, the bundled stdlib/runtime bridge files, `manifest.json`,
+  the license, and the distribution README
+- **AND** the distribution README states the pinned host `clang`/LLVM
+  requirement
+
+#### Scenario: A mismatched tag fails fast
+
+- **WHEN** the tag does not equal the workspace version
+- **THEN** the workflow fails before building or publishing anything

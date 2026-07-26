@@ -161,30 +161,50 @@
   explicitly outside the v0.2 Supported claim.
   Release notes and language/support references keep portable backends and
   unproved platform/framework breadth Experimental or outside v0.2.
-- [ ] 6.3 Publish `v0.2.0` as one complete four-target set with checksums and
+- [x] 6.3 Publish `v0.2.0` as one complete four-target set with checksums and
   provenance only after sections 1-5 are complete.
-- [ ] 6.4 Install `v0.2.0` outside the checkout on every supported host and rerun
+  Stable tag run `30191226253` published four archives, four sidecars,
+  `release-evidence.json`, and provenance attestation `37141681` only after all
+  required main, package, and transition jobs passed.
+- [x] 6.4 Install `v0.2.0` outside the checkout on every supported host and rerun
   the release smoke from the published assets, not workflow staging paths.
-- [ ] 6.5 Prove rollback to the previous published toolchain remains available
+  The stable tag's Windows, Linux, macOS x64, and macOS arm64 package jobs each
+  installed the checksum-verified archive into a clean prefix and passed the
+  installed stdlib/tool-version smoke.
+- [x] 6.5 Prove rollback to the previous published toolchain remains available
   and non-destructive after stable publication.
+  Transition artifacts `8628932458`, `8628935571`, `8628931575`, and
+  `8628932694` retain RC2 previous, stable upgraded, and RC2 rolled-back loops
+  without protected fixture edits.
 
 ## 7. Final verification
 
-- [ ] 7.1 `cargo fmt --all -- --check`
-- [ ] 7.2 `cargo clippy -p sengoo-compiler -p sengoo-runtime -p sgc -p sgpm -p sgfmt -p sglsp --all-targets -- -D warnings`
-- [ ] 7.3 `cargo test -p sengoo-compiler --lib`
-- [ ] 7.4 `cargo test -p sengoo-runtime --lib --features native-bridge`
-- [ ] 7.5 `cargo test -p sgc -- --test-threads=1`
-- [ ] 7.6 `cargo test -p sgpm -- --test-threads=1`
-- [ ] 7.7 `cargo test -p sgfmt`
-- [ ] 7.8 `cargo test -p sglsp`
-- [ ] 7.9 Run every reviewed realworld package through installed
+- [x] 7.1 `cargo fmt --all -- --check`
+- [x] 7.2 `cargo clippy -p sengoo-compiler -p sengoo-runtime -p sgc -p sgpm -p sgfmt -p sglsp --all-targets -- -D warnings`
+- [x] 7.3 `cargo test -p sengoo-compiler --lib` (1123 passed)
+- [x] 7.4 `cargo test -p sengoo-runtime --lib --features native-bridge` (143 passed)
+- [x] 7.5 `cargo test -p sgc -- --test-threads=1` (497 unit tests plus all
+  integration suites passed with 0 failures on 2026-07-26.)
+- [x] 7.6 `cargo test -p sgpm -- --test-threads=1` (162 tests passed with 0
+  failures on 2026-07-26.)
+- [x] 7.7 `cargo test -p sgfmt` (12 unit tests passed and doc-tests passed
+  with 0 failures on 2026-07-26.)
+- [x] 7.8 `cargo test -p sglsp` (1 attribute verifier test and 168 LSP tests
+  passed with 0 failures on 2026-07-26.)
+- [x] 7.9 Run every reviewed realworld package through installed
   `sgpm check/test/fmt --check/doc/build/run --locked` as applicable.
-- [ ] 7.10 Run compatibility, sanitizer/leak, bounded fuzz, performance,
+  Stable main run `30190063481` passed the installed four-host realworld and
+  reviewed package loops at the stable SHA.
+- [x] 7.10 Run compatibility, sanitizer/leak, bounded fuzz, performance,
   distribution, provenance, upgrade, rollback, TLS, debug, and reactor jobs
   from the retained release evidence manifest.
-- [ ] 7.11 `openspec validate v0-2-release-candidate-closure --strict`
-- [ ] 7.12 `openspec validate --all --strict`
+  Stable `release-evidence.json` records all six successful main runs, four
+  package and four transition jobs, provenance, fixture hashes, tool versions,
+  and no platform skip for SHA `92c8f399f61b73d63990581c637da68572b6e133`.
+- [x] 7.11 `openspec validate v0-2-release-candidate-closure --strict`
+  (`Change 'v0-2-release-candidate-closure' is valid` on 2026-07-26.)
+- [x] 7.12 `openspec validate --all --strict`
+  (50 passed, 0 failed on 2026-07-26.)
 
 ## Archive Gate
 
@@ -192,10 +212,10 @@
   released implementation.
 - [x] Two consecutive v0.2 candidates pass complete one-SHA matrices and their
   artifacts/evidence remain available.
-- [ ] `v0.2.0` is published as a complete four-target set and installed-asset
+- [x] `v0.2.0` is published as a complete four-target set and installed-asset
   smoke passes on every supported host.
-- [ ] Upgrade, compatibility, and rollback are executable and non-destructive.
-- [ ] No P0/P1 release blocker is open; accepted P2/platform limitations are
+- [x] Upgrade, compatibility, and rollback are executable and non-destructive.
+- [x] No P0/P1 release blocker is open; accepted P2/platform limitations are
   explicit in the support matrix and release notes.
-- [ ] All repository truth sources cite the retained release SHA/runs.
-- [ ] Strict change and repository-wide OpenSpec validation pass.
+- [x] All repository truth sources cite the retained release SHA/runs.
+- [x] Strict change and repository-wide OpenSpec validation pass.

@@ -123,11 +123,12 @@ The current reviewed first-party release set is:
 | Publish/resolve package workflow | `examples/realworld/package-release-loop` | Installed release lane reruns `metadata --format json --locked`, `publish --dry-run --locked --format json --output target/package`, and `publish --registry local --locked --format json`. |
 | Python hot-path interop | `examples/realworld/python-hot-path` | Installed release lane runs `python_smoke.py` with the installed `sgc`, parses `.sgreflect.json`, compiles emitted `.ll` with `clang`, and invokes the reflected symbol through Python `ctypes`. |
 
-Actions run `30186907319` passes this reviewed set with installed archives on
+Actions run `30190063481` passes this reviewed set with installed archives on
 Windows x64, Linux x64, macOS arm64, and macOS x64. Toolchain distribution run
-`30187594178` independently passes package/install/upgrade and installed stdlib
-smoke on the same four host targets at candidate SHA
-`6f9475dd956e63c886c8868278bc233a7044806b`.
+`30190137130` independently passes package/install/upgrade and installed stdlib
+smoke on the same four host targets at stable SHA
+`92c8f399f61b73d63990581c637da68572b6e133`. Stable tag run `30191226253`
+then proves RC2-to-stable upgrade and checksum-verified rollback on every host.
 
 ## Tagging
 
