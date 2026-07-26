@@ -40,10 +40,10 @@ sh scripts/install.sh --version 0.2.0
 具体变更见 [v0.2.0 发布说明](docs/release-notes-v0.2.0.md)和
 [v0.1 到 v0.2 迁移指南](docs/migration-v0-1-to-v0-2.md)。
 
-**v0.2 候选版门禁证据 SHA：**
-`6f9475dd956e63c886c8868278bc233a7044806b`（[PR #55](https://github.com/Hyper66666/Sengoo/pull/55)）。
-六项同 SHA 主干门禁和四主机 `v0.2.0-rc.2` 发布运行
-[`30188454330`](https://github.com/Hyper66666/Sengoo/actions/runs/30188454330)
+**v0.2 稳定版门禁证据 SHA：**
+`92c8f399f61b73d63990581c637da68572b6e133`（[PR #56](https://github.com/Hyper66666/Sengoo/pull/56)）。
+六项同 SHA 主干门禁和四主机 `v0.2.0` 发布运行
+[`30191226253`](https://github.com/Hyper66666/Sengoo/actions/runs/30191226253)
 已通过核心语言、编译规模、sanitizer、有界 fuzz、兼容性、安装版 realworld、
 打包、升级和回滚检查。生产 HTTP 包含精确路由 Sengoo handler、有界
 opt-in keep-alive、有界响应流，以及 Windows Schannel、Linux 和两种 macOS

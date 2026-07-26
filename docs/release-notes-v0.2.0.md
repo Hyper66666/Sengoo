@@ -51,9 +51,20 @@ smokes before publication.
 - Candidate 2 passed six same-SHA main workflows, four package jobs, and four
   RC1-to-RC2-to-RC1 transition jobs. Its public archives and evidence manifest
   are retained at the [`v0.2.0-rc.2` release](https://github.com/Hyper66666/Sengoo/releases/tag/v0.2.0-rc.2).
+- Stable: `92c8f399f61b73d63990581c637da68572b6e133`, run
+  [`30191226253`](https://github.com/Hyper66666/Sengoo/actions/runs/30191226253),
+  provenance attestation [`37141681`](https://github.com/Hyper66666/Sengoo/attestations/37141681).
 
-Stable release SHA, workflow, archive digests, and provenance are recorded here
-after the transactional `v0.2.0` tag workflow publishes the complete target set.
+| Target | SHA-256 |
+| --- | --- |
+| `aarch64-apple-darwin` | `e25b10df03f7aa49c5da6a31ebcbece1fd264fb031d162ec0496853ba2894842` |
+| `x86_64-apple-darwin` | `f46140b369e36e06e8834cb9bd81bcaca003e9eb29bca3978ecf657036e99562` |
+| `x86_64-pc-windows-msvc` | `11baa4fc0819e4062d3fa134e928a6c244a30c4bb3d0a68007232ed12e0d31c3` |
+| `x86_64-unknown-linux-gnu` | `3c041ddb8430c6d3d014e3a4aa93430985a3b8c74f9edf780c6e78cb02d52170` |
+
+The stable evidence manifest records the six successful main-push workflows,
+four package jobs, four RC2-to-stable-to-RC2 transition jobs, frozen fixture
+hashes, and no platform skip.
 
 ## Experimental or Deferred
 

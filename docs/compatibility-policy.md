@@ -5,13 +5,15 @@ for release decisions, not a claim that every operating-system or dependency
 version works.
 
 **v0.2 Stable-surface and fixture evidence SHA:**
-`6f9475dd956e63c886c8868278bc233a7044806b` ([PR #55](https://github.com/Hyper66666/Sengoo/pull/55)).
+`92c8f399f61b73d63990581c637da68572b6e133` ([PR #56](https://github.com/Hyper66666/Sengoo/pull/56)).
 Surface classes, edition `2026` rejection, migration notes, public-input panic
 policy, and retained fixtures (`examples/compat/v0.1.0-rc.1`,
-`examples/compat/v0.2.0-rc.1`) are documented against that release candidate.
+`examples/compat/v0.2.0-rc.1`) are documented against that stable release.
 Two consecutive four-host candidates passed; `v0.2.0-rc.2` release run
 [`30188454330`](https://github.com/Hyper66666/Sengoo/actions/runs/30188454330)
-retains the RC1 upgrade, compatibility, and checksum-verified rollback proof.
+retains the RC1 upgrade and rollback proof, while stable run
+[`30191226253`](https://github.com/Hyper66666/Sengoo/actions/runs/30191226253)
+retains the RC2 upgrade, compatibility, and checksum-verified rollback proof.
 
 ## Surface stability classes
 

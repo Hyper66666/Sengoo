@@ -143,6 +143,44 @@ hashes, and no platform skip. Transition artifacts `8628005628` (Linux),
 `8628007905` (Windows), `8628004938` (macOS arm64), and `8628006273` (macOS
 x64) each retain `previous`, `upgraded`, and `rolled-back` phases.
 
+## Stable v0.2.0
+
+PR #56 merged the coherent `0.2.0` workspace and release truth sources as
+`92c8f399f61b73d63990581c637da68572b6e133`. Stable main evidence uses only
+that SHA:
+
+| Gate | Retained run | Result |
+| --- | --- | --- |
+| Core conformance / LLDB | [30190063470](https://github.com/Hyper66666/Sengoo/actions/runs/30190063470) | Passed |
+| Native safety | [30190063475](https://github.com/Hyper66666/Sengoo/actions/runs/30190063475) | Passed |
+| Hardening fuzz | [30190063486](https://github.com/Hyper66666/Sengoo/actions/runs/30190063486) | Passed |
+| Compatibility prerelease | [30190063472](https://github.com/Hyper66666/Sengoo/actions/runs/30190063472) | Passed |
+| Installed realworld | [30190063481](https://github.com/Hyper66666/Sengoo/actions/runs/30190063481) | Passed on all four hosts |
+| Production performance | [30190063474](https://github.com/Hyper66666/Sengoo/actions/runs/30190063474) | Passed 100k/1000k and resource budgets |
+| Manual main distribution | [30190137130](https://github.com/Hyper66666/Sengoo/actions/runs/30190137130) | Passed on all four hosts |
+
+Annotated tag `v0.2.0` points to that SHA. Stable run
+[30191226253](https://github.com/Hyper66666/Sengoo/actions/runs/30191226253)
+passed four package jobs, four RC2-to-stable-to-RC2 transition jobs, the
+one-SHA collector, provenance attestation `37141681`, evidence generation, and
+transactional publication. The non-prerelease is retained at
+[v0.2.0](https://github.com/Hyper66666/Sengoo/releases/tag/v0.2.0).
+
+| Target | Published archive SHA-256 |
+| --- | --- |
+| `aarch64-apple-darwin` | `e25b10df03f7aa49c5da6a31ebcbece1fd264fb031d162ec0496853ba2894842` |
+| `x86_64-apple-darwin` | `f46140b369e36e06e8834cb9bd81bcaca003e9eb29bca3978ecf657036e99562` |
+| `x86_64-pc-windows-msvc` | `11baa4fc0819e4062d3fa134e928a6c244a30c4bb3d0a68007232ed12e0d31c3` |
+| `x86_64-unknown-linux-gnu` | `3c041ddb8430c6d3d014e3a4aa93430985a3b8c74f9edf780c6e78cb02d52170` |
+
+Independent audit downloaded all nine public assets, matched every sidecar,
+read every manifest as version `0.2.0` and the exact stable SHA, and verified
+all four subjects against `refs/tags/v0.2.0` plus the source digest. The
+evidence manifest records six successful main runs, four package jobs, four
+transition jobs, frozen fixture hashes, and no platform skip. Transition
+artifacts `8628932458` (Linux), `8628935571` (Windows), `8628931575` (macOS
+arm64), and `8628932694` (macOS x64) retain all three phases.
+
 ### Senline slice disposition
 
 The following general fixes were reviewed independently of the unfinished

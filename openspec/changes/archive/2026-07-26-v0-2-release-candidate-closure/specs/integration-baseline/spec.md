@@ -26,3 +26,11 @@ untracked file, dirty worktree, obsolete branch, or local-only commit.
 - **THEN** that state is checkpointed and reviewed before integration
 - **AND** destructive reset or worktree cleanup is blocked until the unique
   work is preserved
+
+#### Scenario: Phase 0 is proposed for archive
+
+- **WHEN** `mainline-release-baseline` is proposed for archive
+- **THEN** all required verification jobs reference the same commit SHA
+- **AND** the SHA is visible on the configured remote
+- **AND** no required capability evidence exists only in an untracked file or
+  obsolete branch
