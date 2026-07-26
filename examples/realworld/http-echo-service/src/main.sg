@@ -20,11 +20,37 @@ def dual_router() -> Result<HttpRouter, i64> {
 
 def dispatch_dual(request: HttpServerRequest) -> bool {
     let built = dual_router();
-    if built.is_ok == false { false; } else { let ignored = http_router_dispatch(built.value, request); true; };
+    if built.is_ok == false {
+        false;
+    } else {
+        let ignored = http_router_dispatch(built.value, request);
+        true;
+    };
 }
 
 async def main() -> i64 {
     let bind_result = http_server_bind("127.0.0.1", 0);
-    let unsupported_host = if bind_result.is_ok { false; } else { bind_result.error == STATUS_UNSUPPORTED(); };
-    if bind_result.is_ok { let server = bind_result.value; let claimed = server.claim_serve_mode(HTTP_SERVER_MODE_ROUTER()); if claimed.is_ok == false { server.close(); 1; } else { let outcome = await server.next_request_router_async(5000); let timed_out = if outcome.is_ok { false; } else { outcome.error == STATUS_TIMEOUT(); }; let answered = if outcome.is_ok { dispatch_dual(outcome.value); } else { false; }; let closed = server.close(); if (answered or timed_out) and closed { 0; } else { 1; }; }; } else if unsupported_host { 0; } else { 1; };
+    let unsupported_host = if bind_result.is_ok {
+        false;
+    } else {
+        bind_result.error == STATUS_UNSUPPORTED();
+    };
+    if bind_result.is_ok {
+        let server = bind_result.value;
+        let claimed = server.claim_serve_mode(HTTP_SERVER_MODE_ROUTER());
+        if claimed.is_ok == false {
+            server.close();
+            1;
+        } else {
+            let outcome = await server.next_request_router_async(5000);
+            let timed_out = if outcome.is_ok { false; } else { outcome.error == STATUS_TIMEOUT(); };
+            let answered = if outcome.is_ok { dispatch_dual(outcome.value); } else { false; };
+            let closed = server.close();
+            if (answered or timed_out) and closed { 0; } else { 1; };
+        };
+    } else if unsupported_host {
+        0;
+    } else {
+        1;
+    };
 }

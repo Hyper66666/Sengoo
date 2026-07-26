@@ -12,10 +12,18 @@ def main() -> i64 {
     let log_written = log_write(LOG_INFO(), "http status smoke").unwrap_or(false);
     let ftp_result = http_client_get("ftp://127.0.0.1/", 1);
     let ftp_closed = if ftp_result.is_ok { ftp_result.value.close(); } else { true; };
-    let ftp_unsupported = if ftp_result.is_ok { false; } else { ftp_result.error == STATUS_UNSUPPORTED(); };
+    let ftp_unsupported = if ftp_result.is_ok {
+        false;
+    } else {
+        ftp_result.error == STATUS_UNSUPPORTED();
+    };
     let doc = json_parse("[0]").unwrap_or(JsonDoc { handle: 0 });
     let root = doc.root();
     let count = root.array_len().unwrap_or(0);
     let closed = doc.close();
-    if ftp_unsupported and ftp_closed and count == 1 and closed and log_level_set and log_cleared and log_written { 0; } else { 1; };
+    if ftp_unsupported and ftp_closed and count == 1 and closed and log_level_set and log_cleared and log_written {
+        0;
+    } else {
+        1;
+    };
 }

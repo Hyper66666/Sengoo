@@ -22,7 +22,17 @@ def teardown() {
 
 def test_audit_fixture() -> i64 {
     let result = audit_workspace("fixture", "fixture/no-config.json", "fixture/audit.txt");
-    if result.is_err() { result.error; } else if result.value <= 1 { 11; } else if not file_exists("fixture/audit.txt") { 12; } else if not file_exists("fixture/audit-report.json") { 13; } else { 0; };
+    if result.is_err() {
+        result.error;
+    } else if result.value <= 1 {
+        11;
+    } else if not file_exists("fixture/audit.txt") {
+        12;
+    } else if not file_exists("fixture/audit-report.json") {
+        13;
+    } else {
+        0;
+    };
 }
 
 def test_missing_tests_returns_not_found() -> i64 {
@@ -31,11 +41,25 @@ def test_missing_tests_returns_not_found() -> i64 {
     let _source = file_write_str("empty/src/main.sg", "source file");
     let result = audit_workspace("empty", "empty/no-config.json", "empty/audit.txt");
     let _removed = dir_remove_tree("empty", 8, 100);
-    if result.is_err() and result.error == STATUS_NOT_FOUND() { 0; } else if result.is_err() { result.error; } else { 20; };
+    if result.is_err() and result.error == STATUS_NOT_FOUND() {
+        0;
+    } else if result.is_err() {
+        result.error;
+    } else {
+        20;
+    };
 }
 
 def test_parallel_score_matches_serial_oracle() -> i64 {
     let summary = WorkspaceSummary { source_files: 3, test_files: 2, manifests: 1, bytes: 64 };
     let concurrent = parallel_score(summary);
-    if concurrent.is_err() { concurrent.error; } else if concurrent.value != summary.score() { 30; } else if concurrent.value != 52 { 31; } else { 0; };
+    if concurrent.is_err() {
+        concurrent.error;
+    } else if concurrent.value != summary.score() {
+        30;
+    } else if concurrent.value != 52 {
+        31;
+    } else {
+        0;
+    };
 }

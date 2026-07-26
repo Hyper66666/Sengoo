@@ -22,30 +22,73 @@ def dual_router() -> Result<HttpRouter, i64> {
 
 def dispatch_dual(request: HttpServerRequest) -> bool {
     let built = dual_router();
-    if built.is_ok == false { false; } else { let ignored = http_router_dispatch(built.value, request); true; };
+    if built.is_ok == false {
+        false;
+    } else {
+        let ignored = http_router_dispatch(built.value, request);
+        true;
+    };
 }
 
 async def client_health(port: i64) -> i64 {
     await sleep(10);
     let connect_result = net_tcp_connect("127.0.0.1", port, 1000);
-    if connect_result.is_ok { let stream = connect_result.value; let sent = stream.send("GET /health HTTP/1.1\r\nHost: localhost\r\nConnection: close\r\n\r\n"); await sleep(1000); let closed = stream.close(); if sent.is_ok and closed { 0; } else { 2; }; } else { connect_result.error; };
+    if connect_result.is_ok {
+        let stream = connect_result.value;
+        let sent = stream.send("GET /health HTTP/1.1\r\nHost: localhost\r\nConnection: close\r\n\r\n");
+        await sleep(1000);
+        let closed = stream.close();
+        if sent.is_ok and closed { 0; } else { 2; };
+    } else {
+        connect_result.error;
+    };
 }
 
 async def client_echo(port: i64) -> i64 {
     await sleep(10);
     let connect_result = net_tcp_connect("127.0.0.1", port, 1000);
-    if connect_result.is_ok { let stream = connect_result.value; let sent = stream.send("GET /echo HTTP/1.1\r\nHost: localhost\r\nConnection: close\r\n\r\n"); await sleep(1000); let closed = stream.close(); if sent.is_ok and closed { 0; } else { 2; }; } else { connect_result.error; };
+    if connect_result.is_ok {
+        let stream = connect_result.value;
+        let sent = stream.send("GET /echo HTTP/1.1\r\nHost: localhost\r\nConnection: close\r\n\r\n");
+        await sleep(1000);
+        let closed = stream.close();
+        if sent.is_ok and closed { 0; } else { 2; };
+    } else {
+        connect_result.error;
+    };
 }
 
 async def dual_route_contract(server: HttpServer) -> bool {
     let port = server.local_port().unwrap_or(0);
     let claimed = server.claim_serve_mode(HTTP_SERVER_MODE_ROUTER());
-    if claimed.is_ok == false { server.close(); false; } else { let client1 = spawn(client_health(port)); let o1 = await server.next_request_router_async(5000); let health_ok = if o1.is_ok { dispatch_dual(o1.value); } else { false; }; let client1_ok = await client1 == 0; let client2 = spawn(client_echo(port)); let o2 = await server.next_request_router_async(5000); let echo_ok = if o2.is_ok { dispatch_dual(o2.value); } else { false; }; let client2_ok = await client2 == 0; let closed = server.close(); port > 0 and claimed.is_ok and health_ok and echo_ok and client1_ok and client2_ok and closed; };
+    if claimed.is_ok == false {
+        server.close();
+        false;
+    } else {
+        let client1 = spawn(client_health(port));
+        let o1 = await server.next_request_router_async(5000);
+        let health_ok = if o1.is_ok { dispatch_dual(o1.value); } else { false; };
+        let client1_ok = await client1 == 0;
+        let client2 = spawn(client_echo(port));
+        let o2 = await server.next_request_router_async(5000);
+        let echo_ok = if o2.is_ok { dispatch_dual(o2.value); } else { false; };
+        let client2_ok = await client2 == 0;
+        let closed = server.close();
+        port > 0 and claimed.is_ok and health_ok and echo_ok and client1_ok and client2_ok and closed;
+    };
 }
 
 async def main() -> i64 {
     let bind_result = http_server_bind("127.0.0.1", 0);
-    let unsupported_host = if bind_result.is_ok { false; } else { bind_result.error == STATUS_UNSUPPORTED(); };
-    let native_ok = if bind_result.is_ok { await dual_route_contract(bind_result.value); } else { false; };
+    let unsupported_host = if bind_result.is_ok {
+        false;
+    } else {
+        bind_result.error == STATUS_UNSUPPORTED();
+    };
+    let native_ok = if bind_result.is_ok {
+        await dual_route_contract(bind_result.value);
+    } else {
+        false;
+    };
     if native_ok or unsupported_host { 0; } else { 2; };
 }

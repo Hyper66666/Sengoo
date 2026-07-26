@@ -15,7 +15,25 @@ def compressed_json_artifact_smoke() -> i64 {
     let compressed_again_result = compress_gzip_buffer(source, source.used_len(), compressed_again);
     let too_small = compress_gzip_buffer(source, source.used_len(), tiny).err().unwrap_or(0);
     let invalid_status = decompress_gzip_buffer(invalid, invalid.used_len(), restored).err().unwrap_or(0);
-    let parsed_ok = if compressed_result.is_ok { let restored_result = decompress_gzip_buffer(compressed, compressed_result.value, restored); if restored_result.is_ok { let doc_result = json_parse_buffer(restored, restored_result.value); if doc_result.is_ok { let doc = doc_result.value; let root = doc.root(); let count = root.array_len().unwrap_or(0); let closed = doc.close(); count == 3 and closed and restored_result.value == source.used_len(); } else { false; }; } else { false; }; } else { false; };
+    let parsed_ok = if compressed_result.is_ok {
+        let restored_result = decompress_gzip_buffer(compressed, compressed_result.value, restored);
+        if restored_result.is_ok {
+            let doc_result = json_parse_buffer(restored, restored_result.value);
+            if doc_result.is_ok {
+                let doc = doc_result.value;
+                let root = doc.root();
+                let count = root.array_len().unwrap_or(0);
+                let closed = doc.close();
+                count == 3 and closed and restored_result.value == source.used_len();
+            } else {
+                false;
+            };
+        } else {
+            false;
+        };
+    } else {
+        false;
+    };
     let deterministic_len = compressed_result.is_ok and compressed_again_result.is_ok and compressed_result.value == compressed_again_result.value;
     let gzip_shape = compressed_result.is_ok and compressed_result.value > source.used_len();
     let ok = parsed_ok and deterministic_len and gzip_shape and too_small == STATUS_BUFFER_TOO_SMALL() and invalid_status == STATUS_PARSE();
