@@ -175,12 +175,17 @@ fn distribution_release_publishes_one_sha_evidence_manifest() {
         .expect("read release evidence generator");
 
     assert!(
-        workflow.contains("Generate one-SHA release evidence")
+        workflow.contains("Collect required one-SHA gate runs")
+            && workflow.contains("required-gate-runs.json")
+            && workflow.contains("actions: read")
+            && workflow.contains("Generate one-SHA release evidence")
             && workflow.contains("scripts/generate-release-evidence.ps1")
             && workflow.contains("target/dist/release-evidence.json")
+            && workflow.contains("-GateRunsPath target/dist/required-gate-runs.json")
+            && workflow.contains("-CompatibilityFixturePath $compatibilityFixture")
             && workflow.contains("-PreviousVersion $previousVersion")
             && workflow.contains("steps.archive-provenance.outputs['attestation-url']"),
-        "tag publication should retain one-SHA archive, checksum, transition, workflow, and provenance evidence"
+        "tag publication should retain fail-closed one-SHA gate, archive, compatibility, transition, workflow, and provenance evidence"
     );
     for required in [
         "x86_64-pc-windows-msvc",
@@ -198,12 +203,113 @@ fn distribution_release_publishes_one_sha_evidence_manifest() {
         "release-transition-windows-x86_64",
         "release-transition-macos-x86_64",
         "release-transition-macos-arm64",
+        "GateRunsPath",
+        "CompatibilityFixturePath",
+        "required_gate_runs",
+        "tool_versions",
+        "compatibility_fixture",
+        "lockfile_sha256",
+        "known_platform_skips",
+        "expired evidence artifact",
     ] {
         assert!(
             generator.contains(required),
             "release evidence generator should enforce `{required}`"
         );
     }
+}
+
+#[test]
+fn release_evidence_generator_embeds_and_validates_required_gate_runs() {
+    let root = distribution_temp_dir("release-evidence");
+    let dist = root.join("dist");
+    fs::create_dir_all(&dist).expect("create distribution directory");
+    let source_revision = "1".repeat(40);
+    for (target, extension) in [
+        ("x86_64-pc-windows-msvc", "zip"),
+        ("x86_64-unknown-linux-gnu", "tar.gz"),
+        ("x86_64-apple-darwin", "tar.gz"),
+        ("aarch64-apple-darwin", "tar.gz"),
+    ] {
+        let target_dir = dist.join(target);
+        fs::create_dir_all(&target_dir).expect("create target distribution directory");
+        let archive_name = format!("sengoo-0.2.0-rc.1-{target}.{extension}");
+        let checksum_name = format!("{archive_name}.sha256");
+        let archive_bytes = format!("release archive for {target}").into_bytes();
+        let archive_hash = format!("{:x}", Sha256::digest(&archive_bytes));
+        fs::write(target_dir.join(&archive_name), archive_bytes).expect("write archive fixture");
+        fs::write(
+            target_dir.join(&checksum_name),
+            format!("{archive_hash}  {archive_name}\n"),
+        )
+        .expect("write archive checksum fixture");
+
+        let mut manifest = distribution_manifest();
+        manifest["version"] = json!("0.2.0-rc.1");
+        manifest["target"] = json!(target);
+        manifest["source_revision"] = json!(source_revision);
+        manifest["archive_file"] = json!(archive_name);
+        manifest["checksum_file"] = json!(checksum_name);
+        write_json(&target_dir.join("manifest.json"), &manifest);
+    }
+
+    let gate_runs = root.join("required-gate-runs.json");
+    write_json(&gate_runs, &successful_gate_runs(&source_revision));
+    let output_path = root.join("release-evidence.json");
+    let compatibility_fixture = workspace_root().join("examples/compat/v0.1.0-rc.1");
+    let output =
+        run_release_evidence_generator(&dist, &output_path, &gate_runs, &compatibility_fixture);
+    assert!(
+        output.status.success(),
+        "release evidence generation failed\nstdout:\n{}\nstderr:\n{}",
+        String::from_utf8_lossy(&output.stdout),
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let evidence: Value =
+        serde_json::from_slice(&fs::read(&output_path).expect("read generated release evidence"))
+            .expect("parse generated release evidence");
+    assert_eq!(evidence["source_revision"], source_revision);
+    assert_eq!(
+        evidence["required_gate_runs"]
+            .as_array()
+            .expect("required gate runs"),
+        successful_gate_runs(&source_revision)["required_runs"]
+            .as_array()
+            .expect("fixture gate runs")
+    );
+    assert_eq!(evidence["artifacts"].as_array().unwrap().len(), 4);
+    assert_eq!(
+        evidence["compatibility_fixture"]["path"],
+        compatibility_fixture.to_string_lossy().replace('\\', "/")
+    );
+    assert_eq!(
+        evidence["compatibility_fixture"]["lockfile_sha256"]
+            .as_str()
+            .expect("compatibility lock hash")
+            .len(),
+        64
+    );
+    assert!(evidence["artifacts"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .all(|artifact| artifact["tool_versions"]["sgc"].is_string()));
+
+    let mut mixed_sha = successful_gate_runs(&source_revision);
+    mixed_sha["required_runs"][0]["head_sha"] = json!("2".repeat(40));
+    write_json(&gate_runs, &mixed_sha);
+    let rejected =
+        run_release_evidence_generator(&dist, &output_path, &gate_runs, &compatibility_fixture);
+    assert!(
+        !rejected.status.success()
+            && String::from_utf8_lossy(&rejected.stderr)
+                .contains("required gate run is not a successful main-push run"),
+        "mixed-SHA gate evidence should fail closed\nstdout:\n{}\nstderr:\n{}",
+        String::from_utf8_lossy(&rejected.stdout),
+        String::from_utf8_lossy(&rejected.stderr)
+    );
+
+    let _ = fs::remove_dir_all(root);
 }
 
 #[test]
@@ -783,6 +889,123 @@ fn run_manifest_comparator(left: &Path, right: &Path, output: &Path) -> std::pro
         .arg(output)
         .output()
         .expect("run distribution manifest comparator")
+}
+
+fn run_release_evidence_generator(
+    dist: &Path,
+    output: &Path,
+    gate_runs: &Path,
+    compatibility_fixture: &Path,
+) -> std::process::Output {
+    Command::new(powershell())
+        .args(["-NoLogo", "-NoProfile", "-NonInteractive", "-File"])
+        .arg(
+            workspace_root()
+                .join("scripts")
+                .join("generate-release-evidence.ps1"),
+        )
+        .arg("-DistDir")
+        .arg(dist)
+        .arg("-OutputPath")
+        .arg(output)
+        .arg("-Version")
+        .arg("0.2.0-rc.1")
+        .arg("-SourceRevision")
+        .arg("1".repeat(40))
+        .arg("-PreviousVersion")
+        .arg("0.1.0-rc.1")
+        .arg("-GateRunsPath")
+        .arg(gate_runs)
+        .arg("-CompatibilityFixturePath")
+        .arg(compatibility_fixture)
+        .arg("-Repository")
+        .arg("Hyper66666/Sengoo")
+        .arg("-RunId")
+        .arg("123")
+        .arg("-RunAttempt")
+        .arg("1")
+        .arg("-RunUrl")
+        .arg("https://github.com/Hyper66666/Sengoo/actions/runs/123")
+        .arg("-ProvenanceUrl")
+        .arg("https://github.com/Hyper66666/Sengoo/attestations/456")
+        .output()
+        .expect("run release evidence generator")
+}
+
+fn successful_gate_runs(source_revision: &str) -> Value {
+    let required_runs = [
+        "core-conformance",
+        "native-safety",
+        "hardening-fuzz",
+        "compatibility-prerelease",
+        "realworld-e2e",
+        "perf-smoke",
+    ]
+    .into_iter()
+    .enumerate()
+    .map(|(index, workflow)| {
+        json!({
+            "workflow": workflow,
+            "id": (1000 + index).to_string(),
+            "attempt": "1",
+            "event": "push",
+            "head_branch": "main",
+            "head_sha": source_revision,
+            "status": "completed",
+            "conclusion": "success",
+            "url": format!("https://example.invalid/runs/{}", 1000 + index),
+            "jobs": [{
+                "name": format!("{workflow}-job"),
+                "status": "completed",
+                "conclusion": "success",
+                "url": format!("https://example.invalid/jobs/{}", 1000 + index)
+            }],
+            "artifacts": [{
+                "id": (2000 + index).to_string(),
+                "name": format!("{workflow}-evidence"),
+                "size_in_bytes": 42,
+                "expired": false,
+                "url": format!("https://example.invalid/artifacts/{}", 2000 + index)
+            }]
+        })
+    })
+    .collect::<Vec<_>>();
+    let package_jobs = ["ubuntu", "windows", "macos-arm64", "macos-x64"]
+        .into_iter()
+        .map(|host| {
+            json!({
+                "name": format!("package smoke ({host})"),
+                "status": "completed",
+                "conclusion": "success",
+                "url": format!("https://example.invalid/package/{host}")
+            })
+        })
+        .collect::<Vec<_>>();
+    let transition_jobs = ["ubuntu", "windows", "macos-arm64", "macos-x64"]
+        .into_iter()
+        .map(|host| {
+            json!({
+                "name": format!("published upgrade and rollback ({host})"),
+                "status": "completed",
+                "conclusion": "success",
+                "url": format!("https://example.invalid/transition/{host}")
+            })
+        })
+        .collect::<Vec<_>>();
+    json!({
+        "schema_version": 1,
+        "source_revision": source_revision,
+        "required_runs": required_runs,
+        "distribution_prerequisites": {
+            "run_id": "123",
+            "run_url": "https://example.invalid/runs/123",
+            "head_sha": source_revision,
+            "package_jobs": package_jobs,
+            "transition_jobs": transition_jobs,
+            "artifacts": []
+        },
+        "known_platform_skips": []
+    })
 }
 
 fn write_json(path: &Path, value: &Value) {

@@ -772,12 +772,136 @@ jobs:
     needs: [package-smoke, release-transition]
     runs-on: ubuntu-latest
     permissions:
+      actions: read
       contents: write
       id-token: write
       attestations: write
 
     steps:
       - uses: actions/checkout@v4
+
+      - name: Collect required one-SHA gate runs
+        env:
+          GH_TOKEN: ${{ github.token }}
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = "Stop"
+          $repository = "${{ github.repository }}"
+          $sourceRevision = "${{ github.sha }}"
+          $currentRunId = "${{ github.run_id }}"
+
+          function Invoke-GhJson([string]$Path) {
+            $raw = @(& gh api $Path)
+            if ($LASTEXITCODE -ne 0) {
+              throw "GitHub API request failed: $Path"
+            }
+            return (($raw -join "`n") | ConvertFrom-Json)
+          }
+
+          function Get-RunJobs([string]$RunId) {
+            $response = Invoke-GhJson "repos/$repository/actions/runs/$RunId/jobs?per_page=100"
+            return @($response.jobs | ForEach-Object {
+              [ordered]@{
+                name = [string]$_.name
+                status = [string]$_.status
+                conclusion = [string]$_.conclusion
+                url = [string]$_.html_url
+              }
+            })
+          }
+
+          function Get-RunArtifacts([string]$RunId) {
+            $response = Invoke-GhJson "repos/$repository/actions/runs/$RunId/artifacts?per_page=100"
+            return @($response.artifacts | ForEach-Object {
+              [ordered]@{
+                id = [string]$_.id
+                name = [string]$_.name
+                size_in_bytes = [long]$_.size_in_bytes
+                expired = [bool]$_.expired
+                url = [string]$_.archive_download_url
+              }
+            })
+          }
+
+          $runsResponse = Invoke-GhJson "repos/$repository/actions/runs?head_sha=$sourceRevision&per_page=100"
+          $requiredWorkflows = @(
+            "core-conformance",
+            "native-safety",
+            "hardening-fuzz",
+            "compatibility-prerelease",
+            "realworld-e2e",
+            "perf-smoke"
+          )
+          $requiredRuns = @()
+          foreach ($workflowName in $requiredWorkflows) {
+            $matches = @($runsResponse.workflow_runs | Where-Object {
+              [string]$_.name -eq $workflowName -and
+              [string]$_.head_sha -eq $sourceRevision -and
+              [string]$_.head_branch -eq "main" -and
+              [string]$_.event -eq "push" -and
+              [string]$_.status -eq "completed" -and
+              [string]$_.conclusion -eq "success"
+            } | Sort-Object run_number -Descending)
+            if ($matches.Count -eq 0) {
+              throw "missing successful main-push $workflowName run for $sourceRevision"
+            }
+            $run = $matches[0]
+            $jobs = @(Get-RunJobs ([string]$run.id))
+            $failedJobs = @($jobs | Where-Object {
+              $_.status -ne "completed" -or $_.conclusion -ne "success"
+            })
+            if ($failedJobs.Count -ne 0) {
+              throw "$workflowName contains a non-success job: $($failedJobs.name -join ', ')"
+            }
+            $requiredRuns += [ordered]@{
+              workflow = $workflowName
+              id = [string]$run.id
+              attempt = [string]$run.run_attempt
+              event = [string]$run.event
+              head_branch = [string]$run.head_branch
+              head_sha = [string]$run.head_sha
+              status = [string]$run.status
+              conclusion = [string]$run.conclusion
+              url = [string]$run.html_url
+              jobs = $jobs
+              artifacts = @(Get-RunArtifacts ([string]$run.id))
+            }
+          }
+
+          $distributionJobs = @(Get-RunJobs $currentRunId)
+          $packageJobs = @($distributionJobs | Where-Object { $_.name -like "package smoke (*)" })
+          $transitionJobs = @($distributionJobs | Where-Object {
+            $_.name -like "published upgrade and rollback (*)"
+          })
+          foreach ($jobs in @($packageJobs, $transitionJobs)) {
+            if ($jobs.Count -ne 4) {
+              throw "current distribution run must expose four package and four transition jobs"
+            }
+            $failedJobs = @($jobs | Where-Object {
+              $_.status -ne "completed" -or $_.conclusion -ne "success"
+            })
+            if ($failedJobs.Count -ne 0) {
+              throw "current distribution prerequisite failed: $($failedJobs.name -join ', ')"
+            }
+          }
+
+          $gateEvidence = [ordered]@{
+            schema_version = 1
+            source_revision = $sourceRevision
+            required_runs = $requiredRuns
+            distribution_prerequisites = [ordered]@{
+              run_id = $currentRunId
+              run_url = "${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}"
+              head_sha = $sourceRevision
+              package_jobs = $packageJobs
+              transition_jobs = $transitionJobs
+              artifacts = @(Get-RunArtifacts $currentRunId)
+            }
+            known_platform_skips = @()
+          }
+          New-Item -ItemType Directory -Force -Path target/dist | Out-Null
+          $gateEvidence | ConvertTo-Json -Depth 12 | Set-Content `
+            -LiteralPath target/dist/required-gate-runs.json -Encoding utf8NoBOM
 
       - name: Download all smoke-gated archives
         uses: actions/download-artifact@v4
@@ -804,12 +928,20 @@ jobs:
             "0.2.0" { "0.2.0-rc.2" }
             default { throw "release transition predecessor is not pinned for $version" }
           }
+          $compatibilityFixture = switch ($version) {
+            "0.2.0-rc.1" { "examples/compat/v0.1.0-rc.1" }
+            "0.2.0-rc.2" { "examples/compat/v0.2.0-rc.1" }
+            "0.2.0" { "examples/compat/v0.2.0-rc.1" }
+            default { throw "compatibility fixture is not pinned for $version" }
+          }
           ./scripts/generate-release-evidence.ps1 `
             -DistDir target/dist `
             -OutputPath target/dist/release-evidence.json `
             -Version $version `
             -SourceRevision "${{ github.sha }}" `
             -PreviousVersion $previousVersion `
+            -GateRunsPath target/dist/required-gate-runs.json `
+            -CompatibilityFixturePath $compatibilityFixture `
             -Repository "${{ github.repository }}" `
             -RunId "${{ github.run_id }}" `
             -RunAttempt "${{ github.run_attempt }}" `

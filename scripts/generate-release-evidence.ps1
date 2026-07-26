@@ -16,6 +16,12 @@ param(
     [Parameter(Mandatory = $true)]
     [string]$PreviousVersion,
 
+    [Parameter(Mandatory = $true)]
+    [string]$GateRunsPath,
+
+    [Parameter(Mandatory = $true)]
+    [string]$CompatibilityFixturePath,
+
     [string]$Repository = $env:GITHUB_REPOSITORY,
     [string]$RunId = $env:GITHUB_RUN_ID,
     [string]$RunAttempt = $env:GITHUB_RUN_ATTEMPT,
@@ -33,6 +39,106 @@ $ErrorActionPreference = "Stop"
 
 if ([string]::IsNullOrWhiteSpace($PreviousVersion) -or $PreviousVersion -eq $Version) {
     throw "previous release version must be non-empty and differ from the current version"
+}
+
+$gateRuns = Get-Content -LiteralPath $GateRunsPath -Raw | ConvertFrom-Json
+if ([int]$gateRuns.schema_version -ne 1) {
+    throw "unsupported required gate evidence schema: $($gateRuns.schema_version)"
+}
+if ([string]$gateRuns.source_revision -ne $SourceRevision) {
+    throw "required gate evidence source revision mismatch"
+}
+$requiredWorkflowNames = @(
+    "core-conformance",
+    "native-safety",
+    "hardening-fuzz",
+    "compatibility-prerelease",
+    "realworld-e2e",
+    "perf-smoke"
+)
+$requiredGateRuns = @($gateRuns.required_runs)
+foreach ($workflowName in $requiredWorkflowNames) {
+    $matches = @($requiredGateRuns | Where-Object { [string]$_.workflow -eq $workflowName })
+    if ($matches.Count -ne 1) {
+        throw "required gate evidence must contain exactly one $workflowName run"
+    }
+    $run = $matches[0]
+    if (
+        [string]$run.head_sha -ne $SourceRevision -or
+        [string]$run.head_branch -ne "main" -or
+        [string]$run.event -ne "push" -or
+        [string]$run.status -ne "completed" -or
+        [string]$run.conclusion -ne "success"
+    ) {
+        throw "required gate run is not a successful main-push run for ${SourceRevision}: $workflowName"
+    }
+    $jobs = @($run.jobs)
+    if ($jobs.Count -eq 0) {
+        throw "required gate run has no retained jobs: $workflowName"
+    }
+    $failedJobs = @($jobs | Where-Object {
+        [string]$_.status -ne "completed" -or [string]$_.conclusion -ne "success"
+    })
+    if ($failedJobs.Count -ne 0) {
+        throw "required gate run contains non-success jobs: $workflowName"
+    }
+    $expiredArtifacts = @($run.artifacts | Where-Object { [bool]$_.expired })
+    if ($expiredArtifacts.Count -ne 0) {
+        throw "expired evidence artifact in ${workflowName}: $($expiredArtifacts.name -join ', ')"
+    }
+}
+
+$distributionPrerequisites = $gateRuns.distribution_prerequisites
+if ([string]$distributionPrerequisites.head_sha -ne $SourceRevision) {
+    throw "distribution prerequisite source revision mismatch"
+}
+foreach ($jobSetName in @("package_jobs", "transition_jobs")) {
+    $jobs = @($distributionPrerequisites.$jobSetName)
+    if ($jobs.Count -ne 4) {
+        throw "distribution prerequisite must contain four $jobSetName"
+    }
+    $failedJobs = @($jobs | Where-Object {
+        [string]$_.status -ne "completed" -or [string]$_.conclusion -ne "success"
+    })
+    if ($failedJobs.Count -ne 0) {
+        throw "distribution prerequisite contains non-success $jobSetName"
+    }
+}
+$expiredDistributionArtifacts = @(
+    $distributionPrerequisites.artifacts | Where-Object { [bool]$_.expired }
+)
+if ($expiredDistributionArtifacts.Count -ne 0) {
+    throw "expired evidence artifact in distribution prerequisites: $($expiredDistributionArtifacts.name -join ', ')"
+}
+
+$compatibilityRoot = (Resolve-Path -LiteralPath $CompatibilityFixturePath).Path
+$compatibilityFiles = [ordered]@{
+    manifest_sha256 = "Sengoo.toml"
+    lockfile_sha256 = "Sengoo.lock"
+    source_sha256 = "src/lib.sg"
+    test_sha256 = "tests/smoke.sg"
+}
+$compatibilityHashes = [ordered]@{}
+foreach ($entry in $compatibilityFiles.GetEnumerator()) {
+    $path = Join-Path $compatibilityRoot $entry.Value
+    if (-not (Test-Path -LiteralPath $path -PathType Leaf)) {
+        throw "compatibility fixture is missing $($entry.Value)"
+    }
+    $compatibilityHashes[$entry.Key] = (
+        Get-FileHash -LiteralPath $path -Algorithm SHA256
+    ).Hash.ToLowerInvariant()
+}
+$packageVersionLine = Select-String -LiteralPath (Join-Path $compatibilityRoot "Sengoo.toml") `
+    -Pattern '^version\s*=\s*"([^"]+)"' | Select-Object -First 1
+if ($null -eq $packageVersionLine) {
+    throw "compatibility fixture package version is missing"
+}
+$compatibilityFixture = [ordered]@{
+    path = $CompatibilityFixturePath.Replace('\', '/')
+    package_version = $packageVersionLine.Matches[0].Groups[1].Value
+}
+foreach ($entry in $compatibilityHashes.GetEnumerator()) {
+    $compatibilityFixture[$entry.Key] = $entry.Value
 }
 
 $distRoot = (Resolve-Path -LiteralPath $DistDir).Path
@@ -99,6 +205,7 @@ foreach ($manifestPath in $manifests) {
         manifest = "$([System.IO.Path]::GetFileName($manifestPath.DirectoryName))/$($manifestPath.Name)"
         build_manifest_id = [string]$manifest.build_manifest_id
         native_runtime_abi = [int]$manifest.native_runtime.abi_version
+        tool_versions = $manifest.tool_versions
     }
 }
 
@@ -140,6 +247,10 @@ $evidence = [ordered]@{
             "release-transition-macos-arm64"
         )
     }
+    required_gate_runs = $requiredGateRuns
+    distribution_prerequisites = $distributionPrerequisites
+    compatibility_fixture = $compatibilityFixture
+    known_platform_skips = @($gateRuns.known_platform_skips)
     provenance_url = $ProvenanceUrl
     artifacts = $artifacts
     generated_at_utc = (Get-Date).ToUniversalTime().ToString("o")
@@ -149,5 +260,7 @@ $parent = Split-Path -Parent $OutputPath
 if (-not [string]::IsNullOrWhiteSpace($parent)) {
     New-Item -ItemType Directory -Force -Path $parent | Out-Null
 }
-$evidence | ConvertTo-Json -Depth 10 | Set-Content -LiteralPath $OutputPath -Encoding utf8NoBOM
+$json = $evidence | ConvertTo-Json -Depth 12
+$utf8NoBom = [System.Text.UTF8Encoding]::new($false)
+[System.IO.File]::WriteAllText([System.IO.Path]::GetFullPath($OutputPath), $json, $utf8NoBom)
 Write-Output (Resolve-Path -LiteralPath $OutputPath).Path
