@@ -31,9 +31,12 @@
   `mainstream-adoption-gap-closure` after reconciling their active task and
   inventory state against retained PR #51 evidence. Archived child task files
   were left as historical records.
-- [ ] 1.5 Record the converged remote main SHA; verify no required source, test,
+- [x] 1.5 Record the converged remote main SHA; verify no required source, test,
   fixture, certificate, transcript, or evidence exists only untracked or in an
   obsolete worktree.
+  PR #54 merged as `f5a09c4baa83f539c5d7e889c9fce3d23e2b4289`; the
+  release-sequence worktree was clean, the branch inventory remained unchanged,
+  and RC1 evidence was retained by GitHub rather than local-only files.
 
 ## 2. HTTP production owner closure
 
@@ -65,21 +68,35 @@
 
 ## 3. One-SHA release matrix
 
-- [ ] 3.1 Push one candidate integration SHA and generate a retained evidence
+- [x] 3.1 Push one candidate integration SHA and generate a retained evidence
   manifest keyed by full SHA and version.
-- [ ] 3.2 On Windows x64, Linux x64, macOS x64, and macOS arm64, install the
+  `v0.2.0-rc.1` run `30184545506` published `release-evidence.json` for
+  `f5a09c4baa83f539c5d7e889c9fce3d23e2b4289` and version `0.2.0-rc.1`.
+- [x] 3.2 On Windows x64, Linux x64, macOS x64, and macOS arm64, install the
   packaged archive outside the checkout and run version, stdlib, locked
   package, reviewed realworld, compatibility, upgrade, and rollback smokes.
-- [ ] 3.3 Run host-role evidence from design D4: Schannel/CDB on Windows,
+  Main run `30183586721`, manual distribution run `30183605458`, and RC1 tag
+  run `30184545506` passed the installed and transition loops on all four hosts.
+- [x] 3.3 Run host-role evidence from design D4: Schannel/CDB on Windows,
   rustls/LLDB/safety/fuzz/perf on Linux, and rustls/reactor/native package loops
   on both macOS architectures.
-- [ ] 3.4 Run Linux sanitizer/leak and bounded fuzz gates over compiler,
+  The same main SHA passed core/LLDB `30183586698`, native safety
+  `30183586670`, fuzz `30183586677`, performance `30183586679`, and the RC1
+  tag's Schannel/CDB plus four-host TLS/reactor/package roles.
+- [x] 3.4 Run Linux sanitizer/leak and bounded fuzz gates over compiler,
   manifest/lock/archive, runtime handle/FFI, and portable artifact boundaries;
   retain minimized regressions for any fix.
-- [ ] 3.5 Run the committed 100k/1000k compile and representative runtime gates;
+  Runs `30183586670` and `30183586677` passed and retained their evidence
+  artifacts on the candidate SHA.
+- [x] 3.5 Run the committed 100k/1000k compile and representative runtime gates;
   budget changes require reviewed benchmark evidence.
-- [ ] 3.6 Reject mixed-SHA, skipped-required-job, expired-artifact, or local-only
+  Performance run `30183586679` passed with retained
+  `production-performance-evidence`.
+- [x] 3.6 Reject mixed-SHA, skipped-required-job, expired-artifact, or local-only
   evidence as a release pass.
+  The tag-only collector and generator validated six successful main-push runs,
+  eight successful host package/transition jobs, unexpired artifacts, exact
+  fixture hashes, and one full source revision before publication.
 
 ## 4. Candidate 1
 
@@ -88,17 +105,28 @@
   Workspace crates now inherit `0.2.0-rc.1`, the four-tool coherence test
   passes, and the distribution workflow retains its tag/workspace fail-fast
   check.
-- [ ] 4.2 Pass the complete section 3 matrix on candidate 1 and retain all four
+- [x] 4.2 Pass the complete section 3 matrix on candidate 1 and retain all four
   archives, checksums, provenance, evidence manifest, and compatibility inputs.
-- [ ] 4.3 Prove `v0.1.0-rc.1` retained projects check/test/build/run under
+  RC1 published four archives, four `.sha256` files, evidence manifest, and
+  attestation `37127632`; every archive passed independent provenance verify.
+- [x] 4.3 Prove `v0.1.0-rc.1` retained projects check/test/build/run under
   candidate 1 without silent source, manifest, or lockfile rewriting.
-- [ ] 4.4 Publish candidate 1 only after every required target passes; preserve
+  Transition artifacts `8627024903`, `8627026644`, `8627022847`, and
+  `8627031690` record previous/upgraded/rolled-back fixture loops on all hosts.
+- [x] 4.4 Publish candidate 1 only after every required target passes; preserve
   the previous release for rollback.
+  [`v0.2.0-rc.1`](https://github.com/Hyper66666/Sengoo/releases/tag/v0.2.0-rc.1)
+  was published only after all prerequisite jobs passed; `v0.1.0-rc.1`
+  remains published and checksum-installable.
 
 ## 5. Candidate 2 and consecutive compatibility
 
-- [ ] 5.1 Create candidate 2 from fixes that preserve the frozen Stable surface,
+- [x] 5.1 Create candidate 2 from fixes that preserve the frozen Stable surface,
   or reset the candidate sequence when a P0/P1 fix changes that surface.
+  Candidate 2 contains only retained RC1 evidence updates and the coherent
+  `0.2.0-rc.2` version transition; no Stable source, stdlib, CLI, schema,
+  diagnostic, protocol, or runtime ABI behavior changed, so the count remains
+  consecutive.
 - [ ] 5.2 Pass the complete section 3 matrix on candidate 2 using its own SHA.
 - [ ] 5.3 Install/upgrade from retained candidate 1 to candidate 2 and run
   candidate-1 source/manifest/lockfile/diagnostic/ABI fixtures unchanged.

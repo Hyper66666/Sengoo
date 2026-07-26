@@ -62,6 +62,45 @@ release assets. Section 3 remains open until the converged `main` SHA reruns
 the matrix and the matching tag produces `release-evidence.json`, provenance,
 and published transition transcripts.
 
+## Converged Main and Candidate 1
+
+PR #54 merged to `main` as
+`f5a09c4baa83f539c5d7e889c9fce3d23e2b4289`. The complete main matrix used
+only that SHA:
+
+| Gate | Retained run | Result |
+| --- | --- | --- |
+| Core conformance / LLDB | [30183586698](https://github.com/Hyper66666/Sengoo/actions/runs/30183586698) | Passed |
+| Native safety | [30183586670](https://github.com/Hyper66666/Sengoo/actions/runs/30183586670) | Passed |
+| Hardening fuzz | [30183586677](https://github.com/Hyper66666/Sengoo/actions/runs/30183586677) | Passed |
+| Compatibility prerelease | [30183586694](https://github.com/Hyper66666/Sengoo/actions/runs/30183586694) | Passed |
+| Installed realworld | [30183586721](https://github.com/Hyper66666/Sengoo/actions/runs/30183586721) | Passed on all four hosts |
+| Production performance | [30183586679](https://github.com/Hyper66666/Sengoo/actions/runs/30183586679) | Passed 100k/1000k and resource budgets |
+| Manual main distribution | [30183605458](https://github.com/Hyper66666/Sengoo/actions/runs/30183605458) | Passed on all four hosts |
+
+Annotated tag `v0.2.0-rc.1` points to the same full SHA. Tag run
+[30184545506](https://github.com/Hyper66666/Sengoo/actions/runs/30184545506)
+passed four package jobs, four published upgrade/rollback jobs, the one-SHA
+collector, provenance attestation, evidence generation, and publication. The
+published prerelease is
+[v0.2.0-rc.1](https://github.com/Hyper66666/Sengoo/releases/tag/v0.2.0-rc.1),
+with provenance attestation `37127632`.
+
+| Target | Published archive SHA-256 |
+| --- | --- |
+| `aarch64-apple-darwin` | `0689b17c3383d59fd5fa0834be37c6bf22e38cf0e498e6c1457576d5dd4fef0e` |
+| `x86_64-apple-darwin` | `e24e10dc460b0c2bb7b359a5942cb4c5265fd8df4f1ce38a918a89e1ef6f0e67` |
+| `x86_64-pc-windows-msvc` | `9915908f7941fe01ceadb65d065ff4a8124a9350a230a1c1e7eac212541b8562` |
+| `x86_64-unknown-linux-gnu` | `ff55c4608836bce3a1eceef9e806a90d7124f879e28b40e427bf3253b1f175e3` |
+
+Post-publication audit downloaded all nine release assets, matched every
+sidecar, independently verified GitHub provenance for all four archives, and
+validated the evidence manifest's six main runs, eight distribution jobs,
+four target manifests/tool-version sets, and `v0.1.0-rc.1` fixture hashes.
+Transition artifacts `8627024903` (Linux), `8627026644` (Windows),
+`8627022847` (macOS arm64), and `8627031690` (macOS x64) each retain
+`previous`, `upgraded`, and `rolled-back` phases without protected-file edits.
+
 ### Senline slice disposition
 
 The following general fixes were reviewed independently of the unfinished
