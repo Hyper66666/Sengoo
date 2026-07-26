@@ -101,6 +101,48 @@ Transition artifacts `8627024903` (Linux), `8627026644` (Windows),
 `8627022847` (macOS arm64), and `8627031690` (macOS x64) each retain
 `previous`, `upgraded`, and `rolled-back` phases without protected-file edits.
 
+## Candidate 2 and Consecutive Proof
+
+PR #55 merged the test-only reference-registry readiness fix as
+`6f9475dd956e63c886c8868278bc233a7044806b`. The fix waits for the registry's
+post-bind listening signal and changes no Stable source, stdlib, CLI, manifest,
+lockfile, diagnostic, protocol, or runtime ABI behavior, so it does not reset
+the consecutive-candidate count. The complete main matrix used only that SHA:
+
+| Gate | Retained run | Result |
+| --- | --- | --- |
+| Core conformance / LLDB | [30186907325](https://github.com/Hyper66666/Sengoo/actions/runs/30186907325) | Passed |
+| Native safety | [30186907312](https://github.com/Hyper66666/Sengoo/actions/runs/30186907312) | Passed |
+| Hardening fuzz | [30186907299](https://github.com/Hyper66666/Sengoo/actions/runs/30186907299) | Passed |
+| Compatibility prerelease | [30186907296](https://github.com/Hyper66666/Sengoo/actions/runs/30186907296) | Passed |
+| Installed realworld | [30186907319](https://github.com/Hyper66666/Sengoo/actions/runs/30186907319) | Passed on all four hosts |
+| Production performance | [30186907306](https://github.com/Hyper66666/Sengoo/actions/runs/30186907306) | Passed 100k/1000k and resource budgets |
+| Manual main distribution | [30187594178](https://github.com/Hyper66666/Sengoo/actions/runs/30187594178) | Passed on all four hosts |
+
+Annotated tag `v0.2.0-rc.2` points to that full SHA. Tag run
+[30188454330](https://github.com/Hyper66666/Sengoo/actions/runs/30188454330)
+passed four package jobs, four RC1-to-RC2-to-RC1 transition jobs, the one-SHA
+collector, provenance attestation, evidence generation, and publication. The
+published prerelease is
+[v0.2.0-rc.2](https://github.com/Hyper66666/Sengoo/releases/tag/v0.2.0-rc.2),
+with provenance attestation `37134388`.
+
+| Target | Published archive SHA-256 |
+| --- | --- |
+| `aarch64-apple-darwin` | `a5bcf49d9bd6fb0eabbc27490a4497d5ae1a6d10923488961263a88f8b4eb53a` |
+| `x86_64-apple-darwin` | `005e674955784766251ac6a1e06bc3e7efceb31a6459b2291e3ba303110fb429` |
+| `x86_64-pc-windows-msvc` | `ae908c4123d0992d5a47769aceab78acaf06536f4fe7069f5b574328c0f3fc7c` |
+| `x86_64-unknown-linux-gnu` | `3942a690a7b5a01b541525de9bb31d293d3eb7eeaf50ec84d98f234e7f127387` |
+
+Post-publication audit downloaded all nine release assets, matched every
+sidecar, read each archive manifest as version `0.2.0-rc.2` and the exact
+candidate SHA, and independently verified the four archive subjects against
+the tag ref and source digest. `release-evidence.json` records six successful
+main-push runs, four package jobs, four transition jobs, the frozen fixture
+hashes, and no platform skip. Transition artifacts `8628005628` (Linux),
+`8628007905` (Windows), `8628004938` (macOS arm64), and `8628006273` (macOS
+x64) each retain `previous`, `upgraded`, and `rolled-back` phases.
+
 ### Senline slice disposition
 
 The following general fixes were reviewed independently of the unfinished

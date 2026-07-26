@@ -21,32 +21,34 @@ Sengoo 现在可以打包成自包含工具链归档，包含 `sgc`、`sgpm`、
 
 ```powershell
 cargo build -p sgc -p sgpm -p sgfmt -p sglsp --release
-.\scripts\package-toolchain.ps1 -Version 0.1.0-smoke -NoBuild
+.\scripts\package-toolchain.ps1 -Version 0.2.0-smoke -NoBuild
 $archive = Get-Content target/dist/latest-archive.txt
 .\scripts\install.ps1 -Archive $archive -InstallDir target/install-smoke
 ```
 
-已发布预发布安装 / 升级（当前公开 tag）：
+稳定版安装 / 升级：
 
 ```powershell
-.\scripts\install.ps1 -Version 0.1.0-rc.1
+.\scripts\install.ps1 -Version 0.2.0
 ```
 
 ```sh
-sh scripts/install.sh --version 0.1.0-rc.1
+sh scripts/install.sh --version 0.2.0
 ```
 
-公开预发布：[`v0.1.0-rc.1`](https://github.com/Hyper66666/Sengoo/releases/tag/v0.1.0-rc.1)。
-v0.2 主线见 `sengoo-v0-2-mainstream-core`，此处不宣称已发布 v0.2.0。
+稳定版：[`v0.2.0`](https://github.com/Hyper66666/Sengoo/releases/tag/v0.2.0)。
+具体变更见 [v0.2.0 发布说明](docs/release-notes-v0.2.0.md)和
+[v0.1 到 v0.2 迁移指南](docs/migration-v0-1-to-v0-2.md)。
 
-**v0.2 mainstream-core 历史门禁证据 SHA：**
-`084b623037f007344d76ce50f2e0d01fac57b565`（分支 `codex/sengoo-v0-2-openspec`，
-[PR #47](https://github.com/Hyper66666/Sengoo/pull/47)）。后续 PR #51 已通过
-核心语言、编译规模、sanitizer、四主机工具链打包和安装版 realworld 门禁。
-生产 HTTP 现已包含精确路由 Sengoo handler、有界 opt-in keep-alive、有界
-响应流和 TLS server 子集。Windows Schannel 组合已经验证；POSIX rustls 在
-v0.2 release-host 矩阵记录真实握手前仍标为 Platform-specific。准确支持范围
-以 `examples/realworld/SUPPORT_MATRIX.md` 为准。
+**v0.2 候选版门禁证据 SHA：**
+`6f9475dd956e63c886c8868278bc233a7044806b`（[PR #55](https://github.com/Hyper66666/Sengoo/pull/55)）。
+六项同 SHA 主干门禁和四主机 `v0.2.0-rc.2` 发布运行
+[`30188454330`](https://github.com/Hyper66666/Sengoo/actions/runs/30188454330)
+已通过核心语言、编译规模、sanitizer、有界 fuzz、兼容性、安装版 realworld、
+打包、升级和回滚检查。生产 HTTP 包含精确路由 Sengoo handler、有界
+opt-in keep-alive、有界响应流，以及 Windows Schannel、Linux 和两种 macOS
+架构 rustls 的已验证 TLS 组合。准确支持范围以
+`examples/realworld/SUPPORT_MATRIX.md` 为准。
 
 原生 debug-info 构建使用 `-g` / `--debug-info`：
 

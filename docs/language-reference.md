@@ -1,19 +1,19 @@
 # Sengoo Language Reference
 
-Reference version: draft for toolchain `0.1.x` with v0.2 mainstream-core
-program evidence on SHA `084b623037f007344d76ce50f2e0d01fac57b565`
-([PR #47](https://github.com/Hyper66666/Sengoo/pull/47)).
+Reference version: toolchain `0.2.0`, frozen by release-candidate evidence on
+SHA `6f9475dd956e63c886c8868278bc233a7044806b`
+([PR #55](https://github.com/Hyper66666/Sengoo/pull/55)).
 
 This is the authoritative entry point for Sengoo language behavior. It records
 implemented status first, and links each major surface to a proof example,
 test, or deeper document. Historical design notes may describe features that do
 not exist yet; this reference wins when they disagree.
 
-Local gate evidence for the v0.2 M1–M4 archive set (language coherence, developer
-loop, production stdlib streams/Unicode baseline, stability contract) is pinned
-to that SHA. Multi-host installed-release matrices and HTTP production serving
-(handlers / keep-alive / streaming / TLS server) are residual and are not
-claimed Supported by this citation alone.
+The six main gates and release run
+[`30188454330`](https://github.com/Hyper66666/Sengoo/actions/runs/30188454330)
+pin the native v0.2 language, installed toolchain, HTTP production subset, and
+four-host compatibility/rollback evidence to that SHA. Experimental portable
+backends remain outside the Supported native release claim.
 
 Status labels:
 

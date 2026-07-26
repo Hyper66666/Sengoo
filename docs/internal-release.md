@@ -35,7 +35,7 @@ Build release artifacts:
 
 ```powershell
 cargo build --release -p sgc -p sgpm -p sgfmt -p sglsp
-.\scripts\package-toolchain.ps1 -Version 0.1.0-rc.1 -NoBuild
+.\scripts\package-toolchain.ps1 -Version 0.2.0 -NoBuild
 ```
 
 The packaging script writes a release-shaped archive, `manifest.json`, and a
@@ -44,7 +44,7 @@ The packaging script writes a release-shaped archive, `manifest.json`, and a
 stdlib imports without `SENGOO_ROOT` or a source checkout.
 
 The packaging script names archives from the workspace version and target
-triple, for example `sengoo-0.1.0-rc.1-x86_64-pc-windows-msvc.zip`.
+triple, for example `sengoo-0.2.0-x86_64-pc-windows-msvc.zip`.
 
 Each archive must include a plain-text or JSON manifest recording:
 
@@ -123,10 +123,11 @@ The current reviewed first-party release set is:
 | Publish/resolve package workflow | `examples/realworld/package-release-loop` | Installed release lane reruns `metadata --format json --locked`, `publish --dry-run --locked --format json --output target/package`, and `publish --registry local --locked --format json`. |
 | Python hot-path interop | `examples/realworld/python-hot-path` | Installed release lane runs `python_smoke.py` with the installed `sgc`, parses `.sgreflect.json`, compiles emitted `.ll` with `clang`, and invokes the reflected symbol through Python `ctypes`. |
 
-Actions run `29333253316` passes this reviewed set with installed archives on
+Actions run `30186907319` passes this reviewed set with installed archives on
 Windows x64, Linux x64, macOS arm64, and macOS x64. Toolchain distribution run
-`29333253290` independently passes package/install/upgrade and installed stdlib
-smoke on the same four host targets.
+`30187594178` independently passes package/install/upgrade and installed stdlib
+smoke on the same four host targets at candidate SHA
+`6f9475dd956e63c886c8868278bc233a7044806b`.
 
 ## Tagging
 
@@ -152,11 +153,11 @@ The install scripts choose the current host channel, download the pinned tag,
 verify its SHA-256, and replace the selected install directory:
 
 ```powershell
-.\scripts\install.ps1 -Version 0.1.0-rc.1 -AddToPath
+.\scripts\install.ps1 -Version 0.2.0 -AddToPath
 ```
 
 ```sh
-sh scripts/install.sh --version 0.1.0-rc.1 --add-to-path
+sh scripts/install.sh --version 0.2.0 --add-to-path
 ```
 
 Run the same command with a newer explicit version to upgrade. There is no

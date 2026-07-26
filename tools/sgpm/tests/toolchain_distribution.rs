@@ -576,7 +576,9 @@ fn compatibility_policy_freezes_edition_deprecation_and_supported_hosts() {
         );
     }
     assert!(
-        policy.contains("latest prerelease line") && policy.contains("security or soundness"),
+        policy.contains("latest stable 0.x line")
+            && policy.contains("previous release candidate")
+            && policy.contains("security or soundness"),
         "pre-1.0 support and emergency compatibility exceptions must be explicit"
     );
 }
