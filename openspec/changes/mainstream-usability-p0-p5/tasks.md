@@ -1,0 +1,145 @@
+## 1. Pinning and prerequisites
+
+- [x] 1.1 Run `openspec validate mainstream-usability-p0-p5 --strict`.
+  Passed at proposal time and re-run after each revision.
+- [x] 1.2 Record the baseline probe matrix (accepted vs rejected forms) in
+  `design.md` so regressions are detectable.
+  Recorded in `design.md` Context table.
+- [x] 1.3 Confirm `?` type checking needs no change: `peel_option_ty_static` /
+  `peel_result_ty_static` match on type name and arity only.
+  Confirmed in `try_helpers.rs:35-51` and verified end-to-end: `?` propagates
+  user-declared `enum Result`/`enum Option` (probe `chain(10,0)` → 101/1).
+
+## 2. P0 — Option/Result as enums
+
+- [ ] 2.1 Define `enum Option<T> { None, Some(T) }` and
+  `enum Result<T, E> { Ok(T), Err(E) }` in `tools/stdlib/`; constructors usable
+  as values and as patterns.
+  Progress: the language layer is proven for user-declared enums —
+  qualified and bare `Some`/`None`/`Ok`/`Err` construct and match with
+  payload binding, expected-type inference covers payload-free variants
+  (`let x: Option<i64> = None`, return position), ambiguous bare names get
+  `ambiguous-enum-variant`, `?` propagates both shapes
+  (compiler tests `enum_match_lowering_tests::{generic_enum_*, bare_variant_*,
+  question_mark_propagates_user_enum_result_and_option,
+  single_element_struct_payload_binds_whole_in_match_arm}`).
+  Remaining: swap the stdlib declarations themselves and the compatibility
+  accessors (2.3–2.5) before migrating call sites.
+- [ ] 2.2 MIR lowering, layout, and exact-once Drop for enum payloads, including
+  `match` arm moves and `?` early return. Extend AMM Drop tests to cover
+  `Option`/`Result` payloads before the struct form is removed.
+- [ ] 2.3 Compiler-known compatibility accessors (`.is_ok`, `.is_some`,
+  `.value`, `.error`) over the enum form, each with a deprecation diagnostic
+  naming the pattern replacement.
+- [ ] 2.4 Reject struct-literal construction of these types with a diagnostic
+  naming the `Ok`/`Err`/`Some`/`None` replacement.
+- [ ] 2.5 Deprecate `option_none_with` / `result_*_with` placeholder
+  constructors; behavior preserved for the compatibility release.
+- [ ] 2.6 `?` continues to work unchanged for both types; add regression tests
+  for `Result`→`Result`, `Option`→`Option`, and the rejected cross/`main` cases.
+- [ ] 2.7 Migrate `tools/stdlib/` (236 field-access sites) to constructors and
+  `match`.
+- [ ] 2.8 Migrate `examples/` and fixtures (195 field-access sites).
+- [ ] 2.9 Language reference and support matrix updated; `Option`/`Result` rows
+  state the enum form and the deprecation window.
+
+## 3. P1 — for over collections
+
+- [ ] 3.1 Desugar `for pat in expr` onto the existing `Iterator` protocol for
+  collection and iterator receivers.
+- [ ] 3.2 Keep the current direct lowering for arrays, slices, and ranges; add a
+  test proving no iterator indirection is introduced for them.
+- [ ] 3.3 Support `Vec`, `VecDeque`, `HashSet`, `BTreeSet` element iteration and
+  `HashMap`/`BTreeMap` entry iteration.
+- [ ] 3.4 Add `keys()` / `values()` to `HashMap` and `BTreeMap`.
+- [ ] 3.5 Iterating lazy adapters (`map`, `filter`, `take`, `skip`,
+  `enumerate`) with `for` consumes them to completion.
+- [ ] 3.6 Mutation-while-iterating stays rejected by existing borrow rules;
+  regression test included.
+
+## 4. P2 — Quiet output and one diagnostic language
+
+- [ ] 4.1 Move cache, workset, frontend session/scheduler, and generic-instance
+  instrumentation behind `--verbose`.
+- [ ] 4.2 Suppress pass-through toolchain include-path warnings on successful
+  builds.
+- [ ] 4.3 Keep every actionable error and warning at default verbosity.
+- [ ] 4.4 `--verbose` restores the previous output exactly; test asserts both
+  modes.
+- [ ] 4.5 Translate remaining Chinese compiler diagnostics to English, keeping
+  stable codes and JSON shape unchanged.
+- [ ] 4.6 `--error-format json` payloads unchanged; `sglsp` parity test.
+
+## 5. P3 — Everyday syntax
+
+- [ ] 5.1 `vec![a, b, c]` and `vec![value; count]` as pinned built-in forms.
+- [ ] 5.2 `println` / `print` / `eprintln` accept a format string plus arguments
+  through the existing `format` pipeline.
+- [ ] 5.3 `{:?}` renders `#[derive(Debug)]` shapes in format arguments and
+  f-string interpolation.
+- [ ] 5.4 `{:?}` without a `Debug` derive is rejected with a diagnostic naming
+  the missing derive.
+- [ ] 5.5 `if let PATTERN = EXPR { .. } else { .. }`, with a diagnostic for
+  irrefutable patterns.
+
+## 6. P4 — Idiomatic flagship examples
+
+- [ ] 6.1 Rewrite `examples/realworld/workspace-audit/src/lib.sg` using early
+  `return`, `?`, and flat guard clauses instead of single-line nested
+  expressions.
+- [ ] 6.2 Rewrite `examples/realworld/cli-json-audit/src/main.sg` the same way.
+- [ ] 6.3 Sweep remaining fixtures for collapsed single-line function bodies.
+  Do not reformat the repo at large; a width-aware sweep of the other 53
+  affected files is a follow-up scheduled after the `Option`/`Result`
+  migration.
+- [ ] 6.4 Behavior is unchanged: each rewritten fixture passes its loop with
+  identical results. Fixtures holding v1 lockfiles (D8) are verified through
+  the non-locked loop and their locked-gate status stays open with the blocker
+  recorded, not ticked.
+
+## 7. P5 — Width-aware block formatting
+
+- [ ] 7.1 `format_block_inline` falls back to the multi-line `format_block`
+  rendering when the inline form would exceed `max_width`, activating the
+  already-parsed but currently unread option. Default stays 100.
+- [ ] 7.2 Applies to every block form — `if`, `while`, `for`, `loop`, `match`
+  arms, `async`, `parallel`, `try` — not only function bodies.
+- [ ] 7.3 Blocks that fit stay inline, unchanged from current behavior.
+- [ ] 7.4 `--max-width` and `sgfmt.toml` demonstrably change where blocks break.
+- [ ] 7.5 Idiomatic multi-line conditional bodies pass `sgfmt --check`.
+- [ ] 7.6 Ships with its own tests, reviewable separately from the P4 rewrites.
+- [ ] 7.7 Identify every `fmt --check` gate that newly fails under the rule.
+  Do NOT reformat the repo: 53 of 198 in-tree `.sg` files contain 251 lines over
+  100 characters, and a sweep would collide with the concurrent `Option`/
+  `Result` migration. Apply the new formatting only to fixtures P4 rewrites;
+  schedule the sweep as a follow-up after P0 settles.
+
+## 8. Verification
+
+- [ ] 8.1 `cargo fmt --check`
+- [ ] 8.2 `cargo test -p sengoo-compiler --lib`
+- [ ] 8.3 `cargo test -p sgc`
+- [ ] 8.4 `cargo test -p sgpm`
+- [ ] 8.5 `cargo test -p sglsp`
+- [ ] 8.6 `cargo test -p sgfmt`
+- [ ] 8.7 `cargo clippy -p sgc -p sgpm -p sengoo-compiler -p sengoo-runtime -p sgfmt -p sglsp --all-targets -- -D warnings`
+- [ ] 8.8 Re-run the baseline probe matrix: every previously rejected form in
+  scope now compiles, and every previously accepted form still compiles.
+- [ ] 8.9 Realworld loops green for the rewritten fixtures (non-locked where a
+  v1 lockfile blocks the locked gate per D8).
+- [ ] 8.10 `openspec validate mainstream-usability-p0-p5 --strict`
+
+## Archive Gate
+
+- [ ] `openspec validate mainstream-usability-p0-p5 --strict` passes.
+- [ ] `Option`/`Result` are enums; no in-tree code constructs a sentinel payload
+  to express absence or failure.
+- [ ] `for` iterates every collection listed in P1, with array/slice/range
+  lowering unchanged.
+- [ ] A successful `sgc run` prints no compiler instrumentation at default
+  verbosity, and `--verbose` restores it.
+- [ ] All compiler diagnostics are English with unchanged stable codes.
+- [ ] Flagship examples read idiomatically and pass their loops.
+- [ ] `sgfmt` honors `max_width` for every block form; idiomatic multi-line
+  bodies pass `sgfmt --check`.
+- [ ] Language reference and `SUPPORT_MATRIX.md` updated with proof links.
