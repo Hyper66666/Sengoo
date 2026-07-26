@@ -234,6 +234,19 @@ fn release_host_matrix_proves_http_tls_with_source_and_installed_sgc() {
         common.contains("var_os(\"SENGOO_TEST_INSTALLED_SGC\")"),
         "the integration harness should honor the explicit installed-sgc path"
     );
+    for needle in [
+        "Capture required Windows CDB debugger evidence",
+        "Windows Kits\\10\\Debuggers\\x64\\cdb.exe",
+        "SENGOO_REQUIRE_DEBUGGER_EVIDENCE",
+        "native_debugger_breaks_steps_and_reads_local",
+        "debugger-native-cdb-transcripts",
+        "if-no-files-found: error",
+    ] {
+        assert!(
+            distribution.contains(needle),
+            "Windows release host should retain fail-closed CDB evidence containing `{needle}`"
+        );
+    }
 }
 
 #[test]

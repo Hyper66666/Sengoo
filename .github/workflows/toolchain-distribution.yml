@@ -72,6 +72,45 @@ jobs:
         shell: pwsh
         run: cargo build -p sgc -p sgpm -p sgfmt -p sglsp --release
 
+      - name: Capture required Windows CDB debugger evidence
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: |
+          $transcriptDir = Join-Path $env:RUNNER_TEMP "sengoo-cdb-transcripts"
+          New-Item -ItemType Directory -Force -Path $transcriptDir | Out-Null
+          $knownCdbPath = Join-Path ${env:ProgramFiles(x86)} "Windows Kits\10\Debuggers\x64\cdb.exe"
+          $cdbPath = if (Test-Path -LiteralPath $knownCdbPath) {
+            $knownCdbPath
+          } else {
+            $command = Get-Command cdb.exe -ErrorAction SilentlyContinue
+            if ($command) {
+              $command.Source
+            } else {
+              Get-ChildItem -LiteralPath (Join-Path ${env:ProgramFiles(x86)} "Windows Kits") -Filter cdb.exe -File -Recurse -ErrorAction SilentlyContinue |
+                Where-Object { $_.FullName -match '[\\/]Debuggers[\\/]x64[\\/]cdb\.exe$' } |
+                Select-Object -First 1 -ExpandProperty FullName
+            }
+          }
+          if (-not $cdbPath -or -not (Test-Path -LiteralPath $cdbPath)) {
+            "required x64 CDB executable is unavailable in PATH or Windows Kits" | Set-Content -LiteralPath (Join-Path $transcriptDir "cdb-unavailable.txt")
+            throw "required Windows CDB debugger evidence is unavailable"
+          }
+          $env:PATH = "$(Split-Path -Parent $cdbPath);$env:PATH"
+          $env:SENGOO_REQUIRE_DEBUGGER_EVIDENCE = "1"
+          $env:SENGOO_DEBUGGER_TRANSCRIPT_DIR = $transcriptDir
+          cargo test --locked -p sgc --test debugger_native native_debugger_breaks_steps_and_reads_local -- --nocapture --test-threads=1
+          if ($LASTEXITCODE -ne 0) {
+            throw "Windows CDB debugger evidence failed"
+          }
+
+      - name: Upload Windows CDB debugger transcripts
+        if: runner.os == 'Windows' && always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: debugger-native-cdb-transcripts
+          path: ${{ runner.temp }}/sengoo-cdb-transcripts/
+          if-no-files-found: error
+
       - name: Verify timer socket and owned-handle reactor paths
         shell: pwsh
         run: cargo test -p sengoo-runtime --lib --features native-bridge reactor_ -- --nocapture --test-threads=1
