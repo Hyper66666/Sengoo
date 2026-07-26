@@ -41,11 +41,19 @@
   into canonical `stdlib-http-server`.
   Archived as `2026-07-25-http-production-serving`; repository-wide strict
   validation passes with the canonical HTTP requirements in place.
-- [ ] 2.2 Run Windows Schannel and POSIX rustls real-handshake tests with CA and
+- [x] 2.2 Run Windows Schannel and POSIX rustls real-handshake tests with CA and
   hostname verification; no `verify=false` or plaintext fallback counts.
-- [ ] 2.3 Prove managed TLS Buffers, Vec Router, keep-alive, and chunked
+  PR #54 candidate SHA `39a6b036aff5892eedf56e4f32ec249c07124c00`
+  passed `toolchain-distribution` run `30180980360` on Windows x64, Linux x64,
+  macOS x64, and macOS arm64. Every host ran the verified-CA/`localhost`
+  runtime and real-`sgc` TLS composition tests without a verification bypass.
+- [x] 2.3 Prove managed TLS Buffers, Vec Router, keep-alive, and chunked
   streaming compose through installed `sgc` and the locked
   `http-echo-service` fixture.
+  `realworld-e2e` run `30180980373` installed the packaged toolchain outside
+  the checkout on all four hosts, passed the locked fixture loop including
+  `http-echo-service`, and reran the verified-CA Router/keep-alive/chunked
+  streaming composition through the installed `sgc`.
 - [x] 2.4 Preserve C-only fallback linkability and `STATUS_UNSUPPORTED` behavior
   without shadowing native runtime strong symbols.
   C-only link/idempotence regressions pass, and

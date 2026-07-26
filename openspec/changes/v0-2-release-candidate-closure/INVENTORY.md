@@ -1,6 +1,6 @@
 # v0.2 Release Candidate Closure Inventory
 
-Snapshot date: 2026-07-23
+Snapshot date: 2026-07-26
 
 ## Baseline
 
@@ -28,6 +28,39 @@ compatibility, core, bounded fuzz, native safety, compile-scale, installed
 realworld, and Windows/Linux/macOS x64/macOS arm64 package-smoke jobs passed.
 The HTTP worktree's only residual (`tls_fix.txt`) is a generated local test
 transcript and is neither unique source nor release evidence.
+
+## Candidate Branch Pre-Merge Evidence
+
+PR #54 candidate SHA
+`39a6b036aff5892eedf56e4f32ec249c07124c00` passed the complete branch gate
+set below. Every listed run reports that exact full SHA; no older run is used
+as candidate evidence.
+
+| Gate | Retained run | Result |
+| --- | --- | --- |
+| Core conformance | [30180980354](https://github.com/Hyper66666/Sengoo/actions/runs/30180980354) | Passed |
+| Native safety | [30180980339](https://github.com/Hyper66666/Sengoo/actions/runs/30180980339) | Passed |
+| Hardening fuzz | [30180980340](https://github.com/Hyper66666/Sengoo/actions/runs/30180980340) | Passed |
+| Compatibility prerelease | [30180980389](https://github.com/Hyper66666/Sengoo/actions/runs/30180980389) | Passed |
+| Installed realworld | [30180980373](https://github.com/Hyper66666/Sengoo/actions/runs/30180980373) | Passed on Windows x64, Linux x64, macOS x64, and macOS arm64 |
+| Toolchain distribution | [30180980360](https://github.com/Hyper66666/Sengoo/actions/runs/30180980360) | Passed package/install/upgrade smoke on all four hosts |
+| Production performance | [30180980357](https://github.com/Hyper66666/Sengoo/actions/runs/30180980357) | Passed the committed 100k/1000k and resource budgets |
+
+The distribution run executed the verified-CA and `localhost` hostname path
+for Schannel on Windows and rustls on Linux plus both macOS architectures. It
+composed managed TLS Buffers, the Sengoo `Vec` Router, keep-alive, and chunked
+response streaming in both the runtime test and a real `sgc` program. The
+installed realworld run then repeated that composition using the packaged
+toolchain outside the checkout and passed the locked `http-echo-service`
+fixture on every host. These runs close tasks 2.2 and 2.3.
+
+Retained workflow artifacts include `debugger-native-cdb-transcripts`
+(artifact `8625599149`), all four `sengoo-toolchain-*` archives, Linux and
+Windows reproducibility bundles, and `production-performance-evidence`
+(artifact `8625840339`). These are pre-merge branch artifacts, not published
+release assets. Section 3 remains open until the converged `main` SHA reruns
+the matrix and the matching tag produces `release-evidence.json`, provenance,
+and published transition transcripts.
 
 ### Senline slice disposition
 
