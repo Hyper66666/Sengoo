@@ -127,22 +127,40 @@
   `0.2.0-rc.2` version transition; no Stable source, stdlib, CLI, schema,
   diagnostic, protocol, or runtime ABI behavior changed, so the count remains
   consecutive.
-- [ ] 5.2 Pass the complete section 3 matrix on candidate 2 using its own SHA.
-- [ ] 5.3 Install/upgrade from retained candidate 1 to candidate 2 and run
+- [x] 5.2 Pass the complete section 3 matrix on candidate 2 using its own SHA.
+  Main SHA `6f9475dd956e63c886c8868278bc233a7044806b` passed core
+  `30186907325`, safety `30186907312`, fuzz `30186907299`, compatibility
+  `30186907296`, realworld `30186907319`, performance `30186907306`, and
+  manual four-host distribution `30187594178`.
+- [x] 5.3 Install/upgrade from retained candidate 1 to candidate 2 and run
   candidate-1 source/manifest/lockfile/diagnostic/ABI fixtures unchanged.
-- [ ] 5.4 Roll back from candidate 2 to candidate 1 with checksum verification;
+  RC2 tag run `30188454330` passed all four package and published-transition
+  jobs against `examples/compat/v0.2.0-rc.1`; fixture hashes in
+  `release-evidence.json` match the repository inputs.
+- [x] 5.4 Roll back from candidate 2 to candidate 1 with checksum verification;
   retained compatible packages pass and newer incompatible artifacts fail with
   actionable version diagnostics.
-- [ ] 5.5 Retain both candidate evidence manifests and record whether the
+  Transition artifacts `8628005628`, `8628007905`, `8628004938`, and
+  `8628006273` retain previous/upgraded/rolled-back phases on Linux, Windows,
+  macOS arm64, and macOS x64 respectively.
+- [x] 5.5 Retain both candidate evidence manifests and record whether the
   consecutive count was reset, with the behavior-changing commit if it was.
+  RC1 and RC2 public releases retain both manifests. Commit `0c3d2a1f5` is a
+  test-only subprocess-readiness fix, so no Stable behavior changed and the
+  candidate count was not reset.
 
 ## 6. Stable release and truth sources
 
-- [ ] 6.1 Reconcile README/README.zh-CN, language reference, compatibility
+- [x] 6.1 Reconcile README/README.zh-CN, language reference, compatibility
   policy, migration guide, internal release docs, release notes, and
   `SUPPORT_MATRIX.md` against the candidate-2 SHA and retained runs.
-- [ ] 6.2 Keep experimental WASM/bytecode/Cranelift and platform-specific gaps
+  Stable-preparation commit updates every named truth source and adds
+  `docs/release-notes-v0.2.0.md`; final stable run identifiers are added after
+  transactional publication.
+- [x] 6.2 Keep experimental WASM/bytecode/Cranelift and platform-specific gaps
   explicitly outside the v0.2 Supported claim.
+  Release notes and language/support references keep portable backends and
+  unproved platform/framework breadth Experimental or outside v0.2.
 - [ ] 6.3 Publish `v0.2.0` as one complete four-target set with checksums and
   provenance only after sections 1-5 are complete.
 - [ ] 6.4 Install `v0.2.0` outside the checkout on every supported host and rerun
@@ -170,9 +188,9 @@
 
 ## Archive Gate
 
-- [ ] `http-production-serving` is archived and canonical HTTP truth matches the
+- [x] `http-production-serving` is archived and canonical HTTP truth matches the
   released implementation.
-- [ ] Two consecutive v0.2 candidates pass complete one-SHA matrices and their
+- [x] Two consecutive v0.2 candidates pass complete one-SHA matrices and their
   artifacts/evidence remain available.
 - [ ] `v0.2.0` is published as a complete four-target set and installed-asset
   smoke passes on every supported host.
