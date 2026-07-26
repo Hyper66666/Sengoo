@@ -41,26 +41,82 @@ def default_config() -> AuditConfig {
     AuditConfig { max_depth: 3, require_tests: true };
 }
 
+def missing_json_value() -> JsonValue {
+    JsonValue { doc_handle: 0, node_id: 0 };
+}
+
+def config_max_depth(root: JsonValue) -> i64 {
+    if not root.object_has("max_depth") { return 3; };
+    root.object_get("max_depth").unwrap_or(missing_json_value()).number_i64().unwrap_or(3);
+}
+
+def config_require_tests(root: JsonValue) -> bool {
+    if not root.object_has("require_tests") { return true; };
+    root.object_get("require_tests").unwrap_or(missing_json_value()).bool_value().unwrap_or(true);
+}
+
 def load_config(path_name: &str) -> AuditConfig {
-    if not file_exists(path_name) { default_config(); } else { let len = file_len(path_name).unwrap_or(0); if len <= 0 { default_config(); } else { let buffer_result = ffi_buffer_new(len + 1); if buffer_result.is_ok { let buffer = buffer_result.value; let read = file_read_into(path_name, buffer).unwrap_or(0); let doc_result = json_parse_buffer(buffer, read); if doc_result.is_ok { let doc = doc_result.value; let root = doc.root(); let max_depth_value = if root.object_has("max_depth") { root.object_get("max_depth").unwrap_or(JsonValue { doc_handle: 0, node_id: 0 }).number_i64().unwrap_or(3); } else { 3; }; let require_tests_value = if root.object_has("require_tests") { root.object_get("require_tests").unwrap_or(JsonValue { doc_handle: 0, node_id: 0 }).bool_value().unwrap_or(true); } else { true; }; AuditConfig { max_depth: max_depth_value, require_tests: require_tests_value }; } else { default_config(); }; } else { default_config(); }; }; };
+    if not file_exists(path_name) { return default_config(); };
+    let len = file_len(path_name).unwrap_or(0);
+    if len <= 0 { return default_config(); };
+    let buffer_result = ffi_buffer_new(len + 1);
+    if buffer_result.is_err() { return default_config(); };
+    let buffer = buffer_result.value;
+    let read = file_read_into(path_name, buffer).unwrap_or(0);
+    let doc_result = json_parse_buffer(buffer, read);
+    if doc_result.is_err() { return default_config(); };
+    let doc = doc_result.value;
+    let root = doc.root();
+    AuditConfig { max_depth: config_max_depth(root), require_tests: config_require_tests(root) };
 }
 
 def empty_summary() -> WorkspaceSummary {
     WorkspaceSummary { source_files: 0, test_files: 0, manifests: 0, bytes: 0 };
 }
 
+def count_source(current: i64, path_view: &str) -> i64 {
+    if not str_ends_with(path_view, ".sg") { return current; };
+    current + 1;
+}
+
+def count_test(current: i64, path_view: &str) -> i64 {
+    if not str_ends_with(path_view, ".sg") { return current; };
+    if not str_contains(path_view, "tests") { return current; };
+    current + 1;
+}
+
+def count_manifest(current: i64, path_view: &str) -> i64 {
+    if not str_ends_with(path_view, "Sengoo.toml") { return current; };
+    current + 1;
+}
+
+def count_path(totals: WorkspaceSummary, entry: String) -> WorkspaceSummary {
+    let path_view = entry.as_str();
+    let sources = count_source(totals.source_files, path_view);
+    let tests = count_test(totals.test_files, path_view);
+    let manifests = count_manifest(totals.manifests, path_view);
+    let bytes = totals.bytes + file_len(path_view).unwrap_or(0);
+    WorkspaceSummary { source_files: sources, test_files: tests, manifests: manifests, bytes: bytes };
+}
+
 def summarize_workspace(root: &str, config: AuditConfig) -> Result<WorkspaceSummary, i64> {
     if config.max_depth < 0 { return Result { is_ok: true, value: empty_summary(), error: 0 }; };
     let walk_result = dir_walk(root, config.max_depth);
-    if walk_result.is_err() { return Result { is_ok: false, value: empty_summary(), error: walk_result.error }; };
+    if walk_result.is_err() {
+        return Result { is_ok: false, value: empty_summary(), error: walk_result.error };
+    };
     let walk = walk_result.value;
-    let mut source_files = 0;
-    let mut test_files = 0;
-    let mut manifests = 0;
-    let mut bytes = 0;
-    let mut done = false;
-    while not done { let next = walk.next_string(); if next.is_ok { let path_name = next.value; let path_view = path_name.as_str(); if str_ends_with(path_view, ".sg") { source_files = source_files + 1; if str_contains(path_view, "tests") { test_files = test_files + 1; }; }; if str_ends_with(path_view, "Sengoo.toml") { manifests = manifests + 1; }; bytes = bytes + file_len(path_view).unwrap_or(0); } else if next.error == STATUS_NOT_FOUND() { done = true; } else { return Result { is_ok: false, value: empty_summary(), error: next.error }; }; };
-    Result { is_ok: true, value: WorkspaceSummary { source_files: source_files, test_files: test_files, manifests: manifests, bytes: bytes }, error: 0 };
+    let mut totals = empty_summary();
+    let mut stopped_on = 0;
+    while true {
+        let next = walk.next_string();
+        if next.is_err() { stopped_on = next.error; break; };
+        totals = count_path(totals, next.value);
+    };
+    if stopped_on != STATUS_NOT_FOUND() {
+        return Result { is_ok: false, value: empty_summary(), error: stopped_on };
+    };
+    Result { is_ok: true, value: totals, error: 0 };
 }
 
 def write_json_report(path_name: &str, summary: WorkspaceSummary) -> Result<i64, i64> {
@@ -97,12 +153,20 @@ def parallel_score(summary: WorkspaceSummary) -> Result<i64, i64> {
 def audit_workspace(root: &str, config_path: &str, report_path: &str) -> Result<i64, i64> {
     let config = load_config(config_path);
     let summary = summarize_workspace(root, config)?;
-    if config.require_tests and summary.test_files == 0 { return Result { is_ok: false, value: 0, error: STATUS_NOT_FOUND() }; };
+    if config.require_tests and summary.test_files == 0 {
+        return Result { is_ok: false, value: 0, error: STATUS_NOT_FOUND() };
+    };
     let concurrent_score = parallel_score(summary)?;
-    if concurrent_score != summary.score() { return Result { is_ok: false, value: 0, error: STATUS_UNKNOWN() }; };
+    if concurrent_score != summary.score() {
+        return Result { is_ok: false, value: 0, error: STATUS_UNKNOWN() };
+    };
     let text = format("workspace-audit: sources={} tests={} manifests={} bytes={} score={}", summary.source_files, summary.test_files, summary.manifests, summary.bytes, concurrent_score);
     let wrote_text = file_write_str(report_path, text.as_str())?;
-    let json_report_path = if str_eq(root, "fixture") { "fixture/audit-report.json"; } else { "audit-report.json"; };
+    let json_report_path = if str_eq(root, "fixture") {
+        "fixture/audit-report.json";
+    } else {
+        "audit-report.json";
+    };
     let wrote_json = write_json_report(json_report_path, summary)?;
     Result { is_ok: true, value: wrote_text + wrote_json + concurrent_score, error: 0 };
 }
