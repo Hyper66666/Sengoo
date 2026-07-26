@@ -27,6 +27,21 @@ impl Formatter {
         format!("{{ {} }}", body)
     }
 
+    /// Multi-line rendering used when the inline form would exceed `max_width`.
+    ///
+    /// An empty block has nothing to spread over lines, so it keeps the inline
+    /// form even when its prefix alone is already too wide.
+    fn format_block_broken(&self, block: &Block, indent: usize) -> String {
+        if block.stmts.is_empty() {
+            return "{}".to_string();
+        }
+        self.format_block(block, indent)
+    }
+
+    fn fits(&self, line: &str) -> bool {
+        line.chars().count() <= self.options.max_width
+    }
+
     fn format_stmt(&self, stmt: &Stmt, indent: usize) -> String {
         match &stmt.kind {
             StmtKind::Let {
@@ -45,22 +60,132 @@ impl Formatter {
                     s.push_str(": ");
                     s.push_str(&self.format_type(ty));
                 }
-                if let Some(value) = value {
-                    s.push_str(" = ");
-                    s.push_str(&self.format_expr(value));
+                let Some(value) = value else {
+                    s.push(';');
+                    return s;
+                };
+                s.push_str(" = ");
+                self.finish_stmt(s, value, indent)
+            }
+            StmtKind::Const { name, ty, value } => self.finish_stmt(
+                format!(
+                    "{}const {}: {} = ",
+                    self.pad(indent),
+                    name.name,
+                    self.format_type(ty)
+                ),
+                value,
+                indent,
+            ),
+            StmtKind::Expr(expr) => self.finish_stmt(self.pad(indent), expr, indent),
+            StmtKind::Item(item) => self.format_decl(item, indent),
+        }
+    }
+
+    /// Renders `head` followed by `expr` and the statement terminator.
+    ///
+    /// The width budget is measured against the whole line, so the leading
+    /// indent, any statement head (`let x = `) and any expression prefix
+    /// (`if cond `, `while cond `, ...) all count against `max_width`.
+    fn finish_stmt(&self, head: String, expr: &Expr, indent: usize) -> String {
+        let inline = format!("{}{};", head, self.format_expr(expr));
+        if self.fits(&inline) {
+            return inline;
+        }
+        format!("{}{};", head, self.format_expr_broken(expr, indent))
+    }
+
+    /// Re-renders `expr` with its blocks spread across lines.
+    ///
+    /// Expression forms that carry no block keep their inline rendering: there
+    /// is nothing to break, so the line simply stays long.
+    fn format_expr_broken(&self, expr: &Expr, indent: usize) -> String {
+        match &expr.kind {
+            ExprKind::Block(block) => self.format_block_broken(block, indent),
+            ExprKind::If {
+                cond,
+                then_branch,
+                else_branch,
+            } => {
+                let mut s = format!(
+                    "if {} {}",
+                    self.format_expr(cond),
+                    self.format_block_broken(then_branch, indent)
+                );
+                if let Some(else_branch) = else_branch {
+                    s.push_str(" else ");
+                    s.push_str(&self.format_expr_broken(else_branch, indent));
                 }
-                s.push(';');
                 s
             }
-            StmtKind::Const { name, ty, value } => format!(
-                "{}const {}: {} = {};",
-                self.pad(indent),
-                name.name,
-                self.format_type(ty),
-                self.format_expr(value)
+            ExprKind::While { cond, body } => format!(
+                "while {} {}",
+                self.format_expr(cond),
+                self.format_block_broken(body, indent)
             ),
-            StmtKind::Expr(expr) => format!("{}{};", self.pad(indent), self.format_expr(expr)),
-            StmtKind::Item(item) => self.format_decl(item, indent),
+            ExprKind::For {
+                pattern,
+                iter,
+                body,
+            } => format!(
+                "for {} in {} {}",
+                self.format_pattern(pattern),
+                self.format_expr(iter),
+                self.format_block_broken(body, indent)
+            ),
+            ExprKind::Loop(body) => format!("loop {}", self.format_block_broken(body, indent)),
+            ExprKind::Match { scrutinee, arms } => {
+                if arms.is_empty() {
+                    return format!("match {} {{}}", self.format_expr(scrutinee));
+                }
+                let mut lines = vec![format!("match {} {{", self.format_expr(scrutinee))];
+                for arm in arms {
+                    lines.push(format!(
+                        "{}{},",
+                        self.pad(indent + 1),
+                        self.format_match_arm_broken(arm, indent + 1)
+                    ));
+                }
+                lines.push(format!("{}}}", self.pad(indent)));
+                lines.join("\n")
+            }
+            ExprKind::AsyncBlock(block) => {
+                format!("async {}", self.format_block_broken(block, indent))
+            }
+            ExprKind::ParallelBlock(block) => {
+                format!("parallel {}", self.format_block_broken(block, indent))
+            }
+            ExprKind::TryBlock(block) => format!("try {}", self.format_block_broken(block, indent)),
+            ExprKind::Return(Some(value)) => {
+                format!("return {}", self.format_expr_broken(value, indent))
+            }
+            ExprKind::Break(Some(value)) => {
+                format!("break {}", self.format_expr_broken(value, indent))
+            }
+            ExprKind::Yield(Some(value)) => {
+                format!("yield {}", self.format_expr_broken(value, indent))
+            }
+            ExprKind::Assign { target, value } => format!(
+                "{} = {}",
+                self.format_expr(target),
+                self.format_expr_broken(value, indent)
+            ),
+            ExprKind::AssignOp { op, target, value } => format!(
+                "{} {} {}",
+                self.format_expr(target),
+                op.as_str(),
+                self.format_expr_broken(value, indent)
+            ),
+            ExprKind::Lambda { params, body } => format!(
+                "|{}| {}",
+                params
+                    .iter()
+                    .map(|param| param.name.as_str())
+                    .collect::<Vec<_>>()
+                    .join(", "),
+                self.format_expr_broken(body, indent)
+            ),
+            _ => self.format_expr(expr),
         }
     }
 
@@ -382,7 +507,31 @@ impl Formatter {
     }
 
     fn format_match_arm(&self, arm: &MatchArm) -> String {
-        let patterns = if arm.patterns.is_empty() {
+        format!(
+            "{}{}",
+            self.format_match_arm_head(arm),
+            self.format_expr(&arm.body)
+        )
+    }
+
+    /// Renders one arm of a match that is already broken across lines, spreading
+    /// the arm body too when the arm's own line would exceed `max_width`.
+    fn format_match_arm_broken(&self, arm: &MatchArm, indent: usize) -> String {
+        let head = self.format_match_arm_head(arm);
+        let inline = format!(
+            "{}{}{},",
+            self.pad(indent),
+            head,
+            self.format_expr(&arm.body)
+        );
+        if self.fits(&inline) {
+            return format!("{}{}", head, self.format_expr(&arm.body));
+        }
+        format!("{}{}", head, self.format_expr_broken(&arm.body, indent))
+    }
+
+    fn format_match_arm_head(&self, arm: &MatchArm) -> String {
+        let mut rendered = if arm.patterns.is_empty() {
             "_".to_string()
         } else {
             arm.patterns
@@ -392,13 +541,11 @@ impl Formatter {
                 .join(" | ")
         };
 
-        let mut rendered = patterns;
         if let Some(guard) = &arm.guard {
             rendered.push_str(" if ");
             rendered.push_str(&self.format_expr(guard));
         }
         rendered.push_str(" => ");
-        rendered.push_str(&self.format_expr(&arm.body));
         rendered
     }
 
