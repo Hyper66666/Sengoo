@@ -29,9 +29,9 @@ pub(crate) async fn cmd_build(
 ) -> Result<()> {
     let build_target = NativeBuildTarget::resolve(target)?;
     if build_target.is_cross() {
-        println!("cross-compile target: {}", build_target.triple);
+        vprintln!("cross-compile target: {}", build_target.triple);
     }
-    println!("Building: {}", input);
+    vprintln!("Building: {}", input);
 
     let input_path = Path::new(input);
     let stem = input_path.file_stem().unwrap_or_default().to_string_lossy();
@@ -45,7 +45,7 @@ pub(crate) async fn cmd_build(
     let source = expand_imports_for_source(input_path, &root_source)?;
     let native_link_libraries = collect_native_link_libraries_for_graph(input_path, &root_source)?;
     if !native_link_libraries.is_empty() {
-        println!(
+        vprintln!(
             "native link libraries: {}",
             native_link_libraries.join(", ")
         );
@@ -62,7 +62,7 @@ pub(crate) async fn cmd_build(
     let _contract_checks_override_guard = ContractChecksOverrideGuard::new(
         set_contract_runtime_checks_override(Some(contract_checks_enabled)),
     );
-    println!(
+    vprintln!(
         "contract runtime checks: {} (mode={})",
         if contract_checks_enabled {
             "enabled"
@@ -74,7 +74,7 @@ pub(crate) async fn cmd_build(
     let collect_symbol_fingerprints =
         should_collect_symbol_fingerprints(source.len(), force_rebuild, low_memory);
     if !collect_symbol_fingerprints && !force_rebuild && !low_memory {
-        println!(
+        vprintln!(
             "symbol fingerprint collection: skipped for large source ({} bytes > limit {} bytes)",
             source.len(),
             symbol_fingerprint_collection_limit_bytes()
@@ -110,7 +110,7 @@ pub(crate) async fn cmd_build(
         FrontendProbeMode::VerifyChangedAndDependents
     };
     if low_memory {
-        println!("low-memory mode: enabled (--low-memory)");
+        vprintln!("low-memory mode: enabled (--low-memory)");
     }
     let graph_snapshot = collect_module_graph_snapshot(
         input_path,
@@ -135,20 +135,20 @@ pub(crate) async fn cmd_build(
     );
     let source_hash = root_implementation_hash;
     let reflection = resolve_reflection_options_for_snapshot(reflection, &graph_snapshot);
-    println!("{}", reflection_mode_note(&reflection, &graph_snapshot));
+    vprintln!("{}", reflection_mode_note(&reflection, &graph_snapshot));
     let module_fingerprints = graph_snapshot.module_fingerprints.clone();
     if !graph_snapshot.diagnostics.is_empty() {
-        println!("frontend probe diagnostics (stable order):");
+        vprintln!("frontend probe diagnostics (stable order):");
         for line in &graph_snapshot.diagnostics {
-            println!("  - {}", line);
+            vprintln!("  - {}", line);
         }
     }
-    println!(
+    vprintln!(
         "frontend session: reused_modules={} rebuilt_modules={}",
         graph_snapshot.reused_modules.len(),
         graph_snapshot.rebuilt_modules.len()
     );
-    println!(
+    vprintln!(
         "frontend scheduler: requested={} selected={} serial={} parse_tasks={} body_tasks={} queue_wait_avg_ms={:.3} util={:.2}%",
         graph_snapshot.frontend_scheduler.requested_jobs,
         graph_snapshot.frontend_scheduler.selected_jobs,
@@ -159,9 +159,9 @@ pub(crate) async fn cmd_build(
         graph_snapshot.frontend_scheduler.worker_utilization_pct
     );
     if !graph_snapshot.fallback_events.is_empty() {
-        println!("frontend fallback events:");
+        vprintln!("frontend fallback events:");
         for event in &graph_snapshot.fallback_events {
-            println!(
+            vprintln!(
                 "  - stage={} scope={} reason={}",
                 event.stage,
                 frontend_fallback_scope_label(event.scope),
@@ -180,7 +180,7 @@ pub(crate) async fn cmd_build(
             &frontend_session_path,
             &graph_snapshot.frontend_session_store,
         ) {
-            println!("frontend session fallback: {}", err);
+            vprintln!("frontend session fallback: {}", err);
         }
     }
     let runtime_c = find_runtime_c();
@@ -245,7 +245,7 @@ pub(crate) async fn cmd_build(
         opt_level,
         &generic_feature_flags,
     );
-    println!(
+    vprintln!(
         "generic instance cache: total={} hits={} rebuilt={} hit_ratio={:.2} interface_invalidated={} body_invalidated={} dependency_invalidated={} new_instances={}",
         generic_plan_stats.total_instances,
         generic_plan_stats.cache_hits,
@@ -270,15 +270,15 @@ pub(crate) async fn cmd_build(
     let mut edit_impact: Option<EditImpact> = None;
 
     let previous_build_metadata = if low_memory {
-        println!("build cache bypassed: --low-memory");
+        vprintln!("build cache bypassed: --low-memory");
         None
     } else if force_rebuild {
-        println!("build cache bypassed: --force-rebuild");
+        vprintln!("build cache bypassed: --force-rebuild");
         None
     } else if let Some(metadata) = previous_build_metadata_seed.clone() {
         if build_metadata_matches(&metadata, &key) {
             if build_artifact_exists(&metadata) {
-                println!(
+                vprintln!(
                     "build cache hit (opt=O{}, emit_llvm={})",
                     metadata.opt_level, metadata.emit_llvm
                 );
@@ -291,11 +291,11 @@ pub(crate) async fn cmd_build(
                 println!("Build output: {}", metadata.output_path);
                 return Ok(());
             }
-            println!("build cache miss: cached artifacts are missing");
+            vprintln!("build cache miss: cached artifacts are missing");
         } else {
-            println!("build cache miss: metadata changed");
+            vprintln!("build cache miss: metadata changed");
             for reason in build_cache_mismatch_reasons(&metadata, &key) {
-                println!("  - {}", reason);
+                vprintln!("  - {}", reason);
             }
             let impact = classify_edit_impact(
                 metadata.root_interface_hash,
@@ -308,13 +308,13 @@ pub(crate) async fn cmd_build(
                 &graph_v2,
             );
             for line in format_edit_impact_lines(&impact) {
-                println!("  - {}", line);
+                vprintln!("  - {}", line);
             }
             edit_impact = Some(impact);
         }
         Some(metadata)
     } else {
-        println!(
+        vprintln!(
             "build cache miss: no cache metadata at {}",
             cache_path.to_string_lossy()
         );
@@ -335,7 +335,7 @@ pub(crate) async fn cmd_build(
     if previous_build_metadata.is_some()
         && can_skip_codegen_via_generic_cache(edit_impact.as_ref(), &graph_v2, &generic_plan_stats)
     {
-        println!(
+        vprintln!(
             "generic workset optimization: all impacted generic instances are cache hits, skipping MIR/codegen"
         );
         workset_plan = BuildWorksetPlan::ReusePreviousArtifacts;
@@ -346,7 +346,7 @@ pub(crate) async fn cmd_build(
             large_project_mode_choice,
         )
     {
-        println!(
+        vprintln!(
             "workset optimization: impl-only changes are outside root reachable entry set; reusing previous artifacts"
         );
         workset_plan = BuildWorksetPlan::ReusePreviousArtifacts;
@@ -359,14 +359,14 @@ pub(crate) async fn cmd_build(
     );
     let build_workset_manifest_path = codegen_workset_manifest_path(&build_dir, &stem, "build");
     save_codegen_workset_manifest(&build_workset_manifest_path, &workset_manifest)?;
-    println!(
+    vprintln!(
         "codegen workset: rebuild_modules={} reuse_modules={} rebuild_symbols={} reuse_symbols={}",
         workset_manifest.rebuild_modules.len(),
         workset_manifest.reuse_modules.len(),
         workset_manifest.rebuild_symbols.len(),
         workset_manifest.reuse_symbols.len(),
     );
-    println!(
+    vprintln!(
         "codegen workset manifest: {}",
         build_workset_manifest_path.to_string_lossy()
     );
@@ -378,7 +378,7 @@ pub(crate) async fn cmd_build(
                         .as_ref()
                         .map(|impact| edit_class_label(impact.class))
                         .unwrap_or("unknown");
-                    println!(
+                    vprintln!(
                         "build workset plan: reuse previous artifacts ({})",
                         class_label
                     );
@@ -421,36 +421,36 @@ pub(crate) async fn cmd_build(
                                                 "rebuilt object from cached LLVM IR and relinked"
                                             }
                                         };
-                                        println!("build workset plan: {}", label);
+                                        vprintln!("build workset plan: {}", label);
                                         println!("Build output: {}", output_file);
                                         return Ok(());
                                     }
                                     Err(err) => {
-                                        println!("build workset fallback: {}", err);
+                                        vprintln!("build workset fallback: {}", err);
                                     }
                                 }
                             } else {
-                                println!(
+                                vprintln!(
                                     "build workset fallback: clang unavailable for cached relink"
                                 );
                             }
                         } else {
-                            println!("build workset fallback: cached object path changed");
+                            vprintln!("build workset fallback: cached object path changed");
                         }
                     } else {
-                        println!("build workset fallback: cached object path missing");
+                        vprintln!("build workset fallback: cached object path missing");
                     }
                 } else {
-                    println!("build workset fallback: previous artifacts are missing");
+                    vprintln!("build workset fallback: previous artifacts are missing");
                 }
             }
         }
         BuildWorksetPlan::RebuildImpactedRoot => {
-            println!("build workset plan: rebuild impacted root module");
+            vprintln!("build workset plan: rebuild impacted root module");
         }
         BuildWorksetPlan::FullRebuild => {
             if edit_impact.is_some() {
-                println!("build workset plan: full rebuild");
+                vprintln!("build workset plan: full rebuild");
             }
         }
     }
@@ -481,7 +481,7 @@ pub(crate) async fn cmd_build(
     if let Some(path) = timings_json {
         write_timings_json_v1(Path::new(path), &phases)?;
     }
-    println!(
+    vprintln!(
         "frontend memory mode: {}",
         frontend_memory_mode_label(effective_memory_mode)
     );
@@ -517,7 +517,7 @@ pub(crate) async fn cmd_build(
         if !low_memory {
             if let Err(err) = save_generic_instance_cache(&generic_cache_path, &next_generic_cache)
             {
-                println!("generic instance cache fallback: {}", err);
+                vprintln!("generic instance cache fallback: {}", err);
             }
         }
         println!("LLVM IR written to {}", output_file);
@@ -537,7 +537,7 @@ pub(crate) async fn cmd_build(
 
     let incremental_mode = incremental_link_mode_from_env();
     if matches!(incremental_mode, IncrementalLinkMode::Off) {
-        println!("incremental link disabled: SENGOO_INCREMENTAL_LINK=off");
+        vprintln!("incremental link disabled: SENGOO_INCREMENTAL_LINK=off");
     }
     let incremental_check = if matches!(incremental_mode, IncrementalLinkMode::Off) {
         None
@@ -559,13 +559,13 @@ pub(crate) async fn cmd_build(
 
     match incremental_check {
         Some(Ok(())) => {
-            println!(
+            vprintln!(
                 "incremental link: reusing object {}",
                 object_path.to_string_lossy()
             );
         }
         Some(Err(reason)) => {
-            println!("incremental link fallback: {}", reason);
+            vprintln!("incremental link fallback: {}", reason);
             if let Some(previous) = previous_build_metadata.as_ref() {
                 let impact = classify_edit_impact(
                     previous.root_interface_hash,
@@ -578,7 +578,7 @@ pub(crate) async fn cmd_build(
                     &graph_v2,
                 );
                 for line in format_edit_impact_lines(&impact) {
-                    println!("  - {}", line);
+                    vprintln!("  - {}", line);
                 }
             }
             compile_ir_to_object(
@@ -655,7 +655,7 @@ pub(crate) async fn cmd_build(
     save_build_cache(&cache_path, &metadata)?;
     if !low_memory {
         if let Err(err) = save_generic_instance_cache(&generic_cache_path, &next_generic_cache) {
-            println!("generic instance cache fallback: {}", err);
+            vprintln!("generic instance cache fallback: {}", err);
         }
     }
 

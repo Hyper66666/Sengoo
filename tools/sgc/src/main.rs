@@ -8,10 +8,21 @@ use std::collections::BTreeMap;
 use std::fs;
 use std::io::{self, IsTerminal, Read, Write};
 use std::path::Path;
-use std::sync::atomic::{AtomicI8, AtomicU8, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicI8, AtomicU8, Ordering};
 use std::sync::Arc;
 use tokio::time::Duration;
 use tracing_subscriber::{fmt, EnvFilter};
+
+/// Prints compiler instrumentation that is only useful when diagnosing the
+/// toolchain itself. Silent unless `--verbose` was passed; actionable
+/// diagnostics about the user's program never go through this macro.
+macro_rules! vprintln {
+    ($($arg:tt)*) => {
+        if $crate::verbose_output_enabled() {
+            println!($($arg)*);
+        }
+    };
+}
 
 mod bench;
 mod cache;
@@ -200,6 +211,16 @@ pub(crate) fn current_error_format() -> ErrorFormat {
         ERROR_FORMAT_JSON_WIRE => ErrorFormat::Json,
         _ => ErrorFormat::Text,
     }
+}
+
+static VERBOSE_OUTPUT: AtomicBool = AtomicBool::new(false);
+
+pub(crate) fn set_verbose_output(enabled: bool) {
+    VERBOSE_OUTPUT.store(enabled, Ordering::Relaxed);
+}
+
+pub(crate) fn verbose_output_enabled() -> bool {
+    VERBOSE_OUTPUT.load(Ordering::Relaxed)
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
