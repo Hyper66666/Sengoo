@@ -3,7 +3,7 @@ use crate::mir::enum_defs::EnumDefMap;
 use crate::mir::hir_specialization_helpers::substitute_hir_type;
 use crate::mir::MIRType;
 use crate::type_naming::mir_type_instance_name;
-use std::cell::Cell;
+use std::cell::{Cell, RefCell};
 use std::collections::HashMap;
 
 thread_local! {
@@ -33,6 +33,24 @@ pub(crate) fn with_target_pointer_width<T>(bits: u8, action: impl FnOnce() -> T)
     })
 }
 
+thread_local! {
+    /// Enum names currently being instantiated, used to break layout recursion.
+    static ENUM_INSTANTIATION_STACK: RefCell<Vec<String>> = const { RefCell::new(Vec::new()) };
+}
+
+fn enum_instantiation_in_progress(name: &str) -> bool {
+    ENUM_INSTANTIATION_STACK.with(|stack| stack.borrow().iter().any(|entry| entry == name))
+}
+
+fn with_enum_instantiation<T>(name: &str, action: impl FnOnce() -> T) -> T {
+    ENUM_INSTANTIATION_STACK.with(|stack| stack.borrow_mut().push(name.to_string()));
+    let result = action();
+    ENUM_INSTANTIATION_STACK.with(|stack| {
+        stack.borrow_mut().pop();
+    });
+    result
+}
+
 pub(crate) fn integer_bits_for_mir(kind: crate::hir::IntKind) -> u8 {
     match kind {
         crate::hir::IntKind::ISize | crate::hir::IntKind::USize => {
@@ -56,10 +74,24 @@ pub(crate) fn hir_type_to_mir_with_structs_and_enums(
                 }
             }
 
-            if args.is_empty() {
-                if let Some(enum_def) = enum_defs.get(name) {
+            if let Some(enum_def) = enum_defs.get(name) {
+                if args.is_empty() && !enum_def.is_generic() {
                     return enum_def.mir_type();
                 }
+                // A recursive enum has no flat layout; break the cycle by
+                // falling back to the uninstantiated declaration.
+                if enum_instantiation_in_progress(name) {
+                    return enum_def.mir_type();
+                }
+                let mir_args: Vec<MIRType> = args
+                    .iter()
+                    .map(|arg| {
+                        hir_type_to_mir_with_structs_and_enums(arg, struct_defs, enum_defs, subst)
+                    })
+                    .collect();
+                return with_enum_instantiation(name, || {
+                    enum_def.instantiate(&mir_args, struct_defs, enum_defs)
+                });
             }
 
             if let Some(def) = struct_defs.get(name) {

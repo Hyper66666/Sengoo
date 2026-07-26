@@ -77,7 +77,12 @@ impl<'a> LoweringContext<'a> {
                     destination: payload_local,
                     source: enum_value,
                 });
-                if fields.len() == 1 && !payload_has_fields(&payload_ty) {
+                // A single-element tuple variant stores its element directly
+                // as the payload (see `payload_to_mir`), even when that
+                // element is itself a struct such as `String` — bind it
+                // whole. Only a true multi-element `Tuple` payload is split
+                // per index.
+                if fields.len() == 1 && !matches!(payload_ty, MIRType::Tuple(_)) {
                     let (_, name) = &fields[0];
                     let bound_local =
                         self.add_local(Some(name.clone()), LocalKind::User, payload_ty.clone());
@@ -151,10 +156,6 @@ fn enum_payload_ty(ty: &MIRType, discriminant: Option<u32>) -> Option<MIRType> {
         }),
         _ => None,
     }
-}
-
-fn payload_has_fields(ty: &MIRType) -> bool {
-    matches!(ty, MIRType::Struct { .. } | MIRType::Tuple(_))
 }
 
 fn tuple_index_ty(ty: &MIRType, index: u32) -> Option<MIRType> {

@@ -99,6 +99,10 @@ pub struct TypeChecker {
     struct_field_defs: HashMap<String, Vec<(String, Type)>>,
     enum_variants: HashMap<String, Vec<String>>,
     enum_variant_field_tys: HashMap<String, HashMap<String, Vec<Ty>>>,
+    /// Variant name to every enum declaring it, so an unqualified `Some(v)` or
+    /// `None` resolves without the `Option::` prefix. A name owned by more than
+    /// one enum stays ambiguous and is reported rather than guessed.
+    bare_variant_owners: HashMap<String, Vec<String>>,
     struct_type_params: HashMap<String, Vec<TypeParam>>,
     class_decls: HashMap<String, ClassDeclInfo>,
     generic_function_metas: HashMap<String, GenericFunctionMeta>,
@@ -141,6 +145,7 @@ impl TypeChecker {
             struct_field_defs: HashMap::new(),
             enum_variants: HashMap::new(),
             enum_variant_field_tys: HashMap::new(),
+            bare_variant_owners: HashMap::new(),
             struct_type_params: HashMap::new(),
             class_decls: HashMap::new(),
             generic_function_metas: HashMap::new(),
@@ -574,6 +579,12 @@ impl TypeChecker {
                     .iter()
                     .map(|variant| variant.name.name.clone())
                     .collect::<Vec<_>>();
+                for variant in &variants {
+                    let owners = self.bare_variant_owners.entry(variant.clone()).or_default();
+                    if !owners.contains(&name) {
+                        owners.push(name.clone());
+                    }
+                }
                 self.enum_variants.insert(name.clone(), variants);
                 self.env.push_scope();
                 let enum_meta_and_fields = (|| -> TyResult<EnumMetaAndFields> {
@@ -1330,7 +1341,11 @@ impl TypeChecker {
             ExprKind::Lambda { params, body } => {
                 self.check_lambda_with_expected(params, body, expected)
             }
-            ExprKind::Struct { .. } => {
+            // Path and Ident cover payload-free enum variants such as
+            // `Option::None` and bare `None`, whose generic arguments are only
+            // recoverable from the expected type; mirror the struct-literal
+            // fallback.
+            ExprKind::Struct { .. } | ExprKind::Path(_) | ExprKind::Ident(_) => {
                 self.expected_return_types.push(expected.clone());
                 let result = self.check_expr(expr);
                 self.expected_return_types.pop();

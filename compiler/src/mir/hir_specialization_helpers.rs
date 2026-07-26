@@ -193,6 +193,7 @@ pub(crate) fn substitute_hir_expr(expr: &HIRExpr, subst: &HashMap<String, HIRTyp
             variant_name,
             discriminant,
             args,
+            concrete_type,
         } => HIRExpr::EnumConstruct {
             enum_name: enum_name.clone(),
             variant_name: variant_name.clone(),
@@ -201,6 +202,9 @@ pub(crate) fn substitute_hir_expr(expr: &HIRExpr, subst: &HashMap<String, HIRTyp
                 .iter()
                 .map(|arg| substitute_hir_expr(arg, subst))
                 .collect(),
+            concrete_type: concrete_type
+                .as_ref()
+                .map(|ty| Box::new(substitute_hir_type(ty, subst))),
         },
         HIRExpr::MethodCall {
             receiver,

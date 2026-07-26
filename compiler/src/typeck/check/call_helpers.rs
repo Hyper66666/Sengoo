@@ -641,6 +641,45 @@ impl TypeChecker {
         self.check_call_with_expected(func, args, call_span, None)
     }
 
+    /// Construct the enum variant a callee names, if it names one.
+    fn check_variant_callee(
+        &mut self,
+        func: &Expr,
+        args: &[Expr],
+        expected_return: Option<&Ty>,
+    ) -> Option<TyResult<Ty>> {
+        enum Callee {
+            Qualified(Path),
+            Bare(Ident),
+        }
+
+        let callee = match &func.kind {
+            ExprKind::Path(path) if path.segments.len() >= 2 => Callee::Qualified(path.clone()),
+            ExprKind::Path(path) if path.segments.len() == 1 => {
+                Callee::Bare(path.segments[0].clone())
+            }
+            ExprKind::Ident(ident) => Callee::Bare(ident.clone()),
+            _ => return None,
+        };
+        if let Callee::Bare(ident) = &callee {
+            if self.env.contains(&ident.name) {
+                return None;
+            }
+        }
+
+        let pushed = expected_return.cloned().inspect(|expected| {
+            self.expected_return_types.push(expected.clone());
+        });
+        let result = match &callee {
+            Callee::Qualified(path) => self.check_enum_variant_constructor(path, args),
+            Callee::Bare(ident) => self.check_bare_enum_variant(&ident.name, ident.span, args),
+        };
+        if pushed.is_some() {
+            self.expected_return_types.pop();
+        }
+        result
+    }
+
     pub(super) fn check_call_with_expected(
         &mut self,
         func: &Expr,
@@ -648,10 +687,13 @@ impl TypeChecker {
         call_span: crate::lexer::Span,
         expected_return: Option<&Ty>,
     ) -> TyResult<Ty> {
-        if let ExprKind::Path(path) = &func.kind {
-            if let Some(result) = self.check_enum_variant_constructor(path, args) {
-                return result;
-            }
+        // A callee that names an enum variant constructs it rather than calling
+        // a function. Unqualified names (`Some(v)`) only take this path when
+        // nothing else in scope claims the name. The expected type is pushed
+        // for the duration so that generic parameters no argument pins — the
+        // `E` of `Ok(value)` — are recovered from it.
+        if let Some(result) = self.check_variant_callee(func, args, expected_return) {
+            return result;
         }
 
         let builtin_name = match &func.kind {
