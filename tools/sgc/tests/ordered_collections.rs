@@ -287,10 +287,14 @@ def scoped(before: i64) -> i64 {
         let iter_item = iter.next();
         (*borrowed).text.handle != 0 && iter_item.is_some()
     };
-    let removed = values.remove(1).unwrap_or(Payload { text: String { handle: 0 } });
-    let popped = values.pop().unwrap_or(Payload { text: String { handle: 0 } });
-    let removed_ok = removed.text.handle != 0;
-    let popped_ok = popped.text.handle != 0;
+    let removed_ok = {
+        let removed = values.remove(1).unwrap_or(Payload { text: String { handle: 0 } });
+        removed.text.handle != 0
+    };
+    let popped_ok = {
+        let popped = values.pop().unwrap_or(Payload { text: String { handle: 0 } });
+        popped.text.handle != 0
+    };
     let cleared = values.clear();
     let after_clear = sengoo_string_live_handle_count();
     if pushed == false {

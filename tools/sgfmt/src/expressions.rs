@@ -394,7 +394,7 @@ impl Formatter {
                             .join(", ")
                     )
                 }
-            },
+            }
             ExprKind::Tuple(items) => {
                 let rendered = items
                     .iter()

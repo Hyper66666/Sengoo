@@ -4752,8 +4752,10 @@ async def main() -> i64 {
     eighth.value.join();
 
     let locked = await mutex_lock_guard(counter.borrow());
-    if !locked.is_ok { return locked.error; }
-    locked.value.get()
+    match locked {
+        Ok(guard) => guard.get(),
+        Err(code) => return code,
+    }
 }
 "#,
     ) else {
@@ -4779,8 +4781,10 @@ import std::async;
 async def main() -> i64 {
     let counter: Arc<Mutex<i64>> = arc_new(mutex_new(2));
     let locked = await mutex_lock_guard(counter.borrow());
-    if !locked.is_ok { return locked.error; }
-    locked.value.get()
+    match locked {
+        Ok(guard) => guard.get(),
+        Err(code) => return code,
+    }
 }
 "#,
     ) else {
@@ -11224,6 +11228,34 @@ def main() -> i64 {
     );
 
     assert_eq!(output.status.code(), Some(60));
+}
+
+#[test]
+fn stdlib_surface_runtime_for_loop_sums_vec_and_map_keys() {
+    let output = require_stdlib_runtime_output!(
+        "for-loop-vec-map-keys",
+        r#"
+def main() -> i64 {
+    let values: Vec<i64> = vec_new();
+    values.push(1);
+    values.push(2);
+    values.push(3);
+    let mut total = 0;
+    for value in values {
+        total = total + value;
+    }
+    let mut map: HashMap<i64, i64> = hashmap_new();
+    map.insert(1, 10);
+    map.insert(2, 20);
+    for key in map.keys() {
+        total = total + *key;
+    }
+    total
+}
+"#,
+    );
+
+    assert_eq!(output.status.code(), Some(9));
 }
 
 #[test]

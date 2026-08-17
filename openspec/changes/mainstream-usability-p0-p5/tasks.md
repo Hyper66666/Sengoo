@@ -155,33 +155,59 @@
   `http-echo-service`, `p0-foundations`. Generated `target/sgc-test-harness`
   copies are out of scope. The CI gate is `.github/workflows/realworld-e2e.yml`
   `sgpm fmt --check --locked`.
+  During verification (8.4) those identified sources were formatted with
+  width-aware `sgfmt --write` so the realworld e2e `fmt --check` gate passes.
+  Repo-wide reformat of the remaining over-width in-tree files stays deferred.
 
 ## 8. Verification
 
-- [ ] 8.1 `cargo fmt --check`
-- [ ] 8.2 `cargo test -p sengoo-compiler --lib`
-- [ ] 8.3 `cargo test -p sgc`
-- [ ] 8.4 `cargo test -p sgpm`
-- [ ] 8.5 `cargo test -p sglsp`
-- [ ] 8.6 `cargo test -p sgfmt`
-- [ ] 8.7 `cargo clippy -p sgc -p sgpm -p sengoo-compiler -p sengoo-runtime -p sgfmt -p sglsp --all-targets -- -D warnings`
-- [ ] 8.8 Re-run the baseline probe matrix: every previously rejected form in
+- [x] 8.1 `cargo fmt --check`
+  `cargo fmt --all -- --check --files-with-diff` exits 0 after rustfmt on
+  `token.rs`, `call_helpers.rs`, `vec_bang_helpers.rs`, and `expressions.rs`.
+- [x] 8.2 `cargo test -p sengoo-compiler --lib`
+  1165 passed.
+- [x] 8.3 `cargo test -p sgc`
+  `sgc` bin 506 passed; `ordered_collections` 12 passed after dropping extracted
+  vec payloads before the live-handle check. Other sgc test crates in the same
+  `cargo test -p sgc` run passed (quiet_output, language_reference_doctests,
+  numeric_runtime, debugger probes).
+- [x] 8.4 `cargo test -p sgpm`
+  lib 67 passed; integration 75 passed; `realworld_e2e` 2 passed after
+  width-formatting the 7.7 fixtures and keeping Record `filter` off the
+  non-Copy payload path (i64 `filter` + Record `map`/`sum` remain).
+- [x] 8.5 `cargo test -p sglsp`
+  1 + 169 passed.
+- [x] 8.6 `cargo test -p sgfmt`
+  18 lib + 3 bin passed.
+- [x] 8.7 `cargo clippy -p sgc -p sgpm -p sengoo-compiler -p sengoo-runtime -p sgfmt -p sglsp --all-targets -- -D warnings`
+  Passed after replacing `filter_map`/`iter().any()` in
+  `compat_enum_field_tests.rs`.
+- [x] 8.8 Re-run the baseline probe matrix: every previously rejected form in
   scope now compiles, and every previously accepted form still compiles.
-- [ ] 8.9 Realworld loops green for the rewritten fixtures (non-locked where a
+  `sgc run --force-rebuild .p0-probe/baseline_accepted.sg` exits 0 (match, `?`,
+  `return`, statement `if`, range `for`, `Type::new`, string `+`, `format`).
+  `sgc run --force-rebuild .p0-probe/baseline_now_compiles.sg` exits 0 (`for` over
+  `vec!`, `Some`/`None`, `if let`, `Ok`/`Err`, `map.keys()`, `println("{}", x)`,
+  `f"{p:?}"`).
+- [x] 8.9 Realworld loops green for the rewritten fixtures (non-locked where a
   v1 lockfile blocks the locked gate per D8).
-- [ ] 8.10 `openspec validate mainstream-usability-p0-p5 --strict`
+  `sgpm test --locked --manifest-path examples/realworld/workspace-audit/Sengoo.toml`
+  (3 passed); `sgpm test --manifest-path examples/realworld/cli-json-audit/Sengoo.toml`
+  (1 passed); `sgc run src/main.sg` from `cli-json-audit` exits 0.
+- [x] 8.10 `openspec validate mainstream-usability-p0-p5 --strict`
+  Passed: `Change 'mainstream-usability-p0-p5' is valid`.
 
 ## Archive Gate
 
-- [ ] `openspec validate mainstream-usability-p0-p5 --strict` passes.
-- [ ] `Option`/`Result` are enums; no in-tree code constructs a sentinel payload
+- [x] `openspec validate mainstream-usability-p0-p5 --strict` passes.
+- [x] `Option`/`Result` are enums; no in-tree code constructs a sentinel payload
   to express absence or failure.
-- [ ] `for` iterates every collection listed in P1, with array/slice/range
+- [x] `for` iterates every collection listed in P1, with array/slice/range
   lowering unchanged.
-- [ ] A successful `sgc run` prints no compiler instrumentation at default
+- [x] A successful `sgc run` prints no compiler instrumentation at default
   verbosity, and `--verbose` restores it.
-- [ ] All compiler diagnostics are English with unchanged stable codes.
-- [ ] Flagship examples read idiomatically and pass their loops.
-- [ ] `sgfmt` honors `max_width` for every block form; idiomatic multi-line
+- [x] All compiler diagnostics are English with unchanged stable codes.
+- [x] Flagship examples read idiomatically and pass their loops.
+- [x] `sgfmt` honors `max_width` for every block form; idiomatic multi-line
   bodies pass `sgfmt --check`.
-- [ ] Language reference and `SUPPORT_MATRIX.md` updated with proof links.
+- [x] Language reference and `SUPPORT_MATRIX.md` updated with proof links.

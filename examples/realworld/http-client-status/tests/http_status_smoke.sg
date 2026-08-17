@@ -14,13 +14,9 @@ def main() -> i64 {
     let mut ftp_closed = true;
     let mut ftp_unsupported = false;
     match ftp_result {
-        Ok(response) => {
-            ftp_closed = response.close();
-        },
-        Err(error) => {
-            ftp_unsupported = error == STATUS_UNSUPPORTED();
-        },
-    }
+        Ok(response) => { ftp_closed = response.close(); },
+        Err(error) => { ftp_unsupported = error == STATUS_UNSUPPORTED(); },
+    };
     let doc = json_parse("[0]").unwrap_or(JsonDoc { handle: 0 });
     let root = doc.root();
     let count = root.array_len().unwrap_or(0);

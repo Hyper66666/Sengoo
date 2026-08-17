@@ -327,17 +327,12 @@ impl TypeChecker {
     }
 
     fn type_implements_debug(&self, ty: &Ty) -> bool {
-        self.impl_registry
-            .implements_trait("Debug", &type_key(ty))
+        self.impl_registry.implements_trait("Debug", &type_key(ty))
     }
 
     fn is_builtin_debug_ty(&self, ty: &Ty) -> bool {
         match &ty.kind {
-            TyKind::Int(_)
-            | TyKind::Bool
-            | TyKind::Float(_)
-            | TyKind::Str
-            | TyKind::Char => true,
+            TyKind::Int(_) | TyKind::Bool | TyKind::Float(_) | TyKind::Str | TyKind::Char => true,
             TyKind::Ref(_, inner) => self.is_builtin_debug_ty(inner),
             TyKind::Adt { name, .. } if name == "String" => true,
             _ => false,

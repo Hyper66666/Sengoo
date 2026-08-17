@@ -884,9 +884,7 @@ fn scan_interpolation_end(bytes: &[u8], i: &mut usize) -> Option<(usize, Option<
                 while *i < bytes.len() {
                     match bytes[*i] {
                         b'}' => {
-                            let spec = std::str::from_utf8(&bytes[spec_lo..*i])
-                                .ok()?
-                                .to_string();
+                            let spec = std::str::from_utf8(&bytes[spec_lo..*i]).ok()?.to_string();
                             *i += 1;
                             return Some((expr_hi, Some(spec)));
                         }

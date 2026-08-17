@@ -12,7 +12,7 @@ impl Display for Label {
 }
 
 def score_result() -> Result<i64, i64> {
-    Ok(42)
+    Ok(42);
 }
 
 def text_result() -> Result<String, i64> {
@@ -20,14 +20,8 @@ def text_result() -> Result<String, i64> {
 }
 
 def main() -> i64 {
-    let score = match score_result() {
-        Ok(value) => value,
-        Err(_) => return 1,
-    };
-    let text = match text_result() {
-        Ok(value) => value,
-        Err(_) => return 1,
-    };
+    let score = match score_result() { Ok(value) => value, Err(_) => return 1 };
+    let text = match text_result() { Ok(value) => value, Err(_) => return 1 };
     let label = Label { id: score };
     println(text);
     println(label);

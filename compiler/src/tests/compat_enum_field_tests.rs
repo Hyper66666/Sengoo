@@ -263,21 +263,21 @@ def main() -> i64 {
     let warnings = collect_compile_warnings(&source).expect("placeholder uses should typecheck");
     let names: Vec<_> = warnings
         .iter()
-        .filter_map(|warning| {
+        .map(|warning| {
             let CompileWarning::DeprecatedUse { name, .. } = warning;
-            Some(name.as_str())
+            name.as_str()
         })
         .collect();
     assert!(
-        names.iter().any(|name| *name == "option_none_with"),
+        names.contains(&"option_none_with"),
         "expected option_none_with deprecation, got {warnings:?}"
     );
     assert!(
-        names.iter().any(|name| *name == "result_ok_with"),
+        names.contains(&"result_ok_with"),
         "expected result_ok_with deprecation, got {warnings:?}"
     );
     assert!(
-        names.iter().any(|name| *name == "result_err_with"),
+        names.contains(&"result_err_with"),
         "expected result_err_with deprecation, got {warnings:?}"
     );
     let none = warnings

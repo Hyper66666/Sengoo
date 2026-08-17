@@ -21,7 +21,8 @@ impl TypeChecker {
             };
             let value_ty = self.check_expr(value)?;
             let count_ty = self.check_expr(count)?;
-            self.infer.unify(&count_ty, &self.env.int_ty(IntKind::I64))?;
+            self.infer
+                .unify(&count_ty, &self.env.int_ty(IntKind::I64))?;
             value_ty
         } else if elements.is_empty() {
             self.expected_vec_elem_ty().ok_or_else(|| {
@@ -68,9 +69,7 @@ impl TypeChecker {
         let expected = self.expected_return_types.last()?;
         let expected = self.infer.apply_subst(expected);
         match &expected.kind {
-            TyKind::Adt { name, args } if name == "Vec" && args.len() == 1 => {
-                Some(args[0].clone())
-            }
+            TyKind::Adt { name, args } if name == "Vec" && args.len() == 1 => Some(args[0].clone()),
             _ => None,
         }
     }
@@ -109,7 +108,11 @@ fn ty_to_ast_type(ty: &Ty, span: Span) -> Option<Type> {
 }
 
 fn vec_new_call(span: Span) -> Expr {
-    Expr::call(Expr::path(Path::from_str("vec_new", span)), Vec::new(), span)
+    Expr::call(
+        Expr::path(Path::from_str("vec_new", span)),
+        Vec::new(),
+        span,
+    )
 }
 
 fn vec_annotation(elem_ty: Type, span: Span) -> Type {

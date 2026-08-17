@@ -189,7 +189,7 @@ fn desugar_iterator_for(
     );
     let none_arm = MatchArm::new(
         vec![Pattern::new(
-            PatternKind::Path(Path::from_str("None", for_span)),
+            PatternKind::Ident(Ident::new("None", for_span)),
             for_span,
         )],
         Expr::break_expr(None, for_span),

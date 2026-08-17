@@ -35,14 +35,14 @@ def compress_smoke(expected_count: i64) -> i64 {
                     let root = doc.root();
                     let count = root.array_len().unwrap_or(0);
                     let closed = doc.close();
-                    count == expected_count and closed and restored_len == source.used_len()
+                    count == expected_count and closed and restored_len == source.used_len();
                 },
                 Err(_) => false,
             },
             Err(_) => false,
-        }
+        };
     } else {
-        false
+        false;
     };
     let ok = fixture_ready and parsed_ok and compressed_len > source.used_len() and too_small == STATUS_BUFFER_TOO_SMALL() and invalid_status == STATUS_PARSE();
     invalid.free();

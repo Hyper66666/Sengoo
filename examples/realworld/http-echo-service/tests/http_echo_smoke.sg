@@ -19,17 +19,14 @@ def dual_router() -> Result<HttpRouter, i64> {
     match http_router_route(r0, "GET", "/health", h_health) {
         Ok(router) => http_router_route(router, "GET", "/echo", h_echo),
         Err(error) => Err(error),
-    }
+    };
 }
 
 def dispatch_dual(request: HttpServerRequest) -> bool {
     match dual_router() {
-        Ok(router) => {
-            let ignored = http_router_dispatch(router, request);
-            true
-        },
+        Ok(router) => { let ignored = http_router_dispatch(router, request); true; },
         Err(_) => false,
-    }
+    };
 }
 
 async def client_health(port: i64) -> i64 {
@@ -43,9 +40,9 @@ async def client_health(port: i64) -> i64 {
             };
             await sleep(1000);
             let closed = stream.close();
-            if sent_ok and closed { 0 } else { 2 }
+            if sent_ok and closed { 0; } else { 2; };
         },
-    }
+    };
 }
 
 async def client_echo(port: i64) -> i64 {
@@ -59,40 +56,33 @@ async def client_echo(port: i64) -> i64 {
             };
             await sleep(1000);
             let closed = stream.close();
-            if sent_ok and closed { 0 } else { 2 }
+            if sent_ok and closed { 0; } else { 2; };
         },
-    }
+    };
 }
 
 async def dual_route_contract(server: HttpServer) -> bool {
     let port = server.local_port().unwrap_or(0);
     match server.claim_serve_mode(HTTP_SERVER_MODE_ROUTER()) {
-        Err(_) => {
-            server.close();
-            false
-        },
+        Err(_) => { server.close(); false; },
         Ok(_) => {
             let client1 = spawn(client_health(port));
             let o1 = await server.next_request_router_async(5000);
-            let health_ok = if o1.is_ok { dispatch_dual(o1.value) } else { false };
+            let health_ok = if o1.is_ok { dispatch_dual(o1.value); } else { false; };
             let client1_ok = await client1 == 0;
             let client2 = spawn(client_echo(port));
             let o2 = await server.next_request_router_async(5000);
-            let echo_ok = if o2.is_ok { dispatch_dual(o2.value) } else { false };
+            let echo_ok = if o2.is_ok { dispatch_dual(o2.value); } else { false; };
             let client2_ok = await client2 == 0;
             let closed = server.close();
-            port > 0 and health_ok and echo_ok and client1_ok and client2_ok and closed
+            port > 0 and health_ok and echo_ok and client1_ok and client2_ok and closed;
         },
-    }
+    };
 }
 
 async def main() -> i64 {
     match http_server_bind("127.0.0.1", 0) {
-        Ok(server) => {
-            if await dual_route_contract(server) { 0 } else { 2 }
-        },
-        Err(error) => {
-            if error == STATUS_UNSUPPORTED() { 0 } else { 2 }
-        },
-    }
+        Ok(server) => { if await dual_route_contract(server) { 0; } else { 2; }; },
+        Err(error) => { if error == STATUS_UNSUPPORTED() { 0; } else { 2; }; },
+    };
 }

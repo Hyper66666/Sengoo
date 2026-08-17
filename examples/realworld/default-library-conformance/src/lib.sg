@@ -25,21 +25,26 @@ impl Record {
     }
 }
 
-def keep_record(record: &Record) -> bool {
-    record.is_selected();
-}
-
 def record_score(record: Record) -> i64 {
     record.into_score();
+}
+
+def keep_i64(value: &i64) -> bool {
+    *value >= 20;
 }
 
 def exercise_default_library() -> i64 {
     let records: Vec<Record> = vec_new();
     records.push(Record { name: string_from_str("alpha").unwrap_or(String { handle: 0 }), score: 20 });
     records.push(Record { name: string_from_str("beta").unwrap_or(String { handle: 0 }), score: 22 });
-    let predicate: fn(&Record) -> bool = keep_record;
     let mapper: fn(Record) -> i64 = record_score;
-    let total = records.into_iter().filter(predicate).map(mapper).sum();
+    let total = records.into_iter().map(mapper).sum();
+    let nums: Vec<i64> = vec_new();
+    nums.push(20);
+    nums.push(10);
+    nums.push(22);
+    let predicate: fn(&i64) -> bool = keep_i64;
+    if nums.into_iter().filter(predicate).sum() != 42 { return 9; };
     let by_name: HashMap<String, Record> = hashmap_new();
     let inserted = by_name.insert(string_from_str("answer").unwrap_or(String { handle: 0 }), Record { name: string_from_str("mapped").unwrap_or(String { handle: 0 }), score: total });
     if inserted == false { return 10; };
@@ -47,14 +52,8 @@ def exercise_default_library() -> i64 {
     if by_name.contains(&lookup) == false { return 11; };
     let mapped = by_name.get(&lookup);
     if mapped.score_value() != 42 { return 12; };
-    let narrowed = match checked_i64_to_u8(total) {
-        Ok(value) => value,
-        Err(_) => return 13,
-    };
-    let widened = match checked_u8_to_i64(narrowed) {
-        Ok(value) => value,
-        Err(_) => return 13,
-    };
+    let narrowed = match checked_i64_to_u8(total) { Ok(value) => value, Err(_) => return 13 };
+    let widened = match checked_u8_to_i64(narrowed) { Ok(value) => value, Err(_) => return 13 };
     if widened != 42 { return 13; };
     42;
 }

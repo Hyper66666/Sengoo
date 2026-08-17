@@ -28,14 +28,14 @@ def compressed_json_artifact_smoke() -> i64 {
                     let root = doc.root();
                     let count = root.array_len().unwrap_or(0);
                     let closed = doc.close();
-                    count == 3 and closed and restored_len == source.used_len()
+                    count == 3 and closed and restored_len == source.used_len();
                 },
                 Err(_) => false,
             },
             Err(_) => false,
-        }
+        };
     } else {
-        false
+        false;
     };
     let deterministic_len = compressed_len >= 0 and compressed_again_len >= 0 and compressed_len == compressed_again_len;
     let gzip_shape = compressed_len > source.used_len();

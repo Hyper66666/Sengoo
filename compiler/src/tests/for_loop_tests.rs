@@ -218,6 +218,36 @@ def main() -> i64 {
 }
 
 #[test]
+fn for_loop_over_vec_matches_none_and_some() {
+    let ir = compile_with_collections(
+        r#"
+def main() -> i64 {
+    let values: Vec<i64> = vec_new();
+    values.push(1);
+    values.push(2);
+    values.push(3);
+    let mut total = 0;
+    for value in values {
+        total = total + value;
+    }
+    total
+}
+"#,
+    );
+    let Some(next_at) = ir.find("Iterator_next").or_else(|| ir.find("_next(")) else {
+        panic!("expected iterator next call in for-over-vec IR:\n{ir}");
+    };
+    let switch_region = ir[next_at..]
+        .split("\ndefine ")
+        .next()
+        .unwrap_or(&ir[next_at..]);
+    assert!(
+        switch_region.contains("i64 0, label") && switch_region.contains("i64 1, label"),
+        "for-over-vec must match both Option::None and Option::Some:\n{switch_region}"
+    );
+}
+
+#[test]
 fn for_loop_iterates_map_entries_keys_and_values() {
     let ir = compile_with_collections(
         r#"

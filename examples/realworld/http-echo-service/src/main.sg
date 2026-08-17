@@ -17,36 +17,32 @@ def dual_router() -> Result<HttpRouter, i64> {
     match http_router_route(r0, "GET", "/health", h_health) {
         Ok(router) => http_router_route(router, "GET", "/echo", h_echo),
         Err(error) => Err(error),
-    }
+    };
 }
 
 def dispatch_dual(request: HttpServerRequest) -> bool {
     match dual_router() {
-        Ok(router) => {
-            let ignored = http_router_dispatch(router, request);
-            true
-        },
+        Ok(router) => { let ignored = http_router_dispatch(router, request); true; },
         Err(_) => false,
-    }
+    };
 }
 
 async def main() -> i64 {
     match http_server_bind("127.0.0.1", 0) {
-        Err(error) => {
-            if error == STATUS_UNSUPPORTED() { 0 } else { 1 }
-        },
+        Err(error) => { if error == STATUS_UNSUPPORTED() { 0; } else { 1; }; },
         Ok(server) => match server.claim_serve_mode(HTTP_SERVER_MODE_ROUTER()) {
-            Err(_) => {
-                server.close();
-                1
-            },
+            Err(_) => { server.close(); 1; },
             Ok(_) => {
                 let outcome = await server.next_request_router_async(5000);
-                let timed_out = if outcome.is_ok { false } else { outcome.error == STATUS_TIMEOUT() };
-                let answered = if outcome.is_ok { dispatch_dual(outcome.value) } else { false };
+                let timed_out = if outcome.is_ok {
+                    false;
+                } else {
+                    outcome.error == STATUS_TIMEOUT();
+                };
+                let answered = if outcome.is_ok { dispatch_dual(outcome.value); } else { false; };
                 let closed = server.close();
-                if (answered or timed_out) and closed { 0 } else { 1 }
+                if (answered or timed_out) and closed { 0; } else { 1; };
             },
         },
-    }
+    };
 }

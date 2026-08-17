@@ -915,7 +915,7 @@ impl<K: Ord, V> BTreeMap<K, V> {
         RawMapKeyIter { handle: sengoo_raw_map_key_iter_new(self.handle), marker: 0 }
     }
     def keys(&self) -> RawMapKeyIter<K> {
-        self.iter_keys()
+        RawMapKeyIter { handle: sengoo_raw_map_key_iter_new(self.handle), marker: 0 }
     }
     def values(&self) -> RawVecIntoIter<V> {
         let result: Vec<V> = vec_new();
