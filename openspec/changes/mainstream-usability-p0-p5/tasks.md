@@ -84,15 +84,21 @@
 
 ## 5. P3 — Everyday syntax
 
-- [ ] 5.1 `vec![a, b, c]` and `vec![value; count]` as pinned built-in forms.
-- [ ] 5.2 `println` / `print` / `eprintln` accept a format string plus arguments
+- [x] 5.1 `vec![a, b, c]` and `vec![value; count]` as pinned built-in forms.
+  Proof: `everyday_syntax_tests::{vec_macro_builds_from_elements,vec_macro_repeat_form_compiles,unknown_bang_form_is_rejected,for_loop_over_vec_macro_compiles}`.
+- [x] 5.2 `println` / `print` / `eprintln` accept a format string plus arguments
   through the existing `format` pipeline.
-- [ ] 5.3 `{:?}` renders `#[derive(Debug)]` shapes in format arguments and
+  Proof: `everyday_syntax_tests::println_accepts_format_string_and_arguments`.
+- [x] 5.3 `{:?}` renders `#[derive(Debug)]` shapes in format arguments and
   f-string interpolation.
-- [ ] 5.4 `{:?}` without a `Debug` derive is rejected with a diagnostic naming
+  Proof: `everyday_syntax_tests::debug_placeholder_with_derive_compiles` and
+  `parser::fstring::tests::lowers_debug_spec_to_format_placeholder`.
+- [x] 5.4 `{:?}` without a `Debug` derive is rejected with a diagnostic naming
   the missing derive.
-- [ ] 5.5 `if let PATTERN = EXPR { .. } else { .. }`, with a diagnostic for
+  Proof: `everyday_syntax_tests::debug_placeholder_without_derive_is_rejected`.
+- [x] 5.5 `if let PATTERN = EXPR { .. } else { .. }`, with a diagnostic for
   irrefutable patterns.
+  Proof: `everyday_syntax_tests::{if_let_binds_option_payload,if_let_irrefutable_pattern_is_rejected}`.
 
 ## 6. P4 — Idiomatic flagship examples
 

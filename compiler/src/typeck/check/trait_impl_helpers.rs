@@ -136,6 +136,19 @@ fn scan_future_poll_expr(
             });
             then_wake && else_wake
         }
+        ExprKind::IfLet {
+            expr,
+            then_branch,
+            else_branch,
+            ..
+        } => {
+            let wake_registered = scan_future_poll_expr(expr, facts, wake_registered);
+            let then_wake = scan_future_poll_block(then_branch, facts, wake_registered);
+            let else_wake = else_branch.as_ref().map_or(wake_registered, |else_branch| {
+                scan_future_poll_expr(else_branch, facts, wake_registered)
+            });
+            then_wake && else_wake
+        }
         ExprKind::While { cond, body } => {
             let wake_registered = scan_future_poll_expr(cond, facts, wake_registered);
             scan_future_poll_block(body, facts, wake_registered);
@@ -188,6 +201,16 @@ fn scan_future_poll_expr(
             let mut wake_registered = wake_registered;
             for element in elements {
                 wake_registered = scan_future_poll_expr(element, facts, wake_registered);
+            }
+            wake_registered
+        }
+        ExprKind::VecBang { elements, count } => {
+            let mut wake_registered = wake_registered;
+            for element in elements {
+                wake_registered = scan_future_poll_expr(element, facts, wake_registered);
+            }
+            if let Some(count) = count {
+                wake_registered = scan_future_poll_expr(count, facts, wake_registered);
             }
             wake_registered
         }

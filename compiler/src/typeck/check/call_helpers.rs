@@ -236,6 +236,15 @@ impl TypeChecker {
             .implements_trait("Display", &type_key(ty))
     }
 
+    /// `print`/`println`/`eprintln` only take the format pipeline when the first
+    /// argument is a string literal template, so `print(1, 2)` stays arity mismatch.
+    fn first_arg_is_string_literal(args: &[Expr]) -> bool {
+        matches!(
+            args.first().map(|arg| &arg.kind),
+            Some(ExprKind::Literal(crate::ast::Literal::String(_)))
+        )
+    }
+
     /// Type-check a `format(template, args...)` call: the template must be a
     /// string literal, its `{}` placeholders must match the argument count, and
     /// every argument must be renderable (built-in printable or `impl Display`).
@@ -277,19 +286,83 @@ impl TypeChecker {
                 template_arg.span.hi,
             ));
         }
+        let mut arg_tys = Vec::with_capacity(value_args.len());
         for arg in value_args {
-            let arg_ty = self.check_expr(arg)?;
-            let mut visiting = HashSet::new();
+            arg_tys.push(self.check_expr(arg)?);
+        }
+        let mut auto_index = 0usize;
+        for segment in &segments {
+            let crate::format_template::FormatSegment::Placeholder(placeholder) = segment else {
+                continue;
+            };
+            let index = placeholder.position.unwrap_or_else(|| {
+                let index = auto_index;
+                auto_index += 1;
+                index
+            });
+            let arg_ty = &arg_tys[index];
             let context = match &arg_ty.kind {
                 TyKind::Adt { name, .. } => name.clone(),
                 _ => "format argument".to_string(),
             };
-            self.ensure_type_printable_for_print(&arg_ty, &context, &mut visiting)?;
+            match placeholder.style {
+                crate::format_template::FormatStyle::Debug => {
+                    self.ensure_type_debug_formattable(
+                        arg_ty,
+                        &context,
+                        value_args[index].span.lo,
+                        value_args[index].span.hi,
+                    )?;
+                }
+                crate::format_template::FormatStyle::Display => {
+                    let mut visiting = HashSet::new();
+                    self.ensure_type_printable_for_print(arg_ty, &context, &mut visiting)?;
+                }
+            }
         }
         Ok(self.env.new_ty(TyKind::Adt {
             name: "String".to_string(),
             args: Vec::new(),
         }))
+    }
+
+    fn type_implements_debug(&self, ty: &Ty) -> bool {
+        self.impl_registry
+            .implements_trait("Debug", &type_key(ty))
+    }
+
+    fn is_builtin_debug_ty(&self, ty: &Ty) -> bool {
+        match &ty.kind {
+            TyKind::Int(_)
+            | TyKind::Bool
+            | TyKind::Float(_)
+            | TyKind::Str
+            | TyKind::Char => true,
+            TyKind::Ref(_, inner) => self.is_builtin_debug_ty(inner),
+            TyKind::Adt { name, .. } if name == "String" => true,
+            _ => false,
+        }
+    }
+
+    fn ensure_type_debug_formattable(
+        &mut self,
+        ty: &Ty,
+        context: &str,
+        span_lo: u32,
+        span_hi: u32,
+    ) -> TyResult<()> {
+        let ty = self.infer.apply_subst(ty);
+        if self.is_builtin_debug_ty(&ty) || self.type_implements_debug(&ty) {
+            return Ok(());
+        }
+        Err(TypeckError::diagnostic(
+            "missing-debug-derive",
+            format!(
+                "type {context} does not implement Debug; add `#[derive(Debug)]` or an `impl Debug`"
+            ),
+            span_lo,
+            span_hi,
+        ))
     }
 
     fn ensure_struct_printable(
@@ -475,6 +548,18 @@ impl TypeChecker {
                     Self::collect_capture_idents(else_branch, params, captures, seen);
                 }
             }
+            ExprKind::IfLet {
+                expr,
+                then_branch,
+                else_branch,
+                ..
+            } => {
+                Self::collect_capture_idents(expr, params, captures, seen);
+                Self::collect_capture_from_block(then_branch, params, captures, seen);
+                if let Some(else_branch) = else_branch {
+                    Self::collect_capture_idents(else_branch, params, captures, seen);
+                }
+            }
             ExprKind::Block(block) => {
                 Self::collect_capture_from_block(block, params, captures, seen);
             }
@@ -501,6 +586,14 @@ impl TypeChecker {
             ExprKind::Tuple(items) | ExprKind::Array(items) => {
                 for item in items {
                     Self::collect_capture_idents(item, params, captures, seen);
+                }
+            }
+            ExprKind::VecBang { elements, count } => {
+                for item in elements {
+                    Self::collect_capture_idents(item, params, captures, seen);
+                }
+                if let Some(count) = count {
+                    Self::collect_capture_idents(count, params, captures, seen);
                 }
             }
             ExprKind::Struct { fields, base, .. } => {
@@ -1119,6 +1212,10 @@ impl TypeChecker {
             _ => false,
         };
         if is_print {
+            if args.len() > 1 && Self::first_arg_is_string_literal(args) {
+                let _formatted = self.check_format_call(args)?;
+                return Ok(self.env.unit_ty());
+            }
             // print expects exactly one argument
             if args.len() != 1 {
                 return Err(TypeckError::ArgumentCountMismatch {

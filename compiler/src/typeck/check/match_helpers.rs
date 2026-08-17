@@ -105,6 +105,68 @@ impl TypeChecker {
         }
     }
 
+    pub(super) fn if_let_pattern_is_irrefutable(&self, pat: &Pattern, scrutinee_ty: &Ty) -> bool {
+        match &pat.kind {
+            PatternKind::Wildcard => true,
+            PatternKind::Ident(ident) => {
+                !self.ident_is_scrutinee_variant(&ident.name, scrutinee_ty)
+            }
+            PatternKind::Tuple(pats) => pats
+                .iter()
+                .all(|pat| self.if_let_pattern_is_irrefutable(pat, scrutinee_ty)),
+            PatternKind::Struct { path, fields, .. } => {
+                let Some(name) = path.segments.last() else {
+                    return false;
+                };
+                if self.ident_is_scrutinee_variant(&name.name, scrutinee_ty) {
+                    return false;
+                }
+                if Self::scrutinee_enum_name(scrutinee_ty).is_some() {
+                    return false;
+                }
+                fields
+                    .iter()
+                    .all(|field| self.if_let_pattern_is_irrefutable(&field.pattern, scrutinee_ty))
+            }
+            PatternKind::Or(pats) => pats
+                .iter()
+                .all(|pat| self.if_let_pattern_is_irrefutable(pat, scrutinee_ty)),
+            _ => false,
+        }
+    }
+
+    #[inline(never)]
+    pub(super) fn check_if_let(
+        &mut self,
+        pattern: &Pattern,
+        scrutinee: &Expr,
+        then_branch: &crate::ast::Block,
+        else_branch: &Option<Box<Expr>>,
+        _span: crate::lexer::Span,
+    ) -> TyResult<Ty> {
+        let checked = self.check_expr(scrutinee)?;
+        let scrutinee_ty = self.infer.apply_subst(&checked);
+        if self.if_let_pattern_is_irrefutable(pattern, &scrutinee_ty) {
+            return Err(TypeckError::diagnostic(
+                "irrefutable-if-let",
+                "irrefutable if-let pattern; the condition can never fail, so use `let` instead",
+                pattern.span.lo,
+                pattern.span.hi,
+            ));
+        }
+        self.check_pattern_or_bindings(pattern, &scrutinee_ty)?;
+        self.env.push_scope();
+        self.bind_pattern_vars(pattern, &scrutinee_ty)?;
+        let then_ty = self.check_block(then_branch)?;
+        self.env.pop_scope();
+        let else_ty = match else_branch {
+            Some(expr) => self.check_expr(expr)?,
+            None => self.env.unit_ty(),
+        };
+        self.infer.unify(&then_ty, &else_ty)?;
+        Ok(then_ty)
+    }
+
     fn check_alternative_pattern_bindings(
         &mut self,
         patterns: &[Pattern],

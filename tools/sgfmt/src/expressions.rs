@@ -118,6 +118,24 @@ impl Formatter {
                 }
                 s
             }
+            ExprKind::IfLet {
+                pattern,
+                expr,
+                then_branch,
+                else_branch,
+            } => {
+                let mut s = format!(
+                    "if let {} = {} {}",
+                    self.format_pattern(pattern),
+                    self.format_expr(expr),
+                    self.format_block_broken(then_branch, indent)
+                );
+                if let Some(else_branch) = else_branch {
+                    s.push_str(" else ");
+                    s.push_str(&self.format_expr_broken(else_branch, indent));
+                }
+                s
+            }
             ExprKind::While { cond, body } => format!(
                 "while {} {}",
                 self.format_expr(cond),
@@ -277,6 +295,24 @@ impl Formatter {
                 }
                 s
             }
+            ExprKind::IfLet {
+                pattern,
+                expr,
+                then_branch,
+                else_branch,
+            } => {
+                let mut s = format!(
+                    "if let {} = {} {}",
+                    self.format_pattern(pattern),
+                    self.format_expr(expr),
+                    self.format_block_inline(then_branch)
+                );
+                if let Some(else_branch) = else_branch {
+                    s.push_str(" else ");
+                    s.push_str(&self.format_expr(else_branch));
+                }
+                s
+            }
             ExprKind::While { cond, body } => format!(
                 "while {} {}",
                 self.format_expr(cond),
@@ -338,6 +374,27 @@ impl Formatter {
                     .collect::<Vec<_>>()
                     .join(", ")
             ),
+            ExprKind::VecBang { elements, count } => {
+                if let Some(count) = count {
+                    format!(
+                        "vec![{}; {}]",
+                        elements
+                            .first()
+                            .map(|value| self.format_expr(value))
+                            .unwrap_or_else(|| "_".to_string()),
+                        self.format_expr(count)
+                    )
+                } else {
+                    format!(
+                        "vec![{}]",
+                        elements
+                            .iter()
+                            .map(|i| self.format_expr(i))
+                            .collect::<Vec<_>>()
+                            .join(", ")
+                    )
+                }
+            },
             ExprKind::Tuple(items) => {
                 let rendered = items
                     .iter()

@@ -147,6 +147,40 @@ pub(super) fn lower_body(block: &ast::Block, type_env: &TypeEnv) -> HIRBody {
     hir_body
 }
 
+#[inline(never)]
+fn lower_if_let_expr(expr: &ast::Expr, type_env: &TypeEnv) -> Result<HIRExpr, String> {
+    let ast::ExprKind::IfLet {
+        pattern,
+        expr: scrutinee,
+        then_branch,
+        else_branch,
+    } = &expr.kind
+    else {
+        return Err("expected if-let expression".to_string());
+    };
+    let then_expr = ast::Expr::block(then_branch.clone());
+    let else_expr = else_branch
+        .as_ref()
+        .map(|e| e.as_ref().clone())
+        .unwrap_or_else(|| ast::Expr::block(ast::Block::new(Vec::new(), expr.span)));
+    let match_expr = ast::Expr::match_expr(
+        scrutinee.as_ref().clone(),
+        vec![
+            ast::MatchArm::new(vec![pattern.clone()], then_expr, expr.span),
+            ast::MatchArm::new(
+                vec![ast::pattern::Pattern::new(
+                    ast::pattern::PatternKind::Wildcard,
+                    expr.span,
+                )],
+                else_expr,
+                expr.span,
+            ),
+        ],
+        expr.span,
+    );
+    lower_expr(&match_expr, type_env)
+}
+
 /// 降低 AST 表达式到 HIR 表达式
 pub(super) fn lower_expr(expr: &ast::Expr, type_env: &TypeEnv) -> Result<HIRExpr, String> {
     Ok(match &expr.kind {
@@ -236,6 +270,7 @@ pub(super) fn lower_expr(expr: &ast::Expr, type_env: &TypeEnv) -> Result<HIRExpr
                 }),
             }
         }
+        ast::ExprKind::IfLet { .. } => lower_if_let_expr(expr, type_env)?,
         ast::ExprKind::Match { scrutinee, arms } => {
             let scrutinee_enum = scrutinee_enum_name(scrutinee, type_env);
             let scrutinee = Box::new(lower_expr(scrutinee, type_env)?);
@@ -283,6 +318,12 @@ pub(super) fn lower_expr(expr: &ast::Expr, type_env: &TypeEnv) -> Result<HIRExpr
                     body: Box::new(lower_body(body, type_env)),
                 }
             }
+        }
+        ast::ExprKind::VecBang { .. } => {
+            let desugared = type_env
+                .desugared_for(expr.span)
+                .ok_or_else(|| "vec! was not lowered during type checking".to_string())?;
+            lower_expr(desugared, type_env)?
         }
         ast::ExprKind::Call { func, args } => {
             if let Some(resolved) = type_env.resolved_associated_function(expr.span.lo) {

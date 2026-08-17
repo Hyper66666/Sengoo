@@ -6221,6 +6221,7 @@ import std::ffi;
 import std::io;
 import std::string;
 
+#[derive(Debug)]
 struct Point {
     x: i64,
     ok: bool,

@@ -51,6 +51,7 @@ mod match_helpers;
 mod stmt_helpers;
 mod trait_impl_helpers;
 mod try_helpers;
+mod vec_bang_helpers;
 
 #[derive(Debug, Clone)]
 struct ClassDeclInfo {
@@ -1353,6 +1354,12 @@ impl TypeChecker {
                 Ok(ty)
             }
             ExprKind::Paren(inner) => self.check_expr_with_expected(inner, expected),
+            ExprKind::VecBang { .. } => {
+                self.expected_return_types.push(expected.clone());
+                let result = self.check_expr(expr);
+                self.expected_return_types.pop();
+                result
+            }
             ExprKind::Call { func, args } => {
                 self.check_call_with_expected(func, args, expr.span, Some(expected))
             }
@@ -1409,12 +1416,21 @@ impl TypeChecker {
             }
             ExprKind::Tuple(elems) => self.check_tuple(elems),
             ExprKind::Array(elems) => self.check_array(elems),
+            ExprKind::VecBang { elements, count } => {
+                self.check_vec_bang(elements, count.as_deref(), expr.span)
+            }
             ExprKind::Block(block) => self.check_block(block),
             ExprKind::If {
                 cond,
                 then_branch,
                 else_branch,
             } => self.check_if(cond, then_branch, else_branch),
+            ExprKind::IfLet {
+                pattern,
+                expr: scrutinee,
+                then_branch,
+                else_branch,
+            } => self.check_if_let(pattern, scrutinee, then_branch, else_branch, expr.span),
             ExprKind::While { cond, body } => self.check_while(cond, body),
             ExprKind::For {
                 pattern,

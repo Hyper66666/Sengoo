@@ -162,7 +162,8 @@ def main() -> i64 {
 | --- | --- | --- |
 | `let` / `let mut` | Supported | Immutable assignment diagnostics are shared by `sgc` and `sglsp`. |
 | Blocks and tail expressions | Supported | Core examples. |
-| `if` / `else` | Supported | Snapshot and conformance tests. |
+| `if` / `else` | Supported | Snapshot and conformance tests. `if let PATTERN = EXPR { .. } else { .. }` binds a single pattern; irrefutable patterns report `irrefutable-if-let`. Proof: `compiler/src/tests/everyday_syntax_tests.rs`. |
+| `vec![]` | Supported | Pinned built-in `vec![a, b, c]` and `vec![value; count]` lower to `vec_new` plus `push`. Other `name![]` forms are rejected. Proof: `compiler/src/tests/everyday_syntax_tests.rs`. |
 | `while` / `for` / `loop` | Supported | Arrays, slices, and ranges keep direct lowering. `for` also iterates `Vec`/`VecDeque`/`HashSet`/`BTreeSet` elements, `HashMap`/`BTreeMap` entries, `keys()`/`values()`, and `Iterator` adapters (`map`/`filter`/`take`/`skip`/`enumerate`). Proof: `compiler/src/tests/for_loop_tests.rs`. |
 | `return`, `break`, `continue` | Subset | Implemented in current MIR/drop paths; edge cases stay under AMM follow-up tests. |
 | Method calls | Supported | Inherent methods and trait methods. |
@@ -334,9 +335,14 @@ Status: **Subset**.
 Supported:
 
 - `format` owned `String` builder.
-- `{}`, `{:?}` for scalar/current derived shapes.
+- `{}` Display placeholders and `{:?}` Debug placeholders. `{:?}` requires
+  `#[derive(Debug)]` or an `impl Debug`; missing Debug reports
+  `missing-debug-derive`.
 - Positional placeholders, right alignment, and f64 precision such as `{:.2}`.
-- f-string lowering through the same formatting path.
+- f-string lowering through the same formatting path, including specs such as
+  `{p:?}`.
+- `print` / `println` / `eprintln` accept a format string plus arguments and
+  route them through the same pipeline as `format`.
 
 Proof: formatting tests in `compiler/src/tests/` and `docs/language-features.md`.
 

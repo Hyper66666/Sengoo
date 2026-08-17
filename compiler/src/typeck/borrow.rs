@@ -381,6 +381,18 @@ impl BorrowChecker {
                     self.check_expr(else_expr);
                 }
             }
+            ExprKind::IfLet {
+                expr,
+                then_branch,
+                else_branch,
+                ..
+            } => {
+                self.check_expr(expr);
+                self.check_block(then_branch);
+                if let Some(else_expr) = else_branch {
+                    self.check_expr(else_expr);
+                }
+            }
             ExprKind::While { cond, body } => {
                 self.push_active_loop_uses(Some(cond), body);
                 self.check_expr(cond);
@@ -422,6 +434,14 @@ impl BorrowChecker {
             ExprKind::Array(elems) | ExprKind::Tuple(elems) => {
                 for elem in elems {
                     self.check_expr(elem);
+                }
+            }
+            ExprKind::VecBang { elements, count } => {
+                for elem in elements {
+                    self.check_expr(elem);
+                }
+                if let Some(count) = count {
+                    self.check_expr(count);
                 }
             }
             ExprKind::Struct { fields, base, .. } => {
@@ -503,6 +523,16 @@ impl BorrowChecker {
                 }
             }
             ExprKind::If {
+                then_branch,
+                else_branch,
+                ..
+            } => {
+                self.check_borrow_escape_block_tail(then_branch);
+                if let Some(else_expr) = else_branch {
+                    self.check_borrow_escape_expr(else_expr);
+                }
+            }
+            ExprKind::IfLet {
                 then_branch,
                 else_branch,
                 ..
@@ -838,6 +868,14 @@ impl BorrowChecker {
                     Self::collect_expr_ident_uses(elem, uses);
                 }
             }
+            ExprKind::VecBang { elements, count } => {
+                for elem in elements {
+                    Self::collect_expr_ident_uses(elem, uses);
+                }
+                if let Some(count) = count {
+                    Self::collect_expr_ident_uses(count, uses);
+                }
+            }
             ExprKind::Struct { fields, base, .. } => {
                 for field in fields {
                     Self::collect_expr_ident_uses(&field.value, uses);
@@ -852,6 +890,18 @@ impl BorrowChecker {
                 else_branch,
             } => {
                 Self::collect_expr_ident_uses(cond, uses);
+                Self::collect_block_ident_uses(then_branch, uses);
+                if let Some(else_expr) = else_branch {
+                    Self::collect_expr_ident_uses(else_expr, uses);
+                }
+            }
+            ExprKind::IfLet {
+                expr,
+                then_branch,
+                else_branch,
+                ..
+            } => {
+                Self::collect_expr_ident_uses(expr, uses);
                 Self::collect_block_ident_uses(then_branch, uses);
                 if let Some(else_expr) = else_branch {
                     Self::collect_expr_ident_uses(else_expr, uses);
