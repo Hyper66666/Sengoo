@@ -21,30 +21,30 @@ def compress_smoke(expected_count: i64) -> i64 {
     let restored = ffi_buffer_new(128).unwrap_or(Buffer { handle: 0 });
     let tiny = ffi_buffer_new(8).unwrap_or(Buffer { handle: 0 });
     let invalid = ffi_buffer_from_bytes("not-gzip").unwrap_or(Buffer { handle: 0 });
-    let compressed_result = compress_gzip_buffer(source, source.used_len(), compressed);
+    let compressed_len = match compress_gzip_buffer(source, source.used_len(), compressed) {
+        Ok(value) => value,
+        Err(_) => -1,
+    };
     let too_small = compress_gzip_buffer(source, source.used_len(), tiny).err().unwrap_or(0);
     let invalid_status = decompress_gzip_buffer(invalid, invalid.used_len(), restored).err().unwrap_or(0);
     let fixture_ready = file_exists("compress-fixture.tmp");
-    let parsed_ok = if compressed_result.is_ok {
-        let restored_result = decompress_gzip_buffer(compressed, compressed_result.value, restored);
-        if restored_result.is_ok {
-            let doc_result = json_parse_buffer(restored, restored_result.value);
-            if doc_result.is_ok {
-                let doc = doc_result.value;
-                let root = doc.root();
-                let count = root.array_len().unwrap_or(0);
-                let closed = doc.close();
-                count == expected_count and closed and restored_result.value == source.used_len();
-            } else {
-                false;
-            };
-        } else {
-            false;
-        };
+    let parsed_ok = if compressed_len >= 0 {
+        match decompress_gzip_buffer(compressed, compressed_len, restored) {
+            Ok(restored_len) => match json_parse_buffer(restored, restored_len) {
+                Ok(doc) => {
+                    let root = doc.root();
+                    let count = root.array_len().unwrap_or(0);
+                    let closed = doc.close();
+                    count == expected_count and closed and restored_len == source.used_len()
+                },
+                Err(_) => false,
+            },
+            Err(_) => false,
+        }
     } else {
-        false;
+        false
     };
-    let ok = fixture_ready and parsed_ok and compressed_result.value > source.used_len() and too_small == STATUS_BUFFER_TOO_SMALL() and invalid_status == STATUS_PARSE();
+    let ok = fixture_ready and parsed_ok and compressed_len > source.used_len() and too_small == STATUS_BUFFER_TOO_SMALL() and invalid_status == STATUS_PARSE();
     invalid.free();
     tiny.free();
     restored.free();

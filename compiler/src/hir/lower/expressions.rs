@@ -155,7 +155,7 @@ pub(super) fn lower_expr(expr: &ast::Expr, type_env: &TypeEnv) -> Result<HIRExpr
             // A bare payload-free variant such as `None`: only when the name
             // is no known symbol and exactly one enum declares it, matching
             // the type checker's resolution order.
-            if let Some(construct) = bare_variant_construct(&name.name, type_env) {
+            if let Some(construct) = bare_variant_construct(&name.name, expr.span, type_env) {
                 construct
             } else {
                 HIRExpr::Var {
@@ -171,16 +171,14 @@ pub(super) fn lower_expr(expr: &ast::Expr, type_env: &TypeEnv) -> Result<HIRExpr
                     variant_name,
                     discriminant,
                     args: Vec::new(),
-                    // TODO(mainstream-usability-p0-p4 task 2.1): payload-free
-                    // variants such as `None` need the type checker to record
-                    // the selected instance before generic enums can
-                    // monomorphise here. `None` preserves pre-change behavior.
-                    concrete_type: None,
+                    concrete_type: type_env
+                        .resolved_enum_variant_type(expr.span)
+                        .map(|ty| Box::new(lower_checked_type(ty))),
                 }
             } else if let Some(ident) = path.as_simple() {
                 // Single-segment paths cover bare payload-free variants
                 // (`None`) exactly like plain identifiers do.
-                if let Some(construct) = bare_variant_construct(&ident.name, type_env) {
+                if let Some(construct) = bare_variant_construct(&ident.name, expr.span, type_env) {
                     construct
                 } else {
                     HIRExpr::Var {
@@ -583,7 +581,11 @@ fn enum_constructor(path: &ast::Path) -> Option<(String, String, u32)> {
 /// Lower a bare identifier that names a payload-free variant of exactly one
 /// enum (`None`) into its construction. Names that are in scope as variables
 /// or functions stay variables — the type checker resolves in the same order.
-fn bare_variant_construct(name: &str, type_env: &TypeEnv) -> Option<HIRExpr> {
+fn bare_variant_construct(
+    name: &str,
+    span: crate::lexer::Span,
+    type_env: &TypeEnv,
+) -> Option<HIRExpr> {
     if type_env.lookup(name).is_some() {
         return None;
     }
@@ -593,7 +595,9 @@ fn bare_variant_construct(name: &str, type_env: &TypeEnv) -> Option<HIRExpr> {
         variant_name: name.to_string(),
         discriminant,
         args: Vec::new(),
-        concrete_type: None,
+        concrete_type: type_env
+            .resolved_enum_variant_type(span)
+            .map(|ty| Box::new(lower_checked_type(ty))),
     })
 }
 

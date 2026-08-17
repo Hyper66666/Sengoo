@@ -419,9 +419,9 @@ impl<T> Drop for Rc<T> {
 
 def collections_copy_result(value: i64) -> Result<i64, i64> {
     if value >= 0 {
-        Result { is_ok: true, value: value, error: 0 }
+        Ok(value)
     } else {
-        Result { is_ok: false, value: 0, error: 0 - value }
+        Err(0 - value)
     }
 }
 
@@ -566,12 +566,18 @@ def raw_vec_iter_next<T>(handle: i64) -> Option<&T> {
 
 def raw_vec_iter_next_i64(handle: i64, fallback: i64) -> i64 {
     let item: Option<&i64> = raw_vec_iter_next(handle);
-    if item.is_some { *item.value } else { fallback }
+    match item {
+        Some(value) => *value,
+        None => fallback,
+    }
 }
 
 def raw_vec_iter_next_bool_i64(handle: i64, fallback: i64) -> i64 {
     let item: Option<&bool> = raw_vec_iter_next(handle);
-    if item.is_some { bool_to_i64(*item.value) } else { fallback }
+    match item {
+        Some(value) => bool_to_i64(*value),
+        None => fallback,
+    }
 }
 
 def raw_vec_get_or_default_i64(handle: i64, index: i64, fallback: i64) -> i64 {
@@ -712,12 +718,18 @@ def raw_map_key_iter_next<T>(handle: i64) -> Option<&T> {
 
 def raw_map_key_iter_next_i64(handle: i64, fallback: i64) -> i64 {
     let item: Option<&i64> = raw_map_key_iter_next(handle);
-    if item.is_some { *item.value } else { fallback }
+    match item {
+        Some(value) => *value,
+        None => fallback,
+    }
 }
 
 def raw_map_key_iter_next_bool(handle: i64, fallback: bool) -> bool {
     let item: Option<&bool> = raw_map_key_iter_next(handle);
-    if item.is_some { *item.value } else { fallback }
+    match item {
+        Some(value) => *value,
+        None => fallback,
+    }
 }
 
 def btreeset_new_string() -> BTreeSet<String> {
@@ -950,12 +962,13 @@ impl<T> RawVecIntoIter<T> {
         let result: Vec<T> = vec_new();
         let mut done = false;
         while done == false {
-            let mut item = self.next();
-            if item.is_none() {
-                done = true;
-            } else {
-                raw_vec_push(result.handle, item.value);
-                item.is_some = false;
+            match self.next() {
+                Some(value) => {
+                    raw_vec_push(result.handle, value);
+                },
+                None => {
+                    done = true;
+                },
             }
         }
         result
@@ -973,12 +986,13 @@ impl<T> RawVecIntoIter<T> {
         let mut result = initial;
         let mut done = false;
         while done == false {
-            let mut item = self.next();
-            if item.is_none() {
-                done = true;
-            } else {
-                result = reducer(result, item.value);
-                item.is_some = false;
+            match self.next() {
+                Some(value) => {
+                    result = reducer(result, value);
+                },
+                None => {
+                    done = true;
+                },
             }
         }
         result
@@ -991,13 +1005,14 @@ impl<T> RawVecIntoIter<T> {
         let result: HashMap<K, V> = hashmap_new();
         let mut done = false;
         while done == false {
-            let mut item = self.next();
-            if item.is_none() {
-                done = true;
-            } else {
-                let entry = projector(item.value);
-                item.is_some = false;
-                raw_hashmap_insert(result.handle, entry.key, entry.value);
+            match self.next() {
+                Some(value) => {
+                    let entry = projector(value);
+                    raw_hashmap_insert(result.handle, entry.key, entry.value);
+                },
+                None => {
+                    done = true;
+                },
             }
         }
         result
@@ -1010,12 +1025,13 @@ impl<T: SumValue> RawVecIntoIter<T> {
         let mut total: T = sum_identity();
         let mut done = false;
         while done == false {
-            let mut item = self.next();
-            if item.is_none() {
-                done = true;
-            } else {
-                total = total.sum_combine(item.value);
-                item.is_some = false;
+            match self.next() {
+                Some(value) => {
+                    total = total.sum_combine(value);
+                },
+                None => {
+                    done = true;
+                },
             }
         }
         total
@@ -1027,12 +1043,13 @@ impl<T: Hash + Eq> RawVecIntoIter<T> {
         let result: HashSet<T> = hashset_new();
         let mut done = false;
         while done == false {
-            let mut item = self.next();
-            if item.is_none() {
-                done = true;
-            } else {
-                raw_hashset_insert(result.handle, item.value);
-                item.is_some = false;
+            match self.next() {
+                Some(value) => {
+                    raw_hashset_insert(result.handle, value);
+                },
+                None => {
+                    done = true;
+                },
             }
         }
         result
@@ -1084,12 +1101,13 @@ impl<I: Iterator, T> TakeIter<I, T> {
         let result: Vec<T> = vec_new();
         let mut done = false;
         while done == false {
-            let mut item = self.next();
-            if item.is_none() {
-                done = true;
-            } else {
-                raw_vec_push(result.handle, item.value);
-                item.is_some = false;
+            match self.next() {
+                Some(value) => {
+                    raw_vec_push(result.handle, value);
+                },
+                None => {
+                    done = true;
+                },
             }
         }
         result
@@ -1107,10 +1125,13 @@ impl<I: Iterator, T> TakeIter<I, T> {
         let mut result = initial;
         let mut done = false;
         while done == false {
-            let mut item = self.next();
-            if item.is_none() { done = true; } else {
-                result = reducer(result, item.value);
-                item.is_some = false;
+            match self.next() {
+                Some(value) => {
+                    result = reducer(result, value);
+                },
+                None => {
+                    done = true;
+                },
             }
         }
         result
@@ -1122,11 +1143,14 @@ impl<I: Iterator, T> TakeIter<I, T> {
         let result: HashMap<K, V> = hashmap_new();
         let mut done = false;
         while done == false {
-            let mut item = self.next();
-            if item.is_none() { done = true; } else {
-                let entry = projector(item.value);
-                item.is_some = false;
-                raw_hashmap_insert(result.handle, entry.key, entry.value);
+            match self.next() {
+                Some(value) => {
+                    let entry = projector(value);
+                    raw_hashmap_insert(result.handle, entry.key, entry.value);
+                },
+                None => {
+                    done = true;
+                },
             }
         }
         result
@@ -1138,10 +1162,13 @@ impl<I: Iterator, T: SumValue> TakeIter<I, T> {
         let mut total: T = sum_identity();
         let mut done = false;
         while done == false {
-            let mut item = self.next();
-            if item.is_none() { done = true; } else {
-                total = total.sum_combine(item.value);
-                item.is_some = false;
+            match self.next() {
+                Some(value) => {
+                    total = total.sum_combine(value);
+                },
+                None => {
+                    done = true;
+                },
             }
         }
         total
@@ -1153,10 +1180,13 @@ impl<I: Iterator, T: Hash + Eq> TakeIter<I, T> {
         let result: HashSet<T> = hashset_new();
         let mut done = false;
         while done == false {
-            let mut item = self.next();
-            if item.is_none() { done = true; } else {
-                raw_hashset_insert(result.handle, item.value);
-                item.is_some = false;
+            match self.next() {
+                Some(value) => {
+                    raw_hashset_insert(result.handle, value);
+                },
+                None => {
+                    done = true;
+                },
             }
         }
         result
@@ -1230,12 +1260,13 @@ impl<I: Iterator, T> SkipIter<I, T> {
         let result: Vec<T> = vec_new();
         let mut done = false;
         while done == false {
-            let mut item = self.next();
-            if item.is_none() {
-                done = true;
-            } else {
-                raw_vec_push(result.handle, item.value);
-                item.is_some = false;
+            match self.next() {
+                Some(value) => {
+                    raw_vec_push(result.handle, value);
+                },
+                None => {
+                    done = true;
+                },
             }
         }
         result
@@ -1253,10 +1284,13 @@ impl<I: Iterator, T> SkipIter<I, T> {
         let mut result = initial;
         let mut done = false;
         while done == false {
-            let mut item = self.next();
-            if item.is_none() { done = true; } else {
-                result = reducer(result, item.value);
-                item.is_some = false;
+            match self.next() {
+                Some(value) => {
+                    result = reducer(result, value);
+                },
+                None => {
+                    done = true;
+                },
             }
         }
         result
@@ -1268,11 +1302,14 @@ impl<I: Iterator, T> SkipIter<I, T> {
         let result: HashMap<K, V> = hashmap_new();
         let mut done = false;
         while done == false {
-            let mut item = self.next();
-            if item.is_none() { done = true; } else {
-                let entry = projector(item.value);
-                item.is_some = false;
-                raw_hashmap_insert(result.handle, entry.key, entry.value);
+            match self.next() {
+                Some(value) => {
+                    let entry = projector(value);
+                    raw_hashmap_insert(result.handle, entry.key, entry.value);
+                },
+                None => {
+                    done = true;
+                },
             }
         }
         result
@@ -1284,10 +1321,13 @@ impl<I: Iterator, T: SumValue> SkipIter<I, T> {
         let mut total: T = sum_identity();
         let mut done = false;
         while done == false {
-            let mut item = self.next();
-            if item.is_none() { done = true; } else {
-                total = total.sum_combine(item.value);
-                item.is_some = false;
+            match self.next() {
+                Some(value) => {
+                    total = total.sum_combine(value);
+                },
+                None => {
+                    done = true;
+                },
             }
         }
         total
@@ -1299,10 +1339,13 @@ impl<I: Iterator, T: Hash + Eq> SkipIter<I, T> {
         let result: HashSet<T> = hashset_new();
         let mut done = false;
         while done == false {
-            let mut item = self.next();
-            if item.is_none() { done = true; } else {
-                raw_hashset_insert(result.handle, item.value);
-                item.is_some = false;
+            match self.next() {
+                Some(value) => {
+                    raw_hashset_insert(result.handle, value);
+                },
+                None => {
+                    done = true;
+                },
             }
         }
         result
@@ -1313,26 +1356,26 @@ impl<I: Iterator, T> Iterator for EnumerateIter<I, T> {
     type Item = EnumeratedItem<T>;
 
     def next(&self) -> Option<EnumeratedItem<T>> {
-        let item = self.inner.next();
-        if item.is_none() {
-            __sengoo_option_none()
-        } else {
-            let index = raw_vec_get_or_default_i64(self.index.handle, 0, 0);
-            raw_vec_set(self.index.handle, 0, index + 1);
-            option_some(EnumeratedItem { index: index, value: item.value })
+        match self.inner.next() {
+            Some(value) => {
+                let index = raw_vec_get_or_default_i64(self.index.handle, 0, 0);
+                raw_vec_set(self.index.handle, 0, index + 1);
+                Some(EnumeratedItem { index: index, value: value })
+            },
+            None => None,
         }
     }
 }
 
 impl<I: Iterator, T> EnumerateIter<I, T> {
     def next(&self) -> Option<EnumeratedItem<T>> {
-        let item = self.inner.next();
-        if item.is_none() {
-            __sengoo_option_none()
-        } else {
-            let index = raw_vec_get_or_default_i64(self.index.handle, 0, 0);
-            raw_vec_set(self.index.handle, 0, index + 1);
-            option_some(EnumeratedItem { index: index, value: item.value })
+        match self.inner.next() {
+            Some(value) => {
+                let index = raw_vec_get_or_default_i64(self.index.handle, 0, 0);
+                raw_vec_set(self.index.handle, 0, index + 1);
+                Some(EnumeratedItem { index: index, value: value })
+            },
+            None => None,
         }
     }
     def filter(
@@ -1370,12 +1413,13 @@ impl<I: Iterator, T> EnumerateIter<I, T> {
         let result: Vec<EnumeratedItem<T>> = vec_new();
         let mut done = false;
         while done == false {
-            let mut item = self.next();
-            if item.is_none() {
-                done = true;
-            } else {
-                raw_vec_push(result.handle, item.value);
-                item.is_some = false;
+            match self.next() {
+                Some(value) => {
+                    raw_vec_push(result.handle, value);
+                },
+                None => {
+                    done = true;
+                },
             }
         }
         result
@@ -1393,10 +1437,13 @@ impl<I: Iterator, T> EnumerateIter<I, T> {
         let mut result = initial;
         let mut done = false;
         while done == false {
-            let mut item = self.next();
-            if item.is_none() { done = true; } else {
-                result = reducer(result, item.value);
-                item.is_some = false;
+            match self.next() {
+                Some(value) => {
+                    result = reducer(result, value);
+                },
+                None => {
+                    done = true;
+                },
             }
         }
         result
@@ -1408,11 +1455,14 @@ impl<I: Iterator, T> EnumerateIter<I, T> {
         let result: HashMap<K, V> = hashmap_new();
         let mut done = false;
         while done == false {
-            let mut item = self.next();
-            if item.is_none() { done = true; } else {
-                let entry = projector(item.value);
-                item.is_some = false;
-                raw_hashmap_insert(result.handle, entry.key, entry.value);
+            match self.next() {
+                Some(value) => {
+                    let entry = projector(value);
+                    raw_hashmap_insert(result.handle, entry.key, entry.value);
+                },
+                None => {
+                    done = true;
+                },
             }
         }
         result
@@ -1423,24 +1473,24 @@ impl<I: Iterator, T, O> Iterator for MapIter<I, T, O> {
     type Item = O;
 
     def next(&self) -> Option<O> {
-        let item = self.inner.next();
-        if item.is_none() {
-            __sengoo_option_none()
-        } else {
-            let mapper = self.mapper;
-            option_some(mapper(item.value))
+        match self.inner.next() {
+            Some(value) => {
+                let mapper = self.mapper;
+                Some(mapper(value))
+            },
+            None => None,
         }
     }
 }
 
 impl<I: Iterator, T, O> MapIter<I, T, O> {
     def next(&self) -> Option<O> {
-        let item = self.inner.next();
-        if item.is_none() {
-            __sengoo_option_none()
-        } else {
-            let mapper = self.mapper;
-            option_some(mapper(item.value))
+        match self.inner.next() {
+            Some(value) => {
+                let mapper = self.mapper;
+                Some(mapper(value))
+            },
+            None => None,
         }
     }
     def enumerate(self) -> EnumerateIter<MapIter<I, T, O>, O> {
@@ -1464,12 +1514,13 @@ impl<I: Iterator, T, O> MapIter<I, T, O> {
         let result: Vec<O> = vec_new();
         let mut done = false;
         while done == false {
-            let mut item = self.next();
-            if item.is_none() {
-                done = true;
-            } else {
-                raw_vec_push(result.handle, item.value);
-                item.is_some = false;
+            match self.next() {
+                Some(value) => {
+                    raw_vec_push(result.handle, value);
+                },
+                None => {
+                    done = true;
+                },
             }
         }
         result
@@ -1487,10 +1538,13 @@ impl<I: Iterator, T, O> MapIter<I, T, O> {
         let mut result = initial;
         let mut done = false;
         while done == false {
-            let mut item = self.next();
-            if item.is_none() { done = true; } else {
-                result = reducer(result, item.value);
-                item.is_some = false;
+            match self.next() {
+                Some(value) => {
+                    result = reducer(result, value);
+                },
+                None => {
+                    done = true;
+                },
             }
         }
         result
@@ -1502,11 +1556,14 @@ impl<I: Iterator, T, O> MapIter<I, T, O> {
         let result: HashMap<K, V> = hashmap_new();
         let mut done = false;
         while done == false {
-            let mut item = self.next();
-            if item.is_none() { done = true; } else {
-                let entry = projector(item.value);
-                item.is_some = false;
-                raw_hashmap_insert(result.handle, entry.key, entry.value);
+            match self.next() {
+                Some(value) => {
+                    let entry = projector(value);
+                    raw_hashmap_insert(result.handle, entry.key, entry.value);
+                },
+                None => {
+                    done = true;
+                },
             }
         }
         result
@@ -1518,10 +1575,13 @@ impl<I: Iterator, T, O: SumValue> MapIter<I, T, O> {
         let mut total: O = sum_identity();
         let mut done = false;
         while done == false {
-            let mut item = self.next();
-            if item.is_none() { done = true; } else {
-                total = total.sum_combine(item.value);
-                item.is_some = false;
+            match self.next() {
+                Some(value) => {
+                    total = total.sum_combine(value);
+                },
+                None => {
+                    done = true;
+                },
             }
         }
         total
@@ -1533,10 +1593,13 @@ impl<I: Iterator, T, O: Hash + Eq> MapIter<I, T, O> {
         let result: HashSet<O> = hashset_new();
         let mut done = false;
         while done == false {
-            let mut item = self.next();
-            if item.is_none() { done = true; } else {
-                raw_hashset_insert(result.handle, item.value);
-                item.is_some = false;
+            match self.next() {
+                Some(value) => {
+                    raw_hashset_insert(result.handle, value);
+                },
+                None => {
+                    done = true;
+                },
             }
         }
         result
@@ -1547,21 +1610,20 @@ impl<I: Iterator, T> Iterator for FilterIter<I, T> {
     type Item = T;
 
     def next(&self) -> Option<T> {
-        let mut result: Option<T> = __sengoo_option_none();
+        let mut result: Option<T> = None;
         let mut done = false;
         while done == false {
-            let mut item = self.inner.next();
-            if item.is_none() {
-                done = true;
-            } else {
-                let predicate = self.predicate;
-                if predicate(&item.value) {
-                    result = item;
-                    item = __sengoo_option_none();
+            match self.inner.next() {
+                Some(value) => {
+                    let predicate = self.predicate;
+                    if predicate(&value) {
+                        result = Some(value);
+                        done = true;
+                    }
+                },
+                None => {
                     done = true;
-                } else {
-                    item = __sengoo_option_none();
-                }
+                },
             }
         }
         result
@@ -1570,21 +1632,20 @@ impl<I: Iterator, T> Iterator for FilterIter<I, T> {
 
 impl<I: Iterator, T> FilterIter<I, T> {
     def next(&self) -> Option<T> {
-        let mut result: Option<T> = __sengoo_option_none();
+        let mut result: Option<T> = None;
         let mut done = false;
         while done == false {
-            let mut item = self.inner.next();
-            if item.is_none() {
-                done = true;
-            } else {
-                let predicate = self.predicate;
-                if predicate(&item.value) {
-                    result = item;
-                    item = __sengoo_option_none();
+            match self.inner.next() {
+                Some(value) => {
+                    let predicate = self.predicate;
+                    if predicate(&value) {
+                        result = Some(value);
+                        done = true;
+                    }
+                },
+                None => {
                     done = true;
-                } else {
-                    item = __sengoo_option_none();
-                }
+                },
             }
         }
         result
@@ -1614,12 +1675,13 @@ impl<I: Iterator, T> FilterIter<I, T> {
         let result: Vec<T> = vec_new();
         let mut done = false;
         while done == false {
-            let mut item = self.next();
-            if item.is_none() {
-                done = true;
-            } else {
-                raw_vec_push(result.handle, item.value);
-                item.is_some = false;
+            match self.next() {
+                Some(value) => {
+                    raw_vec_push(result.handle, value);
+                },
+                None => {
+                    done = true;
+                },
             }
         }
         result
@@ -1637,10 +1699,13 @@ impl<I: Iterator, T> FilterIter<I, T> {
         let mut result = initial;
         let mut done = false;
         while done == false {
-            let mut item = self.next();
-            if item.is_none() { done = true; } else {
-                result = reducer(result, item.value);
-                item.is_some = false;
+            match self.next() {
+                Some(value) => {
+                    result = reducer(result, value);
+                },
+                None => {
+                    done = true;
+                },
             }
         }
         result
@@ -1652,11 +1717,14 @@ impl<I: Iterator, T> FilterIter<I, T> {
         let result: HashMap<K, V> = hashmap_new();
         let mut done = false;
         while done == false {
-            let mut item = self.next();
-            if item.is_none() { done = true; } else {
-                let entry = projector(item.value);
-                item.is_some = false;
-                raw_hashmap_insert(result.handle, entry.key, entry.value);
+            match self.next() {
+                Some(value) => {
+                    let entry = projector(value);
+                    raw_hashmap_insert(result.handle, entry.key, entry.value);
+                },
+                None => {
+                    done = true;
+                },
             }
         }
         result
@@ -1668,10 +1736,13 @@ impl<I: Iterator, T: SumValue> FilterIter<I, T> {
         let mut total: T = sum_identity();
         let mut done = false;
         while done == false {
-            let mut item = self.next();
-            if item.is_none() { done = true; } else {
-                total = total.sum_combine(item.value);
-                item.is_some = false;
+            match self.next() {
+                Some(value) => {
+                    total = total.sum_combine(value);
+                },
+                None => {
+                    done = true;
+                },
             }
         }
         total
@@ -1683,10 +1754,13 @@ impl<I: Iterator, T: Hash + Eq> FilterIter<I, T> {
         let result: HashSet<T> = hashset_new();
         let mut done = false;
         while done == false {
-            let mut item = self.next();
-            if item.is_none() { done = true; } else {
-                raw_hashset_insert(result.handle, item.value);
-                item.is_some = false;
+            match self.next() {
+                Some(value) => {
+                    raw_hashset_insert(result.handle, value);
+                },
+                None => {
+                    done = true;
+                },
             }
         }
         result
@@ -2250,7 +2324,7 @@ impl VecIter<bool> {
 impl EnumerateVecIterBool {
     def next(self) -> Option<EnumeratedBool> {
         if sengoo_raw_vec_iter_done(self.iter.handle) != 0 {
-            option_none_with(EnumeratedBool { index: 0, value: false })
+            None
         } else {
             let current = sengoo_raw_vec_iter_index(self.iter.handle);
             let value = i64_to_bool(raw_vec_iter_next_bool_i64(self.iter.handle, 0));
@@ -2388,7 +2462,7 @@ impl Iterator for VecIter<i64> {
 impl EnumerateVecIterI64 {
     def next(self) -> Option<EnumeratedI64> {
         if sengoo_raw_vec_iter_done(self.iter.handle) != 0 {
-            option_none_with(EnumeratedI64 { index: 0, value: 0 })
+            None
         } else {
             let current = sengoo_raw_vec_iter_index(self.iter.handle);
             let value = raw_vec_iter_next_i64(self.iter.handle, 0);
@@ -2441,11 +2515,15 @@ impl HashMap<i64, i64> {
         let mut done = false;
         while done == false {
             let key: Option<&i64> = raw_map_key_iter_next(keys.handle);
-            if key.is_none() {
-                done = true;
-            } else {
-                let value: &i64 = raw_hashmap_get(self.handle, key.value);
-                values.push(*value);
+            match key {
+                Some(entry_key) => {
+                    let value: &i64 = raw_hashmap_get(self.handle, entry_key);
+                    values.push(*value);
+                },
+                None => {
+                    done = true;
+                    false
+                },
             }
         }
         let values_handle = values.handle;
@@ -2492,11 +2570,15 @@ impl HashMap<bool, bool> {
         let mut done = false;
         while done == false {
             let key: Option<&bool> = raw_map_key_iter_next(keys.handle);
-            if key.is_none() {
-                done = true;
-            } else {
-                let value: &bool = raw_hashmap_get(self.handle, key.value);
-                values.push(*value);
+            match key {
+                Some(entry_key) => {
+                    let value: &bool = raw_hashmap_get(self.handle, entry_key);
+                    values.push(*value);
+                },
+                None => {
+                    done = true;
+                    false
+                },
             }
         }
         let values_handle = values.handle;
@@ -2543,11 +2625,15 @@ impl HashMap<i64, bool> {
         let mut done = false;
         while done == false {
             let key: Option<&i64> = raw_map_key_iter_next(keys.handle);
-            if key.is_none() {
-                done = true;
-            } else {
-                let value: &bool = raw_hashmap_get(self.handle, key.value);
-                values.push(*value);
+            match key {
+                Some(entry_key) => {
+                    let value: &bool = raw_hashmap_get(self.handle, entry_key);
+                    values.push(*value);
+                },
+                None => {
+                    done = true;
+                    false
+                },
             }
         }
         let values_handle = values.handle;
@@ -2594,11 +2680,15 @@ impl HashMap<bool, i64> {
         let mut done = false;
         while done == false {
             let key: Option<&bool> = raw_map_key_iter_next(keys.handle);
-            if key.is_none() {
-                done = true;
-            } else {
-                let value: &i64 = raw_hashmap_get(self.handle, key.value);
-                values.push(*value);
+            match key {
+                Some(entry_key) => {
+                    let value: &i64 = raw_hashmap_get(self.handle, entry_key);
+                    values.push(*value);
+                },
+                None => {
+                    done = true;
+                    false
+                },
             }
         }
         let values_handle = values.handle;
@@ -2713,7 +2803,7 @@ impl HashMapIter<bool> {
 impl EnumerateHashMapIterBool {
     def next(self) -> Option<EnumeratedBool> {
         if sengoo_raw_vec_iter_done(self.iter.handle) != 0 {
-            option_none_with(EnumeratedBool { index: 0, value: false })
+            None
         } else {
             let current = sengoo_raw_vec_iter_index(self.iter.handle);
             let value = i64_to_bool(raw_vec_iter_next_bool_i64(self.iter.handle, 0));
@@ -2886,7 +2976,7 @@ impl Iterator for HashSetIter<i64> {
 impl EnumerateHashSetIterI64 {
     def next(self) -> Option<EnumeratedI64> {
         if sengoo_raw_map_key_iter_done(self.iter.handle) != 0 {
-            option_none_with(EnumeratedI64 { index: 0, value: 0 })
+            None
         } else {
             let current = sengoo_raw_map_key_iter_index(self.iter.handle);
             let value = raw_map_key_iter_next_i64(self.iter.handle, 0);
@@ -2950,7 +3040,7 @@ impl Iterator for HashSetIter<bool> {
 impl EnumerateHashSetIterBool {
     def next(self) -> Option<EnumeratedBool> {
         if sengoo_raw_map_key_iter_done(self.iter.handle) != 0 {
-            option_none_with(EnumeratedBool { index: 0, value: false })
+            None
         } else {
             let current = sengoo_raw_map_key_iter_index(self.iter.handle);
             let value = raw_map_key_iter_next_bool(self.iter.handle, false);
@@ -3060,7 +3150,7 @@ impl Iterator for HashMapIter<i64> {
 impl EnumerateHashMapIterI64 {
     def next(self) -> Option<EnumeratedI64> {
         if sengoo_raw_vec_iter_done(self.iter.handle) != 0 {
-            option_none_with(EnumeratedI64 { index: 0, value: 0 })
+            None
         } else {
             let current = sengoo_raw_vec_iter_index(self.iter.handle);
             let value = raw_vec_iter_next_i64(self.iter.handle, 0);
@@ -3295,7 +3385,7 @@ impl HashMap<String, String> {
             let value: &String = raw_hashmap_get(self.handle, &key);
             collections_string_result(sengoo_string_clone_status((*value).handle))
         } else {
-            Result { is_ok: false, value: String { handle: 0 }, error: 1 }
+            Err(1)
         }
     }
 
@@ -3306,7 +3396,7 @@ impl HashMap<String, String> {
     def remove_raw(&self, key_ptr: i64) -> Result<String, i64> {
         let key = String { handle: sengoo_string_from_str_copy(key_ptr) };
         if key.handle < 0 {
-            Result { is_ok: false, value: String { handle: 0 }, error: 1 }
+            Err(1)
         } else {
             collections_string_result(raw_hashmap_remove_string_handle(self.handle, &key))
         }
@@ -3480,14 +3570,14 @@ impl BTreeMap<String, String> {
             let value: &String = raw_hashmap_get(self.handle, &owned);
             collections_string_result(sengoo_string_clone_status((*value).handle))
         } else {
-            Result { is_ok: false, value: String { handle: 0 }, error: 1 }
+            Err(1)
         }
     }
 
     def remove(&self, key: &str) -> Result<String, i64> {
         let owned = String { handle: sengoo_string_from_str_copy(sengoo_stdlib_str_ptr(key)) };
         if owned.handle < 0 {
-            Result { is_ok: false, value: String { handle: 0 }, error: 1 }
+            Err(1)
         } else {
             collections_string_result(raw_hashmap_remove_string_handle(self.handle, &owned))
         }
@@ -3725,28 +3815,29 @@ impl StringMapKeyIter {
 
     def next(self) -> Result<String, i64> {
         let item: Option<&String> = raw_map_key_iter_next(self.handle);
-        if item.is_some {
-            collections_string_result(sengoo_string_clone_status((*item.value).handle))
-        } else {
-            Result { is_ok: false, value: String { handle: 0 }, error: 1 }
+        match item {
+            Some(value) => collections_string_result(sengoo_string_clone_status((*value).handle)),
+            None => Err(1),
         }
     }
 
     def next_copy(self, buffer: Buffer) -> Result<i64, i64> {
         let item: Option<&String> = raw_map_key_iter_next(self.handle);
-        if item.is_some {
-            collections_copy_result(sengoo_string_copy_to_buffer((*item.value).handle, buffer.handle))
-        } else {
-            Result { is_ok: false, value: 0, error: 1 }
+        match item {
+            Some(value) => collections_copy_result(sengoo_string_copy_to_buffer((*value).handle, buffer.handle)),
+            None => Err(1),
         }
     }
 
     def count(self) -> i64 {
         let mut total = 0;
         while !self.done() {
-            let next_value = self.next();
-            if next_value.is_ok {
-                total = total + 1;
+            match self.next() {
+                Ok(_) => {
+                    total = total + 1;
+                    false
+                },
+                Err(_) => false,
             }
         }
         total
@@ -3765,10 +3856,13 @@ impl StringMapKeyIter {
         let taken = vec_new_string();
         let mut total = 0;
         while total < n && !self.done() {
-            let next_value = self.next();
-            if next_value.is_ok {
-                taken.push(next_value.value);
-                total = total + 1;
+            match self.next() {
+                Ok(value) => {
+                    taken.push(value);
+                    total = total + 1;
+                    false
+                },
+                Err(_) => false,
             }
         }
         taken
@@ -3777,9 +3871,12 @@ impl StringMapKeyIter {
     def collect(self) -> Vec<String> {
         let collected = vec_new_string();
         while !self.done() {
-            let next_value = self.next();
-            if next_value.is_ok {
-                collected.push(next_value.value);
+            match self.next() {
+                Ok(value) => {
+                    collected.push(value);
+                    false
+                },
+                Err(_) => false,
             }
         }
         collected
@@ -3801,15 +3898,16 @@ impl StringMapKeyIter {
 impl EnumerateStringMapKeyIter {
     def next(self) -> Option<EnumeratedString> {
         if sengoo_raw_map_key_iter_done(self.iter.handle) != 0 {
-            option_none_with(EnumeratedString { index: 0, value: String { handle: 0 } })
+            None
         } else {
             let current = sengoo_raw_map_key_iter_index(self.iter.handle);
             let item: Option<&String> = raw_map_key_iter_next(self.iter.handle);
-            if item.is_some {
-                let value = sengoo_string_clone_status((*item.value).handle);
-                option_some(EnumeratedString { index: current, value: String { handle: value } })
-            } else {
-                option_none_with(EnumeratedString { index: 0, value: String { handle: 0 } })
+            match item {
+                Some(entry) => {
+                    let value = sengoo_string_clone_status((*entry).handle);
+                    option_some(EnumeratedString { index: current, value: String { handle: value } })
+                },
+                None => None,
             }
         }
     }
@@ -3817,9 +3915,9 @@ impl EnumerateStringMapKeyIter {
 
 def collections_string_result(value: i64) -> Result<String, i64> {
     if value >= 0 {
-        Result { is_ok: true, value: String { handle: value }, error: 0 }
+        Ok(String { handle: value })
     } else {
-        Result { is_ok: false, value: String { handle: 0 }, error: 0 - value }
+        Err(0 - value)
     }
 }
 
@@ -3846,7 +3944,7 @@ impl Vec<String> {
 
     def get(&self, index: i64) -> Result<String, i64> {
         if index < 0 || index >= self.len() {
-            Result { is_ok: false, value: String { handle: 0 }, error: 1 }
+            Err(1)
         } else {
             let value: &String = raw_vec_get(self.handle, index);
             collections_string_result(sengoo_string_clone_status((*value).handle))
@@ -3863,7 +3961,7 @@ impl Vec<String> {
 
     def remove(&self, index: i64) -> Result<String, i64> {
         if index < 0 || index >= self.len() {
-            Result { is_ok: false, value: String { handle: 0 }, error: 1 }
+            Err(1)
         } else {
             collections_string_result(sengoo_raw_vec_remove_string(self.handle, index))
         }
@@ -3881,18 +3979,22 @@ impl VecStringIter {
 
     def next(self) -> Result<String, i64> {
         let item: Option<&String> = raw_vec_iter_next(self.handle);
-        if item.is_some {
-            collections_string_result(sengoo_string_clone_status((*item.value).handle))
-        } else {
-            Result { is_ok: false, value: String { handle: 0 }, error: 1 }
+        match item {
+            Some(value) => collections_string_result(sengoo_string_clone_status((*value).handle)),
+            None => Err(1),
         }
     }
 
     def collect(self) -> Vec<String> {
         let collected = vec_new_string();
         while !self.done() {
-            let next_value = self.next();
-            if next_value.is_ok { collected.push(next_value.value); }
+            match self.next() {
+                Ok(value) => {
+                    collected.push(value);
+                    false
+                },
+                Err(_) => false,
+            }
         }
         collected
     }
@@ -3900,9 +4002,12 @@ impl VecStringIter {
     def count(self) -> i64 {
         let mut total = 0;
         while !self.done() {
-            let next_value = self.next();
-            if next_value.is_ok {
-                total = total + 1;
+            match self.next() {
+                Ok(_) => {
+                    total = total + 1;
+                    false
+                },
+                Err(_) => false,
             }
         }
         total
@@ -3921,10 +4026,13 @@ impl VecStringIter {
         let taken = vec_new_string();
         let mut total = 0;
         while total < n && !self.done() {
-            let next_value = self.next();
-            if next_value.is_ok {
-                taken.push(next_value.value);
-                total = total + 1;
+            match self.next() {
+                Ok(value) => {
+                    taken.push(value);
+                    total = total + 1;
+                    false
+                },
+                Err(_) => false,
             }
         }
         taken
@@ -3974,7 +4082,7 @@ impl StringMapString {
             let value: &String = raw_hashmap_get(self.handle, &key);
             collections_string_result(sengoo_string_clone_status((*value).handle))
         } else {
-            Result { is_ok: false, value: String { handle: 0 }, error: 1 }
+            Err(1)
         }
     }
 
@@ -3985,7 +4093,7 @@ impl StringMapString {
     def remove_raw(&self, key_ptr: i64) -> Result<String, i64> {
         let key = String { handle: sengoo_string_from_str_copy(key_ptr) };
         if key.handle < 0 {
-            Result { is_ok: false, value: String { handle: 0 }, error: 1 }
+            Err(1)
         } else {
             collections_string_result(raw_hashmap_remove_string_handle(self.handle, &key))
         }
@@ -4007,19 +4115,21 @@ impl StringMapStringKeyIter {
 
     def next(self) -> Result<String, i64> {
         let item: Option<&String> = raw_map_key_iter_next(self.handle);
-        if item.is_some {
-            collections_string_result(sengoo_string_clone_status((*item.value).handle))
-        } else {
-            Result { is_ok: false, value: String { handle: 0 }, error: 1 }
+        match item {
+            Some(value) => collections_string_result(sengoo_string_clone_status((*value).handle)),
+            None => Err(1),
         }
     }
 
     def count(self) -> i64 {
         let mut total = 0;
         while !self.done() {
-            let next_value = self.next();
-            if next_value.is_ok {
-                total = total + 1;
+            match self.next() {
+                Ok(_) => {
+                    total = total + 1;
+                    false
+                },
+                Err(_) => false,
             }
         }
         total
@@ -4038,10 +4148,13 @@ impl StringMapStringKeyIter {
         let taken = vec_new_string();
         let mut total = 0;
         while total < n && !self.done() {
-            let next_value = self.next();
-            if next_value.is_ok {
-                taken.push(next_value.value);
-                total = total + 1;
+            match self.next() {
+                Ok(value) => {
+                    taken.push(value);
+                    total = total + 1;
+                    false
+                },
+                Err(_) => false,
             }
         }
         taken
@@ -4050,9 +4163,12 @@ impl StringMapStringKeyIter {
     def collect(self) -> Vec<String> {
         let collected = vec_new_string();
         while !self.done() {
-            let next_value = self.next();
-            if next_value.is_ok {
-                collected.push(next_value.value);
+            match self.next() {
+                Ok(value) => {
+                    collected.push(value);
+                    false
+                },
+                Err(_) => false,
             }
         }
         collected

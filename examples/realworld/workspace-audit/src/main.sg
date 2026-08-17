@@ -1,6 +1,8 @@
 import workspace_audit;
 
 def main() -> i64 {
-    let result = audit_workspace(".", "workspace-audit.json", "workspace-audit.txt");
-    if result.is_ok { 0; } else { result.error; };
+    match audit_workspace(".", "workspace-audit.json", "workspace-audit.txt") {
+        Ok(_) => 0,
+        Err(error) => error,
+    }
 }

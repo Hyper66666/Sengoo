@@ -12,28 +12,47 @@ async def delayed() -> i64 {
 }
 
 async def main() -> i64 {
-    let invalid_channel = channel_bounded(0);
-    if invalid_channel.is_ok { return 1; };
-    if invalid_channel.error != STATUS_INVALID_ARGUMENT() { return 2; };
-    let pair = channel_bounded(1);
-    if not pair.is_ok { return 3; };
-    let sender = channel_pair_sender(pair.value);
-    let receiver = channel_pair_receiver(pair.value);
+    match channel_bounded(0) {
+        Ok(pair) => {
+            channel_pair_drop(pair);
+            return 1;
+        },
+        Err(error) => {
+            if error != STATUS_INVALID_ARGUMENT() { return 2; }
+        },
+    }
+    let pair = match channel_bounded(1) {
+        Ok(value) => value,
+        Err(_) => return 3,
+    };
+    let sender = channel_pair_sender(pair);
+    let receiver = channel_pair_receiver(pair);
     let sent = await channel_send_i64(sender, 42);
-    if not sent.is_ok { return 4; };
+    if not sent.is_ok {
+        return 4;
+    }
     let received = await channel_recv_i64(receiver);
     channel_sender_drop(sender);
-    channel_pair_drop(pair.value);
-    if not received.is_ok { return 5; };
-    if received.value != 42 { return 6; };
+    channel_pair_drop(pair);
+    if not received.is_ok {
+        return 5;
+    }
+    let received_value = received.value;
+    if received_value != 42 { return 6; };
     let mutex = mutex_new_i64(3);
     let locked = await mutex_lock_async(mutex);
-    if not locked.is_ok { return 7; };
-    if locked.value != 3 { return 8; };
+    if not locked.is_ok {
+        return 7;
+    }
+    let locked_value = locked.value;
+    if locked_value != 3 { return 8; };
     let unlocked = mutex_unlock_i64(mutex, 8);
     mutex_drop(mutex);
-    if not unlocked.is_ok { return 9; };
-    if unlocked.value != 8 { return 10; };
+    let unlocked = match unlocked {
+        Ok(value) => value,
+        Err(_) => return 9,
+    };
+    if unlocked != 8 { return 10; };
     let first = spawn(immediate());
     let second = spawn(delayed());
     if select(first, second) == 7 { 0; } else { 11; };

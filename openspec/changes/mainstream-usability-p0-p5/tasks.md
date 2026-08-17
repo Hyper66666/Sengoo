@@ -12,35 +12,39 @@
 
 ## 2. P0 — Option/Result as enums
 
-- [ ] 2.1 Define `enum Option<T> { None, Some(T) }` and
+- [x] 2.1 Define `enum Option<T> { None, Some(T) }` and
   `enum Result<T, E> { Ok(T), Err(E) }` in `tools/stdlib/`; constructors usable
   as values and as patterns.
-  Progress: the language layer is proven for user-declared enums —
-  qualified and bare `Some`/`None`/`Ok`/`Err` construct and match with
-  payload binding, expected-type inference covers payload-free variants
-  (`let x: Option<i64> = None`, return position), ambiguous bare names get
-  `ambiguous-enum-variant`, `?` propagates both shapes
-  (compiler tests `enum_match_lowering_tests::{generic_enum_*, bare_variant_*,
-  question_mark_propagates_user_enum_result_and_option,
-  single_element_struct_payload_binds_whole_in_match_arm}`).
-  Remaining: swap the stdlib declarations themselves and the compatibility
-  accessors (2.3–2.5) before migrating call sites.
-- [ ] 2.2 MIR lowering, layout, and exact-once Drop for enum payloads, including
+  Stdlib declarations are the enum form; constructors and `match` work in
+  `tools/stdlib/option.sg` and `tools/stdlib/result.sg`.
+- [x] 2.2 MIR lowering, layout, and exact-once Drop for enum payloads, including
   `match` arm moves and `?` early return. Extend AMM Drop tests to cover
   `Option`/`Result` payloads before the struct form is removed.
-- [ ] 2.3 Compiler-known compatibility accessors (`.is_ok`, `.is_some`,
+  Verified by the 1136-test compiler library suite, all 36 `drop_flag_tests`,
+  and native runtime regressions for conditional match-arm moves, guards,
+  `Option`/`Result` scope drops, `unwrap_or`, and `?` early returns.
+- [x] 2.3 Compiler-known compatibility accessors (`.is_ok`, `.is_some`,
   `.value`, `.error`) over the enum form, each with a deprecation diagnostic
   naming the pattern replacement.
-- [ ] 2.4 Reject struct-literal construction of these types with a diagnostic
+  Typeck (`compat_enum_field_ty`) and MIR (`lower_compat_enum_field`) resolve
+  the four fields on `Option`/`Result` enums only; each hit emits
+  `attributes::deprecated_use` with a pattern replacement. Payload reads off
+  the other arm yield that type's default value. Proof:
+  `compiler/src/tests/compat_enum_field_tests.rs`.
+- [x] 2.4 Reject struct-literal construction of these types with a diagnostic
   naming the `Ok`/`Err`/`Some`/`None` replacement.
-- [ ] 2.5 Deprecate `option_none_with` / `result_*_with` placeholder
+  Proof: `compiler/src/tests/struct_codegen_tests.rs::{option,result}_struct_literal_diagnostic_names_variant_constructors`.
+- [x] 2.5 Deprecate `option_none_with` / `result_*_with` placeholder
   constructors; behavior preserved for the compatibility release.
-- [ ] 2.6 `?` continues to work unchanged for both types; add regression tests
+  Attributes live on the stdlib helpers; proof:
+  `compat_enum_field_tests::placeholder_constructors_remain_usable_with_deprecation`.
+- [x] 2.6 `?` continues to work unchanged for both types; add regression tests
   for `Result`→`Result`, `Option`→`Option`, and the rejected cross/`main` cases.
-- [ ] 2.7 Migrate `tools/stdlib/` (236 field-access sites) to constructors and
+  Proof: `try_operator_tests::enum_*_question_*`.
+- [x] 2.7 Migrate `tools/stdlib/` (236 field-access sites) to constructors and
   `match`.
-- [ ] 2.8 Migrate `examples/` and fixtures (195 field-access sites).
-- [ ] 2.9 Language reference and support matrix updated; `Option`/`Result` rows
+- [x] 2.8 Migrate `examples/` and fixtures (195 field-access sites).
+- [x] 2.9 Language reference and support matrix updated; `Option`/`Result` rows
   state the enum form and the deprecation window.
 
 ## 3. P1 — for over collections

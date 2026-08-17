@@ -114,6 +114,7 @@ pub struct TypeChecker {
     propagation_stack: Vec<try_helpers::PropagationContext>,
     try_block_mode_stack: Vec<try_helpers::TryBlockMode>,
     expected_return_types: Vec<Ty>,
+    match_guard_bindings: Vec<HashSet<String>>,
     warnings: Vec<crate::error::CompileWarning>,
     deprecated_decls: HashMap<String, crate::parser::DeprecatedDecl>,
     trait_default_methods: HashMap<String, HashMap<String, Function>>,
@@ -157,6 +158,7 @@ impl TypeChecker {
             propagation_stack: Vec::new(),
             try_block_mode_stack: Vec::new(),
             expected_return_types: Vec::new(),
+            match_guard_bindings: Vec::new(),
             warnings: Vec::new(),
             deprecated_decls: HashMap::new(),
             trait_default_methods: HashMap::new(),
@@ -171,7 +173,12 @@ impl TypeChecker {
         let mut drop_trait = TraitInfo::new("Drop".to_string(), Vec::new(), true);
         drop_trait.add_method(
             "drop".to_string(),
-            MethodSig::new(true, Vec::new(), env.unit_ty(), Vec::new()),
+            MethodSig::new(
+                Some(SelfParam::BorrowedMut),
+                Vec::new(),
+                env.unit_ty(),
+                Vec::new(),
+            ),
         );
         registry.register(drop_trait);
         for trait_name in [
@@ -199,7 +206,7 @@ impl TypeChecker {
         hash_trait.add_method(
             "hash".to_string(),
             MethodSig::new(
-                true,
+                Some(SelfParam::Borrowed),
                 Vec::new(),
                 env.int_ty(crate::typeck::ty::IntKind::I64),
                 Vec::new(),
@@ -293,6 +300,18 @@ impl TypeChecker {
     fn load_deprecated_decls(&mut self) {
         for decl in crate::parser::take_deprecated_decls() {
             self.deprecated_decls.insert(decl.name.clone(), decl);
+        }
+    }
+
+    /// Record a warning, skipping one already reported for the same code and span
+    /// so a single source location does not warn once per checking pass.
+    pub(super) fn push_warning(&mut self, warning: crate::error::CompileWarning) {
+        let duplicate = self
+            .warnings
+            .iter()
+            .any(|existing| existing.code() == warning.code() && existing.span() == warning.span());
+        if !duplicate {
+            self.warnings.push(warning);
         }
     }
 
@@ -1345,10 +1364,19 @@ impl TypeChecker {
             // `Option::None` and bare `None`, whose generic arguments are only
             // recoverable from the expected type; mirror the struct-literal
             // fallback.
-            ExprKind::Struct { .. } | ExprKind::Path(_) | ExprKind::Ident(_) => {
+            ExprKind::Struct { .. } => {
                 self.expected_return_types.push(expected.clone());
                 let result = self.check_expr(expr);
                 self.expected_return_types.pop();
+                result
+            }
+            ExprKind::Path(_) | ExprKind::Ident(_) => {
+                self.expected_return_types.push(expected.clone());
+                let result = self.check_expr(expr);
+                self.expected_return_types.pop();
+                if let Ok(ty) = &result {
+                    self.env.record_enum_variant_type(expr.span, ty.clone());
+                }
                 result
             }
             _ => self.check_expr(expr),
@@ -1446,6 +1474,23 @@ impl TypeChecker {
                     return Err(TypeckError::Other(
                         "TaskScope is opaque and cannot be constructed by user code".to_string(),
                     ));
+                }
+                if let Some(variants) = self.enum_variants.get(&name) {
+                    let replacement = match name.as_str() {
+                        "Option" => "use `Some(value)` or `None`".to_string(),
+                        "Result" => "use `Ok(value)` or `Err(error)`".to_string(),
+                        _ => format!(
+                            "use a variant constructor: {}",
+                            variants
+                                .iter()
+                                .map(|variant| format!("`{variant}`"))
+                                .collect::<Vec<_>>()
+                                .join(", ")
+                        ),
+                    };
+                    return Err(TypeckError::Other(format!(
+                        "cannot construct enum `{name}` with struct literal syntax; {replacement}"
+                    )));
                 }
 
                 let field_defs = self

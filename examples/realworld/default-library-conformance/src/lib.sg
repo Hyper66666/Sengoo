@@ -47,10 +47,15 @@ def exercise_default_library() -> i64 {
     if by_name.contains(&lookup) == false { return 11; };
     let mapped = by_name.get(&lookup);
     if mapped.score_value() != 42 { return 12; };
-    let narrowed = checked_i64_to_u8(total);
-    if narrowed.is_err() { return 13; };
-    let widened = checked_u8_to_i64(narrowed.value);
-    if widened.is_err() or widened.value != 42 { return 13; };
+    let narrowed = match checked_i64_to_u8(total) {
+        Ok(value) => value,
+        Err(_) => return 13,
+    };
+    let widened = match checked_u8_to_i64(narrowed) {
+        Ok(value) => value,
+        Err(_) => return 13,
+    };
+    if widened != 42 { return 13; };
     42;
 }
 

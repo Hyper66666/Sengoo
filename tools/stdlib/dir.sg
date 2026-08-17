@@ -24,35 +24,35 @@ impl !Sync for DirWalk {}
 
 def dir_bool_result(status: i64) -> Result<bool, i64> {
     if status == 0 {
-        Result { is_ok: true, value: true, error: 0 }
+        Ok(true)
     } else {
-        Result { is_ok: false, value: false, error: status_from_raw_ffi(status) }
+        Err(status_from_raw_ffi(status))
     }
 }
 
 def dir_i64_result(value: i64) -> Result<i64, i64> {
     if value >= 0 {
-        Result { is_ok: true, value: value, error: 0 }
+        Ok(value)
     } else {
-        Result { is_ok: false, value: 0, error: status_from_raw_ffi(value) }
+        Err(status_from_raw_ffi(value))
     }
 }
 
 def dir_status_i64_result(value: i64) -> Result<i64, i64> {
     if value >= 0 {
-        Result { is_ok: true, value: value, error: 0 }
+        Ok(value)
     } else {
-        Result { is_ok: false, value: 0, error: status_from_raw_ffi(value) }
+        Err(status_from_raw_ffi(value))
     }
 }
 
 def dir_walk_result(value: i64) -> Result<DirWalk, i64> {
     if value > 0 {
-        Result { is_ok: true, value: DirWalk { handle: value }, error: 0 }
+        Ok(DirWalk { handle: value })
     } else if value < 0 {
-        Result { is_ok: false, value: DirWalk { handle: 0 }, error: status_from_raw_ffi(value) }
+        Err(status_from_raw_ffi(value))
     } else {
-        Result { is_ok: false, value: DirWalk { handle: 0 }, error: STATUS_UNKNOWN() }
+        Err(STATUS_UNKNOWN())
     }
 }
 
@@ -107,9 +107,9 @@ def dir_entry_name(path: &str, index: i64, buffer: Buffer) -> Result<i64, i64> {
 def dir_entry_name_string(path: &str, index: i64) -> Result<String, i64> {
     let value = sengoo_dir_entry_name_string(sengoo_stdlib_str_ptr(path), index);
     if value >= 0 {
-        Result { is_ok: true, value: String { handle: value }, error: 0 }
+        Ok(String { handle: value })
     } else {
-        Result { is_ok: false, value: String { handle: 0 }, error: status_from_raw_ffi(value) }
+        Err(status_from_raw_ffi(value))
     }
 }
 
@@ -156,10 +156,10 @@ impl Drop for DirWalk {
 
 def dir_string_result(value: i64) -> Result<String, i64> {
     if value > 0 {
-        Result { is_ok: true, value: String { handle: value }, error: 0 }
+        Ok(String { handle: value })
     } else if value == 0 {
-        Result { is_ok: false, value: String { handle: 0 }, error: STATUS_NOT_FOUND() }
+        Err(STATUS_NOT_FOUND())
     } else {
-        Result { is_ok: false, value: String { handle: 0 }, error: status_from_raw_ffi(value) }
+        Err(status_from_raw_ffi(value))
     }
 }

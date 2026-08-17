@@ -503,7 +503,7 @@ impl TypeChecker {
                     let method_generic_meta =
                         self.bind_type_params_with_meta(&method.type_params)?;
                     let mut param_types = Vec::new();
-                    let has_self = method.self_param.is_some();
+                    let self_param = method.self_param;
 
                     for param in &method.params {
                         let ty = self.check_type(&param.ty)?;
@@ -525,14 +525,14 @@ impl TypeChecker {
                     }
                     let sig = if has_default {
                         MethodSig::with_default(
-                            has_self,
+                            self_param,
                             param_types,
                             ret_ty,
                             method_generic_meta.iter().map(|meta| meta.var_id).collect(),
                         )
                     } else {
                         MethodSig::new(
-                            has_self,
+                            self_param,
                             param_types,
                             ret_ty,
                             method_generic_meta.iter().map(|meta| meta.var_id).collect(),
@@ -893,10 +893,10 @@ impl TypeChecker {
             self.env.push_scope();
             let method_generic_meta = self.bind_type_params_with_meta(&item.type_params)?;
             let mut param_types = Vec::new();
-            let mut has_self = item.self_param.is_some();
+            let mut self_param = item.self_param;
             for param in &item.params {
                 if param.name.name == "self" {
-                    has_self = true;
+                    self_param.get_or_insert(SelfParam::Owned);
                 } else {
                     let ty = self.check_type(&param.ty)?;
                     param_types.push(ty);
@@ -910,7 +910,7 @@ impl TypeChecker {
             impl_info.add_method(
                 item.name.name.clone(),
                 FunctionTy::with_generic_params(
-                    has_self,
+                    self_param,
                     param_types,
                     ret_ty,
                     method_generic_meta.iter().map(|meta| meta.var_id).collect(),
@@ -1012,7 +1012,7 @@ impl TypeChecker {
                             impl_info.add_method(
                                 method_name.clone(),
                                 FunctionTy::with_generic_params(
-                                    method_sig.has_self,
+                                    method_sig.self_param,
                                     param_types,
                                     return_type,
                                     method_sig.generic_params.clone(),

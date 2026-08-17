@@ -1789,11 +1789,10 @@ def main() -> i64 {
     assert!(ir.contains("i32_checked_mul"));
     assert!(ir.contains("i32_saturating_add"));
     assert!(ir.contains("i32_wrapping_add"));
-    assert_eq!(
-        ir.matches("define %Option_i32 @option_none_with_i32")
-            .count(),
-        1,
-        "generic option_none_with<i32> should be emitted once:\n{ir}"
+    assert!(
+        ir.contains("define i1 @Option_i32_is_none({ i64, [4 x i8] }")
+            || ir.contains("define i1 @Option_i32_is_none({i64, [4 x i8] }"),
+        "Option<i32> should use its concrete enum payload layout:\n{ir}"
     );
 }
 
@@ -3177,8 +3176,8 @@ def result_flag(res: Result<bool, i64>) -> bool {
 def main() -> i64 {
     let vec: Vec<bool> = Vec { handle: 0, marker: 0 };
     let map: HashMap<bool, bool> = HashMap { handle: 0, key_marker: 0, value_marker: 0 };
-    let option_true: Option<bool> = Option { is_some: true, value: true };
-    let result_true: Result<bool, i64> = Result { is_ok: true, value: true, error: 0 };
+    let option_true: Option<bool> = Some(true);
+    let result_true: Result<bool, i64> = Ok(true);
 
     if vec.is_empty() && map.is_empty() && option_flag(option_true) && result_flag(result_true) {
         1
@@ -4367,8 +4366,8 @@ fn stdlib_surface_generic_result_projection_methods_compile() {
     let ir = compile_with_stdlib(
         r#"
 def main() -> i64 {
-    let ok_result: Result<bool, i64> = Result { is_ok: true, value: true, error: 6 };
-    let err_result: Result<i64, bool> = Result { is_ok: false, value: 0, error: true };
+    let ok_result: Result<bool, i64> = Ok(true);
+    let err_result: Result<i64, bool> = Err(true);
     let ok_option: Option<bool> = ok_result.ok();
     let err_option: Option<bool> = err_result.err();
 
@@ -4387,11 +4386,31 @@ def main() -> i64 {
 {}",
         ir
     );
+    let ok_section = ir
+        .split("; Function: Result_bool_i64_ok")
+        .nth(1)
+        .and_then(|tail| tail.split("; Function:").next())
+        .expect("Result<bool, i64>.ok function body");
+    assert!(
+        ok_section.contains("phi { i64, [1 x i8] }"),
+        "Result<bool, i64>.ok must construct Option<bool> with a one-byte payload\n{}",
+        ok_section
+    );
     assert!(
         ir.contains("; Function: Result_i64_bool_err"),
         "expected Result<i64, bool>.err specialization
 {}",
         ir
+    );
+    let err_section = ir
+        .split("; Function: Result_i64_bool_err")
+        .nth(1)
+        .and_then(|tail| tail.split("; Function:").next())
+        .expect("Result<i64, bool>.err function body");
+    assert!(
+        err_section.contains("phi { i64, [1 x i8] }"),
+        "Result<i64, bool>.err must construct Option<bool> with a one-byte payload\n{}",
+        err_section
     );
     assert!(
         ir.contains("; Function: Option_bool_unwrap_or"),
@@ -4406,8 +4425,8 @@ fn stdlib_surface_method_generic_ok_or_emits_specialized_bool_error_variants() {
     let ir = compile_with_stdlib(
         r#"
 def main() -> i64 {
-    let some_flag: Option<bool> = Option { is_some: true, value: true };
-    let none_flag: Option<bool> = Option { is_some: false, value: false };
+    let some_flag: Option<bool> = Some(true);
+    let none_flag: Option<bool> = None;
 
     let ok_result = some_flag.ok_or(false);
     let err_result = none_flag.ok_or(true);
@@ -4426,6 +4445,16 @@ def main() -> i64 {
         "expected method-generic ok_or specialization for bool error
 {}",
         ir
+    );
+    let ok_or_section = ir
+        .split("; Function: Option_bool_ok_or_bool")
+        .nth(1)
+        .and_then(|tail| tail.split("; Function:").next())
+        .expect("Option<bool>.ok_or<bool> function body");
+    assert!(
+        ok_or_section.contains("phi { i64, [1 x i8] }"),
+        "Option<bool>.ok_or<bool> must construct Result<bool, bool> with a one-byte payload\n{}",
+        ok_or_section
     );
     assert!(
         ir.contains("; Function: Result_bool_bool_ok"),
@@ -4488,6 +4517,37 @@ def main() -> i64 {
         ir.contains("; Function: result_err_with_bool_bool"),
         "expected generic result_err_with<bool, bool> specialization\n{}",
         ir
+    );
+}
+
+#[test]
+fn stdlib_surface_generic_option_constructor_uses_aggregate_payload_layout() {
+    let ir = compile_with_stdlib(
+        r#"
+struct Pair {
+    left: i64,
+    right: i64,
+}
+
+def main() -> i64 {
+    let pair: Option<Pair> = option_some(Pair { left: 3, right: 4 });
+    match pair {
+        Some(value) => value.left + value.right,
+        None => 0,
+    }
+}
+"#,
+    );
+
+    let constructor_section = ir
+        .split("; Function: option_some_Pair")
+        .nth(1)
+        .and_then(|tail| tail.split("; Function:").next())
+        .expect("option_some<Pair> function body");
+    assert!(
+        constructor_section.contains("alloca { i64, [16 x i8] }"),
+        "option_some<Pair> must construct Option<Pair> with a sixteen-byte payload\n{}",
+        constructor_section
     );
 }
 
@@ -4577,7 +4637,7 @@ def main() -> i64 {
 }
 
 #[test]
-fn stdlib_surface_mixed_option_instantiations_emit_distinct_struct_types() {
+fn stdlib_surface_mixed_option_instantiations_emit_distinct_enum_layouts() {
     let ir = compile_with_stdlib(
         r#"
 def option_flag(opt: Option<bool>) -> bool {
@@ -4589,8 +4649,8 @@ def option_sum(opt: Option<i64>) -> i64 {
 }
 
 def main() -> i64 {
-    let bool_opt: Option<bool> = Option { is_some: true, value: true };
-    let int_opt: Option<i64> = Option { is_some: true, value: 7 };
+    let bool_opt: Option<bool> = Some(true);
+    let int_opt: Option<i64> = Some(7);
 
     if option_flag(bool_opt) {
         option_sum(int_opt)
@@ -4602,19 +4662,19 @@ def main() -> i64 {
     );
 
     assert!(
-        ir.contains("%Option_bool = type { i1, i1 }"),
-        "expected distinct LLVM struct for Option<bool>\n{}",
+        ir.contains("define i1 @Option_bool_unwrap_or({ i64, [1 x i8] }"),
+        "expected concrete enum layout for Option<bool>\n{}",
         ir
     );
     assert!(
-        ir.contains("%Option_i64 = type { i1, i64 }"),
-        "expected distinct LLVM struct for Option<i64>\n{}",
+        ir.contains("define i64 @Option_i64_unwrap_or({ i64, [8 x i8] }"),
+        "expected concrete enum layout for Option<i64>\n{}",
         ir
     );
 }
 
 #[test]
-fn stdlib_surface_option_and_result_remain_tagged_struct_layouts() {
+fn stdlib_surface_option_and_result_use_tagged_enum_layouts() {
     let ir = compile_with_stdlib(
         r#"
 def option_flag(opt: Option<bool>) -> bool {
@@ -4634,10 +4694,10 @@ def result_sum(res: Result<i64, bool>) -> i64 {
 }
 
 def main() -> i64 {
-    let bool_opt: Option<bool> = Option { is_some: true, value: true };
-    let int_opt: Option<i64> = Option { is_some: true, value: 7 };
-    let ok_result: Result<bool, i64> = Result { is_ok: true, value: true, error: 6 };
-    let err_result: Result<i64, bool> = Result { is_ok: false, value: 9, error: true };
+    let bool_opt: Option<bool> = Some(true);
+    let int_opt: Option<i64> = Some(7);
+    let ok_result: Result<bool, i64> = Ok(true);
+    let err_result: Result<i64, bool> = Err(true);
 
     if option_flag(bool_opt) && result_flag(ok_result) {
         option_sum(int_opt) + result_sum(err_result)
@@ -4649,23 +4709,23 @@ def main() -> i64 {
     );
 
     assert!(
-        ir.contains("%Option_bool = type { i1, i1 }"),
-        "expected Option<bool> tagged-struct layout\n{}",
+        ir.contains("define i1 @Option_bool_unwrap_or({ i64, [1 x i8] }"),
+        "expected Option<bool> tagged-enum layout\n{}",
         ir
     );
     assert!(
-        ir.contains("%Option_i64 = type { i1, i64 }"),
-        "expected Option<i64> tagged-struct layout\n{}",
+        ir.contains("define i64 @Option_i64_unwrap_or({ i64, [8 x i8] }"),
+        "expected Option<i64> tagged-enum layout\n{}",
         ir
     );
     assert!(
-        ir.contains("%Result_bool_i64 = type { i1, i1, i64 }"),
-        "expected Result<bool, i64> tagged-struct layout\n{}",
+        ir.contains("define i1 @Result_bool_i64_unwrap_or({ i64, [8 x i8] }"),
+        "expected Result<bool, i64> tagged-enum layout\n{}",
         ir
     );
     assert!(
-        ir.contains("%Result_i64_bool = type { i1, i64, i1 }"),
-        "expected Result<i64, bool> tagged-struct layout\n{}",
+        ir.contains("define i64 @Result_i64_bool_unwrap_or({ i64, [8 x i8] }"),
+        "expected Result<i64, bool> tagged-enum layout\n{}",
         ir
     );
 }

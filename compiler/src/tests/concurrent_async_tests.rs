@@ -168,8 +168,10 @@ def require_sync<T: Sync>(value: T) -> i64 { 2 }
 
 async def update(shared: Arc<Mutex<Payload>>) -> i64 {
     let locked = await mutex_lock_guard(shared.borrow());
-    if !locked.is_ok { return locked.error; }
-    let mut guard = locked.value;
+    let mut guard = match locked {
+        Ok(value) => value,
+        Err(error) => return error,
+    };
     let mut before_snapshot = Payload { value: 0 };
     if !mutex_guard_copy_into(&guard, &mut before_snapshot) { return 90; }
     let before = before_snapshot.read();
@@ -202,17 +204,23 @@ fn concurrent_arc_mutex_public_shared_counter_uses_generic_composition() {
 async def main() -> i64 {
     let shared: Arc<Mutex<i64>> = arc_new(mutex_new(2));
     let enabled = runtime_enable_thread_pool(4);
-    if !enabled.is_ok { return enabled.error; }
+    match enabled {
+        Ok(_) => 0,
+        Err(error) => return error,
+    };
 
     let first = spawn_shared_counter_i64(shared.clone_arc(), 1, 5);
     let second = spawn_shared_counter_i64(shared.clone_arc(), 1, 5);
-    if !first.is_ok || !second.is_ok { return 1; }
-    first.value.join();
-    second.value.join();
+    let first_job = match first { Ok(job) => job, Err(_) => return 1 };
+    let second_job = match second { Ok(job) => job, Err(_) => return 1 };
+    first_job.join();
+    second_job.join();
 
     let locked = await mutex_lock_guard(shared.borrow());
-    if !locked.is_ok { return locked.error; }
-    locked.value.get()
+    match locked {
+        Ok(guard) => guard.get(),
+        Err(error) => error,
+    }
 }
 "#;
 
@@ -811,8 +819,8 @@ def request_handle(request: HttpServerRequest) -> i64 {
 
 async def main() -> i64 {
     let bound = http_server_bind("127.0.0.1", 0);
-    if !bound.is_ok { return bound.error; }
-    let outcome = await bound.value.next_request_async(1);
+    let server = match bound { Ok(server) => server, Err(error) => return error };
+    let outcome = await server.next_request_async(1);
     if outcome.is_ok && outcome.value.handle == request_handle(outcome.value) { 0 } else { outcome.error }
 }
 "#;
@@ -855,8 +863,8 @@ fn async_http_server_rejects_awaiting_synchronous_next_request() {
     let source = r#"
 async def main() -> i64 {
     let bound = http_server_bind("127.0.0.1", 0);
-    if !bound.is_ok { return bound.error; }
-    let outcome = await bound.value.next_request(1);
+    let server = match bound { Ok(server) => server, Err(error) => return error };
+    let outcome = await server.next_request(1);
     if outcome.is_ok { 0 } else { outcome.error }
 }
 "#;

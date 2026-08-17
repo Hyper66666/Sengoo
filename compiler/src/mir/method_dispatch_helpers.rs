@@ -7,6 +7,17 @@ pub(crate) struct MethodDispatchPlan {
     pub type_prefix: String,
 }
 
+/// Dispatch name for an enum receiver: the monomorphised instance name
+/// (`Option_i64`), so `Option_i64_unwrap_or` resolves exactly and sibling
+/// instances (`Option_bool_unwrap_or`) never become ambiguous candidates.
+/// Anonymous compiler-synthesised enums keep the legacy `enum` bucket.
+fn enum_dispatch_name(name: &str) -> String {
+    if name.is_empty() {
+        return "enum".to_string();
+    }
+    name.to_string()
+}
+
 pub(crate) fn receiver_type_prefix(receiver_ty: &MIRType) -> String {
     match receiver_ty {
         MIRType::Int(bits) => format!("i{}", bits),
@@ -23,7 +34,7 @@ pub(crate) fn receiver_type_prefix(receiver_ty: &MIRType) -> String {
             _ => "ptr".to_string(),
         },
         MIRType::Struct { name, .. } => name.clone(),
-        MIRType::Enum { .. } => "enum".to_string(),
+        MIRType::Enum { name, .. } => enum_dispatch_name(name),
         _ => "i64".to_string(),
     }
 }
@@ -51,7 +62,7 @@ pub(crate) fn method_dispatch_name(
                 _ => format!("ptr_{}", method),
             },
             MIRType::Struct { name, .. } => format!("{}_{}", name, method),
-            MIRType::Enum { .. } => format!("enum_{}", method),
+            MIRType::Enum { name, .. } => format!("{}_{}", enum_dispatch_name(name), method),
             _ => format!("i64_{}", method),
         }
     }
@@ -73,6 +84,7 @@ pub(crate) fn receiver_type_display(
             MIRType::Tuple(_) => "tuple".to_string(),
             MIRType::Ptr(_) | MIRType::Ref(_) => "ptr".to_string(),
             MIRType::Struct { name, .. } => name.clone(),
+            MIRType::Enum { name, .. } if !name.is_empty() => name.clone(),
             MIRType::Enum { .. } => "enum".to_string(),
             _ => format!("{:?}", receiver_ty),
         }

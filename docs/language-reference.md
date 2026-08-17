@@ -109,7 +109,7 @@ import std::result;
 
 def propagate(value: Result<i64, i64>) -> Result<i64, i64> {
     let inner = value?;
-    Result { is_ok: true, value: inner + 1, error: 0 }
+    Ok(inner + 1)
 }
 
 def main() -> i64 { 0 }
@@ -150,6 +150,7 @@ def main() -> i64 {
 | `String` | Supported | Owned UTF-8 handle with move/drop, formatting, comparison, slicing, and push helpers. |
 | Structs | Supported | Named fields, literals, methods, derives. |
 | Enums | Supported | Unit and payload variants, construction, return values, and `match`. |
+| `Option<T>` / `Result<T, E>` | Supported | Enum form `None`/`Some(T)` and `Ok(T)`/`Err(E)` with `match` and `?`. Compatibility field reads (`.is_ok`, `.is_some`, `.value`, `.error`) and placeholder constructors (`option_none_with`, `result_*_with`) remain for one release with `attributes::deprecated_use`. Proof: `compiler/src/tests/compat_enum_field_tests.rs`, `tools/stdlib/option.sg`, `tools/stdlib/result.sg`. |
 | Arrays | Supported | Fixed-array index bounds diagnostics (`array-index-out-of-bounds`), assignment, and `for` iteration lower to MIR; see `compiler/src/tests/m1_language_coherence_tests.rs` and `array_assign_tests`. |
 | Generic collections | Supported | `Vec<T>`, `VecDeque<T>`, `HashMap<K,V>`, `HashSet<T>`, `BTreeMap<K,V>`, and `BTreeSet<T>` use owning ABI-v1 storage with exact Drop; see `examples/realworld/default-library-conformance`. |
 | References | Subset | Intraprocedural last-use borrow ending is implemented for straight-line and remaining-use look-ahead; live borrows still block owner moves; escaping locals report `borrow-escapes-owner`. Full temporary/NLL precision remains open. |

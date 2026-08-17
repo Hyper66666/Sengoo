@@ -44,6 +44,13 @@ def main() -> i64 { 0 }
         ir.contains("switch") && ir.contains("i64 1") && ir.contains("i64 2"),
         "expected switch with Green/Blue targets in IR:\n{ir}"
     );
+    assert!(
+        !ir.lines().any(|line| {
+            let line = line.trim_start();
+            line.starts_with("store {") && line.contains("* %t_")
+        }),
+        "wildcard enum arms must not store into an unallocated temp:\n{ir}"
+    );
 }
 
 #[test]
@@ -179,4 +186,84 @@ def main() -> i64 {
 "#,
     )
     .expect("single struct payload must bind whole, not split per field");
+}
+
+#[test]
+fn generic_enum_constructor_uses_the_concrete_return_layout() {
+    let ir = compile_to_ir(
+        r#"
+enum Option<T> { None, Some(T) }
+def make_bool(value: bool) -> Option<bool> {
+    Some(value)
+}
+def main() -> i64 { 0 }
+"#,
+    )
+    .expect("generic enum constructor should compile");
+
+    let function_ir = ir
+        .split("; Function: make_bool")
+        .nth(1)
+        .and_then(|rest| rest.split("; Function:").next())
+        .expect("make_bool function should be present in generated IR");
+    assert!(
+        function_ir.contains("define { i64, [1 x i8] } @make_bool"),
+        "expected the concrete Option<bool> return layout:\n{function_ir}"
+    );
+    assert!(
+        function_ir.contains("alloca { i64, [1 x i8] }"),
+        "enum construction must use the same concrete layout as the function return:\n{function_ir}"
+    );
+}
+
+#[test]
+fn payload_free_generic_enum_constructor_uses_the_expected_layout() {
+    let ir = compile_to_ir(
+        r#"
+enum Option<T> { None, Some(T) }
+def make_none() -> Option<bool> {
+    None
+}
+def main() -> i64 { 0 }
+"#,
+    )
+    .expect("payload-free generic enum constructor should compile");
+
+    let function_ir = ir
+        .split("; Function: make_none")
+        .nth(1)
+        .and_then(|rest| rest.split("; Function:").next())
+        .expect("make_none function should be present in generated IR");
+    assert!(
+        function_ir.contains("define { i64, [1 x i8] } @make_none"),
+        "expected the concrete Option<bool> return layout:\n{function_ir}"
+    );
+    assert!(
+        function_ir.contains("alloca { i64, [1 x i8] }"),
+        "payload-free construction must use the expected concrete layout:\n{function_ir}"
+    );
+}
+
+#[test]
+fn compatibility_payload_field_uses_a_loaded_join_slot() {
+    let ir = compile_to_ir(
+        r#"
+enum Result<T, E> { Ok(T), Err(E) }
+def is_expected_error(result: Result<i64, i64>) -> bool {
+    if result.is_ok { false } else { result.error == 7 }
+}
+def main() -> i64 { 0 }
+"#,
+    )
+    .expect("compatibility payload field should compile");
+
+    let function_ir = ir
+        .split("; Function: is_expected_error")
+        .nth(1)
+        .and_then(|rest| rest.split("; Function:").next())
+        .expect("is_expected_error function should be present in generated IR");
+    assert!(
+        function_ir.contains("alloca i64") && function_ir.contains("load i64, i64* %u_"),
+        "compatibility payload selection must load its cross-branch join slot:\n{function_ir}"
+    );
 }

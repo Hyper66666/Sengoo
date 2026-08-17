@@ -352,10 +352,227 @@ pub(crate) fn substitute_hir_body(body: &HIRBody, subst: &HashMap<String, HIRTyp
     }
 }
 
+fn propagate_expected_enum_types_in_body(
+    body: &mut HIRBody,
+    expected_tail: Option<&HIRType>,
+    function_return_type: &HIRType,
+) {
+    for stmt in &mut body.stmts {
+        match stmt {
+            HIRStmt::Let { ty, value, .. } => {
+                if let Some(value) = value {
+                    propagate_expected_enum_types_in_expr(value, Some(ty), function_return_type);
+                }
+            }
+            HIRStmt::Expr(expr) => {
+                propagate_expected_enum_types_in_expr(expr, None, function_return_type);
+            }
+            HIRStmt::Source { .. } | HIRStmt::Coverage { .. } | HIRStmt::Item => {}
+        }
+    }
+
+    if let Some(expr) = body.expr.as_deref_mut() {
+        propagate_expected_enum_types_in_expr(expr, expected_tail, function_return_type);
+    }
+}
+
+fn hir_type_contains_error(ty: &HIRType) -> bool {
+    match &ty.kind {
+        HIRTypeKind::Error => true,
+        HIRTypeKind::Tuple(items) | HIRTypeKind::Named { args: items, .. } => {
+            items.iter().any(hir_type_contains_error)
+        }
+        HIRTypeKind::Array(inner, _)
+        | HIRTypeKind::Slice(inner)
+        | HIRTypeKind::Ref(_, inner)
+        | HIRTypeKind::Ptr(inner) => hir_type_contains_error(inner),
+        HIRTypeKind::Fn { params, ret } => {
+            params.iter().any(hir_type_contains_error) || hir_type_contains_error(ret)
+        }
+        HIRTypeKind::AssocProjection { base, .. } => hir_type_contains_error(base),
+        _ => false,
+    }
+}
+
+fn propagate_expected_enum_types_in_expr(
+    expr: &mut HIRExpr,
+    expected: Option<&HIRType>,
+    function_return_type: &HIRType,
+) {
+    match expr {
+        HIRExpr::Lit(_) | HIRExpr::Var { .. } | HIRExpr::Continue => {}
+        HIRExpr::Unary(_, inner)
+        | HIRExpr::Deref(inner)
+        | HIRExpr::Await(inner)
+        | HIRExpr::Try(inner) => {
+            propagate_expected_enum_types_in_expr(inner, None, function_return_type);
+        }
+        HIRExpr::Ref(_, inner) => {
+            propagate_expected_enum_types_in_expr(inner, None, function_return_type);
+        }
+        HIRExpr::Binary(_, lhs, rhs) | HIRExpr::And(lhs, rhs) | HIRExpr::Or(lhs, rhs) => {
+            propagate_expected_enum_types_in_expr(lhs, None, function_return_type);
+            propagate_expected_enum_types_in_expr(rhs, None, function_return_type);
+        }
+        HIRExpr::If {
+            cond,
+            then_branch,
+            else_branch,
+        } => {
+            propagate_expected_enum_types_in_expr(cond, None, function_return_type);
+            propagate_expected_enum_types_in_body(then_branch, expected, function_return_type);
+            if let Some(else_branch) = else_branch {
+                propagate_expected_enum_types_in_body(else_branch, expected, function_return_type);
+            }
+        }
+        HIRExpr::Match { scrutinee, arms } => {
+            propagate_expected_enum_types_in_expr(scrutinee, None, function_return_type);
+            for arm in arms {
+                if let Some(guard) = arm.guard.as_deref_mut() {
+                    propagate_expected_enum_types_in_expr(guard, None, function_return_type);
+                }
+                propagate_expected_enum_types_in_expr(
+                    &mut arm.body,
+                    expected,
+                    function_return_type,
+                );
+            }
+        }
+        HIRExpr::Loop(body) => {
+            propagate_expected_enum_types_in_body(body, None, function_return_type);
+        }
+        HIRExpr::While { cond, body } => {
+            propagate_expected_enum_types_in_expr(cond, None, function_return_type);
+            propagate_expected_enum_types_in_body(body, None, function_return_type);
+        }
+        HIRExpr::For { iter, body, .. } => {
+            propagate_expected_enum_types_in_expr(iter, None, function_return_type);
+            propagate_expected_enum_types_in_body(body, None, function_return_type);
+        }
+        HIRExpr::Call { func, args, .. } => {
+            propagate_expected_enum_types_in_expr(func, None, function_return_type);
+            for arg in args {
+                propagate_expected_enum_types_in_expr(arg, None, function_return_type);
+            }
+        }
+        HIRExpr::EnumConstruct {
+            enum_name,
+            args,
+            concrete_type,
+            ..
+        } => {
+            for arg in args {
+                propagate_expected_enum_types_in_expr(arg, None, function_return_type);
+            }
+            if concrete_type.as_deref().is_none_or(hir_type_contains_error) {
+                if let Some(
+                    expected @ HIRType {
+                        kind: HIRTypeKind::Named { name, .. },
+                        ..
+                    },
+                ) = expected
+                {
+                    if name == enum_name {
+                        *concrete_type = Some(Box::new(expected.clone()));
+                    }
+                }
+            }
+        }
+        HIRExpr::MethodCall { receiver, args, .. } => {
+            propagate_expected_enum_types_in_expr(receiver, None, function_return_type);
+            for arg in args {
+                propagate_expected_enum_types_in_expr(arg, None, function_return_type);
+            }
+        }
+        HIRExpr::Struct { fields, .. } => {
+            for (_, value) in fields {
+                propagate_expected_enum_types_in_expr(value, None, function_return_type);
+            }
+        }
+        HIRExpr::Array(items) => {
+            let element_expected = expected.and_then(|ty| match &ty.kind {
+                HIRTypeKind::Array(inner, _) | HIRTypeKind::Slice(inner) => Some(inner.as_ref()),
+                _ => None,
+            });
+            for item in items {
+                propagate_expected_enum_types_in_expr(item, element_expected, function_return_type);
+            }
+        }
+        HIRExpr::Index { base, index } => {
+            propagate_expected_enum_types_in_expr(base, None, function_return_type);
+            propagate_expected_enum_types_in_expr(index, None, function_return_type);
+        }
+        HIRExpr::Field { base, .. } => {
+            propagate_expected_enum_types_in_expr(base, None, function_return_type);
+        }
+        HIRExpr::Assign { target, value } | HIRExpr::AssignOp { target, value, .. } => {
+            propagate_expected_enum_types_in_expr(target, None, function_return_type);
+            propagate_expected_enum_types_in_expr(value, None, function_return_type);
+        }
+        HIRExpr::Return(value) => {
+            if let Some(value) = value.as_deref_mut() {
+                propagate_expected_enum_types_in_expr(
+                    value,
+                    Some(function_return_type),
+                    function_return_type,
+                );
+            }
+        }
+        HIRExpr::Break(value) => {
+            if let Some(value) = value.as_deref_mut() {
+                propagate_expected_enum_types_in_expr(value, expected, function_return_type);
+            }
+        }
+        HIRExpr::Block(body) | HIRExpr::TryBlock(body) => {
+            propagate_expected_enum_types_in_body(body, expected, function_return_type);
+        }
+        HIRExpr::Cast(inner, _) => {
+            propagate_expected_enum_types_in_expr(inner, None, function_return_type);
+        }
+        HIRExpr::Ascribe(inner, ty) => {
+            propagate_expected_enum_types_in_expr(inner, Some(ty), function_return_type);
+        }
+        HIRExpr::Range { start, end, .. } => {
+            if let Some(start) = start.as_deref_mut() {
+                propagate_expected_enum_types_in_expr(start, None, function_return_type);
+            }
+            if let Some(end) = end.as_deref_mut() {
+                propagate_expected_enum_types_in_expr(end, None, function_return_type);
+            }
+        }
+        HIRExpr::Tuple(items) => {
+            let expected_items = expected.and_then(|ty| match &ty.kind {
+                HIRTypeKind::Tuple(items) => Some(items.as_slice()),
+                _ => None,
+            });
+            for (index, item) in items.iter_mut().enumerate() {
+                propagate_expected_enum_types_in_expr(
+                    item,
+                    expected_items.and_then(|items| items.get(index)),
+                    function_return_type,
+                );
+            }
+        }
+        HIRExpr::Lambda { body, .. } => {
+            propagate_expected_enum_types_in_expr(body, None, function_return_type);
+        }
+        HIRExpr::AsyncBlock(body) => {
+            propagate_expected_enum_types_in_body(body, None, function_return_type);
+        }
+    }
+}
+
 pub(crate) fn substitute_hir_function(
     function: &hir::HIRFunction,
     subst: &HashMap<String, HIRType>,
 ) -> hir::HIRFunction {
+    let return_type = substitute_hir_type(&function.return_type, subst);
+    let mut body = substitute_hir_body(&function.body, subst);
+    // Impl bodies are registered without a second type-checking pass. Preserve
+    // the specialized expected type for bare constructors such as `Some` and
+    // `None` so their MIR layout matches the specialized function signature.
+    propagate_expected_enum_types_in_body(&mut body, Some(&return_type), &return_type);
+
     hir::HIRFunction {
         name: function.name.clone(),
         type_params: function.type_params.clone(),
@@ -364,7 +581,7 @@ pub(crate) fn substitute_hir_function(
             .iter()
             .map(|param| param.with_type(substitute_hir_type(&param.ty, subst)))
             .collect(),
-        return_type: substitute_hir_type(&function.return_type, subst),
+        return_type,
         precondition: function
             .precondition
             .as_ref()
@@ -373,7 +590,7 @@ pub(crate) fn substitute_hir_function(
             .postcondition
             .as_ref()
             .map(|expr| substitute_hir_expr(expr, subst)),
-        body: substitute_hir_body(&function.body, subst),
+        body,
         is_async: function.is_async,
         abi: function.abi.clone(),
         is_unsafe: function.is_unsafe,

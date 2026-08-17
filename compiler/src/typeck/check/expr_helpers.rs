@@ -830,8 +830,98 @@ impl TypeChecker {
         })
     }
 
+    /// Deprecated field surface (`.is_ok`, `.is_some`, `.value`, `.error`) over
+    /// the enum forms of `Option` and `Result`.
+    ///
+    /// Kept for one release so existing field reads keep compiling while call
+    /// sites move to patterns; every hit reports `attributes::deprecated_use`
+    /// naming the pattern that replaces it. Reading a payload off the other arm
+    /// (`.value` on `Err`, `.error` on `Ok`) yields that type's default value,
+    /// which is what the placeholder in the struct form used to hold.
+    ///
+    /// Returns `None` for anything that is not one of those four fields on an
+    /// `Option`/`Result`-shaped enum, leaving ordinary field checking in place.
+    fn compat_enum_field_ty(
+        &mut self,
+        type_name: &str,
+        args: &[Ty],
+        field: &Ident,
+    ) -> Option<TyResult<Ty>> {
+        if type_name != "Option" && type_name != "Result" {
+            return None;
+        }
+        let variants = self.enum_variants.get(type_name)?.clone();
+        let has = |variant: &str| variants.iter().any(|name| name == variant);
+        let (success, failure) = if type_name == "Result" && has("Ok") && has("Err") {
+            ("Ok", "Err")
+        } else if type_name == "Option" && has("Some") && has("None") {
+            ("Some", "None")
+        } else {
+            return None;
+        };
+
+        let (variant, replacement) = match field.name.as_str() {
+            "is_ok" | "is_some" => {
+                let failure_pat = if failure == "None" {
+                    format!("`{failure}`")
+                } else {
+                    format!("`{failure}(..)`")
+                };
+                let hint = format!("match on `{success}(..)` / {failure_pat}");
+                self.warn_deprecated_field(type_name, &field.name, &hint, field.span);
+                return Some(Ok(self.env.bool_ty()));
+            }
+            "value" => (
+                success,
+                format!("bind the payload with a `{success}(value)` pattern"),
+            ),
+            "error" => (
+                failure,
+                format!("bind the payload with a `{failure}(error)` pattern"),
+            ),
+            _ => return None,
+        };
+
+        let payload = self
+            .enum_variant_field_tys
+            .get(type_name)
+            .and_then(|by_variant| by_variant.get(variant))
+            .and_then(|field_tys| field_tys.first())
+            .cloned()?;
+
+        let mut subst = HashMap::<TyVarId, Ty>::new();
+        if let Some(meta) = self.generic_type_metas.get(type_name) {
+            for (param, arg) in meta.params.iter().zip(args.iter()) {
+                subst.insert(param.var_id, arg.clone());
+            }
+        }
+        let resolved = self.substitute_ty_vars(&payload, &subst);
+        self.warn_deprecated_field(type_name, &field.name, &replacement, field.span);
+        Some(Ok(resolved))
+    }
+
+    fn warn_deprecated_field(
+        &mut self,
+        type_name: &str,
+        field: &str,
+        replacement: &str,
+        span: crate::lexer::Span,
+    ) {
+        self.push_warning(crate::error::CompileWarning::deprecated_use_with_metadata(
+            "field",
+            format!("{type_name}.{field}"),
+            Some(format!(
+                "`{type_name}` is an enum; direct field access is deprecated"
+            )),
+            Some(replacement.to_string()),
+            Some("the release after next".to_string()),
+            Some((span.lo, span.hi)),
+        ));
+    }
+
     pub(super) fn check_field(&mut self, base: &Expr, name: &Ident) -> TyResult<Ty> {
         let base_ty = self.check_expr(base)?;
+        let base_ty = self.infer.apply_subst(&base_ty);
 
         match &base_ty.kind {
             TyKind::Tuple(types) => tuple_field_index(&name.name)
@@ -844,6 +934,9 @@ impl TypeChecker {
                 name: type_name,
                 args,
             } => {
+                if let Some(field_ty) = self.compat_enum_field_ty(type_name, args, name) {
+                    return field_ty;
+                }
                 let field_defs =
                     self.struct_field_defs
                         .get(type_name)

@@ -134,6 +134,11 @@ pub struct TypeEnv {
     resolved_method_return_types: HashMap<(u32, u32), Ty>,
     /// Concrete return type selected for a generic function call.
     resolved_call_return_types: HashMap<u32, Ty>,
+    /// Concrete enum instance selected for a payload-free variant expression.
+    /// These variants have no argument from which HIR can recover generic
+    /// arguments, so the expected type chosen during checking is retained by
+    /// the expression's full span.
+    resolved_enum_variant_types: HashMap<(u32, u32), Ty>,
     resolved_struct_literal_types: HashMap<(u32, u32), Ty>,
     /// Fully-qualified symbol selected for an associated trait function call.
     resolved_associated_functions: HashMap<u32, String>,
@@ -158,6 +163,7 @@ impl TypeEnv {
             struct_field_types: HashMap::new(),
             resolved_method_return_types: HashMap::new(),
             resolved_call_return_types: HashMap::new(),
+            resolved_enum_variant_types: HashMap::new(),
             resolved_struct_literal_types: HashMap::new(),
             resolved_associated_functions: HashMap::new(),
         };
@@ -416,6 +422,12 @@ impl TypeEnv {
         }
     }
 
+    pub fn legacy_handle_method_borrows_receiver(&self, ty: &Ty, method: &str) -> bool {
+        method != "into_iter"
+            && (self.is_legacy_idempotent_handle_type(ty)
+                || matches!(&ty.kind, TyKind::Adt { name, .. } if name == "String"))
+    }
+
     fn type_contains_drop_owned_value_inner(
         &self,
         ty: &Ty,
@@ -546,6 +558,15 @@ impl TypeEnv {
 
     pub fn resolved_call_return_type(&self, call_site: u32) -> Option<&Ty> {
         self.resolved_call_return_types.get(&call_site)
+    }
+
+    pub fn record_enum_variant_type(&mut self, site: crate::lexer::Span, ty: Ty) {
+        self.resolved_enum_variant_types
+            .insert((site.lo, site.hi), ty);
+    }
+
+    pub fn resolved_enum_variant_type(&self, site: crate::lexer::Span) -> Option<&Ty> {
+        self.resolved_enum_variant_types.get(&(site.lo, site.hi))
     }
 
     pub fn record_struct_literal_type(&mut self, site: crate::lexer::Span, ty: Ty) {

@@ -63,7 +63,7 @@ def teardown_display() -> i64 {
 
 def platform_boot() -> Result<Platform, i64> {
     let status = sgplatform_init();
-    if status == STATUS_OK() { Result { is_ok: true, value: Platform { alive: true }, error: 0 }; } else { Result { is_ok: false, value: Platform { alive: false }, error: platform_status_from_raw(status) }; };
+    if status == STATUS_OK() { Ok(Platform { alive: true }); } else { Err(platform_status_from_raw(status)); };
 }
 
 def platform_shutdown(platform: Platform) -> bool {
@@ -71,7 +71,7 @@ def platform_shutdown(platform: Platform) -> bool {
 }
 
 def boot_platform() -> Result<i64, i64> {
-    if sggame_state_platform_alive_get() != 0 { Result { is_ok: true, value: STATUS_OK(), error: 0 }; } else { let platform = platform_boot().unwrap_or(Platform { alive: false }); if platform.alive { sggame_state_platform_alive_set(1); Result { is_ok: true, value: STATUS_OK(), error: 0 }; } else { Result { is_ok: false, value: 0, error: STATUS_PLATFORM() }; }; };
+    if sggame_state_platform_alive_get() != 0 { Ok(STATUS_OK()); } else { let platform = platform_boot().unwrap_or(Platform { alive: false }); if platform.alive { sggame_state_platform_alive_set(1); Ok(STATUS_OK()); } else { Err(STATUS_PLATFORM()); }; };
 }
 
 def shutdown_platform() -> bool {

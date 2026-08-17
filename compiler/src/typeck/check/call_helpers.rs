@@ -140,7 +140,7 @@ impl TypeChecker {
             call_subst.insert(*generic_param, self.infer.fresh_ty_var());
         }
         FunctionTy::new(
-            fn_ty.has_self,
+            fn_ty.self_param,
             fn_ty
                 .param_types
                 .iter()
@@ -693,7 +693,10 @@ impl TypeChecker {
         // for the duration so that generic parameters no argument pins — the
         // `E` of `Ok(value)` — are recovered from it.
         if let Some(result) = self.check_variant_callee(func, args, expected_return) {
-            return result;
+            let resolved = result?;
+            self.env
+                .record_call_return_type(call_span.lo, resolved.clone());
+            return Ok(resolved);
         }
 
         let builtin_name = match &func.kind {
@@ -1185,6 +1188,7 @@ impl TypeChecker {
                 let expected_ty =
                     self.resolve_associated_projection(&self.infer.apply_subst(arg_ty))?;
                 let actual_ty = self.check_expr_with_expected(arg_expr, &expected_ty)?;
+                self.reject_match_guard_binding_move(arg_expr, &expected_ty, &actual_ty)?;
                 // Passing an unawaited Future as a function argument is an escape.
                 // The caller must `await` it at the call-site first.
                 if self.contains_future_escape_ty(&actual_ty) {
@@ -1250,6 +1254,80 @@ impl TypeChecker {
                     .collect::<Vec<_>>()
                     .join("_"),
             ),
+            _ => None,
+        }
+    }
+
+    fn reject_match_guard_binding_move(
+        &self,
+        arg: &Expr,
+        expected_ty: &Ty,
+        actual_ty: &Ty,
+    ) -> TyResult<()> {
+        if matches!(self.infer.apply_subst(expected_ty).kind, TyKind::Ref(..))
+            || !self
+                .env
+                .type_contains_drop_owned_value(&self.infer.apply_subst(actual_ty))
+        {
+            return Ok(());
+        }
+        let Some(binding) = self.moved_match_guard_binding(arg) else {
+            return Ok(());
+        };
+        Err(TypeckError::diagnostic(
+            "match-guard-move",
+            format!("match guard cannot move pattern binding `{binding}`; borrow it instead"),
+            arg.span.lo,
+            arg.span.hi,
+        ))
+    }
+
+    fn reject_match_guard_receiver_move(
+        &self,
+        receiver: &Expr,
+        method: &str,
+        self_param: Option<SelfParam>,
+        receiver_ty: &Ty,
+    ) -> TyResult<()> {
+        if self
+            .env
+            .legacy_handle_method_borrows_receiver(receiver_ty, method)
+        {
+            return Ok(());
+        }
+        if !matches!(
+            self_param,
+            Some(SelfParam::Owned) | Some(SelfParam::OwnedMut)
+        ) {
+            return Ok(());
+        }
+        self.reject_match_guard_binding_move(receiver, receiver_ty, receiver_ty)
+    }
+
+    fn moved_match_guard_binding(&self, expr: &Expr) -> Option<String> {
+        let active = self.match_guard_bindings.last()?;
+        match &expr.kind {
+            ExprKind::Ident(ident) => active.contains(&ident.name).then(|| ident.name.clone()),
+            ExprKind::Path(path) if path.segments.len() == 1 => {
+                let name = &path.segments[0].name;
+                active.contains(name).then(|| name.clone())
+            }
+            ExprKind::Field { base, .. } | ExprKind::Index { base, .. } => {
+                self.moved_match_guard_binding(base)
+            }
+            ExprKind::Paren(inner) | ExprKind::Try(inner) | ExprKind::Await(inner) => {
+                self.moved_match_guard_binding(inner)
+            }
+            ExprKind::Tuple(items) | ExprKind::Array(items) => items
+                .iter()
+                .find_map(|item| self.moved_match_guard_binding(item)),
+            ExprKind::Struct { fields, base, .. } => fields
+                .iter()
+                .find_map(|field| self.moved_match_guard_binding(&field.value))
+                .or_else(|| {
+                    base.as_deref()
+                        .and_then(|base| self.moved_match_guard_binding(base))
+                }),
             _ => None,
         }
     }
@@ -1345,7 +1423,13 @@ impl TypeChecker {
                     ));
                 }
             };
-            for (expected, actual) in method_ty.param_types.iter().zip(actual_types.iter()) {
+            for ((expected, actual), arg) in method_ty
+                .param_types
+                .iter()
+                .zip(actual_types.iter())
+                .zip(args)
+            {
+                self.reject_match_guard_binding_move(arg, expected, actual)?;
                 self.infer.unify(expected, actual)?;
             }
             let trait_args = impl_info
@@ -1400,6 +1484,7 @@ impl TypeChecker {
             }
             for (expected, arg) in method_ty.param_types.iter().zip(args) {
                 let actual = self.check_expr_with_expected(arg, expected)?;
+                self.reject_match_guard_binding_move(arg, expected, &actual)?;
                 self.infer.unify(expected, &actual)?;
             }
             let resolved_return = self.infer.apply_subst(&method_ty.return_type);
@@ -1453,7 +1538,13 @@ impl TypeChecker {
                 ));
             }
         };
-        for (expected, actual) in method_ty.param_types.iter().zip(actual_types.iter()) {
+        for ((expected, actual), arg) in method_ty
+            .param_types
+            .iter()
+            .zip(actual_types.iter())
+            .zip(args)
+        {
+            self.reject_match_guard_binding_move(arg, expected, actual)?;
             self.infer.unify(expected, actual)?;
         }
         let trait_args = impl_info
@@ -1684,6 +1775,12 @@ impl TypeChecker {
                 && args.is_empty()
                 && matches!(receiver_ty.kind, TyKind::Dyn(_))
             {
+                self.reject_match_guard_receiver_move(
+                    receiver,
+                    method_name,
+                    Some(SelfParam::Owned),
+                    &receiver_ty,
+                )?;
                 return Ok(self.env.unit_ty());
             }
             for trait_name in &traits {
@@ -1699,8 +1796,20 @@ impl TypeChecker {
                         found: args.len(),
                     });
                 }
-                for (expected, actual) in method_sig.param_types.iter().zip(arg_types.iter()) {
+                self.reject_match_guard_receiver_move(
+                    receiver,
+                    method_name,
+                    method_sig.self_param,
+                    &receiver_ty,
+                )?;
+                for ((expected, actual), arg) in method_sig
+                    .param_types
+                    .iter()
+                    .zip(arg_types.iter())
+                    .zip(args)
+                {
                     let expected = self.infer.apply_subst(expected);
+                    self.reject_match_guard_binding_move(arg, &expected, actual)?;
                     self.infer.unify(&expected, actual)?;
                 }
                 return Ok(self.infer.apply_subst(&method_sig.return_type));
@@ -1798,7 +1907,16 @@ impl TypeChecker {
                 });
             }
 
-            for (expected, actual) in fn_ty.param_types.iter().zip(arg_types.iter()) {
+            self.reject_match_guard_receiver_move(
+                receiver,
+                method_name,
+                fn_ty.self_param,
+                &receiver_ty,
+            )?;
+            for ((expected, actual), arg) in
+                fn_ty.param_types.iter().zip(arg_types.iter()).zip(args)
+            {
+                self.reject_match_guard_binding_move(arg, expected, actual)?;
                 self.infer.unify(expected, actual)?;
             }
 
@@ -1810,7 +1928,16 @@ impl TypeChecker {
         if let Some(fn_ty) =
             self.select_generic_bound_method_candidate(&receiver_ty, method_name, args.len())?
         {
-            for (expected, actual) in fn_ty.param_types.iter().zip(arg_types.iter()) {
+            self.reject_match_guard_receiver_move(
+                receiver,
+                method_name,
+                fn_ty.self_param,
+                &receiver_ty,
+            )?;
+            for ((expected, actual), arg) in
+                fn_ty.param_types.iter().zip(arg_types.iter()).zip(args)
+            {
+                self.reject_match_guard_binding_move(arg, expected, actual)?;
                 self.infer.unify(expected, actual)?;
             }
             return self.resolve_associated_projection(&self.infer.apply_subst(&fn_ty.return_type));
@@ -1824,7 +1951,16 @@ impl TypeChecker {
             expected_return,
             call_span,
         )? {
-            for (expected, actual) in fn_ty.param_types.iter().zip(arg_types.iter()) {
+            self.reject_match_guard_receiver_move(
+                receiver,
+                method_name,
+                fn_ty.self_param,
+                &receiver_ty,
+            )?;
+            for ((expected, actual), arg) in
+                fn_ty.param_types.iter().zip(arg_types.iter()).zip(args)
+            {
+                self.reject_match_guard_binding_move(arg, expected, actual)?;
                 self.infer.unify(expected, actual)?;
             }
             let resolved =
@@ -1879,7 +2015,7 @@ impl TypeChecker {
                 continue;
             }
             let fn_ty = FunctionTy::with_generic_params(
-                true,
+                method_sig.self_param,
                 method_sig.param_types,
                 method_sig.return_type,
                 method_sig.generic_params,

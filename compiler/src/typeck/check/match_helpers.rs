@@ -44,11 +44,15 @@ impl TypeChecker {
             }
 
             self.env.push_scope();
+            let mut guard_binding_names = HashSet::new();
             for pattern in &arm.patterns {
-                self.bind_pattern_vars(pattern, &scrutinee_ty)?;
+                guard_binding_names.extend(self.bind_pattern_vars(pattern, &scrutinee_ty)?);
             }
             if let Some(guard) = &arm.guard {
-                let guard_ty = self.check_expr(guard)?;
+                self.match_guard_bindings.push(guard_binding_names);
+                let checked_guard = self.check_expr(guard);
+                self.match_guard_bindings.pop();
+                let guard_ty = checked_guard?;
                 self.infer.unify(&guard_ty, &self.env.bool_ty())?;
                 if !matches!(self.infer.apply_subst(&guard_ty).kind, TyKind::Bool) {
                     return Err(TypeckError::GuardNotBool {
@@ -147,12 +151,14 @@ impl TypeChecker {
         }
     }
 
-    fn bind_pattern_vars(&mut self, pat: &Pattern, scrutinee_ty: &Ty) -> TyResult<()> {
+    fn bind_pattern_vars(&mut self, pat: &Pattern, scrutinee_ty: &Ty) -> TyResult<Vec<String>> {
         let bindings = self.collect_pattern_bindings(pat, scrutinee_ty)?;
+        let mut names = Vec::with_capacity(bindings.names.len());
         for (name, ty) in bindings.names {
-            self.env.insert_var(name, ty);
+            self.env.insert_var(name.clone(), ty);
+            names.push(name);
         }
-        Ok(())
+        Ok(names)
     }
 
     fn scrutinee_enum_name(scrutinee_ty: &Ty) -> Option<String> {

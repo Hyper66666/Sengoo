@@ -92,6 +92,181 @@ def main() -> i64 {
 }
 
 #[test]
+fn match_guard_cannot_move_owned_payload_binding() {
+    let source = r#"
+struct Owned { value: i64 }
+impl Drop for Owned {
+    def drop(&mut self) { self.value = 0; }
+}
+enum MaybeOwned { Empty, Value(Owned) }
+def consume_and_reject(value: Owned) -> bool { value.value == 99 }
+def main() -> i64 {
+    let value: MaybeOwned = MaybeOwned::Value(Owned { value: 7 });
+    match value {
+        MaybeOwned::Value(inner) if consume_and_reject(inner) => 1,
+        MaybeOwned::Value(inner) => inner.value,
+        MaybeOwned::Empty => 0,
+    }
+}
+"#;
+    let mut parser = Parser::new(source);
+    let program = parser.parse_program().expect("parse");
+    let err = typeck(&program).expect_err("a match guard must not consume its payload binding");
+    assert!(
+        err.to_string().contains("[match-guard-move]"),
+        "expected stable match-guard-move diagnostic, got: {err}"
+    );
+}
+
+#[test]
+fn match_guard_cannot_move_owned_payload_through_by_value_method_receiver() {
+    let source = r#"
+struct Owned { value: i64 }
+impl Drop for Owned {
+    def drop(&mut self) { self.value = 0; }
+}
+impl Owned {
+    def consume(self) -> bool { self.value == 99 }
+}
+enum MaybeOwned { Empty, Value(Owned) }
+def main() -> i64 {
+    let value: MaybeOwned = MaybeOwned::Value(Owned { value: 7 });
+    match value {
+        MaybeOwned::Value(inner) if inner.consume() => 1,
+        MaybeOwned::Value(inner) => inner.value,
+        MaybeOwned::Empty => 0,
+    }
+}
+"#;
+    let mut parser = Parser::new(source);
+    let program = parser.parse_program().expect("parse");
+    let err = typeck(&program).expect_err("a match guard must not consume its receiver binding");
+    assert!(
+        err.to_string().contains("[match-guard-move]"),
+        "expected stable match-guard-move diagnostic, got: {err}"
+    );
+}
+
+#[test]
+fn match_guard_cannot_move_owned_payload_through_method_argument() {
+    let source = r#"
+struct Owned { value: i64 }
+impl Drop for Owned {
+    def drop(&mut self) { self.value = 0; }
+}
+struct Inspector {}
+impl Inspector {
+    def consume_and_reject(&self, value: Owned) -> bool { value.value == 99 }
+}
+enum MaybeOwned { Empty, Value(Owned) }
+def main() -> i64 {
+    let inspector = Inspector {};
+    let value: MaybeOwned = MaybeOwned::Value(Owned { value: 7 });
+    match value {
+        MaybeOwned::Value(inner) if inspector.consume_and_reject(inner) => 1,
+        MaybeOwned::Value(inner) => inner.value,
+        MaybeOwned::Empty => 0,
+    }
+}
+"#;
+    let mut parser = Parser::new(source);
+    let program = parser.parse_program().expect("parse");
+    let err =
+        typeck(&program).expect_err("a match guard must not consume a method argument binding");
+    assert!(
+        err.to_string().contains("[match-guard-move]"),
+        "expected stable match-guard-move diagnostic, got: {err}"
+    );
+}
+
+#[test]
+fn match_guard_cannot_move_owned_payload_through_associated_function() {
+    let source = r#"
+struct Owned { value: i64 }
+impl Drop for Owned {
+    def drop(&mut self) { self.value = 0; }
+}
+impl Owned {
+    def consume_and_reject(value: Owned) -> bool { value.value == 99 }
+}
+enum MaybeOwned { Empty, Value(Owned) }
+def main() -> i64 {
+    let value: MaybeOwned = MaybeOwned::Value(Owned { value: 7 });
+    match value {
+        MaybeOwned::Value(inner) if Owned::consume_and_reject(inner) => 1,
+        MaybeOwned::Value(inner) => inner.value,
+        MaybeOwned::Empty => 0,
+    }
+}
+"#;
+    let mut parser = Parser::new(source);
+    let program = parser.parse_program().expect("parse");
+    let err = typeck(&program)
+        .expect_err("a match guard must not consume an associated argument binding");
+    assert!(
+        err.to_string().contains("[match-guard-move]"),
+        "expected stable match-guard-move diagnostic, got: {err}"
+    );
+}
+
+#[test]
+fn match_guard_cannot_move_owned_payload_through_trait_associated_function() {
+    let source = r#"
+struct Owned { value: i64 }
+impl Drop for Owned {
+    def drop(&mut self) { self.value = 0; }
+}
+trait Reject {
+    def consume_and_reject(value: Owned) -> bool {}
+}
+impl Reject for Owned {
+    def consume_and_reject(value: Owned) -> bool { value.value == 99 }
+}
+enum MaybeOwned { Empty, Value(Owned) }
+def main() -> i64 {
+    let value: MaybeOwned = MaybeOwned::Value(Owned { value: 7 });
+    match value {
+        MaybeOwned::Value(inner) if Reject::consume_and_reject(inner) => 1,
+        MaybeOwned::Value(inner) => inner.value,
+        MaybeOwned::Empty => 0,
+    }
+}
+"#;
+    let mut parser = Parser::new(source);
+    let program = parser.parse_program().expect("parse");
+    let err = typeck(&program)
+        .expect_err("a match guard must not consume a trait associated argument binding");
+    assert!(
+        err.to_string().contains("[match-guard-move]"),
+        "expected stable match-guard-move diagnostic, got: {err}"
+    );
+}
+
+#[test]
+fn match_guard_can_borrow_owned_payload_through_method_receiver() {
+    typeck_ok(
+        r#"
+struct Owned { value: i64 }
+impl Drop for Owned {
+    def drop(&mut self) { self.value = 0; }
+}
+impl Owned {
+    def inspect(&self) -> bool { self.value == 99 }
+}
+enum MaybeOwned { Empty, Value(Owned) }
+def main() -> i64 {
+    let value: MaybeOwned = MaybeOwned::Value(Owned { value: 7 });
+    match value {
+        MaybeOwned::Value(inner) if inner.inspect() => 1,
+        MaybeOwned::Value(inner) => inner.value,
+        MaybeOwned::Empty => 0,
+    }
+}
+"#,
+    );
+}
+
+#[test]
 fn or_pattern_binding_mismatch_is_rejected() {
     typeck_err(
         r#"

@@ -10,12 +10,12 @@ struct Surface {
 }
 
 def set_mode(width: i64, height: i64, title: &str) -> Result<Surface, i64> {
-    if width <= 0 or height <= 0 { Result { is_ok: false, value: Surface { width: 0, height: 0 }, error: STATUS_INVALID_ARGUMENT() }; } else if sggame_state_platform_alive_get() == 0 { Result { is_ok: false, value: Surface { width: 0, height: 0 }, error: STATUS_INVALID_HANDLE() }; } else { teardown_display(); let platform = current_platform(); let window = platform.create_window(title, width, height).unwrap_or(Window { handle: 0, closed: true }); if window.handle == 0 { Result { is_ok: false, value: Surface { width: 0, height: 0 }, error: STATUS_PLATFORM() }; } else { store_window(window); let renderer = window.create_renderer().unwrap_or(Renderer { handle: 0, destroyed: true }); if renderer.handle == 0 { let _closed = window.close(); store_window(Window { handle: 0, closed: true }); Result { is_ok: false, value: Surface { width: 0, height: 0 }, error: STATUS_PLATFORM() }; } else { store_renderer(renderer); sggame_state_surface_w_set(width); sggame_state_surface_h_set(height); Result { is_ok: true, value: Surface { width: width, height: height }, error: 0 }; }; }; };
+    if width <= 0 or height <= 0 { Err(STATUS_INVALID_ARGUMENT()); } else if sggame_state_platform_alive_get() == 0 { Err(STATUS_INVALID_HANDLE()); } else { teardown_display(); let platform = current_platform(); let window = platform.create_window(title, width, height).unwrap_or(Window { handle: 0, closed: true }); if window.handle == 0 { Err(STATUS_PLATFORM()); } else { store_window(window); let renderer = window.create_renderer().unwrap_or(Renderer { handle: 0, destroyed: true }); if renderer.handle == 0 { let _closed = window.close(); store_window(Window { handle: 0, closed: true }); Err(STATUS_PLATFORM()); } else { store_renderer(renderer); sggame_state_surface_w_set(width); sggame_state_surface_h_set(height); Ok(Surface { width: width, height: height }); }; }; };
 }
 
 def flip() -> Result<i64, i64> {
     let renderer = current_renderer();
-    if renderer.handle == 0 or renderer.destroyed { Result { is_ok: false, value: 0, error: STATUS_INVALID_HANDLE() }; } else { renderer.present(); };
+    if renderer.handle == 0 or renderer.destroyed { Err(STATUS_INVALID_HANDLE()); } else { renderer.present(); };
 }
 
 def get_surface() -> Surface {

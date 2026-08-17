@@ -12,30 +12,45 @@ async def slow_value() -> i64 {
 }
 
 async def channel_round_trip() -> i64 {
-    let pair = channel_bounded(2);
-    if not pair.is_ok { return pair.error; };
-    let sender = channel_pair_sender(pair.value);
-    let receiver = channel_pair_receiver(pair.value);
+    let pair = match channel_bounded(2) {
+        Ok(value) => value,
+        Err(error) => return error,
+    };
+    let sender = channel_pair_sender(pair);
+    let receiver = channel_pair_receiver(pair);
     let sent = await channel_send_i64(sender, 64);
     let received = await channel_recv_i64(receiver);
     channel_sender_drop(sender);
-    channel_pair_drop(pair.value);
-    if not sent.is_ok { return sent.error; };
-    if received.is_ok { received.value; } else { received.error; };
+    channel_pair_drop(pair);
+    if not sent.is_ok {
+        return sent.error;
+    }
+    if received.is_ok { received.value } else { received.error }
 }
 
 async def mutex_score() -> i64 {
     let mutex = mutex_new_i64(20);
     let locked = await mutex_lock_async(mutex);
-    if not locked.is_ok { return locked.error; };
-    let unlocked = mutex_unlock_i64(mutex, locked.value + 2);
+    if not locked.is_ok {
+        return locked.error;
+    }
+    let locked_value = locked.value;
+    let unlocked = mutex_unlock_i64(mutex, locked_value + 2);
     mutex_drop(mutex);
-    if unlocked.is_ok { unlocked.value; } else { unlocked.error; };
+    match unlocked {
+        Ok(value) => value,
+        Err(error) => error,
+    }
 }
 
 async def main() -> i64 {
-    let invalid_channel = channel_bounded(0);
-    let invalid_status = not invalid_channel.is_ok and invalid_channel.error == STATUS_INVALID_ARGUMENT();
+    let invalid_status = match channel_bounded(0) {
+        Ok(pair) => {
+            channel_pair_drop(pair);
+            false
+        },
+        Err(error) => error == STATUS_INVALID_ARGUMENT(),
+    };
     let channel_value = await channel_round_trip();
     let mutex_value = await mutex_score();
     let first = spawn(fast_value());

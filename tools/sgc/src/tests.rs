@@ -9959,12 +9959,12 @@ async fn stdlib_surface_cross_module_generic_type_imports_probe_successfully() {
 import collections;
 
 def util_ok_flag() -> Option<bool> {
-    let ok_result: Result<bool, i64> = Result { is_ok: true, value: true, error: 9 };
+    let ok_result: Result<bool, i64> = Ok(true);
     ok_result.ok()
 }
 
 def util_err_flag() -> Option<bool> {
-    let err_result: Result<i64, bool> = Result { is_ok: false, value: 0, error: true };
+    let err_result: Result<i64, bool> = Err(true);
     err_result.err()
 }
 "#,
@@ -10288,7 +10288,535 @@ def main() -> i64 {
     let before = sengoo_string_live_handle_count();
     let accepted_len = exercise_filter();
     let after = sengoo_string_live_handle_count();
-    if accepted_len == 8 && after == before { 42 } else { 1 }
+    if accepted_len != 8 {
+        10
+    } else if after != before {
+        20
+    } else {
+        42
+    }
+}
+"#,
+    );
+
+    assert_eq!(output.status.code(), Some(42));
+}
+
+#[test]
+fn stdlib_surface_runtime_option_owned_match_and_unwrap_drop_exactly_once() {
+    let output = require_stdlib_runtime_output!(
+        "option-owned-match-unwrap-drop",
+        r#"
+extern "C" {
+    fn sengoo_string_live_handle_count() -> i64;
+}
+
+def make_text(value: &str) -> String {
+    match string_from_str(value) {
+        Ok(text) => text,
+        Err(_) => String { handle: 0 },
+    }
+}
+
+def exercise_match() -> i64 {
+    let matched: Option<String> = Some(make_text("match"));
+    match matched {
+        Some(text) => text.len(),
+        None => 0,
+    }
+}
+
+def exercise_present_unwrap() -> i64 {
+    let present: Option<String> = Some(make_text("present"));
+    let selected = present.unwrap_or(make_text("fallback"));
+    selected.len()
+}
+
+def exercise_absent_unwrap() -> i64 {
+    let absent: Option<String> = None;
+    let fallback = absent.unwrap_or(make_text("none"));
+    fallback.len()
+}
+
+def main() -> i64 {
+    let before = sengoo_string_live_handle_count();
+    let matched_len = exercise_match();
+    let after_match = sengoo_string_live_handle_count();
+    if matched_len != 5 {
+        10
+    } else if after_match != before {
+        20
+    } else {
+        let present_len = exercise_present_unwrap();
+        let after_present = sengoo_string_live_handle_count();
+        if present_len != 7 {
+            11
+        } else if after_present != before {
+            21
+        } else {
+            let absent_len = exercise_absent_unwrap();
+            let after_absent = sengoo_string_live_handle_count();
+            if absent_len != 4 {
+                12
+            } else if after_absent != before {
+                22
+            } else {
+                42
+            }
+        }
+    }
+}
+"#,
+    );
+
+    assert_eq!(output.status.code(), Some(42));
+}
+
+#[test]
+fn stdlib_surface_runtime_raw_collections_owned_option_paths_drop_exactly_once() {
+    let output = require_stdlib_runtime_output!(
+        "raw-collections-owned-option-drop",
+        r#"
+extern "C" {
+    fn sengoo_string_live_handle_count() -> i64;
+}
+
+def make_text(value: &str) -> String {
+    match string_from_str(value) {
+        Ok(text) => text,
+        Err(_) => String { handle: 0 },
+    }
+}
+
+def exercise_vec() -> i64 {
+    let values: Vec<String> = vec_new();
+    values.push(make_text("vector"));
+    let popped_len = match values.pop() {
+        Some(text) => text.len(),
+        None => 0,
+    };
+    let pop_empty = match values.pop() {
+        Some(_) => false,
+        None => true,
+    };
+
+    if pop_empty { popped_len } else { 0 }
+}
+
+def exercise_map() -> i64 {
+    let entries: HashMap<i64, String> = hashmap_new();
+    entries.insert(7, make_text("map"));
+    let mut key = 7;
+    let removed_len = match entries.remove(&key) {
+        Some(text) => text.len(),
+        None => 0,
+    };
+    let remove_missing = match entries.remove(&key) {
+        Some(_) => false,
+        None => true,
+    };
+
+    if remove_missing { removed_len } else { 0 }
+}
+
+def main() -> i64 {
+    let before = sengoo_string_live_handle_count();
+    let popped_len = exercise_vec();
+    let after_vec = sengoo_string_live_handle_count();
+    if popped_len != 6 {
+        10
+    } else if after_vec != before {
+        20
+    } else {
+        let removed_len = exercise_map();
+        let after_map = sengoo_string_live_handle_count();
+        if removed_len != 3 {
+            11
+        } else if after_map != before {
+            21
+        } else {
+            42
+        }
+    }
+}
+"#,
+    );
+
+    assert_eq!(output.status.code(), Some(42));
+}
+
+#[test]
+fn stdlib_surface_runtime_ignored_owned_enum_payload_drops_at_match_arm_exit() {
+    let output = require_stdlib_runtime_output!(
+        "ignored-owned-enum-payload-drop",
+        r#"
+extern "C" {
+    fn sengoo_string_live_handle_count() -> i64;
+}
+
+def make_text(value: &str) -> String {
+    match string_from_str(value) {
+        Ok(text) => text,
+        Err(_) => String { handle: 0 },
+    }
+}
+
+def discard_popped_text() -> bool {
+    let values: Vec<String> = vec_new();
+    values.push(make_text("discard"));
+    match values.pop() {
+        Some(_) => true,
+        None => false,
+    }
+}
+
+def main() -> i64 {
+    let before = sengoo_string_live_handle_count();
+    let discarded = discard_popped_text();
+    let after = sengoo_string_live_handle_count();
+    if !discarded {
+        10
+    } else if after != before {
+        20
+    } else {
+        42
+    }
+}
+"#,
+    );
+
+    assert_eq!(output.status.code(), Some(42));
+}
+
+#[test]
+fn stdlib_surface_runtime_owned_enum_match_guards_drop_payload_exactly_once() {
+    let output = require_stdlib_runtime_output!(
+        "owned-enum-match-guard-drop",
+        r#"
+extern "C" {
+    fn sengoo_string_live_handle_count() -> i64;
+}
+
+def make_text(value: &str) -> String {
+    match string_from_str(value) {
+        Ok(text) => text,
+        Err(_) => String { handle: 0 },
+    }
+}
+
+struct OwnedText {
+    text: String,
+}
+
+def make_owned_text(value: &str) -> OwnedText {
+    OwnedText { text: make_text(value) }
+}
+
+def inspect_and_reject(value: &OwnedText) -> bool {
+    (*value).text.len() == 99
+}
+
+def guard_falls_through() -> i64 {
+    let result: Result<OwnedText, String> = Ok(make_owned_text("fallthrough"));
+    match result {
+        Ok(text) if inspect_and_reject(&text) => 0,
+        Ok(text) => text.text.len(),
+        Err(_) => 0,
+    }
+}
+
+def guard_matches() -> i64 {
+    let result: Result<String, String> = Ok(make_text("matched"));
+    match result {
+        Ok(text) if text.len() == 7 => text.len(),
+        Ok(_) => 0,
+        Err(_) => 0,
+    }
+}
+
+def main() -> i64 {
+    let before = sengoo_string_live_handle_count();
+    let fallthrough_len = guard_falls_through();
+    let after_fallthrough = sengoo_string_live_handle_count();
+    if fallthrough_len != 11 {
+        10
+    } else if after_fallthrough != before {
+        20
+    } else {
+        let matched_len = guard_matches();
+        let after_match = sengoo_string_live_handle_count();
+        if matched_len != 7 {
+            11
+        } else if after_match != before {
+            21
+        } else {
+            42
+        }
+    }
+}
+"#,
+    );
+
+    assert_eq!(output.status.code(), Some(42));
+}
+
+#[test]
+fn stdlib_surface_runtime_owned_enum_payload_match_guard_drops_exactly_once() {
+    let output = require_stdlib_runtime_output!(
+        "owned-enum-payload-match-guard-drop",
+        r#"
+extern "C" {
+    fn sengoo_string_live_handle_count() -> i64;
+}
+
+def make_text(value: &str) -> String {
+    match string_from_str(value) {
+        Ok(text) => text,
+        Err(_) => String { handle: 0 },
+    }
+}
+
+def guard_matches() -> i64 {
+    let value: Option<String> = Some(make_text("guard"));
+    match value {
+        Some(text) if text.len() == 5 => text.len(),
+        Some(text) => text.len() + 10,
+        None => 0,
+    }
+}
+
+def guard_falls_through() -> i64 {
+    let value: Option<String> = Some(make_text("later"));
+    match value {
+        Some(text) if text.len() == 0 => text.len(),
+        Some(text) => text.len(),
+        None => 0,
+    }
+}
+
+def main() -> i64 {
+    let before = sengoo_string_live_handle_count();
+    let matched = guard_matches();
+    let after_match = sengoo_string_live_handle_count();
+    if matched != 5 {
+        10
+    } else if after_match != before {
+        20
+    } else {
+        let fell_through = guard_falls_through();
+        let after_fallthrough = sengoo_string_live_handle_count();
+        if fell_through != 5 {
+            11
+        } else if after_fallthrough != before {
+            21
+        } else {
+            42
+        }
+    }
+}
+"#,
+    );
+
+    assert_eq!(output.status.code(), Some(42));
+}
+
+#[test]
+fn stdlib_surface_runtime_result_owned_variants_drop_at_scope_exit() {
+    let output = require_stdlib_runtime_output!(
+        "result-owned-variant-scope-drop",
+        r#"
+extern "C" {
+    fn sengoo_string_live_handle_count() -> i64;
+}
+
+def make_text(value: &str) -> String {
+    match string_from_str(value) {
+        Ok(text) => text,
+        Err(_) => String { handle: 0 },
+    }
+}
+
+def scope_ok() -> i64 {
+    let result: Result<String, String> = Ok(make_text("ok"));
+    2
+}
+
+def scope_err() -> i64 {
+    let result: Result<String, String> = Err(make_text("error"));
+    5
+}
+
+def main() -> i64 {
+    let before = sengoo_string_live_handle_count();
+    let ok_status = scope_ok();
+    let after_ok = sengoo_string_live_handle_count();
+    if ok_status != 2 {
+        10
+    } else if after_ok != before {
+        20
+    } else {
+        let err_status = scope_err();
+        let after_err = sengoo_string_live_handle_count();
+        if err_status != 5 {
+            11
+        } else if after_err != before {
+            21
+        } else {
+            42
+        }
+    }
+}
+"#,
+    );
+
+    assert_eq!(output.status.code(), Some(42));
+}
+
+#[test]
+fn stdlib_surface_runtime_match_arm_binding_name_does_not_leak_after_match() {
+    let output = require_stdlib_runtime_output!(
+        "match-arm-binding-scope",
+        r#"
+def reuses_outer_name_after_match() -> i64 {
+    let payload = 10;
+    let result: Result<i64, i64> = Ok(32);
+    let matched = match result {
+        Ok(payload) => payload,
+        Err(_) => 0,
+    };
+    payload + matched
+}
+
+def main() -> i64 {
+    reuses_outer_name_after_match()
+}
+"#,
+    );
+
+    assert_eq!(output.status.code(), Some(42));
+}
+
+#[test]
+fn stdlib_surface_runtime_question_mark_owned_payloads_drop_exactly_once() {
+    let output = require_stdlib_runtime_output!(
+        "question-mark-owned-payload-drop",
+        r#"
+extern "C" {
+    fn sengoo_string_live_handle_count() -> i64;
+}
+
+def make_text(value: &str) -> String {
+    match string_from_str(value) {
+        Ok(text) => text,
+        Err(_) => String { handle: 0 },
+    }
+}
+
+def result_ok_value() -> Result<String, String> {
+    Ok(make_text("success"))
+}
+
+def result_err_value() -> Result<String, String> {
+    Err(make_text("failure"))
+}
+
+def option_some_value() -> Option<String> {
+    Some(make_text("some"))
+}
+
+def option_none_value() -> Option<String> {
+    None
+}
+
+def propagate_result_ok() -> Result<String, String> {
+    let outcome = result_ok_value();
+    let value = outcome?;
+    Ok(value)
+}
+
+def propagate_result_err() -> Result<String, String> {
+    let live = make_text("local-result");
+    let outcome = result_err_value();
+    let value = outcome?;
+    Ok(value)
+}
+
+def propagate_option_some() -> Option<String> {
+    let outcome = option_some_value();
+    let value = outcome?;
+    Some(value)
+}
+
+def propagate_option_none() -> Option<String> {
+    let live = make_text("local-option");
+    let outcome = option_none_value();
+    let value = outcome?;
+    Some(value)
+}
+
+def exercise_result_ok() -> i64 {
+    match propagate_result_ok() {
+        Ok(text) => text.len(),
+        Err(_) => 0,
+    }
+}
+
+def exercise_result_err() -> i64 {
+    match propagate_result_err() {
+        Ok(_) => 0,
+        Err(error) => error.len(),
+    }
+}
+
+def exercise_option_some() -> i64 {
+    match propagate_option_some() {
+        Some(text) => text.len(),
+        None => 0,
+    }
+}
+
+def exercise_option_none() -> i64 {
+    match propagate_option_none() {
+        Some(_) => 0,
+        None => 1,
+    }
+}
+
+def main() -> i64 {
+    let before = sengoo_string_live_handle_count();
+    let result_ok_len = exercise_result_ok();
+    let after_result_ok = sengoo_string_live_handle_count();
+    if result_ok_len != 7 {
+        10
+    } else if after_result_ok != before {
+        20
+    } else {
+        let result_err_len = exercise_result_err();
+        let after_result_err = sengoo_string_live_handle_count();
+        if result_err_len != 7 {
+            11
+        } else if after_result_err != before {
+            21
+        } else {
+            let option_some_len = exercise_option_some();
+            let after_option_some = sengoo_string_live_handle_count();
+            if option_some_len != 4 {
+                12
+            } else if after_option_some != before {
+                22
+            } else {
+                let option_none_status = exercise_option_none();
+                let after_option_none = sengoo_string_live_handle_count();
+                if option_none_status != 1 {
+                    13
+                } else if after_option_none != before {
+                    23
+                } else {
+                    42
+                }
+            }
+        }
+    }
 }
 "#,
     );
@@ -12428,9 +12956,9 @@ fn stdlib_impl_method_instance_source() -> String {
         load_stdlib_surface_source(),
         r#"
 def main() -> bool {
-    let opt: Option<bool> = Option { is_some: true, value: true };
+    let opt: Option<bool> = Some(true);
     let ok_result: Result<bool, bool> = opt.ok_or(false);
-    let res: Result<bool, i64> = Result { is_ok: true, value: true, error: 9 };
+    let res: Result<bool, i64> = Ok(true);
     opt.unwrap_or(false) && ok_result.ok().unwrap_or(false) && res.unwrap_or(false)
 }
 "#
@@ -12443,8 +12971,8 @@ fn stdlib_chained_impl_method_instance_source() -> String {
         load_stdlib_surface_source(),
         r#"
 def main() -> bool {
-    let ok_result: Result<bool, i64> = Result { is_ok: true, value: true, error: 9 };
-    let err_result: Result<i64, bool> = Result { is_ok: false, value: 0, error: true };
+    let ok_result: Result<bool, i64> = Ok(true);
+    let err_result: Result<i64, bool> = Err(true);
     ok_result.ok().unwrap_or(false) && err_result.err().unwrap_or(false)
 }
 "#
@@ -14425,9 +14953,9 @@ fn stdlib_surface_runtime_generic_result_projections_work() {
         "generic-result-projections",
         r#"
 def main() -> i64 {
-    let ok_result: Result<bool, i64> = Result { is_ok: true, value: true, error: 6 };
-    let err_result: Result<bool, i64> = Result { is_ok: false, value: false, error: 6 };
-    let bool_err: Result<i64, bool> = Result { is_ok: false, value: 0, error: true };
+    let ok_result: Result<bool, i64> = Ok(true);
+    let err_result: Result<bool, i64> = Err(6);
+    let bool_err: Result<i64, bool> = Err(true);
 
     let ok_option: Option<bool> = ok_result.ok();
     let err_code_option: Option<i64> = err_result.err();
@@ -14455,9 +14983,9 @@ fn stdlib_surface_runtime_generic_result_projections_infer_local_types() {
         "generic-result-projections-infer-locals",
         r#"
 def main() -> i64 {
-    let ok_result: Result<bool, i64> = Result { is_ok: true, value: true, error: 6 };
-    let err_result: Result<bool, i64> = Result { is_ok: false, value: false, error: 6 };
-    let bool_err: Result<i64, bool> = Result { is_ok: false, value: 0, error: true };
+    let ok_result: Result<bool, i64> = Ok(true);
+    let err_result: Result<bool, i64> = Err(6);
+    let bool_err: Result<i64, bool> = Err(true);
 
     let ok_option = ok_result.ok();
     let err_code_option = err_result.err();
@@ -14563,8 +15091,8 @@ fn stdlib_surface_runtime_generic_option_ok_or_with_i64_error_works() {
         "generic-option-ok-or-i64",
         r#"
 def main() -> i64 {
-    let some_flag: Option<bool> = Option { is_some: true, value: true };
-    let none_flag: Option<bool> = Option { is_some: false, value: false };
+    let some_flag: Option<bool> = Some(true);
+    let none_flag: Option<bool> = None;
 
     let ok_result = some_flag.ok_or(6);
     let err_result = none_flag.ok_or(6);
@@ -14590,8 +15118,8 @@ fn stdlib_surface_runtime_generic_option_ok_or_with_bool_error_works() {
         "generic-option-ok-or-bool",
         r#"
 def main() -> i64 {
-    let some_flag: Option<bool> = Option { is_some: true, value: true };
-    let none_flag: Option<bool> = Option { is_some: false, value: false };
+    let some_flag: Option<bool> = Some(true);
+    let none_flag: Option<bool> = None;
 
     let ok_result = some_flag.ok_or(false);
     let err_result = none_flag.ok_or(true);

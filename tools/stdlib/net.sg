@@ -124,9 +124,9 @@ def net_clear_error() -> bool {
 def net_error_name_copy_raw(code: i64, buffer_ptr: i64, capacity: i64) -> Result<i64, i64> {
     let copied = sengoo_net_error_name_copy(code, buffer_ptr, capacity);
     if copied >= 0 {
-        Result { is_ok: true, value: copied, error: 0 }
+        Ok(copied)
     } else {
-        Result { is_ok: false, value: 0, error: net_last_status() }
+        Err(net_last_status())
     }
 }
 
@@ -137,9 +137,9 @@ def net_error_name_copy(code: i64, buffer: Buffer) -> Result<i64, i64> {
 def net_tcp_connect_raw(host_ptr: i64, port: i64, timeout_ms: i64) -> Result<TcpStream, i64> {
     let handle = sengoo_tcp_connect(host_ptr, port, timeout_ms);
     if handle != 0 {
-        Result { is_ok: true, value: TcpStream { handle: handle }, error: 0 }
+        Ok(TcpStream { handle: handle })
     } else {
-        Result { is_ok: false, value: TcpStream { handle: 0 }, error: net_last_status() }
+        Err(net_last_status())
     }
 }
 
@@ -155,9 +155,9 @@ impl TcpStream {
     def send_raw(self, data_ptr: i64, len: i64) -> Result<i64, i64> {
         let sent = sengoo_tcp_send(self.handle, data_ptr, len);
         if sent >= 0 {
-            Result { is_ok: true, value: sent, error: 0 }
+            Ok(sent)
         } else {
-            Result { is_ok: false, value: 0, error: net_last_status() }
+            Err(net_last_status())
         }
     }
 
@@ -168,9 +168,9 @@ impl TcpStream {
     def recv_raw(self, buffer_ptr: i64, capacity: i64, timeout_ms: i64) -> Result<i64, i64> {
         let received = sengoo_tcp_recv(self.handle, buffer_ptr, capacity, timeout_ms);
         if received >= 0 {
-            Result { is_ok: true, value: received, error: 0 }
+            Ok(received)
         } else {
-            Result { is_ok: false, value: 0, error: net_last_status() }
+            Err(net_last_status())
         }
     }
 
@@ -188,9 +188,9 @@ impl Drop for TcpStream {
 def udp_bind_raw(host_ptr: i64, port: i64) -> Result<UdpSocket, i64> {
     let handle = sengoo_udp_bind(host_ptr, port);
     if handle != 0 {
-        Result { is_ok: true, value: UdpSocket { handle: handle }, error: 0 }
+        Ok(UdpSocket { handle: handle })
     } else {
-        Result { is_ok: false, value: UdpSocket { handle: 0 }, error: net_last_status() }
+        Err(net_last_status())
     }
 }
 
@@ -202,9 +202,9 @@ impl UdpSocket {
     def connect_raw(self, host_ptr: i64, port: i64) -> Result<bool, i64> {
         let status = sengoo_udp_connect(self.handle, host_ptr, port);
         if status != 0 {
-            Result { is_ok: true, value: true, error: 0 }
+            Ok(true)
         } else {
-            Result { is_ok: false, value: false, error: net_last_status() }
+            Err(net_last_status())
         }
     }
 
@@ -215,9 +215,9 @@ impl UdpSocket {
     def send_raw(self, data_ptr: i64, len: i64) -> Result<i64, i64> {
         let sent = sengoo_udp_send(self.handle, data_ptr, len);
         if sent >= 0 {
-            Result { is_ok: true, value: sent, error: 0 }
+            Ok(sent)
         } else {
-            Result { is_ok: false, value: 0, error: net_last_status() }
+            Err(net_last_status())
         }
     }
 
@@ -228,9 +228,9 @@ impl UdpSocket {
     def recv_raw(self, buffer_ptr: i64, capacity: i64, timeout_ms: i64) -> Result<i64, i64> {
         let received = sengoo_udp_recv(self.handle, buffer_ptr, capacity, timeout_ms);
         if received >= 0 {
-            Result { is_ok: true, value: received, error: 0 }
+            Ok(received)
         } else {
-            Result { is_ok: false, value: 0, error: net_last_status() }
+            Err(net_last_status())
         }
     }
 
@@ -252,9 +252,9 @@ impl Drop for UdpSocket {
 def http_get_raw(url_ptr: i64, timeout_ms: i64) -> Result<HttpClient, i64> {
     let handle = sengoo_http_get(url_ptr, timeout_ms);
     if handle != 0 {
-        Result { is_ok: true, value: HttpClient { handle: handle }, error: 0 }
+        Ok(HttpClient { handle: handle })
     } else {
-        Result { is_ok: false, value: HttpClient { handle: 0 }, error: net_last_status() }
+        Err(net_last_status())
     }
 }
 
@@ -265,9 +265,9 @@ def http_get(url: &str, timeout_ms: i64) -> Result<HttpClient, i64> {
 def http_post_raw(url_ptr: i64, body_ptr: i64, len: i64, timeout_ms: i64) -> Result<HttpClient, i64> {
     let handle = sengoo_http_post(url_ptr, body_ptr, len, timeout_ms);
     if handle != 0 {
-        Result { is_ok: true, value: HttpClient { handle: handle }, error: 0 }
+        Ok(HttpClient { handle: handle })
     } else {
-        Result { is_ok: false, value: HttpClient { handle: 0 }, error: net_last_status() }
+        Err(net_last_status())
     }
 }
 
@@ -279,27 +279,27 @@ impl HttpClient {
     def status(self) -> Result<i64, i64> {
         let status = sengoo_http_status(self.handle);
         if status >= 0 {
-            Result { is_ok: true, value: status, error: 0 }
+            Ok(status)
         } else {
-            Result { is_ok: false, value: 0, error: net_last_status() }
+            Err(net_last_status())
         }
     }
 
     def body_len(self) -> Result<i64, i64> {
         let len = sengoo_http_body_len(self.handle);
         if len >= 0 {
-            Result { is_ok: true, value: len, error: 0 }
+            Ok(len)
         } else {
-            Result { is_ok: false, value: 0, error: net_last_status() }
+            Err(net_last_status())
         }
     }
 
     def body_copy_raw(self, buffer_ptr: i64, capacity: i64) -> Result<i64, i64> {
         let copied = sengoo_http_body_copy(self.handle, buffer_ptr, capacity);
         if copied >= 0 {
-            Result { is_ok: true, value: copied, error: 0 }
+            Ok(copied)
         } else {
-            Result { is_ok: false, value: 0, error: net_last_status() }
+            Err(net_last_status())
         }
     }
 
@@ -321,9 +321,9 @@ impl Drop for HttpClient {
 def http_server_bind_raw(host_ptr: i64, port: i64) -> Result<HttpServer, i64> {
     let handle = sengoo_http_server_bind(host_ptr, port);
     if handle != 0 {
-        Result { is_ok: true, value: HttpServer { handle: handle }, error: 0 }
+        Ok(HttpServer { handle: handle })
     } else {
-        Result { is_ok: false, value: HttpServer { handle: 0 }, error: net_last_status() }
+        Err(net_last_status())
     }
 }
 
@@ -348,9 +348,9 @@ def http_server_bind_tls(
         key_len
     );
     if handle != 0 {
-        Result { is_ok: true, value: HttpServer { handle: handle }, error: 0 }
+        Ok(HttpServer { handle: handle })
     } else {
-        Result { is_ok: false, value: HttpServer { handle: 0 }, error: net_last_status() }
+        Err(net_last_status())
     }
 }
 
@@ -358,18 +358,18 @@ impl HttpServer {
     def local_port(self) -> Result<i64, i64> {
         let port = sengoo_http_server_local_port(self.handle);
         if port >= 0 {
-            Result { is_ok: true, value: port, error: 0 }
+            Ok(port)
         } else {
-            Result { is_ok: false, value: 0, error: net_last_status() }
+            Err(net_last_status())
         }
     }
 
     def set_limits(self, max_header_bytes: i64, max_body_bytes: i64) -> Result<bool, i64> {
         let status = sengoo_http_server_set_limits(self.handle, max_header_bytes, max_body_bytes);
         if status != 0 {
-            Result { is_ok: true, value: true, error: 0 }
+            Ok(true)
         } else {
-            Result { is_ok: false, value: false, error: net_last_status() }
+            Err(net_last_status())
         }
     }
 
@@ -379,18 +379,18 @@ impl HttpServer {
     def set_keep_alive(self, enabled: i64) -> Result<bool, i64> {
         let status = sengoo_http_server_set_keep_alive(self.handle, enabled);
         if status != 0 {
-            Result { is_ok: true, value: true, error: 0 }
+            Ok(true)
         } else {
-            Result { is_ok: false, value: false, error: net_last_status() }
+            Err(net_last_status())
         }
     }
 
     def add_route_raw(self, method_ptr: i64, path_pattern_ptr: i64, status: i64, body_ptr: i64, body_len: i64) -> Result<bool, i64> {
         let added = sengoo_http_server_add_route(self.handle, method_ptr, path_pattern_ptr, status, body_ptr, body_len);
         if added != 0 {
-            Result { is_ok: true, value: true, error: 0 }
+            Ok(true)
         } else {
-            Result { is_ok: false, value: false, error: net_last_status() }
+            Err(net_last_status())
         }
     }
 
@@ -401,9 +401,9 @@ impl HttpServer {
     def require_header_raw(self, name_ptr: i64, expected_value_ptr: i64, reject_status: i64, reject_body_ptr: i64, reject_body_len: i64) -> Result<bool, i64> {
         let added = sengoo_http_server_add_middleware_require_header(self.handle, name_ptr, expected_value_ptr, reject_status, reject_body_ptr, reject_body_len);
         if added != 0 {
-            Result { is_ok: true, value: true, error: 0 }
+            Ok(true)
         } else {
-            Result { is_ok: false, value: false, error: net_last_status() }
+            Err(net_last_status())
         }
     }
 
@@ -414,9 +414,9 @@ impl HttpServer {
     def add_ws_echo_route_raw(self, path_pattern_ptr: i64) -> Result<bool, i64> {
         let added = sengoo_http_server_add_ws_echo_route(self.handle, path_pattern_ptr);
         if added != 0 {
-            Result { is_ok: true, value: true, error: 0 }
+            Ok(true)
         } else {
-            Result { is_ok: false, value: false, error: net_last_status() }
+            Err(net_last_status())
         }
     }
 
@@ -427,11 +427,11 @@ impl HttpServer {
     def serve_once(self, timeout_ms: i64) -> Result<bool, i64> {
         let served = sengoo_http_server_serve_once(self.handle, timeout_ms);
         if served > 0 {
-            Result { is_ok: true, value: true, error: 0 }
+            Ok(true)
         } else if served == 0 {
-            Result { is_ok: true, value: false, error: 0 }
+            Ok(false)
         } else {
-            Result { is_ok: false, value: false, error: net_last_status() }
+            Err(net_last_status())
         }
     }
 
@@ -441,9 +441,9 @@ impl HttpServer {
     def next_request(self, timeout_ms: i64) -> Result<HttpServerRequest, i64> {
         let handle = sengoo_http_server_next_request(self.handle, timeout_ms);
         if handle != 0 {
-            Result { is_ok: true, value: HttpServerRequest { handle: handle }, error: 0 }
+            Ok(HttpServerRequest { handle: handle })
         } else {
-            Result { is_ok: false, value: HttpServerRequest { handle: 0 }, error: net_last_status() }
+            Err(net_last_status())
         }
     }
 
@@ -462,9 +462,9 @@ impl HttpServer {
     def claim_serve_mode(self, mode: i64) -> Result<bool, i64> {
         let status = sengoo_http_server_claim_serve_mode(self.handle, mode);
         if status != 0 {
-            Result { is_ok: true, value: true, error: 0 }
+            Ok(true)
         } else {
-            Result { is_ok: false, value: false, error: net_last_status() }
+            Err(net_last_status())
         }
     }
 }
@@ -477,9 +477,9 @@ impl Drop for HttpServer {
 
 def http_request_i64_result(value: i64) -> Result<i64, i64> {
     if value >= 0 {
-        Result { is_ok: true, value: value, error: 0 }
+        Ok(value)
     } else {
-        Result { is_ok: false, value: 0, error: net_last_status() }
+        Err(net_last_status())
     }
 }
 
@@ -495,22 +495,22 @@ impl HttpServerRequest {
     def method_string(self) -> Result<String, i64> {
         let len = sengoo_http_request_method_len(self.handle);
         if len < 0 {
-            Result { is_ok: false, value: String { handle: 0 }, error: net_last_status() }
+            Err(net_last_status())
         } else {
             let buffer_result = ffi_buffer_new(len + 1);
-            if buffer_result.is_ok {
-                let buffer = buffer_result.value;
-                let copied = sengoo_http_request_method_copy(self.handle, buffer.ptr(), buffer.len());
-                if copied >= 0 {
-                    let owned = string_from_bytes_raw(buffer.ptr(), copied);
-                    buffer.free();
-                    owned
-                } else {
-                    buffer.free();
-                    Result { is_ok: false, value: String { handle: 0 }, error: net_last_status() }
-                }
-            } else {
-                Result { is_ok: false, value: String { handle: 0 }, error: buffer_result.error }
+            match buffer_result {
+                Ok(buffer) => {
+                    let copied = sengoo_http_request_method_copy(self.handle, buffer.ptr(), buffer.len());
+                    if copied >= 0 {
+                        let owned = string_from_bytes_raw(buffer.ptr(), copied);
+                        buffer.free();
+                        owned
+                    } else {
+                        buffer.free();
+                        Err(net_last_status())
+                    }
+                },
+                Err(error) => Err(error),
             }
         }
     }
@@ -526,22 +526,22 @@ impl HttpServerRequest {
     def path_string(self) -> Result<String, i64> {
         let len = sengoo_http_request_path_len(self.handle);
         if len < 0 {
-            Result { is_ok: false, value: String { handle: 0 }, error: net_last_status() }
+            Err(net_last_status())
         } else {
             let buffer_result = ffi_buffer_new(len + 1);
-            if buffer_result.is_ok {
-                let buffer = buffer_result.value;
-                let copied = sengoo_http_request_path_copy(self.handle, buffer.ptr(), buffer.len());
-                if copied >= 0 {
-                    let owned = string_from_bytes_raw(buffer.ptr(), copied);
-                    buffer.free();
-                    owned
-                } else {
-                    buffer.free();
-                    Result { is_ok: false, value: String { handle: 0 }, error: net_last_status() }
-                }
-            } else {
-                Result { is_ok: false, value: String { handle: 0 }, error: buffer_result.error }
+            match buffer_result {
+                Ok(buffer) => {
+                    let copied = sengoo_http_request_path_copy(self.handle, buffer.ptr(), buffer.len());
+                    if copied >= 0 {
+                        let owned = string_from_bytes_raw(buffer.ptr(), copied);
+                        buffer.free();
+                        owned
+                    } else {
+                        buffer.free();
+                        Err(net_last_status())
+                    }
+                },
+                Err(error) => Err(error),
             }
         }
     }
@@ -557,22 +557,22 @@ impl HttpServerRequest {
     def query_string(self) -> Result<String, i64> {
         let len = sengoo_http_request_query_len(self.handle);
         if len < 0 {
-            Result { is_ok: false, value: String { handle: 0 }, error: net_last_status() }
+            Err(net_last_status())
         } else {
             let buffer_result = ffi_buffer_new(len + 1);
-            if buffer_result.is_ok {
-                let buffer = buffer_result.value;
-                let copied = sengoo_http_request_query_copy(self.handle, buffer.ptr(), buffer.len());
-                if copied >= 0 {
-                    let owned = string_from_bytes_raw(buffer.ptr(), copied);
-                    buffer.free();
-                    owned
-                } else {
-                    buffer.free();
-                    Result { is_ok: false, value: String { handle: 0 }, error: net_last_status() }
-                }
-            } else {
-                Result { is_ok: false, value: String { handle: 0 }, error: buffer_result.error }
+            match buffer_result {
+                Ok(buffer) => {
+                    let copied = sengoo_http_request_query_copy(self.handle, buffer.ptr(), buffer.len());
+                    if copied >= 0 {
+                        let owned = string_from_bytes_raw(buffer.ptr(), copied);
+                        buffer.free();
+                        owned
+                    } else {
+                        buffer.free();
+                        Err(net_last_status())
+                    }
+                },
+                Err(error) => Err(error),
             }
         }
     }
@@ -588,22 +588,22 @@ impl HttpServerRequest {
     def version_string(self) -> Result<String, i64> {
         let len = sengoo_http_request_version_len(self.handle);
         if len < 0 {
-            Result { is_ok: false, value: String { handle: 0 }, error: net_last_status() }
+            Err(net_last_status())
         } else {
             let buffer_result = ffi_buffer_new(len + 1);
-            if buffer_result.is_ok {
-                let buffer = buffer_result.value;
-                let copied = sengoo_http_request_version_copy(self.handle, buffer.ptr(), buffer.len());
-                if copied >= 0 {
-                    let owned = string_from_bytes_raw(buffer.ptr(), copied);
-                    buffer.free();
-                    owned
-                } else {
-                    buffer.free();
-                    Result { is_ok: false, value: String { handle: 0 }, error: net_last_status() }
-                }
-            } else {
-                Result { is_ok: false, value: String { handle: 0 }, error: buffer_result.error }
+            match buffer_result {
+                Ok(buffer) => {
+                    let copied = sengoo_http_request_version_copy(self.handle, buffer.ptr(), buffer.len());
+                    if copied >= 0 {
+                        let owned = string_from_bytes_raw(buffer.ptr(), copied);
+                        buffer.free();
+                        owned
+                    } else {
+                        buffer.free();
+                        Err(net_last_status())
+                    }
+                },
+                Err(error) => Err(error),
             }
         }
     }
@@ -612,22 +612,22 @@ impl HttpServerRequest {
     def header_len(self, name: &str) -> Result<i64, i64> {
         let len = sengoo_http_request_header_len(self.handle, sengoo_stdlib_str_ptr(name));
         if len >= 0 {
-            Result { is_ok: true, value: len, error: 0 }
+            Ok(len)
         } else if net_last_error() == 0 {
-            Result { is_ok: false, value: 0, error: STATUS_NOT_FOUND() }
+            Err(STATUS_NOT_FOUND())
         } else {
-            Result { is_ok: false, value: 0, error: net_last_status() }
+            Err(net_last_status())
         }
     }
 
     def header_copy(self, name: &str, buffer: Buffer) -> Result<i64, i64> {
         let copied = sengoo_http_request_header_copy(self.handle, sengoo_stdlib_str_ptr(name), buffer.ptr(), buffer.len());
         if copied >= 0 {
-            Result { is_ok: true, value: copied, error: 0 }
+            Ok(copied)
         } else if net_last_error() == 0 {
-            Result { is_ok: false, value: 0, error: STATUS_NOT_FOUND() }
+            Err(STATUS_NOT_FOUND())
         } else {
-            Result { is_ok: false, value: 0, error: net_last_status() }
+            Err(net_last_status())
         }
     }
 
@@ -635,25 +635,25 @@ impl HttpServerRequest {
         let len = sengoo_http_request_header_len(self.handle, sengoo_stdlib_str_ptr(name));
         if len < 0 {
             if net_last_error() == 0 {
-                Result { is_ok: false, value: String { handle: 0 }, error: STATUS_NOT_FOUND() }
+                Err(STATUS_NOT_FOUND())
             } else {
-                Result { is_ok: false, value: String { handle: 0 }, error: net_last_status() }
+                Err(net_last_status())
             }
         } else {
             let buffer_result = ffi_buffer_new(len + 1);
-            if buffer_result.is_ok {
-                let buffer = buffer_result.value;
-                let copied = sengoo_http_request_header_copy(self.handle, sengoo_stdlib_str_ptr(name), buffer.ptr(), buffer.len());
-                if copied >= 0 {
-                    let owned = string_from_bytes_raw(buffer.ptr(), copied);
-                    buffer.free();
-                    owned
-                } else {
-                    buffer.free();
-                    Result { is_ok: false, value: String { handle: 0 }, error: net_last_status() }
-                }
-            } else {
-                Result { is_ok: false, value: String { handle: 0 }, error: buffer_result.error }
+            match buffer_result {
+                Ok(buffer) => {
+                    let copied = sengoo_http_request_header_copy(self.handle, sengoo_stdlib_str_ptr(name), buffer.ptr(), buffer.len());
+                    if copied >= 0 {
+                        let owned = string_from_bytes_raw(buffer.ptr(), copied);
+                        buffer.free();
+                        owned
+                    } else {
+                        buffer.free();
+                        Err(net_last_status())
+                    }
+                },
+                Err(error) => Err(error),
             }
         }
     }
@@ -671,9 +671,9 @@ impl HttpServerRequest {
     def respond(self, status: i64, body: &str) -> Result<bool, i64> {
         let written = sengoo_http_request_respond(self.handle, status, sengoo_stdlib_str_ptr(body), body.len());
         if written != 0 {
-            Result { is_ok: true, value: true, error: 0 }
+            Ok(true)
         } else {
-            Result { is_ok: false, value: false, error: net_last_status() }
+            Err(net_last_status())
         }
     }
 
@@ -686,18 +686,18 @@ impl HttpServerRequest {
             body.len()
         );
         if written != 0 {
-            Result { is_ok: true, value: true, error: 0 }
+            Ok(true)
         } else {
-            Result { is_ok: false, value: false, error: net_last_status() }
+            Err(net_last_status())
         }
     }
 
     def respond_raw(self, status: i64, body_ptr: i64, body_len: i64) -> Result<bool, i64> {
         let written = sengoo_http_request_respond(self.handle, status, body_ptr, body_len);
         if written != 0 {
-            Result { is_ok: true, value: true, error: 0 }
+            Ok(true)
         } else {
-            Result { is_ok: false, value: false, error: net_last_status() }
+            Err(net_last_status())
         }
     }
 
@@ -705,9 +705,9 @@ impl HttpServerRequest {
     def begin_stream(self, status: i64) -> Result<HttpResponseStream, i64> {
         let handle = sengoo_http_request_begin_stream(self.handle, status);
         if handle != 0 {
-            Result { is_ok: true, value: HttpResponseStream { handle: handle }, error: 0 }
+            Ok(HttpResponseStream { handle: handle })
         } else {
-            Result { is_ok: false, value: HttpResponseStream { handle: 0 }, error: net_last_status() }
+            Err(net_last_status())
         }
     }
 
@@ -715,9 +715,9 @@ impl HttpServerRequest {
     def begin_stream_with_length(self, status: i64, content_length: i64) -> Result<HttpResponseStream, i64> {
         let handle = sengoo_http_request_begin_stream_with_length(self.handle, status, content_length);
         if handle != 0 {
-            Result { is_ok: true, value: HttpResponseStream { handle: handle }, error: 0 }
+            Ok(HttpResponseStream { handle: handle })
         } else {
-            Result { is_ok: false, value: HttpResponseStream { handle: 0 }, error: net_last_status() }
+            Err(net_last_status())
         }
     }
 
@@ -739,27 +739,27 @@ impl HttpResponseStream {
     def write_buffer(self, buffer: Buffer, used_len: i64) -> Result<bool, i64> {
         let status = sengoo_http_response_stream_write(self.handle, buffer.ptr(), used_len);
         if status != 0 {
-            Result { is_ok: true, value: true, error: 0 }
+            Ok(true)
         } else {
-            Result { is_ok: false, value: false, error: net_last_status() }
+            Err(net_last_status())
         }
     }
 
     def write_raw(self, data_ptr: i64, len: i64) -> Result<bool, i64> {
         let status = sengoo_http_response_stream_write(self.handle, data_ptr, len);
         if status != 0 {
-            Result { is_ok: true, value: true, error: 0 }
+            Ok(true)
         } else {
-            Result { is_ok: false, value: false, error: net_last_status() }
+            Err(net_last_status())
         }
     }
 
     def finish(self) -> Result<bool, i64> {
         let status = sengoo_http_response_stream_finish(self.handle);
         if status != 0 {
-            Result { is_ok: true, value: true, error: 0 }
+            Ok(true)
         } else {
-            Result { is_ok: false, value: false, error: net_last_status() }
+            Err(net_last_status())
         }
     }
 
@@ -778,9 +778,9 @@ impl Drop for HttpResponseStream {
 def ws_connect_raw(url_ptr: i64, timeout_ms: i64) -> Result<WsClient, i64> {
     let handle = sengoo_ws_connect(url_ptr, timeout_ms);
     if handle != 0 {
-        Result { is_ok: true, value: WsClient { handle: handle }, error: 0 }
+        Ok(WsClient { handle: handle })
     } else {
-        Result { is_ok: false, value: WsClient { handle: 0 }, error: net_last_status() }
+        Err(net_last_status())
     }
 }
 
@@ -792,9 +792,9 @@ impl WsClient {
     def send_text_raw(self, data_ptr: i64, len: i64) -> Result<i64, i64> {
         let sent = sengoo_ws_send_text(self.handle, data_ptr, len);
         if sent >= 0 {
-            Result { is_ok: true, value: sent, error: 0 }
+            Ok(sent)
         } else {
-            Result { is_ok: false, value: 0, error: net_last_status() }
+            Err(net_last_status())
         }
     }
 
@@ -805,9 +805,9 @@ impl WsClient {
     def recv_text_raw(self, buffer_ptr: i64, capacity: i64, timeout_ms: i64) -> Result<i64, i64> {
         let received = sengoo_ws_recv_text(self.handle, buffer_ptr, capacity, timeout_ms);
         if received >= 0 {
-            Result { is_ok: true, value: received, error: 0 }
+            Ok(received)
         } else {
-            Result { is_ok: false, value: 0, error: net_last_status() }
+            Err(net_last_status())
         }
     }
 
@@ -837,9 +837,9 @@ def net_bench_last_error_len() -> i64 {
 def net_bench_last_error_copy_raw(buffer_ptr: i64, capacity: i64) -> Result<i64, i64> {
     let copied = sengoo_net_bench_last_error_copy(buffer_ptr, capacity);
     if copied >= 0 {
-        Result { is_ok: true, value: copied, error: 0 }
+        Ok(copied)
     } else {
-        Result { is_ok: false, value: 0, error: net_bench_last_status() }
+        Err(net_bench_last_status())
     }
 }
 
@@ -858,9 +858,9 @@ def net_bench_last_status() -> i64 {
 def net_bench_run_raw(connections: i64, rtt_messages_per_connection: i64, broadcast_rounds: i64, payload_bytes: i64, report_buffer: i64, report_capacity: i64) -> Result<i64, i64> {
     let copied = sengoo_net_bench_run(connections, rtt_messages_per_connection, broadcast_rounds, payload_bytes, report_buffer, report_capacity);
     if copied >= 0 {
-        Result { is_ok: true, value: copied, error: 0 }
+        Ok(copied)
     } else {
-        Result { is_ok: false, value: 0, error: net_bench_last_status() }
+        Err(net_bench_last_status())
     }
 }
 
@@ -935,31 +935,28 @@ def http_router_route(
         out.r0_path = string_from_str(path).unwrap_or(String { handle: 0 });
         out.r0_handler = handler;
         out.count = out.count + 1;
-        Result { is_ok: true, value: out, error: 0 }
     } else if !out.r1_used {
         out.r1_used = true;
         out.r1_method = string_from_str(method).unwrap_or(String { handle: 0 });
         out.r1_path = string_from_str(path).unwrap_or(String { handle: 0 });
         out.r1_handler = handler;
         out.count = out.count + 1;
-        Result { is_ok: true, value: out, error: 0 }
     } else if !out.r2_used {
         out.r2_used = true;
         out.r2_method = string_from_str(method).unwrap_or(String { handle: 0 });
         out.r2_path = string_from_str(path).unwrap_or(String { handle: 0 });
         out.r2_handler = handler;
         out.count = out.count + 1;
-        Result { is_ok: true, value: out, error: 0 }
     } else if !out.r3_used {
         out.r3_used = true;
         out.r3_method = string_from_str(method).unwrap_or(String { handle: 0 });
         out.r3_path = string_from_str(path).unwrap_or(String { handle: 0 });
         out.r3_handler = handler;
         out.count = out.count + 1;
-        Result { is_ok: true, value: out, error: 0 }
     } else {
-        Result { is_ok: false, value: out, error: STATUS_BUFFER_TOO_SMALL() }
+        return Err(STATUS_BUFFER_TOO_SMALL());
     }
+    Ok(out)
 }
 
 def http_router_default(
@@ -968,11 +965,11 @@ def http_router_default(
 ) -> Result<HttpRouter, i64> {
     let mut out = router;
     if out.has_default {
-        Result { is_ok: false, value: out, error: STATUS_ALREADY_EXISTS() }
+        Err(STATUS_ALREADY_EXISTS())
     } else {
         out.has_default = true;
         out.default_handler = handler;
-        Result { is_ok: true, value: out, error: 0 }
+        Ok(out)
     }
 }
 
@@ -994,9 +991,9 @@ def http_router_match_handles(
 def http_server_next_request_router(server: HttpServer, timeout_ms: i64) -> Result<HttpServerRequest, i64> {
     let handle = sengoo_http_server_next_request_router(server.handle, timeout_ms);
     if handle != 0 {
-        Result { is_ok: true, value: HttpServerRequest { handle: handle }, error: 0 }
+        Ok(HttpServerRequest { handle: handle })
     } else {
-        Result { is_ok: false, value: HttpServerRequest { handle: 0 }, error: net_last_status() }
+        Err(net_last_status())
     }
 }
 
@@ -1006,40 +1003,45 @@ def http_server_next_request_router(server: HttpServer, timeout_ms: i64) -> Resu
 /// Prefer this after `await server.next_request_async_router(...)` so fn-bearing
 /// routers never cross async frame await points (rebuild in a sync helper instead).
 def http_router_dispatch(router: HttpRouter, request: HttpServerRequest) -> HttpRouter {
-    let method_r = request.method_string();
-    let path_r = request.path_string();
-    if !method_r.is_ok or !path_r.is_ok {
-        let ignored = request.respond(500, "internal error");
-        router
-    } else {
-        let method = method_r.value;
-        let path = path_r.value;
-        let mut handler_ok = false;
-        let mut matched = false;
-        if http_router_match_handles(router.r0_used, router.r0_method.handle, router.r0_path.handle, method.handle, path.handle) {
-            let h0 = router.r0_handler; handler_ok = h0(request) == 1;
-            matched = true;
-        } else if http_router_match_handles(router.r1_used, router.r1_method.handle, router.r1_path.handle, method.handle, path.handle) {
-            let h1 = router.r1_handler; handler_ok = h1(request) == 1;
-            matched = true;
-        } else if http_router_match_handles(router.r2_used, router.r2_method.handle, router.r2_path.handle, method.handle, path.handle) {
-            let h2 = router.r2_handler; handler_ok = h2(request) == 1;
-            matched = true;
-        } else if http_router_match_handles(router.r3_used, router.r3_method.handle, router.r3_path.handle, method.handle, path.handle) {
-            let h3 = router.r3_handler; handler_ok = h3(request) == 1;
-            matched = true;
-        } else if router.has_default {
-            let hd = router.default_handler; handler_ok = hd(request) == 1;
-            matched = true;
-        } else {
-            let ignored = request.respond(404, "not found");
-            matched = true;
-            handler_ok = true;
-        }
-        if matched and !handler_ok {
-            let ignored = request.respond(500, "handler error");
-        }
-        router
+    match request.method_string() {
+        Err(_) => {
+            let ignored = request.respond(500, "internal error");
+            router
+        },
+        Ok(method) => match request.path_string() {
+            Err(_) => {
+                let ignored = request.respond(500, "internal error");
+                router
+            },
+            Ok(path) => {
+                let mut handler_ok = false;
+                let mut matched = false;
+                if http_router_match_handles(router.r0_used, router.r0_method.handle, router.r0_path.handle, method.handle, path.handle) {
+                    let h0 = router.r0_handler; handler_ok = h0(request) == 1;
+                    matched = true;
+                } else if http_router_match_handles(router.r1_used, router.r1_method.handle, router.r1_path.handle, method.handle, path.handle) {
+                    let h1 = router.r1_handler; handler_ok = h1(request) == 1;
+                    matched = true;
+                } else if http_router_match_handles(router.r2_used, router.r2_method.handle, router.r2_path.handle, method.handle, path.handle) {
+                    let h2 = router.r2_handler; handler_ok = h2(request) == 1;
+                    matched = true;
+                } else if http_router_match_handles(router.r3_used, router.r3_method.handle, router.r3_path.handle, method.handle, path.handle) {
+                    let h3 = router.r3_handler; handler_ok = h3(request) == 1;
+                    matched = true;
+                } else if router.has_default {
+                    let hd = router.default_handler; handler_ok = hd(request) == 1;
+                    matched = true;
+                } else {
+                    let ignored = request.respond(404, "not found");
+                    matched = true;
+                    handler_ok = true;
+                }
+                if matched and !handler_ok {
+                    let ignored = request.respond(500, "handler error");
+                }
+                router
+            },
+        },
     }
 }
 
@@ -1052,16 +1054,12 @@ def http_router_dispatch(router: HttpRouter, request: HttpServerRequest) -> Http
 /// `http_router_dispatch` from a sync helper that rebuilds the router.
 def serve_http_once(server: HttpServer, router: HttpRouter, timeout_ms: i64) -> Result<HttpRouter, i64> {
     let claimed = server.claim_serve_mode(HTTP_SERVER_MODE_ROUTER());
-    if !claimed.is_ok {
-        Result { is_ok: false, value: router, error: claimed.error }
-    } else {
-        let pull = http_server_next_request_router(server, timeout_ms);
-        if !pull.is_ok {
-            Result { is_ok: false, value: router, error: pull.error }
-        } else {
-            let out = http_router_dispatch(router, pull.value);
-            Result { is_ok: true, value: out, error: 0 }
-        }
+    match claimed {
+        Err(error) => Err(error),
+        Ok(_) => match http_server_next_request_router(server, timeout_ms) {
+            Err(error) => Err(error),
+            Ok(request) => Ok(http_router_dispatch(router, request)),
+        },
     }
 }
 
@@ -1070,5 +1068,3 @@ def serve_http_once(server: HttpServer, router: HttpRouter, timeout_ms: i64) -> 
 def serve_http(server: HttpServer, router: HttpRouter, timeout_ms: i64) -> Result<HttpRouter, i64> {
     serve_http_once(server, router, timeout_ms)
 }
-
-

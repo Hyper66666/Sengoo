@@ -11,12 +11,16 @@ def http_status_score() -> i64 {
     let log_cleared = log_test_sink_clear();
     let log_written = log_write(LOG_INFO(), "http-client-status started").unwrap_or(false);
     let ftp_result = http_client_get("ftp://127.0.0.1/", 1);
-    let ftp_closed = if ftp_result.is_ok { ftp_result.value.close(); } else { true; };
-    let ftp_unsupported = if ftp_result.is_ok {
-        false;
-    } else {
-        ftp_result.error == STATUS_UNSUPPORTED();
-    };
+    let mut ftp_closed = true;
+    let mut ftp_unsupported = false;
+    match ftp_result {
+        Ok(response) => {
+            ftp_closed = response.close();
+        },
+        Err(error) => {
+            ftp_unsupported = error == STATUS_UNSUPPORTED();
+        },
+    }
     let doc = json_doc_object().unwrap_or(JsonDoc { handle: 0 });
     let buffer = ffi_buffer_new(64).unwrap_or(Buffer { handle: 0 });
     let serialized = doc.serialize(buffer).unwrap_or(0);

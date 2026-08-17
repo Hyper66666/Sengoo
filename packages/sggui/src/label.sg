@@ -25,6 +25,17 @@ def label_value_bar_width(value: i64, max_units: i64, unit_pixels: i64) -> i64 {
 impl Label {
     def draw(self, renderer: Renderer, background: Color, accent: Color, unit_pixels: i64) -> Result<i64, i64> {
         let filled = renderer.fill_rect(self.bounds, background);
-        if not filled.is_ok { filled; } else { let bar_w = label_value_bar_width(self.value, self.bounds.w / unit_pixels, unit_pixels); if bar_w > 0 { let bar = rect_new(self.bounds.x + 4, self.bounds.y + 4, bar_w, self.bounds.h - 8); renderer.fill_rect(bar, accent); } else { filled; }; };
+        match filled {
+            Err(error) => Err(error),
+            Ok(value) => {
+                let bar_w = label_value_bar_width(self.value, self.bounds.w / unit_pixels, unit_pixels);
+                if bar_w > 0 {
+                    let bar = rect_new(self.bounds.x + 4, self.bounds.y + 4, bar_w, self.bounds.h - 8);
+                    renderer.fill_rect(bar, accent)
+                } else {
+                    Ok(value)
+                }
+            }
+        }
     }
 }

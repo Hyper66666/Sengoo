@@ -906,6 +906,10 @@ impl Codegen {
                 self.ir.push_str(&format!("{slot} = alloca {enum_llvm}\n"));
                 self.emit_indent();
                 self.ir.push_str(&format!(
+                    "store {enum_llvm} zeroinitializer, {enum_llvm}* {slot}\n"
+                ));
+                self.emit_indent();
+                self.ir.push_str(&format!(
                     "{discr_ptr} = getelementptr {enum_llvm}, {enum_llvm}* {slot}, i32 0, i32 0\n"
                 ));
                 self.emit_indent();
