@@ -127,20 +127,34 @@
 
 ## 7. P5 — Width-aware block formatting
 
-- [ ] 7.1 `format_block_inline` falls back to the multi-line `format_block`
+- [x] 7.1 `format_block_inline` falls back to the multi-line `format_block`
   rendering when the inline form would exceed `max_width`, activating the
   already-parsed but currently unread option. Default stays 100.
-- [ ] 7.2 Applies to every block form — `if`, `while`, `for`, `loop`, `match`
+  Proof: `sgfmt` `long_conditional_body_is_rendered_across_lines`.
+- [x] 7.2 Applies to every block form — `if`, `while`, `for`, `loop`, `match`
   arms, `async`, `parallel`, `try` — not only function bodies.
-- [ ] 7.3 Blocks that fit stay inline, unchanged from current behavior.
-- [ ] 7.4 `--max-width` and `sgfmt.toml` demonstrably change where blocks break.
-- [ ] 7.5 Idiomatic multi-line conditional bodies pass `sgfmt --check`.
-- [ ] 7.6 Ships with its own tests, reviewable separately from the P4 rewrites.
-- [ ] 7.7 Identify every `fmt --check` gate that newly fails under the rule.
+  Proof: `sgfmt` `every_block_form_breaks_on_width`.
+- [x] 7.3 Blocks that fit stay inline, unchanged from current behavior.
+  Proof: `sgfmt` `short_blocks_stay_inline`.
+- [x] 7.4 `--max-width` and `sgfmt.toml` demonstrably change where blocks break.
+  Proof: `sgfmt` `max_width_moves_where_blocks_break` and
+  `resolve_options_reads_config_and_cli_override`.
+- [x] 7.5 Idiomatic multi-line conditional bodies pass `sgfmt --check`.
+  Proof: `sgfmt --check` on `examples/realworld/workspace-audit` and
+  `examples/realworld/cli-json-audit` sources/tests.
+- [x] 7.6 Ships with its own tests, reviewable separately from the P4 rewrites.
+  Proof: `cargo test -p sgfmt` (18 lib + 3 bin tests).
+- [x] 7.7 Identify every `fmt --check` gate that newly fails under the rule.
   Do NOT reformat the repo: 53 of 198 in-tree `.sg` files contain 251 lines over
   100 characters, and a sweep would collide with the concurrent `Option`/
   `Result` migration. Apply the new formatting only to fixtures P4 rewrites;
   schedule the sweep as a follow-up after P0 settles.
+  Realworld `sgpm fmt --check --locked` currently fails on these sources (not
+  P4): `async-channel-smoke`, `compressed-json-artifact`,
+  `default-library-conformance/src/lib.sg`, `http-client-status`,
+  `http-echo-service`, `p0-foundations`. Generated `target/sgc-test-harness`
+  copies are out of scope. The CI gate is `.github/workflows/realworld-e2e.yml`
+  `sgpm fmt --check --locked`.
 
 ## 8. Verification
 
