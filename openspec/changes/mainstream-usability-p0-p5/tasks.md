@@ -67,16 +67,20 @@
 
 ## 4. P2 — Quiet output and one diagnostic language
 
-- [ ] 4.1 Move cache, workset, frontend session/scheduler, and generic-instance
+- [x] 4.1 Move cache, workset, frontend session/scheduler, and generic-instance
   instrumentation behind `--verbose`.
-- [ ] 4.2 Suppress pass-through toolchain include-path warnings on successful
+- [x] 4.2 Suppress pass-through toolchain include-path warnings on successful
   builds.
-- [ ] 4.3 Keep every actionable error and warning at default verbosity.
-- [ ] 4.4 `--verbose` restores the previous output exactly; test asserts both
+- [x] 4.3 Keep every actionable error and warning at default verbosity.
+- [x] 4.4 `--verbose` restores the previous output exactly; test asserts both
   modes.
-- [ ] 4.5 Translate remaining Chinese compiler diagnostics to English, keeping
+  Proof: `tools/sgc/tests/quiet_output.rs`.
+- [x] 4.5 Translate remaining Chinese compiler diagnostics to English, keeping
   stable codes and JSON shape unchanged.
-- [ ] 4.6 `--error-format json` payloads unchanged; `sglsp` parity test.
+  Proof: `diagnostics_tests::typeck_diagnostics_are_english_with_stable_wording`.
+- [x] 4.6 `--error-format json` payloads unchanged; `sglsp` parity test.
+  Proof: `quiet_output::error_format_json_keeps_schema_and_english_messages` and
+  `sglsp` `json_error_payload_preserves_stable_code_and_matches_embedded_compiler`.
 
 ## 5. P3 — Everyday syntax
 
