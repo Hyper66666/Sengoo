@@ -2,6 +2,8 @@
 //!
 //! 管理符号表和作用域。
 
+use crate::ast::Expr;
+use crate::lexer::Span;
 use crate::typeck::interner::TyInterner;
 use crate::typeck::r#trait::type_key;
 use crate::typeck::ty::{Ty, TyKind, TyVarId};
@@ -142,6 +144,9 @@ pub struct TypeEnv {
     resolved_struct_literal_types: HashMap<(u32, u32), Ty>,
     /// Fully-qualified symbol selected for an associated trait function call.
     resolved_associated_functions: HashMap<u32, String>,
+    /// Iterator-protocol `for` loops rewritten to `loop` + `match next()`.
+    desugared_for_loops: HashMap<(u32, u32), Expr>,
+    next_synthetic_span: u32,
 }
 
 #[derive(Debug, Clone)]
@@ -166,6 +171,8 @@ impl TypeEnv {
             resolved_enum_variant_types: HashMap::new(),
             resolved_struct_literal_types: HashMap::new(),
             resolved_associated_functions: HashMap::new(),
+            desugared_for_loops: HashMap::new(),
+            next_synthetic_span: 2_000_000_000,
         };
         // 创建全局作用域
         env.push_scope();
@@ -580,6 +587,20 @@ impl TypeEnv {
 
     pub fn record_associated_function(&mut self, call_site: u32, name: String) {
         self.resolved_associated_functions.insert(call_site, name);
+    }
+
+    pub fn fresh_synthetic_span(&mut self) -> Span {
+        let lo = self.next_synthetic_span;
+        self.next_synthetic_span = self.next_synthetic_span.saturating_add(2);
+        Span::new(lo, lo + 1)
+    }
+
+    pub fn record_desugared_for(&mut self, site: Span, expr: Expr) {
+        self.desugared_for_loops.insert((site.lo, site.hi), expr);
+    }
+
+    pub fn desugared_for(&self, site: Span) -> Option<&Expr> {
+        self.desugared_for_loops.get(&(site.lo, site.hi))
     }
 
     pub fn resolved_associated_function(&self, call_site: u32) -> Option<&str> {

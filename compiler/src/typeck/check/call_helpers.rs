@@ -130,7 +130,7 @@ impl TypeChecker {
         Ok(Ty::new(ty.id, kind))
     }
 
-    fn instantiate_method_function_ty(
+    pub(crate) fn instantiate_method_function_ty(
         &mut self,
         fn_ty: &FunctionTy,
         subst: &HashMap<TyVarId, Ty>,
@@ -149,7 +149,7 @@ impl TypeChecker {
             self.substitute_ty_vars(&fn_ty.return_type, &call_subst),
         )
     }
-    fn lookup_generic_inherent_method(
+    pub(crate) fn lookup_generic_inherent_method(
         &mut self,
         receiver_ty: &Ty,
         method_name: &str,

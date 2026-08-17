@@ -3,8 +3,6 @@
 //! This module resolves declarations, checks expressions and statements, records
 //! generic metadata, and owns the shared trait/impl registries used by later
 //! compiler phases.
-use crate::ast::pattern::Pattern;
-use crate::ast::Visibility;
 use crate::ast::*;
 use crate::error::CompileError;
 use crate::method_resolution::{
@@ -47,6 +45,7 @@ mod class_hierarchy_helpers;
 mod contract_helpers;
 mod decl_helpers;
 mod expr_helpers;
+mod for_helpers;
 mod generic_meta_helpers;
 mod match_helpers;
 mod stmt_helpers;
@@ -720,7 +719,7 @@ impl TypeChecker {
         })
     }
 
-    pub(super) fn substitute_ty_vars(&self, ty: &Ty, subst: &HashMap<TyVarId, Ty>) -> Ty {
+    pub(crate) fn substitute_ty_vars(&self, ty: &Ty, subst: &HashMap<TyVarId, Ty>) -> Ty {
         match &ty.kind {
             TyKind::Var(var_id) => subst.get(var_id).cloned().unwrap_or_else(|| ty.clone()),
             TyKind::Tuple(types) => Ty {
@@ -789,7 +788,7 @@ impl TypeChecker {
         }
     }
 
-    pub(super) fn generic_lookup_key(&self, ty: &Ty) -> String {
+    pub(crate) fn generic_lookup_key(&self, ty: &Ty) -> String {
         match &ty.kind {
             TyKind::Adt { name, args } => {
                 if args.is_empty() {
@@ -820,7 +819,7 @@ impl TypeChecker {
         }
     }
 
-    pub(super) fn match_generic_impl_target(
+    pub(crate) fn match_generic_impl_target(
         &self,
         pattern: &Ty,
         concrete: &Ty,
@@ -1347,7 +1346,7 @@ impl TypeChecker {
                     self.check_method_call(receiver, method, args, Some(expected), expr.span)?;
                 if matches!(
                     method.name.as_str(),
-                    "get" | "front" | "back" | "iter" | "iter_keys"
+                    "get" | "front" | "back" | "iter" | "iter_keys" | "keys" | "values" | "entries"
                 ) {
                     self.env.record_method_return_type(expr.span, ty.clone());
                 }
@@ -1402,7 +1401,7 @@ impl TypeChecker {
                 let ty = self.check_method_call(receiver, method, args, None, expr.span)?;
                 if matches!(
                     method.name.as_str(),
-                    "get" | "front" | "back" | "iter" | "iter_keys"
+                    "get" | "front" | "back" | "iter" | "iter_keys" | "keys" | "values" | "entries"
                 ) {
                     self.env.record_method_return_type(expr.span, ty.clone());
                 }
@@ -1421,7 +1420,7 @@ impl TypeChecker {
                 pattern,
                 iter,
                 body,
-            } => self.check_for(pattern, iter, body),
+            } => self.check_for(pattern, iter, body, expr.span),
             ExprKind::Loop(body) => self.check_loop(body),
             ExprKind::Match { scrutinee, arms } => self.check_match(scrutinee, arms, expr.span),
             ExprKind::Return(value) => self.check_return(value),

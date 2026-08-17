@@ -163,7 +163,7 @@ def main() -> i64 {
 | `let` / `let mut` | Supported | Immutable assignment diagnostics are shared by `sgc` and `sglsp`. |
 | Blocks and tail expressions | Supported | Core examples. |
 | `if` / `else` | Supported | Snapshot and conformance tests. |
-| `while` / `for` / `loop` | Subset | Common loops compile; drop coverage is verified for current lowering paths. |
+| `while` / `for` / `loop` | Supported | Arrays, slices, and ranges keep direct lowering. `for` also iterates `Vec`/`VecDeque`/`HashSet`/`BTreeSet` elements, `HashMap`/`BTreeMap` entries, `keys()`/`values()`, and `Iterator` adapters (`map`/`filter`/`take`/`skip`/`enumerate`). Proof: `compiler/src/tests/for_loop_tests.rs`. |
 | `return`, `break`, `continue` | Subset | Implemented in current MIR/drop paths; edge cases stay under AMM follow-up tests. |
 | Method calls | Supported | Inherent methods and trait methods. |
 | Operators | Supported | Primitive intrinsics and user-defined `Add`/`Sub`/`Mul`/`Div`/`Rem`/`Neg` dispatch are covered by `numeric_operator_traits`. |

@@ -49,17 +49,21 @@
 
 ## 3. P1 — for over collections
 
-- [ ] 3.1 Desugar `for pat in expr` onto the existing `Iterator` protocol for
+- [x] 3.1 Desugar `for pat in expr` onto the existing `Iterator` protocol for
   collection and iterator receivers.
-- [ ] 3.2 Keep the current direct lowering for arrays, slices, and ranges; add a
+- [x] 3.2 Keep the current direct lowering for arrays, slices, and ranges; add a
   test proving no iterator indirection is introduced for them.
-- [ ] 3.3 Support `Vec`, `VecDeque`, `HashSet`, `BTreeSet` element iteration and
+  Proof: `for_loop_tests::array_for_loop_does_not_lower_through_iterator_next`.
+- [x] 3.3 Support `Vec`, `VecDeque`, `HashSet`, `BTreeSet` element iteration and
   `HashMap`/`BTreeMap` entry iteration.
-- [ ] 3.4 Add `keys()` / `values()` to `HashMap` and `BTreeMap`.
-- [ ] 3.5 Iterating lazy adapters (`map`, `filter`, `take`, `skip`,
+  Proof: `for_loop_tests::for_loop_iterates_vec_and_lazy_adapters` and
+  `for_loop_iterates_map_entries_keys_and_values`.
+- [x] 3.4 Add `keys()` / `values()` to `HashMap` and `BTreeMap`.
+- [x] 3.5 Iterating lazy adapters (`map`, `filter`, `take`, `skip`,
   `enumerate`) with `for` consumes them to completion.
-- [ ] 3.6 Mutation-while-iterating stays rejected by existing borrow rules;
+- [x] 3.6 Mutation-while-iterating stays rejected by existing borrow rules;
   regression test included.
+  Proof: `for_loop_tests::for_loop_rejects_mutation_while_iterating_a_vec`.
 
 ## 4. P2 — Quiet output and one diagnostic language
 

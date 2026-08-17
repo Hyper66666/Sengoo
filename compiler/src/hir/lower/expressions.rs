@@ -272,12 +272,16 @@ pub(super) fn lower_expr(expr: &ast::Expr, type_env: &TypeEnv) -> Result<HIRExpr
             iter,
             body,
         } => {
-            let (var_name, var_symbol) = extract_pattern_var_name(pattern);
-            HIRExpr::For {
-                var_name,
-                var_symbol,
-                iter: Box::new(lower_expr(iter, type_env)?),
-                body: Box::new(lower_body(body, type_env)),
+            if let Some(desugared) = type_env.desugared_for(expr.span) {
+                lower_expr(desugared, type_env)?
+            } else {
+                let (var_name, var_symbol) = extract_pattern_var_name(pattern);
+                HIRExpr::For {
+                    var_name,
+                    var_symbol,
+                    iter: Box::new(lower_expr(iter, type_env)?),
+                    body: Box::new(lower_body(body, type_env)),
+                }
             }
         }
         ast::ExprKind::Call { func, args } => {
