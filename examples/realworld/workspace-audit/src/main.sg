@@ -4,5 +4,5 @@ def main() -> i64 {
     match audit_workspace(".", "workspace-audit.json", "workspace-audit.txt") {
         Ok(_) => 0,
         Err(error) => error,
-    }
+    };
 }

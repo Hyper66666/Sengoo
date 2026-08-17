@@ -45,14 +45,14 @@ def config_max_depth(root: JsonValue) -> i64 {
     match root.object_get("max_depth") {
         Ok(value) => value.number_i64().unwrap_or(3),
         Err(_) => 3,
-    }
+    };
 }
 
 def config_require_tests(root: JsonValue) -> bool {
     match root.object_get("require_tests") {
         Ok(value) => value.bool_value().unwrap_or(true),
         Err(_) => true,
-    }
+    };
 }
 
 def load_config(path_name: &str) -> AuditConfig {
@@ -111,18 +111,11 @@ def summarize_workspace(root: &str, config: AuditConfig) -> Result<WorkspaceSumm
     let mut stopped_on = 0;
     while true {
         match walk.next_string() {
-            Ok(entry) => {
-                totals = count_path(totals, entry);
-            },
-            Err(error) => {
-                stopped_on = error;
-                break;
-            },
-        }
+            Ok(entry) => { totals = count_path(totals, entry); },
+            Err(error) => { stopped_on = error; break; },
+        };
     };
-    if stopped_on != STATUS_NOT_FOUND() {
-        return Err(stopped_on);
-    };
+    if stopped_on != STATUS_NOT_FOUND() { return Err(stopped_on); };
     Ok(totals);
 }
 
@@ -160,13 +153,9 @@ def parallel_score(summary: WorkspaceSummary) -> Result<i64, i64> {
 def audit_workspace(root: &str, config_path: &str, report_path: &str) -> Result<i64, i64> {
     let config = load_config(config_path);
     let summary = summarize_workspace(root, config)?;
-    if config.require_tests and summary.test_files == 0 {
-        return Err(STATUS_NOT_FOUND());
-    };
+    if config.require_tests and summary.test_files == 0 { return Err(STATUS_NOT_FOUND()); };
     let concurrent_score = parallel_score(summary)?;
-    if concurrent_score != summary.score() {
-        return Err(STATUS_UNKNOWN());
-    };
+    if concurrent_score != summary.score() { return Err(STATUS_UNKNOWN()); };
     let text = format("workspace-audit: sources={} tests={} manifests={} bytes={} score={}", summary.source_files, summary.test_files, summary.manifests, summary.bytes, concurrent_score);
     let wrote_text = file_write_str(report_path, text.as_str())?;
     let json_report_path = if str_eq(root, "fixture") {

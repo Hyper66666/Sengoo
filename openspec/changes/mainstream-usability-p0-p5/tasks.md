@@ -102,18 +102,28 @@
 
 ## 6. P4 — Idiomatic flagship examples
 
-- [ ] 6.1 Rewrite `examples/realworld/workspace-audit/src/lib.sg` using early
+- [x] 6.1 Rewrite `examples/realworld/workspace-audit/src/lib.sg` using early
   `return`, `?`, and flat guard clauses instead of single-line nested
   expressions.
-- [ ] 6.2 Rewrite `examples/realworld/cli-json-audit/src/main.sg` the same way.
-- [ ] 6.3 Sweep remaining fixtures for collapsed single-line function bodies.
+  Proof: `sgpm test --locked --manifest-path examples/realworld/workspace-audit/Sengoo.toml`
+  (3 passed, including `test_parallel_score_matches_serial_oracle`).
+- [x] 6.2 Rewrite `examples/realworld/cli-json-audit/src/main.sg` the same way.
+  Proof: `sgpm test --manifest-path examples/realworld/cli-json-audit/Sengoo.toml`
+  (1 passed) and `sgc run src/main.sg` from the package directory exits 0.
+- [x] 6.3 Sweep remaining fixtures for collapsed single-line function bodies.
   Do not reformat the repo at large; a width-aware sweep of the other 53
   affected files is a follow-up scheduled after the `Option`/`Result`
   migration.
-- [ ] 6.4 Behavior is unchanged: each rewritten fixture passes its loop with
+  Applied width-aware `sgfmt` only to the P4 flagship sources and tests.
+  Other realworld packages still contain short inline `if ok { 0 } else { 1 }`
+  bodies that fit the default width.
+- [x] 6.4 Behavior is unchanged: each rewritten fixture passes its loop with
   identical results. Fixtures holding v1 lockfiles (D8) are verified through
   the non-locked loop and their locked-gate status stays open with the blocker
   recorded, not ticked.
+  `cli-json-audit` is verified non-locked. After `4425bba55` the v1 lockfile
+  no longer fails `--locked` deserialization, but regenerating those locks
+  stays out of scope per D8.
 
 ## 7. P5 — Width-aware block formatting
 
