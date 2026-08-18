@@ -125,6 +125,7 @@ pub(super) fn process_surface_attributes(source: &str) -> Result<Cow<'_, str>> {
         decl_cursor = skip_visibility(bytes, decl_cursor);
         decl_cursor = skip_keyword(bytes, decl_cursor, b"unsafe");
         decl_cursor = skip_keyword(bytes, decl_cursor, b"async");
+        decl_cursor = skip_ws_and_comments(bytes, decl_cursor);
 
         if starts_with_keyword(bytes, decl_cursor, b"extern") {
             let decl_end = find_declaration_end(bytes, decl_cursor)?;
@@ -140,6 +141,7 @@ pub(super) fn process_surface_attributes(source: &str) -> Result<Cow<'_, str>> {
         cursor = skip_visibility(bytes, cursor);
         cursor = skip_keyword(bytes, cursor, b"unsafe");
         cursor = skip_keyword(bytes, cursor, b"async");
+        cursor = skip_ws_and_comments(bytes, cursor);
 
         let Some((decl_kind, name, decl_end)) = locate_top_level_decl(source, bytes, cursor)?
         else {
@@ -148,7 +150,6 @@ pub(super) fn process_surface_attributes(source: &str) -> Result<Cow<'_, str>> {
             emitted_to = cursor;
             continue;
         };
-
         if decl_kind == SurfaceDeclKind::Other {
             output.extend_from_slice(&bytes[decl_start..decl_end]);
             cursor = decl_end;
@@ -1129,6 +1130,24 @@ def old_main() -> i64 { 1 }
         let deprecated = take_deprecated_decls();
         assert_eq!(deprecated.len(), 1);
         assert_eq!(deprecated[0].name, "old_main");
+    }
+
+    #[test]
+    fn deprecated_attribute_preserves_async_modifier_on_later_declaration() {
+        let source = r#"
+#[deprecated(replacement = "new_main", removal = "v0.3.0")]
+def old_main() -> i64 { 1 }
+
+async def later() -> i64 {
+    await work()
+}
+"#;
+
+        let processed = process_surface_attributes(source).expect("attribute pass should succeed");
+        assert!(
+            processed.contains("async def later"),
+            "attribute masking must not erase later declaration modifiers:\n{processed}"
+        );
     }
 
     #[test]

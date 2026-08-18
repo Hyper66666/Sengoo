@@ -1,6 +1,25 @@
 use super::*;
 use crate::mir::InstId;
 
+#[derive(Debug, Clone)]
+enum OptionDropLayout {
+    LegacyStruct {
+        name: String,
+        payload_ty: MIRType,
+    },
+    Enum {
+        name: String,
+        some_discriminant: u32,
+        payload_ty: MIRType,
+    },
+}
+
+#[derive(Debug, Clone)]
+struct ResultDropLayout {
+    name: String,
+    variants: Vec<(u32, MIRType)>,
+}
+
 impl<'a> LoweringContext<'a> {
     pub(super) fn push_drop_scope(&mut self) {
         self.drop_scope_markers.push(self.drop_bindings.len());
@@ -22,11 +41,10 @@ impl<'a> LoweringContext<'a> {
             return;
         }
         for binding in bindings.iter().rev() {
-            if self.drop_binding_is_moved(binding) {
+            if binding.live_flag.is_none() && self.drop_binding_is_moved(binding) {
                 continue;
             }
-            self.push_task_scope_normal_join(self.current_block(), binding);
-            self.push_drop_call(self.current_block(), binding);
+            self.emit_drop_binding_if_live(binding, true);
         }
     }
 
@@ -83,11 +101,11 @@ impl<'a> LoweringContext<'a> {
         };
         let bindings = self.drop_bindings[marker..]
             .iter()
-            .filter(|binding| !self.drop_binding_is_moved(binding))
+            .filter(|binding| binding.live_flag.is_some() || !self.drop_binding_is_moved(binding))
             .cloned()
             .collect::<Vec<_>>();
         for binding in bindings.iter().rev() {
-            self.push_drop_call(self.current_block(), binding);
+            self.emit_drop_binding_if_live(binding, false);
         }
     }
 
@@ -112,15 +130,22 @@ impl<'a> LoweringContext<'a> {
                 local,
                 field_path: Vec::new(),
                 drop_func,
+                live_flag: None,
+                initialized_block: None,
             });
         } else {
             let ty = self.get_local_type(local).clone();
             self.collect_field_drop_bindings(local, &ty, &mut Vec::new(), &mut bindings);
         };
-        for binding in bindings {
+        for mut binding in bindings {
             if !self.drop_bindings.iter().any(|existing| {
                 existing.local == binding.local && existing.field_path == binding.field_path
             }) {
+                binding.initialized_block = Some(if binding.local.kind == LocalKind::Param {
+                    self.mir_fn.start_block
+                } else {
+                    self.current_block()
+                });
                 self.drop_bindings.push(binding);
             }
         }
@@ -128,6 +153,19 @@ impl<'a> LoweringContext<'a> {
 
     pub(super) fn mark_drop_local_moved(&mut self, local: Local) {
         self.moved_drop_locals.insert(local);
+        let current_block = self.current_block();
+        let binding_indexes = self
+            .drop_bindings
+            .iter()
+            .enumerate()
+            .filter(|(_, binding)| binding.local == local)
+            .map(|(index, _)| index)
+            .collect::<Vec<_>>();
+        for index in binding_indexes {
+            if let Some(flag) = self.ensure_live_flag_for_branch_move(index, current_block) {
+                self.push_bool_store(current_block, flag, false);
+            }
+        }
     }
 
     pub(super) fn mark_drop_locals_moved(&mut self, locals: &[Local]) {
@@ -220,25 +258,46 @@ impl<'a> LoweringContext<'a> {
         self.moved_drop_fields
             .retain(|(moved_local, _)| *moved_local != local);
         self.record_drop_binding_if_needed(local);
+        let flags = self
+            .drop_bindings
+            .iter()
+            .filter(|binding| binding.local == local)
+            .filter_map(|binding| binding.live_flag)
+            .collect::<Vec<_>>();
+        for flag in flags {
+            self.push_bool_store(self.current_block(), flag, true);
+        }
     }
 
     pub(super) fn drop_local_now_if_initialized(&mut self, local: Local) {
-        if self.moved_drop_locals.contains(&local) {
+        let has_live_flag = self
+            .drop_bindings
+            .iter()
+            .any(|binding| binding.local == local && binding.live_flag.is_some());
+        if !has_live_flag && self.moved_drop_locals.contains(&local) {
             return;
         }
         let bindings = self
             .drop_bindings
             .iter()
-            .filter(|binding| binding.local == local && !self.drop_binding_is_moved(binding))
+            .filter(|binding| {
+                binding.local == local
+                    && (binding.live_flag.is_some() || !self.drop_binding_is_moved(binding))
+            })
             .cloned()
             .collect::<Vec<_>>();
         for binding in bindings.iter().rev() {
-            self.push_drop_call(self.current_block(), binding);
+            self.emit_drop_binding_if_live(binding, false);
         }
     }
 
     pub(super) fn drop_field_now_if_initialized(&mut self, local: Local, field_path: &[u32]) {
-        if self.moved_drop_locals.contains(&local) {
+        let has_live_flag = self.drop_bindings.iter().any(|binding| {
+            binding.local == local
+                && Self::field_path_is_prefix(field_path, &binding.field_path)
+                && binding.live_flag.is_some()
+        });
+        if !has_live_flag && self.moved_drop_locals.contains(&local) {
             return;
         }
         let bindings = self
@@ -247,12 +306,12 @@ impl<'a> LoweringContext<'a> {
             .filter(|binding| {
                 binding.local == local
                     && Self::field_path_is_prefix(field_path, &binding.field_path)
-                    && !self.drop_binding_is_moved(binding)
+                    && (binding.live_flag.is_some() || !self.drop_binding_is_moved(binding))
             })
             .cloned()
             .collect::<Vec<_>>();
         for binding in bindings.iter().rev() {
-            self.push_drop_call(self.current_block(), binding);
+            self.emit_drop_binding_if_live(binding, false);
         }
     }
 
@@ -261,6 +320,18 @@ impl<'a> LoweringContext<'a> {
             *moved_local != local || !Self::field_path_is_prefix(field_path, moved_path)
         });
         self.record_drop_binding_if_needed(local);
+        let flags = self
+            .drop_bindings
+            .iter()
+            .filter(|binding| {
+                binding.local == local
+                    && Self::field_path_is_prefix(field_path, &binding.field_path)
+            })
+            .filter_map(|binding| binding.live_flag)
+            .collect::<Vec<_>>();
+        for flag in flags {
+            self.push_bool_store(self.current_block(), flag, true);
+        }
     }
 
     pub(super) fn rebuild_drop_place_with_value(
@@ -365,15 +436,22 @@ impl<'a> LoweringContext<'a> {
                 local,
                 field_path: Vec::new(),
                 drop_func,
+                live_flag: None,
+                initialized_block: None,
             });
         } else {
             let ty = self.get_local_type(local).clone();
             self.collect_field_drop_bindings(local, &ty, &mut Vec::new(), &mut bindings);
         }
-        for binding in bindings {
+        for mut binding in bindings {
             if !self.drop_bindings.iter().any(|existing| {
                 existing.local == binding.local && existing.field_path == binding.field_path
             }) {
+                binding.initialized_block = Some(if binding.local.kind == LocalKind::Param {
+                    self.mir_fn.start_block
+                } else {
+                    self.current_block()
+                });
                 self.drop_bindings.push(binding);
             }
         }
@@ -381,8 +459,17 @@ impl<'a> LoweringContext<'a> {
 
     fn drop_func_for_local(&mut self, local: Local) -> Option<String> {
         let local_ty = self.get_local_type(local).clone();
-        if Self::option_payload_type(&local_ty).is_some() {
+        if self.option_drop_layout(&local_ty).is_some() {
             return self.ensure_option_drop_helper(&local_ty);
+        }
+        if let MIRType::Enum { name, .. } = &local_ty {
+            let custom_drop = format!("{name}_Drop_drop");
+            if self.is_known_function(&custom_drop) {
+                return Some(custom_drop);
+            }
+            if self.result_drop_layout(&local_ty).is_some() {
+                return self.ensure_result_drop_helper(&local_ty);
+            }
         }
         let type_name = match &local_ty {
             MIRType::Struct { name, .. } => Some(name.as_str()),
@@ -393,8 +480,17 @@ impl<'a> LoweringContext<'a> {
     }
 
     fn drop_func_for_type(&mut self, ty: &MIRType) -> Option<String> {
-        if Self::option_payload_type(ty).is_some() {
+        if self.option_drop_layout(ty).is_some() {
             return self.ensure_option_drop_helper(ty);
+        }
+        if let MIRType::Enum { name, .. } = ty {
+            let custom_drop = format!("{name}_Drop_drop");
+            if self.is_known_function(&custom_drop) {
+                return Some(custom_drop);
+            }
+            if self.result_drop_layout(ty).is_some() {
+                return self.ensure_result_drop_helper(ty);
+            }
         }
         let MIRType::Struct { name, .. } = ty else {
             return None;
@@ -403,25 +499,71 @@ impl<'a> LoweringContext<'a> {
         self.is_known_function(&drop_func).then_some(drop_func)
     }
 
-    fn option_payload_type(ty: &MIRType) -> Option<MIRType> {
-        let MIRType::Struct { name, fields } = ty else {
+    fn option_drop_layout(&self, ty: &MIRType) -> Option<OptionDropLayout> {
+        match ty {
+            MIRType::Struct { name, fields }
+                if (name == "Option" || name.starts_with("Option_"))
+                    && matches!(fields.first(), Some((field, MIRType::Bool)) if field == "is_some")
+                    && fields.len() == 2 =>
+            {
+                let payload_ty = fields
+                    .get(1)
+                    .and_then(|(field, ty)| (field == "value").then_some(ty.clone()))?;
+                Some(OptionDropLayout::LegacyStruct {
+                    name: name.clone(),
+                    payload_ty,
+                })
+            }
+            MIRType::Enum { name, .. } if name == "Option" || name.starts_with("Option_") => {
+                let enum_def = self.options.enum_defs.get(name).or_else(|| {
+                    self.options
+                        .enum_defs
+                        .iter()
+                        .filter(|(decl, _)| name.starts_with(&format!("{decl}_")))
+                        .max_by_key(|(decl, _)| decl.len())
+                        .map(|(_, def)| def)
+                })?;
+                let some_discriminant = enum_def.variant_discriminant("Some")?;
+                let payload_ty = crate::mir::enum_defs::EnumDef::instance_variant_payload(
+                    ty,
+                    some_discriminant,
+                )?;
+                Some(OptionDropLayout::Enum {
+                    name: name.clone(),
+                    some_discriminant,
+                    payload_ty,
+                })
+            }
+            _ => None,
+        }
+    }
+
+    fn result_drop_layout(&self, ty: &MIRType) -> Option<ResultDropLayout> {
+        let MIRType::Enum { name, variants, .. } = ty else {
             return None;
         };
-        if !(name == "Option" || name.starts_with("Option_"))
-            || !matches!(fields.first(), Some((field, MIRType::Bool)) if field == "is_some")
-            || fields.len() != 2
-        {
+        if name != "Result" && !name.starts_with("Result_") {
             return None;
         }
-        fields
-            .get(1)
-            .and_then(|(field, ty)| (field == "value").then_some(ty.clone()))
+        let payloads = variants
+            .iter()
+            .filter_map(|(discriminant, payload)| {
+                payload.clone().map(|payload| (*discriminant, payload))
+            })
+            .collect::<Vec<_>>();
+        (!payloads.is_empty()).then_some(ResultDropLayout {
+            name: name.clone(),
+            variants: payloads,
+        })
     }
 
     fn ensure_option_drop_helper(&mut self, option_ty: &MIRType) -> Option<String> {
-        let payload_ty = Self::option_payload_type(option_ty)?;
-        let MIRType::Struct { name, .. } = option_ty else {
-            return None;
+        let layout = self.option_drop_layout(option_ty)?;
+        let (name, payload_ty) = match &layout {
+            OptionDropLayout::LegacyStruct { name, payload_ty }
+            | OptionDropLayout::Enum {
+                name, payload_ty, ..
+            } => (name, payload_ty),
         };
         let helper_name = format!("{name}_Drop_drop");
         if self.is_known_function(&helper_name) {
@@ -467,14 +609,47 @@ impl<'a> LoweringContext<'a> {
 
         let option = Local::new(1, LocalKind::Param);
         let condition = helper_ctx.add_local(None, LocalKind::Temp, MIR_BOOL);
-        helper_ctx.mir_fn.push_inst_to_block(
-            start,
-            Instruction::Extract {
-                destination: condition,
-                value: option,
-                index: 0,
-            },
-        );
+        match &layout {
+            OptionDropLayout::LegacyStruct { .. } => {
+                helper_ctx.mir_fn.push_inst_to_block(
+                    start,
+                    Instruction::Extract {
+                        destination: condition,
+                        value: option,
+                        index: 0,
+                    },
+                );
+            }
+            OptionDropLayout::Enum {
+                some_discriminant, ..
+            } => {
+                let discriminant = helper_ctx.add_local(None, LocalKind::Temp, MIR_I64);
+                helper_ctx.mir_fn.push_inst_to_block(
+                    start,
+                    Instruction::Discriminant {
+                        destination: discriminant,
+                        source: option,
+                    },
+                );
+                let expected = helper_ctx.add_local(None, LocalKind::Temp, MIR_I64);
+                helper_ctx.mir_fn.push_inst_to_block(
+                    start,
+                    Instruction::Assign {
+                        destination: expected,
+                        value: MirConstant::Int(i64::from(*some_discriminant)),
+                    },
+                );
+                helper_ctx.mir_fn.push_inst_to_block(
+                    start,
+                    Instruction::Binary {
+                        destination: condition,
+                        op: MirBinOp::Eq,
+                        left: discriminant,
+                        right: expected,
+                    },
+                );
+            }
+        }
         helper_ctx.mir_fn.basic_blocks[start].set_terminator(Terminator::If {
             cond: condition,
             then_block: payload_block,
@@ -483,15 +658,19 @@ impl<'a> LoweringContext<'a> {
         helper_ctx.mir_fn.basic_blocks[empty_return].set_terminator(Terminator::Return(None));
 
         let extracted = helper_ctx.add_local(None, LocalKind::Temp, payload_ty.clone());
-        helper_ctx.mir_fn.push_inst_to_block(
-            payload_block,
-            Instruction::Extract {
+        let extract = match layout {
+            OptionDropLayout::LegacyStruct { .. } => Instruction::Extract {
                 destination: extracted,
                 value: option,
                 index: 1,
             },
-        );
-        let payload = helper_ctx.add_local(None, LocalKind::User, payload_ty);
+            OptionDropLayout::Enum { .. } => Instruction::ExtractPayload {
+                destination: extracted,
+                source: option,
+            },
+        };
+        helper_ctx.mir_fn.push_inst_to_block(payload_block, extract);
+        let payload = helper_ctx.add_local(None, LocalKind::User, payload_ty.clone());
         helper_ctx.mir_fn.push_inst_to_block(
             payload_block,
             Instruction::Store {
@@ -503,7 +682,119 @@ impl<'a> LoweringContext<'a> {
         helper_ctx.push_drop_scope();
         helper_ctx.record_drop_binding_if_needed(payload);
         helper_ctx.pop_drop_scope(None);
-        helper_ctx.mir_fn.basic_blocks[payload_block].set_terminator(Terminator::Return(None));
+        let payload_end = helper_ctx.current_block();
+        helper_ctx.mir_fn.basic_blocks[payload_end].set_terminator(Terminator::Return(None));
+
+        let nested_helpers = std::mem::take(&mut helper_ctx.lambda_functions);
+        let generated = helper_ctx.mir_fn.clone();
+        drop(helper_ctx);
+        self.lambda_functions.extend(nested_helpers);
+        self.lambda_functions.push(generated);
+        Some(helper_name)
+    }
+
+    fn ensure_result_drop_helper(&mut self, result_ty: &MIRType) -> Option<String> {
+        let layout = self.result_drop_layout(result_ty)?;
+        let helper_name = format!("{}_Drop_drop", layout.name);
+        if self.is_known_function(&helper_name) {
+            return Some(helper_name);
+        }
+
+        self.insert_known_function(helper_name.clone());
+        self.insert_function_sig(
+            helper_name.clone(),
+            FunctionSig {
+                ret_type: MIR_UNIT,
+                param_count: 1,
+                env: Vec::new(),
+            },
+        );
+
+        let mut helper = MirFunction::new(helper_name.clone(), vec![result_ty.clone()], MIR_UNIT);
+        let start = helper.start_block;
+        let empty_return = helper.add_block();
+        let payload_blocks = layout
+            .variants
+            .iter()
+            .map(|_| helper.add_block())
+            .collect::<Vec<_>>();
+        let mut helper_ctx = LoweringContext::new(
+            &mut helper,
+            self.lambda_counter,
+            self.known_functions_base,
+            self.function_sigs_base,
+            self.struct_defs,
+            self.concrete_type_registry.clone(),
+            self.options.clone(),
+            self.inherent_method_templates,
+            self.trait_method_templates,
+        );
+        helper_ctx.known_functions_overlay = self.known_functions_overlay.clone();
+        helper_ctx.function_sigs_overlay = self.function_sigs_overlay.clone();
+        helper_ctx.insert_known_function(helper_name.clone());
+        helper_ctx.insert_function_sig(
+            helper_name.clone(),
+            FunctionSig {
+                ret_type: MIR_UNIT,
+                param_count: 1,
+                env: Vec::new(),
+            },
+        );
+
+        let result = Local::new(1, LocalKind::Param);
+        let discriminant = helper_ctx.add_local(None, LocalKind::Temp, MIR_I64);
+        helper_ctx.mir_fn.push_inst_to_block(
+            start,
+            Instruction::Discriminant {
+                destination: discriminant,
+                source: result,
+            },
+        );
+        let targets = layout
+            .variants
+            .iter()
+            .zip(payload_blocks.iter().copied())
+            .map(|((variant, _), block)| (*variant, block))
+            .collect::<Vec<_>>();
+        helper_ctx.mir_fn.basic_blocks[start].set_terminator(Terminator::Switch {
+            discr: discriminant,
+            targets,
+            otherwise: empty_return,
+        });
+        helper_ctx.mir_fn.basic_blocks[empty_return].set_terminator(Terminator::Return(None));
+
+        for ((_, payload_ty), payload_block) in layout.variants.iter().zip(payload_blocks) {
+            let extracted = helper_ctx.add_local(None, LocalKind::Temp, payload_ty.clone());
+            helper_ctx.mir_fn.push_inst_to_block(
+                payload_block,
+                Instruction::ExtractPayload {
+                    destination: extracted,
+                    source: result,
+                },
+            );
+            let payload = helper_ctx.add_local(None, LocalKind::User, payload_ty.clone());
+            helper_ctx.mir_fn.push_inst_to_block(
+                payload_block,
+                Instruction::Store {
+                    destination: payload,
+                    value: extracted,
+                },
+            );
+            helper_ctx.set_current_block(payload_block);
+            helper_ctx.push_drop_scope();
+            helper_ctx.record_drop_binding_if_needed(payload);
+            helper_ctx.pop_drop_scope(None);
+            let payload_end = helper_ctx.current_block();
+            if helper_ctx
+                .mir_fn
+                .basic_blocks
+                .get(payload_end)
+                .is_some_and(|block| block.terminator.is_none())
+            {
+                helper_ctx.mir_fn.basic_blocks[payload_end]
+                    .set_terminator(Terminator::Return(None));
+            }
+        }
 
         let nested_helpers = std::mem::take(&mut helper_ctx.lambda_functions);
         let generated = helper_ctx.mir_fn.clone();
@@ -525,6 +816,8 @@ impl<'a> LoweringContext<'a> {
                 local,
                 field_path: path.clone(),
                 drop_func,
+                live_flag: None,
+                initialized_block: None,
             });
             return;
         }
@@ -555,20 +848,59 @@ impl<'a> LoweringContext<'a> {
     }
 
     pub(super) fn mark_drop_field_moved(&mut self, local: Local, field_path: Vec<u32>) {
-        if self
+        let tracks_field_move = self
             .drop_bindings
             .iter()
-            .any(|binding| binding.local == local && !binding.field_path.is_empty())
-        {
-            self.moved_drop_fields.insert((local, field_path));
+            .any(|binding| binding.local == local && !binding.field_path.is_empty());
+        if !tracks_field_move {
+            return;
         }
+        self.moved_drop_fields.insert((local, field_path.clone()));
+        let current_block = self.current_block();
+        let binding_indexes = self
+            .drop_bindings
+            .iter()
+            .enumerate()
+            .filter(|(_, binding)| {
+                binding.local == local
+                    && (Self::field_path_is_prefix(&field_path, &binding.field_path)
+                        || Self::field_path_is_prefix(&binding.field_path, &field_path))
+            })
+            .map(|(index, _)| index)
+            .collect::<Vec<_>>();
+        for index in binding_indexes {
+            if let Some(flag) = self.ensure_live_flag_for_branch_move(index, current_block) {
+                self.push_bool_store(current_block, flag, false);
+            }
+        }
+    }
+
+    fn ensure_live_flag_for_branch_move(
+        &mut self,
+        binding_index: usize,
+        move_block: usize,
+    ) -> Option<Local> {
+        let binding = self.drop_bindings.get(binding_index)?;
+        if let Some(flag) = binding.live_flag {
+            return Some(flag);
+        }
+        let initialized_block = binding.initialized_block?;
+        if initialized_block == move_block {
+            return None;
+        }
+
+        let flag = self.mir_fn.add_local(LocalKind::User, MIR_BOOL);
+        self.insert_bool_store_at_block_start(self.mir_fn.start_block, flag, false);
+        self.push_bool_store(initialized_block, flag, true);
+        self.drop_bindings[binding_index].live_flag = Some(flag);
+        Some(flag)
     }
 
     pub(super) fn insert_drop_glue(&mut self) {
         let bindings = self
             .drop_bindings
             .iter()
-            .filter(|binding| !self.drop_binding_is_moved(binding))
+            .filter(|binding| binding.live_flag.is_some() || !self.drop_binding_is_moved(binding))
             .cloned()
             .collect::<Vec<_>>();
         if bindings.is_empty() {
@@ -590,7 +922,10 @@ impl<'a> LoweringContext<'a> {
             return;
         }
 
-        if cleanup_exits.len() == 1 && self.all_bindings_initialized_in_entry(&bindings) {
+        if cleanup_exits.len() == 1
+            && bindings.iter().all(|binding| binding.live_flag.is_none())
+            && self.all_bindings_initialized_in_entry(&bindings)
+        {
             self.insert_straight_line_drops(cleanup_exits[0].0, &bindings);
         } else {
             self.insert_flagged_drops(&cleanup_exits, &bindings);
@@ -612,6 +947,9 @@ impl<'a> LoweringContext<'a> {
         let flagged = bindings
             .iter()
             .filter_map(|binding| {
+                if let Some(flag) = binding.live_flag {
+                    return Some((binding.clone(), flag));
+                }
                 let flag = self.mir_fn.add_local(LocalKind::User, MIR_BOOL);
                 if binding.local.kind == LocalKind::Param {
                     self.insert_bool_store_at_block_start(self.mir_fn.start_block, flag, true);
@@ -684,6 +1022,42 @@ impl<'a> LoweringContext<'a> {
         self.push_drop_call_at(block, binding, self.current_source_site);
     }
 
+    fn emit_drop_binding_if_live(&mut self, binding: &DropBinding, join_task_scope: bool) {
+        let Some(flag) = binding.live_flag else {
+            if join_task_scope {
+                self.push_task_scope_normal_join(self.current_block(), binding);
+            }
+            self.push_drop_call(self.current_block(), binding);
+            return;
+        };
+
+        let source_site = self.current_source_site;
+        let guard_value = self.mir_fn.add_local(LocalKind::Temp, MIR_BOOL);
+        self.mir_fn.push_inst_to_block_at(
+            self.current_block(),
+            Instruction::Load {
+                destination: guard_value,
+                source: flag,
+            },
+            source_site,
+        );
+        let drop_block = self.mir_fn.add_block();
+        let next_block = self.mir_fn.add_block();
+        self.set_terminator(Terminator::If {
+            cond: guard_value,
+            then_block: drop_block,
+            else_block: next_block,
+        });
+
+        if join_task_scope {
+            self.push_task_scope_normal_join(drop_block, binding);
+        }
+        self.push_drop_call_at(drop_block, binding, source_site);
+        self.push_bool_store(drop_block, flag, false);
+        self.set_block_terminator_at(drop_block, Terminator::Goto(next_block), source_site);
+        self.set_current_block(next_block);
+    }
+
     fn push_drop_call_at(&mut self, block: usize, binding: &DropBinding, source_site: Option<u32>) {
         let mut argument = binding.local;
         for index in &binding.field_path {
@@ -742,6 +1116,14 @@ impl<'a> LoweringContext<'a> {
             source_site,
         );
         [assign, store]
+    }
+
+    fn push_bool_store(&mut self, block: usize, destination: Local, value: bool) {
+        let insts = self.alloc_bool_store(destination, value, None);
+        for inst in insts {
+            self.mir_fn.hide_instruction_from_debug(inst);
+            self.mir_fn.basic_blocks[block].push(inst);
+        }
     }
 
     fn insert_bool_store_at_block_start(&mut self, block: usize, destination: Local, value: bool) {

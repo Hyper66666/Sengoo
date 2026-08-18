@@ -308,6 +308,24 @@ fn collect_ast_call_targets_from_expr(
                 collect_ast_call_targets_from_expr(else_branch, index_by_name, targets, seen);
             }
         }
+        AstExprKind::IfLet {
+            expr,
+            then_branch,
+            else_branch,
+            ..
+        } => {
+            collect_ast_call_targets_from_expr(expr, index_by_name, targets, seen);
+            collect_ast_call_targets_from_block(then_branch, index_by_name)
+                .into_iter()
+                .for_each(|idx| {
+                    if seen.insert(idx) {
+                        targets.push(idx);
+                    }
+                });
+            if let Some(else_branch) = else_branch {
+                collect_ast_call_targets_from_expr(else_branch, index_by_name, targets, seen);
+            }
+        }
         AstExprKind::While { cond, body } => {
             collect_ast_call_targets_from_expr(cond, index_by_name, targets, seen);
             collect_ast_call_targets_from_block(body, index_by_name)
@@ -350,6 +368,14 @@ fn collect_ast_call_targets_from_expr(
         AstExprKind::Array(elements) | AstExprKind::Tuple(elements) => {
             for element in elements {
                 collect_ast_call_targets_from_expr(element, index_by_name, targets, seen);
+            }
+        }
+        AstExprKind::VecBang { elements, count } => {
+            for element in elements {
+                collect_ast_call_targets_from_expr(element, index_by_name, targets, seen);
+            }
+            if let Some(count) = count {
+                collect_ast_call_targets_from_expr(count, index_by_name, targets, seen);
             }
         }
         AstExprKind::Struct { fields, base, .. } => {

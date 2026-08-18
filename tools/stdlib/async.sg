@@ -503,18 +503,18 @@ impl Drop for RwLockWriteGuardI64 {
 def runtime_enable_thread_pool(worker_count: i64) -> Result<i64, i64> {
     let raw = sengoo_async_runtime_enable_thread_pool(worker_count);
     if raw >= 0 {
-        Result { is_ok: true, value: raw, error: 0 }
+        Ok(raw)
     } else {
-        Result { is_ok: false, value: 0, error: STATUS_INVALID_ARGUMENT() }
+        Err(STATUS_INVALID_ARGUMENT())
     }
 }
 
 def runtime_enable_executor(worker_count: i64, capacity: i64) -> Result<i64, i64> {
     let raw = sengoo_async_runtime_enable_executor(worker_count, capacity);
     if raw >= 0 {
-        Result { is_ok: true, value: raw, error: 0 }
+        Ok(raw)
     } else {
-        Result { is_ok: false, value: 0, error: status_from_raw_ffi(raw) }
+        Err(status_from_raw_ffi(raw))
     }
 }
 
@@ -536,13 +536,13 @@ def spawn_blocking_future_i64(work: fn() -> i64) -> i64 {
 
 def spawn_blocking_i64(work: fn() -> i64) -> Result<i64, i64> {
     if !sengoo_async_runtime_thread_pool_enabled() {
-        Result { is_ok: false, value: 0, error: STATUS_UNSUPPORTED() }
+        Err(STATUS_UNSUPPORTED())
     } else {
         let handle = sengoo_async_spawn_blocking_i64__start(work);
         if handle == 0 {
-            Result { is_ok: false, value: 0, error: STATUS_UNSUPPORTED() }
+            Err(STATUS_UNSUPPORTED())
         } else {
-            Result { is_ok: true, value: handle, error: 0 }
+            Ok(handle)
         }
     }
 }
@@ -553,11 +553,7 @@ def spawn_shared_counter_i64(
     repetitions: i64,
 ) -> Result<SharedCounterJobI64, i64> {
     if repetitions < 0 {
-        Result {
-            is_ok: false,
-            value: SharedCounterJobI64 { handle: 0 },
-            error: STATUS_INVALID_ARGUMENT(),
-        }
+        Err(STATUS_INVALID_ARGUMENT())
     } else {
         let handle = sengoo_async_shared_counter_spawn_add_i64(
             shared.handle,
@@ -565,17 +561,9 @@ def spawn_shared_counter_i64(
             repetitions,
         );
         if handle == 0 {
-            Result {
-                is_ok: false,
-                value: SharedCounterJobI64 { handle: 0 },
-                error: STATUS_UNSUPPORTED(),
-            }
+            Err(STATUS_UNSUPPORTED())
         } else {
-            Result {
-                is_ok: true,
-                value: SharedCounterJobI64 { handle: handle },
-                error: 0,
-            }
+            Ok(SharedCounterJobI64 { handle: handle })
         }
     }
 }
@@ -583,18 +571,10 @@ def spawn_shared_counter_i64(
 async def mutex_lock_guard<T>(mutex: &Mutex<T>) -> Result<MutexGuard<T>, i64> {
     let status = await raw_mutex_lock_async(mutex);
     if status == 0 {
-        let result: Result<MutexGuard<T>, i64> = Result {
-            is_ok: true,
-            value: mutex.make_guard(mutex.raw_handle(), true),
-            error: 0,
-        };
+        let result: Result<MutexGuard<T>, i64> = Ok(mutex.make_guard(mutex.raw_handle(), true));
         result
     } else {
-        let result: Result<MutexGuard<T>, i64> = Result {
-            is_ok: false,
-            value: mutex.make_guard(0, false),
-            error: status,
-        };
+        let result: Result<MutexGuard<T>, i64> = Err(status);
         result
     }
 }
@@ -602,34 +582,18 @@ async def mutex_lock_guard<T>(mutex: &Mutex<T>) -> Result<MutexGuard<T>, i64> {
 async def rwlock_read_guard<T>(lock: &RwLock<T>) -> Result<RwLockReadGuard<T>, i64> {
     let guard_id = await raw_rwlock_read_async(lock);
     if guard_id > 0 {
-        Result {
-            is_ok: true,
-            value: lock.make_read_guard(guard_id, true),
-            error: 0,
-        }
+        Ok(lock.make_read_guard(guard_id, true))
     } else {
-        Result {
-            is_ok: false,
-            value: lock.make_read_guard(0, false),
-            error: status_from_raw_ffi(guard_id),
-        }
+        Err(status_from_raw_ffi(guard_id))
     }
 }
 
 async def rwlock_write_guard<T>(lock: &RwLock<T>) -> Result<RwLockWriteGuard<T>, i64> {
     let guard_id = await raw_rwlock_write_async(lock);
     if guard_id > 0 {
-        Result {
-            is_ok: true,
-            value: lock.make_write_guard(guard_id, true),
-            error: 0,
-        }
+        Ok(lock.make_write_guard(guard_id, true))
     } else {
-        Result {
-            is_ok: false,
-            value: lock.make_write_guard(0, false),
-            error: status_from_raw_ffi(guard_id),
-        }
+        Err(status_from_raw_ffi(guard_id))
     }
 }
 
@@ -664,13 +628,9 @@ async def channel_send<T: Send>(
 ) -> Result<i64, i64> {
     let status = await raw_channel_send(sender, value);
     if status == 0 {
-        Result { is_ok: true, value: 0, error: 0 }
+        Ok(0)
     } else {
-        Result {
-            is_ok: false,
-            value: 0,
-            error: status_from_raw_ffi(status),
-        }
+        Err(status_from_raw_ffi(status))
     }
 }
 
@@ -681,16 +641,12 @@ async def channel_recv_into<T>(
     let value_handle = await raw_channel_recv(receiver);
     if value_handle > 0 {
         if raw_channel_value_move_into(receiver, value_handle, output) {
-            Result { is_ok: true, value: 0, error: 0 }
+            Ok(0)
         } else {
-            Result { is_ok: false, value: 0, error: STATUS_INVALID_HANDLE() }
+            Err(STATUS_INVALID_HANDLE())
         }
     } else {
-        Result {
-            is_ok: false,
-            value: 0,
-            error: if value_handle < 0 { status_from_raw_ffi(value_handle) } else { STATUS_INVALID_HANDLE() },
-        }
+        Err(if value_handle < 0 { status_from_raw_ffi(value_handle) } else { STATUS_INVALID_HANDLE() })
     }
 }
 
@@ -725,9 +681,9 @@ def channel_bounded(capacity: i64) -> Result<ChannelPairI64, i64> {
 def channel_bounded_i64(capacity: i64) -> Result<ChannelPairI64, i64> {
     let pair = sengoo_async_channel_bounded_i64(capacity);
     if pair == 0 {
-        Result { is_ok: false, value: ChannelPairI64 { handle: 0 }, error: STATUS_INVALID_ARGUMENT() }
+        Err(STATUS_INVALID_ARGUMENT())
     } else {
-        Result { is_ok: true, value: ChannelPairI64 { handle: pair }, error: 0 }
+        Ok(ChannelPairI64 { handle: pair })
     }
 }
 
@@ -782,30 +738,22 @@ def mutex_lock_async(mutex: MutexI64) -> i64 {
 async def mutex_lock_guard_i64(mutex: MutexI64) -> Result<MutexGuardI64, i64> {
     let locked = await mutex_lock_async(mutex);
     if locked.is_ok {
-        Result {
-            is_ok: true,
-            value: MutexGuardI64 {
-                mutex_handle: mutex.handle,
-                value: locked.value,
-                active: true,
-            },
-            error: 0,
-        }
+        Ok(MutexGuardI64 {
+            mutex_handle: mutex.handle,
+            value: locked.value,
+            active: true,
+        })
     } else {
-        Result {
-            is_ok: false,
-            value: MutexGuardI64 { mutex_handle: 0, value: 0, active: false },
-            error: locked.error,
-        }
+        Err(locked.error)
     }
 }
 
 def mutex_unlock_i64(mutex: MutexI64, value: i64) -> Result<i64, i64> {
     let raw = sengoo_async_mutex_unlock_i64(mutex.handle, value);
     if raw >= 0 {
-        Result { is_ok: true, value: value, error: 0 }
+        Ok(value)
     } else {
-        Result { is_ok: false, value: 0, error: STATUS_INVALID_HANDLE() }
+        Err(STATUS_INVALID_HANDLE())
     }
 }
 
@@ -824,75 +772,43 @@ def rwlock_drop(lock: RwLockI64) {
 def rwlock_try_read_guard<T>(lock: &RwLock<T>) -> Result<RwLockReadGuard<T>, i64> {
     let raw = sengoo_async_rwlock_try_read(lock.raw_handle());
     if raw > 0 {
-        Result {
-            is_ok: true,
-            value: lock.make_read_guard(raw, true),
-            error: 0,
-        }
+        Ok(lock.make_read_guard(raw, true))
     } else {
-        Result {
-            is_ok: false,
-            value: lock.make_read_guard(0, false),
-            error: if raw == -11 { STATUS_TIMEOUT() } else { STATUS_INVALID_HANDLE() },
-        }
+        Err(if raw == -11 { STATUS_TIMEOUT() } else { STATUS_INVALID_HANDLE() })
     }
 }
 
 def rwlock_try_write_guard<T>(lock: &RwLock<T>) -> Result<RwLockWriteGuard<T>, i64> {
     let raw = sengoo_async_rwlock_try_write(lock.raw_handle());
     if raw > 0 {
-        Result {
-            is_ok: true,
-            value: lock.make_write_guard(raw, true),
-            error: 0,
-        }
+        Ok(lock.make_write_guard(raw, true))
     } else {
-        Result {
-            is_ok: false,
-            value: lock.make_write_guard(0, false),
-            error: if raw == -11 { STATUS_TIMEOUT() } else { STATUS_INVALID_HANDLE() },
-        }
+        Err(if raw == -11 { STATUS_TIMEOUT() } else { STATUS_INVALID_HANDLE() })
     }
 }
 
 def rwlock_try_read_guard_i64(lock: RwLockI64) -> Result<RwLockReadGuardI64, i64> {
     let raw = sengoo_async_rwlock_try_read_i64(lock.handle);
     if raw > 0 {
-        Result {
-            is_ok: true,
-            value: RwLockReadGuardI64 {
+        Ok(RwLockReadGuardI64 {
                 lock_handle: lock.handle,
                 guard_id: raw,
                 active: true,
-            },
-            error: 0,
-        }
+            })
     } else {
-        Result {
-            is_ok: false,
-            value: RwLockReadGuardI64 { lock_handle: 0, guard_id: 0, active: false },
-            error: if raw == -11 { STATUS_TIMEOUT() } else { STATUS_INVALID_HANDLE() },
-        }
+        Err(if raw == -11 { STATUS_TIMEOUT() } else { STATUS_INVALID_HANDLE() })
     }
 }
 
 def rwlock_try_write_guard_i64(lock: RwLockI64) -> Result<RwLockWriteGuardI64, i64> {
     let raw = sengoo_async_rwlock_try_write_i64(lock.handle);
     if raw > 0 {
-        Result {
-            is_ok: true,
-            value: RwLockWriteGuardI64 {
+        Ok(RwLockWriteGuardI64 {
                 lock_handle: lock.handle,
                 guard_id: raw,
                 active: true,
-            },
-            error: 0,
-        }
+            })
     } else {
-        Result {
-            is_ok: false,
-            value: RwLockWriteGuardI64 { lock_handle: 0, guard_id: 0, active: false },
-            error: if raw == -11 { STATUS_TIMEOUT() } else { STATUS_INVALID_HANDLE() },
-        }
+        Err(if raw == -11 { STATUS_TIMEOUT() } else { STATUS_INVALID_HANDLE() })
     }
 }

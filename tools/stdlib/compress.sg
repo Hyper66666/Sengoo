@@ -6,17 +6,17 @@ extern "C" {
 def compress_gzip_buffer(buffer: Buffer, used_len: i64, out: Buffer) -> Result<i64, i64> {
     let compressed_len = sengoo_compress_gzip(buffer.ptr(), used_len, out.handle, out.len());
     if compressed_len >= 0 {
-        Result { is_ok: true, value: compressed_len, error: 0 }
+        Ok(compressed_len)
     } else {
-        Result { is_ok: false, value: 0, error: status_from_raw_ffi(compressed_len) }
+        Err(status_from_raw_ffi(compressed_len))
     }
 }
 
 def decompress_gzip_buffer(buffer: Buffer, used_len: i64, out: Buffer) -> Result<i64, i64> {
     let decompressed_len = sengoo_compress_gunzip(buffer.ptr(), used_len, out.handle, out.len());
     if decompressed_len >= 0 {
-        Result { is_ok: true, value: decompressed_len, error: 0 }
+        Ok(decompressed_len)
     } else {
-        Result { is_ok: false, value: 0, error: status_from_raw_ffi(decompressed_len) }
+        Err(status_from_raw_ffi(decompressed_len))
     }
 }

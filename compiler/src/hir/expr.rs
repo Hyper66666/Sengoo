@@ -72,6 +72,13 @@ pub enum HIRExpr {
         variant_name: String,
         discriminant: u32,
         args: Vec<HIRExpr>,
+        /// Concrete enum instance selected by type checking, when available.
+        /// Required to monomorphise generic enums such as `Option<T>`.
+        ///
+        /// Boxed to keep `HIRExpr` small: HIR lowering, type inference, and MIR
+        /// lowering all recurse over expressions holding `HIRExpr` by value, so
+        /// an inline `HIRType` here widens every frame of those recursions.
+        concrete_type: Option<Box<HIRType>>,
     },
 
     /// 方法调用
@@ -271,5 +278,31 @@ impl HIRBinaryOp {
             Self::LogOr => 3,
             Self::Assign => 2,
         }
+    }
+}
+
+#[cfg(test)]
+mod size_tests {
+    use super::HIRExpr;
+
+    /// `HIRExpr` is held by value in the stack frames of three mutually deep
+    /// recursions: AST->HIR lowering (`hir::lower::lower_expr`), generic
+    /// substitution (`substitute_hir_expr`), and MIR lowering
+    /// (`LoweringContext::lower_expr`). Debug builds give each match arm its own
+    /// stack slot, so every byte added here is multiplied by the arm count and
+    /// again by a recursion depth that reaches ~125 on ordinary stdlib code.
+    ///
+    /// Compiling `tools/stdlib/math.sg` already needs ~1.9 MiB against libtest's
+    /// 2 MiB default thread stack. Growing this enum by 24 bytes (an inline
+    /// `Option<HIRType>` on `EnumConstruct`) was enough to overflow it. Box new
+    /// `HIRType` payloads instead of inlining them.
+    #[test]
+    fn hir_expr_stays_small_enough_for_the_default_test_stack() {
+        assert!(
+            std::mem::size_of::<HIRExpr>() <= 112,
+            "HIRExpr grew to {} bytes; box new HIRType-sized fields instead of \
+             inlining them, or deep recursions overflow the 2 MiB test stack",
+            std::mem::size_of::<HIRExpr>()
+        );
     }
 }

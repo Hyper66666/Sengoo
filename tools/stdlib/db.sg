@@ -42,9 +42,9 @@ def db_last_error_len() -> i64 {
 def db_last_error_copy_raw(buffer_ptr: i64, capacity: i64) -> Result<i64, i64> {
     let copied = sengoo_db_last_error_copy(buffer_ptr, capacity);
     if copied >= 0 {
-        Result { is_ok: true, value: copied, error: 0 }
+        Ok(copied)
     } else {
-        Result { is_ok: false, value: 0, error: sengoo_db_last_error_code() }
+        Err(sengoo_db_last_error_code())
     }
 }
 
@@ -59,9 +59,9 @@ def db_last_error_clear() -> bool {
 def db_open_raw(path_ptr: i64) -> Result<Db, i64> {
     let handle = sengoo_db_open(path_ptr);
     if handle != 0 {
-        Result { is_ok: true, value: Db { handle: handle }, error: 0 }
+        Ok(Db { handle: handle })
     } else {
-        Result { is_ok: false, value: Db { handle: 0 }, error: sengoo_db_last_error_code() }
+        Err(sengoo_db_last_error_code())
     }
 }
 
@@ -81,9 +81,9 @@ impl Db {
     def exec_raw(self, sql_ptr: i64, params_json_ptr: i64) -> Result<i64, i64> {
         let affected = sengoo_db_exec(self.handle, sql_ptr, params_json_ptr);
         if affected >= 0 {
-            Result { is_ok: true, value: affected, error: 0 }
+            Ok(affected)
         } else {
-            Result { is_ok: false, value: 0, error: affected }
+            Err(affected)
         }
     }
 
@@ -94,9 +94,9 @@ impl Db {
     def query_raw(self, sql_ptr: i64, params_json_ptr: i64) -> Result<DbResult, i64> {
         let result = sengoo_db_query(self.handle, sql_ptr, params_json_ptr);
         if result != 0 {
-            Result { is_ok: true, value: DbResult { handle: result }, error: 0 }
+            Ok(DbResult { handle: result })
         } else {
-            Result { is_ok: false, value: DbResult { handle: 0 }, error: sengoo_db_last_error_code() }
+            Err(sengoo_db_last_error_code())
         }
     }
 
@@ -125,9 +125,9 @@ impl DbResult {
     def col_name_copy_raw(self, col_idx: i64, buffer_ptr: i64, capacity: i64) -> Result<i64, i64> {
         let copied = sengoo_db_result_col_name_copy(self.handle, col_idx, buffer_ptr, capacity);
         if copied >= 0 {
-            Result { is_ok: true, value: copied, error: 0 }
+            Ok(copied)
         } else {
-            Result { is_ok: false, value: 0, error: sengoo_db_last_error_code() }
+            Err(sengoo_db_last_error_code())
         }
     }
 
@@ -142,9 +142,9 @@ impl DbResult {
     def cell_copy_raw(self, row_idx: i64, col_idx: i64, buffer_ptr: i64, capacity: i64) -> Result<i64, i64> {
         let copied = sengoo_db_result_cell_copy(self.handle, row_idx, col_idx, buffer_ptr, capacity);
         if copied >= 0 {
-            Result { is_ok: true, value: copied, error: 0 }
+            Ok(copied)
         } else {
-            Result { is_ok: false, value: 0, error: sengoo_db_last_error_code() }
+            Err(sengoo_db_last_error_code())
         }
     }
 

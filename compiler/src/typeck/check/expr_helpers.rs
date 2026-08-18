@@ -211,6 +211,11 @@ impl TypeChecker {
         let symbol = if let Some(symbol) = self.env.lookup(&ident.name) {
             symbol.clone()
         } else {
+            // An unqualified name that is not in scope may still be a
+            // payload-free enum variant such as `None`.
+            if let Some(result) = self.check_bare_enum_variant(&ident.name, ident.span, &[]) {
+                return result;
+            }
             return Err(TypeckError::UndefinedVariable {
                 name: ident.name.clone(),
             });
@@ -247,19 +252,84 @@ impl TypeChecker {
         }
     }
 
+    /// Resolve an unqualified variant name to its declaring enum.
+    ///
+    /// `Ok(Some(enum_name))` when exactly one enum declares it, `Ok(None)` when
+    /// no enum does, and `Err` when several do — an unqualified name is never
+    /// guessed between candidates.
+    pub(super) fn resolve_bare_enum_variant(
+        &self,
+        variant_name: &str,
+        span: crate::lexer::Span,
+    ) -> TyResult<Option<String>> {
+        let Some(owners) = self.bare_variant_owners.get(variant_name) else {
+            return Ok(None);
+        };
+        match owners.as_slice() {
+            [] => Ok(None),
+            [single] => Ok(Some(single.clone())),
+            many => Err(TypeckError::diagnostic(
+                "ambiguous-enum-variant",
+                format!(
+                    "`{variant_name}` is a variant of {}; qualify it as `{}::{variant_name}`",
+                    many.iter()
+                        .map(|owner| format!("`{owner}`"))
+                        .collect::<Vec<_>>()
+                        .join(" and "),
+                    many[0]
+                ),
+                span.lo,
+                span.hi,
+            )),
+        }
+    }
+
+    /// Check an unqualified variant expression such as `None` or `Some(v)`.
+    ///
+    /// Returns `None` when the name belongs to no enum, leaving the caller's
+    /// original "undefined variable" diagnostic in place.
+    pub(super) fn check_bare_enum_variant(
+        &mut self,
+        variant_name: &str,
+        span: crate::lexer::Span,
+        args: &[Expr],
+    ) -> Option<TyResult<Ty>> {
+        let enum_name = match self.resolve_bare_enum_variant(variant_name, span) {
+            Ok(Some(enum_name)) => enum_name,
+            Ok(None) => return None,
+            Err(error) => return Some(Err(error)),
+        };
+        self.check_enum_variant_construct(&enum_name, variant_name, span.lo, span.hi, args)
+    }
+
     pub(super) fn check_enum_variant_constructor(
         &mut self,
         path: &Path,
         args: &[Expr],
     ) -> Option<TyResult<Ty>> {
+        if path.segments.len() == 1 {
+            let segment = path.segments[0].clone();
+            return self.check_bare_enum_variant(&segment.name, segment.span, args);
+        }
         if path.segments.len() != 2 {
             return None;
         }
-        let enum_name = &path.segments[0].name;
-        let variant_name = &path.segments[1].name;
-        let variants = self.enum_variants.get(enum_name)?.clone();
+        let enum_name = path.segments[0].name.clone();
+        let variant_name = path.segments[1].name.clone();
         let span_lo = path.segments[0].span.lo;
         let span_hi = path.segments[1].span.hi;
+        self.check_enum_variant_construct(&enum_name, &variant_name, span_lo, span_hi, args)
+    }
+
+    fn check_enum_variant_construct(
+        &mut self,
+        enum_name: &str,
+        variant_name: &str,
+        span_lo: u32,
+        span_hi: u32,
+        args: &[Expr],
+    ) -> Option<TyResult<Ty>> {
+        let variants = self.enum_variants.get(enum_name)?.clone();
 
         if !variants.iter().any(|variant| variant == variant_name) {
             return Some(Err(TypeckError::diagnostic(
@@ -331,12 +401,35 @@ impl TypeChecker {
         if let Some(meta) = generic_meta.as_ref() {
             let mut enum_args = Vec::with_capacity(meta.params.len());
             let mut resolved_by_old_id = std::collections::HashMap::new();
-            for (param, placeholder) in meta.params.iter().zip(generic_param_placeholders.iter()) {
+            for (param_index, (param, placeholder)) in meta
+                .params
+                .iter()
+                .zip(generic_param_placeholders.iter())
+                .enumerate()
+            {
                 let mut concrete_ty = self.infer.apply_subst(placeholder);
                 if matches!(concrete_ty.kind, TyKind::Var(_)) {
                     if let Some(default_ty) = &param.default {
                         concrete_ty = self.substitute_ty_vars(default_ty, &resolved_by_old_id);
                         concrete_ty = self.infer.apply_subst(&concrete_ty);
+                    } else if let Some(expected_arg) =
+                        self.expected_return_types.last().and_then(|expected| {
+                            let TyKind::Adt {
+                                name: expected_name,
+                                args,
+                            } = &expected.kind
+                            else {
+                                return None;
+                            };
+                            (expected_name.as_str() == enum_name)
+                                .then(|| args.get(param_index).cloned())
+                                .flatten()
+                        })
+                    {
+                        // Payload-free variants such as `None` carry no
+                        // argument to pin `T`; recover it from the expected
+                        // type exactly like struct literals do.
+                        concrete_ty = self.infer.apply_subst(&expected_arg);
                     } else {
                         return Some(Err(TypeckError::Other(format!(
                             "cannot infer generic argument `{}` for enum `{}` variant `{}`",
@@ -363,7 +456,7 @@ impl TypeChecker {
                 enum_args.push(concrete_ty);
             }
             return Some(Ok(self.env.new_ty(TyKind::Adt {
-                name: enum_name.clone(),
+                name: enum_name.to_string(),
                 args: enum_args,
             })));
         }
@@ -375,7 +468,7 @@ impl TypeChecker {
             .cloned()
             .unwrap_or_else(|| {
                 self.env.new_ty(TyKind::Adt {
-                    name: enum_name.clone(),
+                    name: enum_name.to_string(),
                     args: Vec::new(),
                 })
             });
@@ -737,8 +830,98 @@ impl TypeChecker {
         })
     }
 
+    /// Deprecated field surface (`.is_ok`, `.is_some`, `.value`, `.error`) over
+    /// the enum forms of `Option` and `Result`.
+    ///
+    /// Kept for one release so existing field reads keep compiling while call
+    /// sites move to patterns; every hit reports `attributes::deprecated_use`
+    /// naming the pattern that replaces it. Reading a payload off the other arm
+    /// (`.value` on `Err`, `.error` on `Ok`) yields that type's default value,
+    /// which is what the placeholder in the struct form used to hold.
+    ///
+    /// Returns `None` for anything that is not one of those four fields on an
+    /// `Option`/`Result`-shaped enum, leaving ordinary field checking in place.
+    fn compat_enum_field_ty(
+        &mut self,
+        type_name: &str,
+        args: &[Ty],
+        field: &Ident,
+    ) -> Option<TyResult<Ty>> {
+        if type_name != "Option" && type_name != "Result" {
+            return None;
+        }
+        let variants = self.enum_variants.get(type_name)?.clone();
+        let has = |variant: &str| variants.iter().any(|name| name == variant);
+        let (success, failure) = if type_name == "Result" && has("Ok") && has("Err") {
+            ("Ok", "Err")
+        } else if type_name == "Option" && has("Some") && has("None") {
+            ("Some", "None")
+        } else {
+            return None;
+        };
+
+        let (variant, replacement) = match field.name.as_str() {
+            "is_ok" | "is_some" => {
+                let failure_pat = if failure == "None" {
+                    format!("`{failure}`")
+                } else {
+                    format!("`{failure}(..)`")
+                };
+                let hint = format!("match on `{success}(..)` / {failure_pat}");
+                self.warn_deprecated_field(type_name, &field.name, &hint, field.span);
+                return Some(Ok(self.env.bool_ty()));
+            }
+            "value" => (
+                success,
+                format!("bind the payload with a `{success}(value)` pattern"),
+            ),
+            "error" => (
+                failure,
+                format!("bind the payload with a `{failure}(error)` pattern"),
+            ),
+            _ => return None,
+        };
+
+        let payload = self
+            .enum_variant_field_tys
+            .get(type_name)
+            .and_then(|by_variant| by_variant.get(variant))
+            .and_then(|field_tys| field_tys.first())
+            .cloned()?;
+
+        let mut subst = HashMap::<TyVarId, Ty>::new();
+        if let Some(meta) = self.generic_type_metas.get(type_name) {
+            for (param, arg) in meta.params.iter().zip(args.iter()) {
+                subst.insert(param.var_id, arg.clone());
+            }
+        }
+        let resolved = self.substitute_ty_vars(&payload, &subst);
+        self.warn_deprecated_field(type_name, &field.name, &replacement, field.span);
+        Some(Ok(resolved))
+    }
+
+    fn warn_deprecated_field(
+        &mut self,
+        type_name: &str,
+        field: &str,
+        replacement: &str,
+        span: crate::lexer::Span,
+    ) {
+        self.push_warning(crate::error::CompileWarning::deprecated_use_with_metadata(
+            "field",
+            format!("{type_name}.{field}"),
+            Some(format!(
+                "`{type_name}` is an enum; direct field access is deprecated"
+            )),
+            Some(replacement.to_string()),
+            Some("the release after next".to_string()),
+            Some((span.lo, span.hi)),
+        ));
+    }
+
     pub(super) fn check_field(&mut self, base: &Expr, name: &Ident) -> TyResult<Ty> {
         let base_ty = self.check_expr(base)?;
+        let base_ty = self.infer.apply_subst(&base_ty);
 
         match &base_ty.kind {
             TyKind::Tuple(types) => tuple_field_index(&name.name)
@@ -751,6 +934,9 @@ impl TypeChecker {
                 name: type_name,
                 args,
             } => {
+                if let Some(field_ty) = self.compat_enum_field_ty(type_name, args, name) {
+                    return field_ty;
+                }
                 let field_defs =
                     self.struct_field_defs
                         .get(type_name)

@@ -13,31 +13,100 @@ def echo_handler(request: &mut HttpServerRequest) -> Result<bool, i64> {
 }
 
 def dual_router() -> Result<HttpRouter, i64> {
-    let created = http_router_new();
-    if not created.is_ok { created; } else { let mut router = created.value; let health: fn(&mut HttpServerRequest) -> Result<bool, i64> = health_handler; let echo: fn(&mut HttpServerRequest) -> Result<bool, i64> = echo_handler; let first = http_router_route(&mut router, "GET", "/health", health); if not first.is_ok { Result { is_ok: false, value: router, error: first.error }; } else { let second = http_router_route(&mut router, "GET", "/echo", echo); if second.is_ok { Result { is_ok: true, value: router, error: 0 }; } else { Result { is_ok: false, value: router, error: second.error }; }; }; };
+    match http_router_new() {
+        Err(error) => Err(error),
+        Ok(mut router) => {
+            let health: fn(&mut HttpServerRequest) -> Result<bool, i64> = health_handler;
+            let echo: fn(&mut HttpServerRequest) -> Result<bool, i64> = echo_handler;
+            match http_router_route(&mut router, "GET", "/health", health) {
+                Err(error) => Err(error),
+                Ok(_) => match http_router_route(&mut router, "GET", "/echo", echo) {
+                    Err(error) => Err(error),
+                    Ok(_) => Ok(router),
+                },
+            }
+        },
+    }
 }
 
 async def client_health(port: i64) -> i64 {
     await sleep(10);
-    let connected = net_tcp_connect("127.0.0.1", port, 1000);
-    if connected.is_ok { let stream = connected.value; let sent = stream.send("GET /health HTTP/1.1\r\nHost: localhost\r\nConnection: close\r\n\r\n"); await sleep(1000); let closed = stream.close(); if sent.is_ok and closed { 0; } else { 2; }; } else { connected.error; };
+    match net_tcp_connect("127.0.0.1", port, 1000) {
+        Err(error) => error,
+        Ok(stream) => {
+            let sent = stream.send(
+                "GET /health HTTP/1.1\r\nHost: localhost\r\nConnection: close\r\n\r\n",
+            );
+            await sleep(1000);
+            let closed = stream.close();
+            if sent.is_ok and closed {
+                0;
+            } else {
+                2;
+            };
+        },
+    }
 }
 
 async def client_echo(port: i64) -> i64 {
     await sleep(10);
-    let connected = net_tcp_connect("127.0.0.1", port, 1000);
-    if connected.is_ok { let stream = connected.value; let sent = stream.send("GET /echo HTTP/1.1\r\nHost: localhost\r\nConnection: close\r\n\r\n"); await sleep(1000); let closed = stream.close(); if sent.is_ok and closed { 0; } else { 2; }; } else { connected.error; };
+    match net_tcp_connect("127.0.0.1", port, 1000) {
+        Err(error) => error,
+        Ok(stream) => {
+            let sent = stream.send(
+                "GET /echo HTTP/1.1\r\nHost: localhost\r\nConnection: close\r\n\r\n",
+            );
+            await sleep(1000);
+            let closed = stream.close();
+            if sent.is_ok and closed {
+                0;
+            } else {
+                2;
+            };
+        },
+    }
 }
 
 async def dual_route_contract(server: HttpServer) -> bool {
     let port = server.local_port().unwrap_or(0);
-    let built = dual_router();
-    if not built.is_ok { server.close(); false; } else { let router = built.value; let client1 = spawn(client_health(port)); let health = await serve_http_timeout(&server, &router, 5000); let client1_ok = await client1 == 0; let client2 = spawn(client_echo(port)); let echo = await serve_http_timeout(&server, &router, 5000); let client2_ok = await client2 == 0; let closed = server.close(); port > 0 and health.is_ok and echo.is_ok and client1_ok and client2_ok and closed; };
+    match dual_router() {
+        Err(_) => {
+            server.close();
+            false;
+        },
+        Ok(router) => {
+            let client1 = spawn(client_health(port));
+            let health = await serve_http_timeout(&server, &router, 5000);
+            let client1_ok = await client1 == 0;
+            let client2 = spawn(client_echo(port));
+            let echo = await serve_http_timeout(&server, &router, 5000);
+            let client2_ok = await client2 == 0;
+            let closed = server.close();
+            port > 0
+                and health.is_ok
+                and echo.is_ok
+                and client1_ok
+                and client2_ok
+                and closed;
+        },
+    }
 }
 
 async def main() -> i64 {
-    let bind_result = http_server_bind("127.0.0.1", 0);
-    let unsupported_host = if bind_result.is_ok { false; } else { bind_result.error == STATUS_UNSUPPORTED(); };
-    let native_ok = if bind_result.is_ok { await dual_route_contract(bind_result.value); } else { false; };
-    if native_ok or unsupported_host { 0; } else { 2; };
+    match http_server_bind("127.0.0.1", 0) {
+        Ok(server) => {
+            if await dual_route_contract(server) {
+                0;
+            } else {
+                2;
+            };
+        },
+        Err(error) => {
+            if error == STATUS_UNSUPPORTED() {
+                0;
+            } else {
+                2;
+            };
+        },
+    }
 }

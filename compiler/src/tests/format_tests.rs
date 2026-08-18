@@ -271,6 +271,7 @@ def main() -> i64 {
 fn format_debug_placeholder_renders_struct_fields() {
     let ir = compile_with_stdlib(
         r#"
+#[derive(Debug)]
 struct Point {
     x: i64,
     ok: bool,

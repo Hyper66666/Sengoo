@@ -596,6 +596,11 @@ impl JITCodegen {
                 let discr_ptr = format!("%.enum.discr.ptr.{}", destination.id);
                 self.emit_indent();
                 self.ir.push_str(&format!(
+                    "store {enum_llvm} zeroinitializer, {enum_llvm}* {}\n",
+                    self.local_reg(*destination)
+                ));
+                self.emit_indent();
+                self.ir.push_str(&format!(
                     "{discr_ptr} = getelementptr {enum_llvm}, {enum_llvm}* {}, i32 0, i32 0\n",
                     self.local_reg(*destination)
                 ));

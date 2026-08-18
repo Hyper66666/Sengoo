@@ -2,123 +2,118 @@ extern "C" {
     fn sengoo_panic_option_unwrap_i64() -> i64;
 }
 
-struct Option<T> {
-    is_some: bool,
-    value: T,
+enum Option<T> {
+    None,
+    Some(T),
 }
 
 def option_some<T>(value: T) -> Option<T> {
-    Option { is_some: true, value: value }
+    Some(value)
 }
 
+#[deprecated(message = "`None` carries no payload; the placeholder is ignored", replacement = "None", removal = "the release after next")]
 def option_none_with<T>(placeholder: T) -> Option<T> {
-    Option { is_some: false, value: placeholder }
+    None
 }
 
 def option_none<T>() -> Option<T> {
-    __sengoo_option_none()
-}
-
-def __sengoo_option_none<T>() -> Option<T> {
-    __sengoo_option_none()
+    None
 }
 
 def option_some_i64(value: i64) -> Option<i64> {
-    Option { is_some: true, value: value }
+    Some(value)
 }
 
 def option_none_i64() -> Option<i64> {
-    Option { is_some: false, value: 0 }
+    None
 }
 
 def option_some_bool(value: bool) -> Option<bool> {
-    Option { is_some: true, value: value }
+    Some(value)
 }
 
 def option_none_bool() -> Option<bool> {
-    Option { is_some: false, value: false }
+    None
 }
 
 impl<T> Option<T> {
     def is_some(&self) -> bool {
-        self.is_some
+        match self {
+            Some(_) => true,
+            None => false,
+        }
     }
 
     def is_none(&self) -> bool {
-        if self.is_some {
-            false
-        } else {
-            true
+        match self {
+            Some(_) => false,
+            None => true,
         }
     }
 
     def unwrap_or(self, fallback: T) -> T {
-        if self.is_some {
-            self.value
-        } else {
-            fallback
+        match self {
+            Some(value) => value,
+            None => fallback,
         }
     }
 
     def ok_or<E>(self, error: E) -> Result<T, E> {
-        if self.is_some {
-            Result { is_ok: true, value: self.value, error: error }
-        } else {
-            Result { is_ok: false, value: self.value, error: error }
+        match self {
+            Some(value) => Ok(value),
+            None => Err(error),
         }
     }
 }
 
 impl Option<i64> {
     def expect(self, msg: &str) -> i64 {
-        if self.is_some {
-            self.value
-        } else {
-            print(msg);
-            sengoo_panic_option_unwrap_i64()
+        match self {
+            Some(value) => value,
+            None => {
+                print(msg);
+                sengoo_panic_option_unwrap_i64()
+            }
         }
     }
 
     def unwrap(self) -> i64 {
-        if self.is_some {
-            self.value
-        } else {
-            sengoo_panic_option_unwrap_i64()
+        match self {
+            Some(value) => value,
+            None => sengoo_panic_option_unwrap_i64(),
         }
     }
 
     def map_add(self, delta: i64) -> Option<i64> {
-        if self.is_some {
-            option_some_i64(self.value + delta)
-        } else {
-            option_none_i64()
+        match self {
+            Some(value) => Some(value + delta),
+            None => None,
         }
     }
 
     def and_then_mul(self, factor: i64) -> Option<i64> {
-        if self.is_some {
-            option_some_i64(self.value * factor)
-        } else {
-            option_none_i64()
+        match self {
+            Some(value) => Some(value * factor),
+            None => None,
         }
     }
 }
 
 impl Option<bool> {
     def expect(self, msg: &str) -> bool {
-        if self.is_some {
-            self.value
-        } else {
-            print(msg);
-            sengoo_panic_option_unwrap_i64() != 0
+        match self {
+            Some(value) => value,
+            None => {
+                print(msg);
+                sengoo_panic_option_unwrap_i64() != 0
+            }
         }
     }
 
     def unwrap(self) -> bool {
-        if self.is_some {
-            self.value
-        } else {
-            sengoo_panic_option_unwrap_i64() != 0
+        match self {
+            Some(value) => value,
+            None => sengoo_panic_option_unwrap_i64() != 0,
         }
     }
 }

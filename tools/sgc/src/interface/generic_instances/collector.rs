@@ -229,6 +229,45 @@ pub(super) fn collect_generic_instances_in_expr(
                 );
             }
         }
+        ExprKind::IfLet {
+            expr,
+            then_branch,
+            else_branch,
+            ..
+        } => {
+            collect_generic_instances_in_expr(
+                out,
+                seen,
+                module_path,
+                expr,
+                local_types,
+                simple_to_symbol,
+                method_to_symbols,
+                callable_meta,
+            );
+            collect_generic_instances_in_block(
+                out,
+                seen,
+                module_path,
+                &then_branch.stmts,
+                local_types,
+                simple_to_symbol,
+                method_to_symbols,
+                callable_meta,
+            );
+            if let Some(else_expr) = else_branch.as_deref() {
+                collect_generic_instances_in_expr(
+                    out,
+                    seen,
+                    module_path,
+                    else_expr,
+                    local_types,
+                    simple_to_symbol,
+                    method_to_symbols,
+                    callable_meta,
+                );
+            }
+        }
         ExprKind::While { cond, body } => {
             collect_generic_instances_in_expr(
                 out,
@@ -342,6 +381,32 @@ pub(super) fn collect_generic_instances_in_expr(
                     seen,
                     module_path,
                     elem,
+                    local_types,
+                    simple_to_symbol,
+                    method_to_symbols,
+                    callable_meta,
+                );
+            }
+        }
+        ExprKind::VecBang { elements, count } => {
+            for elem in elements {
+                collect_generic_instances_in_expr(
+                    out,
+                    seen,
+                    module_path,
+                    elem,
+                    local_types,
+                    simple_to_symbol,
+                    method_to_symbols,
+                    callable_meta,
+                );
+            }
+            if let Some(count) = count.as_deref() {
+                collect_generic_instances_in_expr(
+                    out,
+                    seen,
+                    module_path,
+                    count,
                     local_types,
                     simple_to_symbol,
                     method_to_symbols,

@@ -72,6 +72,17 @@ pub(crate) fn ensure_supported_clang_toolchain(clang_exe: &str) -> Result<()> {
     validate_clang_major_version(detected_clang_major_version(clang_exe)?, clang_exe)
 }
 
+/// The `-isystem` include paths added for MSVC targets are only meaningful when
+/// clang is preprocessing C. Passing them on an LLVM-IR or link-only invocation
+/// makes clang warn about every one of them — an artifact of how the driver is
+/// invoked, not a signal about the user's program. Silence them unless the user
+/// asked to see the raw toolchain output.
+fn suppress_pass_through_driver_warnings(command: &mut Command) {
+    if !crate::verbose_output_enabled() {
+        command.arg("-Wno-unused-command-line-argument");
+    }
+}
+
 fn apply_clang_target_args(command: &mut Command, target: &NativeBuildTarget) -> Result<()> {
     command.arg(format!("--target={}", target.triple));
 
@@ -508,6 +519,11 @@ pub(crate) fn ensure_async_runtime_staticlib(
         .arg("--features")
         .arg("native-bridge")
         .env("RUSTFLAGS", "-C link-dead-code");
+    if !crate::verbose_output_enabled() {
+        // Hides cargo's `Compiling`/`Finished` banner for the bundled runtime
+        // staticlib; real cargo errors still reach the user.
+        command.arg("--quiet");
+    }
     if profile != "debug" {
         command.arg("--profile").arg(profile);
     }
@@ -625,6 +641,7 @@ fn link_cross_target(
     let mut command = Command::new(clang_exe);
     command.arg("-Wno-override-module");
     apply_clang_target_args(&mut command, target)?;
+    suppress_pass_through_driver_warnings(&mut command);
     if target.is_linux_gnu() {
         command.arg("-fuse-ld=lld");
     }
@@ -1021,6 +1038,7 @@ pub(crate) fn compile_ir_to_object(
         .arg(format!("-O{}", opt_level));
     append_debug_compile_arg(&mut command, &target, debug_info);
     apply_clang_target_args(&mut command, &target)?;
+    suppress_pass_through_driver_warnings(&mut command);
 
     let status = command
         .arg("-c")
@@ -1186,7 +1204,7 @@ pub(crate) fn link_native_binary_from_objects_with_debug(
             )));
         }
         LLD_AVAILABILITY.store(LINKER_UNAVAILABLE, Ordering::Relaxed);
-        println!("link fallback: lld unavailable, retrying with system linker");
+        vprintln!("link fallback: lld unavailable, retrying with system linker");
     }
 
     let status = run_link_command(

@@ -9,16 +9,14 @@ extern "C" {
 }
 
 def exercise() -> i64 {
-    let owned_out = string_from_str("owned");
-    if owned_out.is_ok == false {
-        return 10;
-    }
-    let owned = owned_out.value;
-    let buffer_out = ffi_buffer_new(32);
-    if buffer_out.is_ok == false {
-        return 11;
-    }
-    let buffer = buffer_out.value;
+    let owned = match string_from_str("owned") {
+        Ok(value) => value,
+        Err(_) => return 10,
+    };
+    let buffer = match ffi_buffer_new(32) {
+        Ok(value) => value,
+        Err(_) => return 11,
+    };
     let numbers = vec_new_i64();
     let scores = hashmap_new_i64_i64();
     let names = text_list_new();

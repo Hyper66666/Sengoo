@@ -247,7 +247,7 @@ impl TypeChecker {
                             impl_info.add_method(
                                 method_name.clone(),
                                 FunctionTy::with_generic_params(
-                                    method_sig.has_self,
+                                    method_sig.self_param,
                                     method_sig.param_types.clone(),
                                     method_sig.return_type.clone(),
                                     method_sig.generic_params.clone(),
@@ -460,7 +460,7 @@ impl TypeChecker {
             self.env.unit_ty()
         };
 
-        let sig = FunctionTy::new(method.self_param.is_some(), param_types, ret_ty);
+        let sig = FunctionTy::new(method.self_param, param_types, ret_ty);
         self.env.pop_scope();
         Ok(sig)
     }

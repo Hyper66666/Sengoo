@@ -2,132 +2,129 @@ extern "C" {
     fn sengoo_panic_result_unwrap_i64() -> i64;
 }
 
-struct Result<T, E> {
-    is_ok: bool,
-    value: T,
-    error: E,
+enum Result<T, E> {
+    Ok(T),
+    Err(E),
 }
 
+#[deprecated(message = "`Ok` carries no error placeholder; it is ignored", replacement = "Ok(value)", removal = "the release after next")]
 def result_ok_with<T, E>(value: T, error_placeholder: E) -> Result<T, E> {
-    Result { is_ok: true, value: value, error: error_placeholder }
+    Ok(value)
 }
 
+#[deprecated(message = "`Err` carries no value placeholder; it is ignored", replacement = "Err(error)", removal = "the release after next")]
 def result_err_with<T, E>(value_placeholder: T, error: E) -> Result<T, E> {
-    Result { is_ok: false, value: value_placeholder, error: error }
+    Err(error)
 }
 
 def result_ok_i64(value: i64) -> Result<i64, i64> {
-    Result { is_ok: true, value: value, error: 0 }
+    Ok(value)
 }
 
 def result_err_i64(error: i64) -> Result<i64, i64> {
-    Result { is_ok: false, value: 0, error: error }
+    Err(error)
 }
 
 def result_ok_bool(value: bool) -> Result<bool, i64> {
-    Result { is_ok: true, value: value, error: 0 }
+    Ok(value)
 }
 
 def result_err_bool(error: i64) -> Result<bool, i64> {
-    Result { is_ok: false, value: false, error: error }
+    Err(error)
 }
 
 impl<T, E> Result<T, E> {
     def is_ok(&self) -> bool {
-        self.is_ok
+        match self {
+            Ok(_) => true,
+            Err(_) => false,
+        }
     }
 
     def is_err(&self) -> bool {
-        if self.is_ok {
-            false
-        } else {
-            true
+        match self {
+            Ok(_) => false,
+            Err(_) => true,
         }
     }
 
     def unwrap_or(self, fallback: T) -> T {
-        if self.is_ok {
-            self.value
-        } else {
-            fallback
+        match self {
+            Ok(value) => value,
+            Err(_) => fallback,
         }
     }
 
     def ok(self) -> Option<T> {
-        if self.is_ok {
-            Option { is_some: true, value: self.value }
-        } else {
-            Option { is_some: false, value: self.value }
+        match self {
+            Ok(value) => Some(value),
+            Err(_) => None,
         }
     }
 
     def err(self) -> Option<E> {
-        if self.is_ok {
-            Option { is_some: false, value: self.error }
-        } else {
-            Option { is_some: true, value: self.error }
+        match self {
+            Ok(_) => None,
+            Err(error) => Some(error),
         }
     }
 }
 
 impl Result<i64, i64> {
     def expect(self, msg: &str) -> i64 {
-        if self.is_ok {
-            self.value
-        } else {
-            print(msg);
-            sengoo_panic_result_unwrap_i64()
+        match self {
+            Ok(value) => value,
+            Err(_) => {
+                print(msg);
+                sengoo_panic_result_unwrap_i64()
+            }
         }
     }
 
     def unwrap(self) -> i64 {
-        if self.is_ok {
-            self.value
-        } else {
-            sengoo_panic_result_unwrap_i64()
+        match self {
+            Ok(value) => value,
+            Err(_) => sengoo_panic_result_unwrap_i64(),
         }
     }
 
     def map_add(self, delta: i64) -> Result<i64, i64> {
-        if self.is_ok {
-            result_ok_i64(self.value + delta)
-        } else {
-            result_err_i64(self.error)
+        match self {
+            Ok(value) => Ok(value + delta),
+            Err(error) => Err(error),
         }
     }
 
     def and_then_mul(self, factor: i64) -> Result<i64, i64> {
-        if self.is_ok {
-            result_ok_i64(self.value * factor)
-        } else {
-            result_err_i64(self.error)
+        match self {
+            Ok(value) => Ok(value * factor),
+            Err(error) => Err(error),
         }
     }
 
     def map_err_add(self, delta: i64) -> Result<i64, i64> {
-        if self.is_ok {
-            result_ok_i64(self.value)
-        } else {
-            result_err_i64(self.error + delta)
+        match self {
+            Ok(value) => Ok(value),
+            Err(error) => Err(error + delta),
         }
     }
 }
 
 impl Result<bool, i64> {
     def expect(self, msg: &str) -> bool {
-        if self.is_ok {
-            self.value
-        } else {
-            print(msg);
-            sengoo_panic_result_unwrap_i64() != 0
+        match self {
+            Ok(value) => value,
+            Err(_) => {
+                print(msg);
+                sengoo_panic_result_unwrap_i64() != 0
+            }
         }
     }
 
     def unwrap(self) -> bool {
-        if self.is_ok {
-            self.value
-        } else {
-            sengoo_panic_result_unwrap_i64() != 0
+        match self {
+            Ok(value) => value,
+            Err(_) => sengoo_panic_result_unwrap_i64() != 0,
         }
     }
 }

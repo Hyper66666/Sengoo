@@ -5,25 +5,24 @@
 // Run: sgc run examples/generics/02_option_unwrap.sg
 // Expected output: 9
 
-struct Option<T> {
-    is_some: bool,
-    value: T,
+enum Option<T> {
+    None,
+    Some(T),
 }
 
 def some_i64(value: i64) -> Option<i64> {
-    Option { is_some: true, value: value }
+    Some(value)
 }
 
 def none_i64() -> Option<i64> {
-    Option { is_some: false, value: 0 }
+    None
 }
 
 impl<T> Option<T> {
     def unwrap_or(self, fallback: T) -> T {
-        if self.is_some {
-            self.value
-        } else {
-            fallback
+        match self {
+            Some(value) => value,
+            None => fallback,
         }
     }
 }

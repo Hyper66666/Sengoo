@@ -3,15 +3,15 @@
 // `try {}` scopes `?` and returns an explicit Result.
 //
 // Run: sgc run examples/ergonomics/02_try_block.sg
+// Expected output: 7
 
-struct Result<T, E> {
-    is_ok: bool,
-    value: T,
-    error: E,
+enum Result<T, E> {
+    Ok(T),
+    Err(E),
 }
 
 def ok_i64(v: i64) -> Result<i64, i64> {
-    Result { is_ok: true, value: v, error: 0 }
+    Ok(v)
 }
 
 def main() -> i64 {
@@ -19,5 +19,10 @@ def main() -> i64 {
         let x = ok_i64(3)?;
         ok_i64(x + 4)
     };
-    if r.is_ok { r.value } else { 0 }
+    let value = match r {
+        Ok(value) => value,
+        Err(_) => 0,
+    };
+    print(value);
+    0
 }
