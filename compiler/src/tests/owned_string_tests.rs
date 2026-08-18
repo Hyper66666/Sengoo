@@ -486,6 +486,93 @@ def main() -> i64 {
 }
 
 #[test]
+fn early_return_field_move_does_not_poison_the_fallthrough_path() {
+    let source = r#"
+struct Token {
+    value: i64,
+}
+
+impl Drop for Token {
+    def drop(&mut self) {
+    }
+}
+
+struct Request {
+    id: Token,
+    payload: Token,
+}
+
+def consume_id(id: Token) -> i64 {
+    id.value
+}
+
+def consume_request(request: Request) -> i64 {
+    request.payload.value
+}
+
+def route(request: Request, unsupported: bool) -> i64 {
+    if unsupported {
+        return consume_id(request.id);
+    }
+    consume_request(request)
+}
+"#;
+    let program = Parser::parse(source).expect("source should parse");
+    let mut checker = TypeChecker::new();
+    checker
+        .check_program(&program)
+        .expect("a terminating branch move must not reach the fallthrough path");
+}
+
+#[test]
+fn non_terminating_branch_field_move_still_poisons_the_fallthrough_path() {
+    let source = r#"
+struct Token {
+    value: i64,
+}
+
+impl Drop for Token {
+    def drop(&mut self) {
+    }
+}
+
+struct Request {
+    id: Token,
+    payload: Token,
+}
+
+def consume_id(id: Token) -> i64 {
+    id.value
+}
+
+def consume_request(request: Request) -> i64 {
+    request.payload.value
+}
+
+def route(request: Request, unsupported: bool) -> i64 {
+    if unsupported {
+        let consumed = consume_id(request.id);
+    }
+    consume_request(request)
+}
+"#;
+    let program = Parser::parse(source).expect("source should parse");
+    let mut checker = TypeChecker::new();
+    let err = checker
+        .check_program(&program)
+        .expect_err("a non-terminating branch move must reach the fallthrough path");
+    let crate::error::CompileError::TypeckError(typeck) = err else {
+        panic!("expected TypeckError, got {err:?}");
+    };
+    assert!(
+        typeck
+            .to_string()
+            .contains("use of partially moved value `request`"),
+        "unexpected error: {typeck}"
+    );
+}
+
+#[test]
 fn stdlib_owned_string_return_marks_value_moved() {
     let err = typecheck_fails_with_stdlib(
         r#"

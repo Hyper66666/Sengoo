@@ -147,6 +147,12 @@ fn sgc() -> PathBuf {
     PathBuf::from(env!("CARGO_BIN_EXE_sgc"))
 }
 
+fn source_sgc() -> Command {
+    let mut command = Command::new(sgc());
+    command.args(["--runtime-mode", "source-development"]);
+    command
+}
+
 fn host_debugger() -> Option<(DebuggerFlavor, &'static str)> {
     #[cfg(windows)]
     {
@@ -882,7 +888,7 @@ fn native_debugger_breaks_steps_and_reads_local() {
     let source = project.source_path();
     fs::write(&source, PROBE_SOURCE).expect("write debugger probe source");
 
-    let build = Command::new(sgc())
+    let build = source_sgc()
         .arg("build")
         .arg(&source)
         .args(["-O", "0", "--debug-info", "--force-rebuild"])
@@ -942,7 +948,7 @@ fn composite_probe_builds_for_native_debugging() {
     let source = project.composite_source_path();
     fs::write(&source, COMPOSITE_PROBE_SOURCE).expect("write composite debugger probe source");
 
-    let check = Command::new(sgc())
+    let check = source_sgc()
         .arg("check")
         .arg(&source)
         .output()
@@ -971,7 +977,7 @@ fn native_lldb_steps_and_inspects_composite_surfaces() {
     let source = project.composite_source_path();
     fs::write(&source, COMPOSITE_PROBE_SOURCE).expect("write composite debugger probe source");
 
-    let build = Command::new(sgc())
+    let build = source_sgc()
         .arg("build")
         .arg(&source)
         .args(["-O", "0", "--debug-info", "--force-rebuild"])
@@ -1017,7 +1023,7 @@ fn debug_build_cache_recovery_recreates_the_pdb() {
     let source = project.source_path();
     fs::write(&source, PROBE_SOURCE).expect("write debugger cache-recovery probe source");
 
-    let initial = Command::new(sgc())
+    let initial = source_sgc()
         .arg("build")
         .arg(&source)
         .args(["-O", "0", "--debug-info", "--force-rebuild"])
@@ -1035,7 +1041,7 @@ fn debug_build_cache_recovery_recreates_the_pdb() {
     fs::remove_file(&executable).expect("remove cached debug executable");
     fs::remove_file(&pdb).expect("remove cached debug PDB");
 
-    let recovered = Command::new(sgc())
+    let recovered = source_sgc()
         .arg("build")
         .arg(&source)
         .args(["-O", "0", "--debug-info"])

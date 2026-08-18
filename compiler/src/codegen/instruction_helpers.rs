@@ -699,11 +699,27 @@ impl Codegen {
             } => {
                 let dest = self.local_name(*destination);
 
-                let src = self.local_name(*source);
                 let dest_ty = self.get_local_type(mir_fn, *destination).clone();
                 let source_ty = self.get_local_type(mir_fn, *source).clone();
-                let source_ptr_ty = format!("{}*", self.mir_type_to_llvm_cached(&source_ty));
+                let source_llvm = self.mir_type_to_llvm_cached(&source_ty);
+                let source_ptr_ty = format!("{}*", source_llvm);
                 let dest_llvm = self.mir_type_to_llvm_cached(&dest_ty);
+                let src = if self.local_uses_stack_slot(*source, mir_fn) {
+                    self.local_name(*source)
+                } else {
+                    // Parameters and temporaries are SSA values; spill before taking their address.
+                    let source_value = self.operand_value(*source, mir_fn);
+                    let slot = format!("{}.slot", dest);
+                    self.emit_indent();
+                    self.ir
+                        .push_str(&format!("{} = alloca {}\n", slot, source_llvm));
+                    self.emit_indent();
+                    self.ir.push_str(&format!(
+                        "store {} {}, {} {}\n",
+                        source_llvm, source_value, source_ptr_ty, slot
+                    ));
+                    slot
+                };
 
                 self.emit_indent();
 

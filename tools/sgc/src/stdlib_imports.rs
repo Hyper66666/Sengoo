@@ -94,9 +94,11 @@ fn source_module_direct_dependencies(module: &str) -> &'static [&'static str] {
         "fmt" => &["strconv", "status"],
         "regex" | "log" | "config" | "hash" | "encoding" | "compress" | "fs" => &["status"],
         "async" => &["status", "result"],
-        // Keep `async` out of net's transitive deps so C-only fallback bundles
-        // that only import std::net do not require async mutex/sleep symbols.
-        "http" | "net" => &["ffi", "status", "string"],
+        "http" => &["ffi", "status", "string"],
+        // Keep the broad async module out of net's transitive surface. The
+        // router future uses its narrow HTTP lifecycle ABI, while C-only
+        // bundles provide weak poll/cancel/drop fallbacks for dispatch links.
+        "net" => &["ffi", "status", "string", "collections"],
         "db" | "lua54" | "proto" => &["ffi"],
         "assert" => &[],
         _ => &[],

@@ -11,6 +11,9 @@ on:
   pull_request:
     paths:
       - ".github/workflows/toolchain-distribution.yml"
+      - "README-dist.md"
+      - "scripts/compare-distribution-manifests.ps1"
+      - "scripts/generate-release-evidence.ps1"
       - "scripts/package-toolchain.ps1"
       - "scripts/install.ps1"
       - "scripts/install.sh"
@@ -35,15 +38,19 @@ jobs:
           - os: ubuntu-latest
             target: x86_64-unknown-linux-gnu
             artifact: linux-x86_64
+            reproducible: true
           - os: windows-latest
             target: x86_64-pc-windows-msvc
             artifact: windows-x86_64
+            reproducible: true
           - os: macos-15
             target: aarch64-apple-darwin
             artifact: macos-arm64
+            reproducible: false
           - os: macos-15-intel
             target: x86_64-apple-darwin
             artifact: macos-x86_64
+            reproducible: false
 
     steps:
       - uses: actions/checkout@v4
@@ -65,9 +72,60 @@ jobs:
         shell: pwsh
         run: cargo build -p sgc -p sgpm -p sgfmt -p sglsp --release
 
+      - name: Capture required Windows CDB debugger evidence
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: |
+          $transcriptDir = Join-Path $env:RUNNER_TEMP "sengoo-cdb-transcripts"
+          New-Item -ItemType Directory -Force -Path $transcriptDir | Out-Null
+          $knownCdbPath = Join-Path ${env:ProgramFiles(x86)} "Windows Kits\10\Debuggers\x64\cdb.exe"
+          $cdbPath = if (Test-Path -LiteralPath $knownCdbPath) {
+            $knownCdbPath
+          } else {
+            $command = Get-Command cdb.exe -ErrorAction SilentlyContinue
+            if ($command) {
+              $command.Source
+            } else {
+              Get-ChildItem -LiteralPath (Join-Path ${env:ProgramFiles(x86)} "Windows Kits") -Filter cdb.exe -File -Recurse -ErrorAction SilentlyContinue |
+                Where-Object { $_.FullName -match '[\\/]Debuggers[\\/]x64[\\/]cdb\.exe$' } |
+                Select-Object -First 1 -ExpandProperty FullName
+            }
+          }
+          if (-not $cdbPath -or -not (Test-Path -LiteralPath $cdbPath)) {
+            "required x64 CDB executable is unavailable in PATH or Windows Kits" | Set-Content -LiteralPath (Join-Path $transcriptDir "cdb-unavailable.txt")
+            throw "required Windows CDB debugger evidence is unavailable"
+          }
+          $env:PATH = "$(Split-Path -Parent $cdbPath);$env:PATH"
+          $env:SENGOO_REQUIRE_DEBUGGER_EVIDENCE = "1"
+          $env:SENGOO_DEBUGGER_TRANSCRIPT_DIR = $transcriptDir
+          cargo test --locked -p sgc --test debugger_native native_debugger_breaks_steps_and_reads_local -- --nocapture --test-threads=1
+          if ($LASTEXITCODE -ne 0) {
+            throw "Windows CDB debugger evidence failed"
+          }
+
+      - name: Upload Windows CDB debugger transcripts
+        if: runner.os == 'Windows' && always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: debugger-native-cdb-transcripts
+          path: ${{ runner.temp }}/sengoo-cdb-transcripts/
+          if-no-files-found: error
+
       - name: Verify timer socket and owned-handle reactor paths
         shell: pwsh
         run: cargo test -p sengoo-runtime --lib --features native-bridge reactor_ -- --nocapture --test-threads=1
+
+      - name: Verify production HTTP TLS composition
+        shell: pwsh
+        run: |
+          cargo test -p sengoo-runtime --lib --features native-bridge http_server_tls_router_keep_alive_and_streaming_compose -- --nocapture --test-threads=1
+          if ($LASTEXITCODE -ne 0) {
+            throw "runtime HTTP TLS composition failed on ${{ matrix.os }}"
+          }
+          cargo test -p sgc --test http_request_strings real_sgc_tls_router_keep_alive_streaming_composes_with_verified_ca -- --nocapture --test-threads=1
+          if ($LASTEXITCODE -ne 0) {
+            throw "real sgc HTTP TLS composition failed on ${{ matrix.os }}"
+          }
 
       - name: Run release smoke matrix
         shell: pwsh
@@ -79,7 +137,9 @@ jobs:
           }
           $env:CARGO_BIN_EXE_sgc = Join-Path $releaseBin "sgc$suffix"
           $env:CARGO_BIN_EXE_sgfmt = Join-Path $releaseBin "sgfmt$suffix"
-          & $env:CARGO_BIN_EXE_sgc run examples/01_hello.sg --force-rebuild
+          # Checkout smokes authorize Cargo-built native runtime explicitly.
+          # Installed-mode is proven later against the packaged archive only.
+          & $env:CARGO_BIN_EXE_sgc --runtime-mode source-development run examples/01_hello.sg --force-rebuild
           $helloExit = $LASTEXITCODE
           if ($helloExit -ne 42) {
             throw "sgc hello smoke expected exit 42 on ${{ matrix.os }}, got $helloExit"
@@ -116,7 +176,6 @@ jobs:
       - name: Package toolchain
         shell: pwsh
         env:
-          SENGOO_BUILD_HASH: ${{ github.sha }}
           SENGOO_DIST_TARGET: ${{ matrix.target }}
         run: |
           if ("${{ github.ref_type }}" -eq "tag") {
@@ -124,12 +183,67 @@ jobs:
           } else {
             $version = "0.1.0-ci"
           }
-          ./scripts/package-toolchain.ps1 -Version $version -NoBuild -SmokeEvidence "toolchain-distribution workflow package-smoke ${{ matrix.os }} ${{ github.sha }}"
+
+          $artifact = "${{ matrix.artifact }}"
+          $primaryOutput = "target/dist"
+          $cargoTargetA = Join-Path $env:RUNNER_TEMP "sengoo-cargo-package-a-$artifact"
+          Remove-Item -LiteralPath $primaryOutput -Recurse -Force -ErrorAction SilentlyContinue
+          Remove-Item -LiteralPath $cargoTargetA -Recurse -Force -ErrorAction SilentlyContinue
+          # package-toolchain.ps1 owns deterministic RUSTFLAGS (source+target
+          # remap, Windows /Brepro). Do not set a partial CARGO_ENCODED_RUSTFLAGS
+          # here or it will be overwritten by the packaging script.
+          Remove-Item Env:CARGO_ENCODED_RUSTFLAGS -ErrorAction SilentlyContinue
+          Remove-Item Env:RUSTFLAGS -ErrorAction SilentlyContinue
+          ./scripts/package-toolchain.ps1 `
+            -Version $version `
+            -OutputDir $primaryOutput `
+            -CargoTargetDir $cargoTargetA `
+            -SmokeEvidence "toolchain-distribution workflow build A ${{ matrix.os }} ${{ github.sha }}"
+
+          $manifestA = Join-Path $primaryOutput "sengoo-$version-${{ matrix.target }}/manifest.json"
+          $packageA = Get-Content -LiteralPath $manifestA -Raw | ConvertFrom-Json
+          if (-not $packageA.release_eligible) {
+            throw "package A is not release eligible: $($packageA | ConvertTo-Json -Compress)"
+          }
+
+          if ("${{ matrix.reproducible }}" -eq "true") {
+            $secondaryOutput = "target/dist-repro-b-$artifact"
+            $cargoTargetB = Join-Path $env:RUNNER_TEMP "sengoo-cargo-package-b-$artifact"
+            Remove-Item -LiteralPath $secondaryOutput -Recurse -Force -ErrorAction SilentlyContinue
+            Remove-Item -LiteralPath $cargoTargetB -Recurse -Force -ErrorAction SilentlyContinue
+            Remove-Item Env:CARGO_ENCODED_RUSTFLAGS -ErrorAction SilentlyContinue
+            Remove-Item Env:RUSTFLAGS -ErrorAction SilentlyContinue
+            ./scripts/package-toolchain.ps1 `
+              -Version $version `
+              -OutputDir $secondaryOutput `
+              -CargoTargetDir $cargoTargetB `
+              -SmokeEvidence "toolchain-distribution workflow build B ${{ matrix.os }} ${{ github.sha }}"
+
+            $manifestB = Join-Path $secondaryOutput "sengoo-$version-${{ matrix.target }}/manifest.json"
+            $packageB = Get-Content -LiteralPath $manifestB -Raw | ConvertFrom-Json
+            if (-not $packageB.release_eligible) {
+              throw "package B is not release eligible: $($packageB | ConvertTo-Json -Compress)"
+            }
+
+            $evidenceDir = "target/repro-evidence/$artifact"
+            ./scripts/compare-distribution-manifests.ps1 `
+              -LeftManifest $manifestA `
+              -RightManifest $manifestB `
+              -OutputDir $evidenceDir
+            $comparison = Get-Content -LiteralPath (Join-Path $evidenceDir "comparison.json") -Raw | ConvertFrom-Json
+            if ($comparison.status -ne "reproducible") {
+              throw "independent distribution builds are not reproducible"
+            }
+            foreach ($evidenceFile in @("normalized-a.json", "normalized-b.json", "comparison.json")) {
+              if (-not (Test-Path -LiteralPath (Join-Path $evidenceDir $evidenceFile))) {
+                throw "missing reproducibility evidence: $evidenceFile"
+              }
+            }
+          }
 
       - name: Prepare local release feed
         shell: pwsh
         env:
-          SENGOO_BUILD_HASH: ${{ github.sha }}
           SENGOO_DIST_TARGET: ${{ matrix.target }}
         run: |
           if ("${{ github.ref_type }}" -eq "tag") {
@@ -140,8 +254,8 @@ jobs:
           $parsedBaseVersion = [System.Management.Automation.SemanticVersion]$baseVersion
           $upgradePatch = $parsedBaseVersion.Patch + 1
           $upgradeVersion = "$($parsedBaseVersion.Major).$($parsedBaseVersion.Minor).$upgradePatch-upgrade-smoke"
-          $primaryBuildHash = $env:SENGOO_BUILD_HASH
-          if ($primaryBuildHash -notmatch '^[0-9a-fA-F]+$') {
+          $primaryBuildHash = "${{ github.sha }}".Substring(0, 12)
+          if ($primaryBuildHash -notmatch '^[0-9a-fA-F]{12}$') {
             throw "primary build hash must be hexadecimal, got $primaryBuildHash"
           }
           $firstNibble = [Convert]::ToInt32($primaryBuildHash.Substring(0, 1), 16)
@@ -168,6 +282,10 @@ jobs:
           if ($LASTEXITCODE -ne 0) {
             throw "secondary release build failed"
           }
+          cargo build -p sengoo-runtime --lib --features native-bridge --profile staticlib
+          if ($LASTEXITCODE -ne 0) {
+            throw "secondary native runtime static library build failed"
+          }
           ./scripts/package-toolchain.ps1 -Version $upgradeVersion -OutputDir $upgradeOutputDir -NoBuild -SmokeEvidence "toolchain-distribution workflow upgrade smoke ${{ matrix.os }} ${{ github.sha }}"
           $upgradeArchive = (Get-Content (Join-Path $upgradeOutputDir "latest-archive.txt")).Trim()
           $upgradeReleaseDir = Join-Path $downloadRoot "v$upgradeVersion"
@@ -192,6 +310,20 @@ jobs:
         run: |
           $archive = Get-Content target/dist/latest-archive.txt
           ./scripts/install.ps1 -Archive $archive -InstallDir target/install-smoke
+
+      - name: Install reproducibility build B (POSIX)
+        if: matrix.reproducible && runner.os != 'Windows'
+        shell: bash
+        run: |
+          archive=$(cat "target/dist-repro-b-${{ matrix.artifact }}/latest-archive.txt")
+          sh scripts/install.sh "$archive" target/install-smoke-repro-b
+
+      - name: Install reproducibility build B (Windows)
+        if: matrix.reproducible && runner.os == 'Windows'
+        shell: pwsh
+        run: |
+          $archive = Get-Content "target/dist-repro-b-${{ matrix.artifact }}/latest-archive.txt"
+          ./scripts/install.ps1 -Archive $archive -InstallDir target/install-smoke-repro-b
 
       - name: Installed stdlib smoke
         shell: pwsh
@@ -408,17 +540,369 @@ jobs:
             target/dist/*.sha256
             target/dist/*/manifest.json
 
+      - name: Upload reproducibility evidence
+        if: matrix.reproducible
+        uses: actions/upload-artifact@v4
+        with:
+          name: sengoo-reproducibility-${{ matrix.artifact }}
+          path: |
+            target/dist-repro-b-${{ matrix.artifact }}/*.zip
+            target/dist-repro-b-${{ matrix.artifact }}/*.tar.gz
+            target/dist-repro-b-${{ matrix.artifact }}/*.sha256
+            target/dist-repro-b-${{ matrix.artifact }}/*/manifest.json
+            target/repro-evidence/${{ matrix.artifact }}/normalized-a.json
+            target/repro-evidence/${{ matrix.artifact }}/normalized-b.json
+            target/repro-evidence/${{ matrix.artifact }}/comparison.json
+
+  release-transition:
+    name: published upgrade and rollback (${{ matrix.os }})
+    if: startsWith(github.ref, 'refs/tags/v')
+    needs: package-smoke
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: ubuntu-latest
+            target: x86_64-unknown-linux-gnu
+            artifact: linux-x86_64
+          - os: windows-latest
+            target: x86_64-pc-windows-msvc
+            artifact: windows-x86_64
+          - os: macos-15
+            target: aarch64-apple-darwin
+            artifact: macos-arm64
+          - os: macos-15-intel
+            target: x86_64-apple-darwin
+            artifact: macos-x86_64
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Download current smoke-gated archive
+        uses: actions/download-artifact@v4
+        with:
+          name: sengoo-toolchain-${{ matrix.artifact }}
+          path: target/current
+
+      - name: Verify published upgrade and rollback
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = "Stop"
+
+          function Invoke-ToolchainInstall([string]$Version, [string]$InstallRoot) {
+            if ($IsWindows -or $PSVersionTable.PSEdition -eq "Desktop") {
+              ./scripts/install.ps1 -Version $Version -BaseUrl $downloadRoot -InstallDir $InstallRoot
+            } else {
+              & sh scripts/install.sh --version $Version --base-url $downloadRoot --install-dir $InstallRoot
+              if ($LASTEXITCODE -ne 0) {
+                throw "toolchain install failed for $Version"
+              }
+            }
+          }
+
+          function Assert-InstalledToolVersions(
+            [string]$InstallRoot,
+            [string]$ExpectedVersion,
+            [string]$Transcript
+          ) {
+            $manifest = Get-Content -LiteralPath (Join-Path $InstallRoot "manifest.json") -Raw | ConvertFrom-Json
+            if ([string]$manifest.version -ne $ExpectedVersion) {
+              throw "installed manifest mismatch: expected $ExpectedVersion, got $($manifest.version)"
+            }
+            $suffix = if ($IsWindows -or $PSVersionTable.PSEdition -eq "Desktop") { ".exe" } else { "" }
+            $bin = Join-Path $InstallRoot "bin"
+            $expectedSignature = $null
+            foreach ($tool in @("sgc", "sgpm", "sgfmt", "sglsp")) {
+              $version = & (Join-Path $bin "$tool$suffix") --version
+              $versionLine = "$tool $version"
+              Add-Content -LiteralPath $Transcript -Value $versionLine
+              Write-Host $versionLine
+              $manifestVersion = $manifest.tool_versions.PSObject.Properties[$tool].Value
+              if ($version -ne $manifestVersion) {
+                throw "$tool payload does not match manifest: expected $manifestVersion, got $version"
+              }
+              $signature = $version -replace "^$tool ", ""
+              if (-not $expectedSignature) {
+                $expectedSignature = $signature
+              } elseif ($signature -ne $expectedSignature) {
+                throw "tool version/hash mismatch: expected $expectedSignature, got $signature from $tool"
+              }
+            }
+            return $expectedSignature
+          }
+
+          function Invoke-CompatibilityFixture(
+            [string]$Label,
+            [string]$InstallRoot,
+            [string]$FixtureRelative,
+            [string]$Transcript
+          ) {
+            $sourceFixture = Join-Path $env:GITHUB_WORKSPACE $FixtureRelative
+            $project = Join-Path $env:RUNNER_TEMP "sengoo-release-transition-${{ matrix.artifact }}-$Label"
+            Remove-Item -LiteralPath $project -Recurse -Force -ErrorAction SilentlyContinue
+            Copy-Item -LiteralPath $sourceFixture -Destination $project -Recurse
+
+            $protectedFiles = @("Sengoo.toml", "Sengoo.lock", "src/lib.sg", "tests/smoke.sg")
+            $before = @{}
+            foreach ($relative in $protectedFiles) {
+              $before[$relative] = (Get-FileHash -LiteralPath (Join-Path $project $relative) -Algorithm SHA256).Hash
+            }
+
+            $suffix = if ($IsWindows -or $PSVersionTable.PSEdition -eq "Desktop") { ".exe" } else { "" }
+            $bin = Join-Path $InstallRoot "bin"
+            $sgpm = Join-Path $bin "sgpm$suffix"
+            $env:SGPM_SGC = Join-Path $bin "sgc$suffix"
+            $env:SGPM_SGFMT = Join-Path $bin "sgfmt$suffix"
+            Remove-Item Env:SENGOO_ROOT -ErrorAction SilentlyContinue
+            Remove-Item Env:SENGOO_STDLIB -ErrorAction SilentlyContinue
+            Remove-Item Env:SENGOO_RUNTIME -ErrorAction SilentlyContinue
+
+            "== $Label ($FixtureRelative) ==" | Tee-Object -FilePath $Transcript -Append
+            Push-Location $project
+            try {
+              foreach ($arguments in @(
+                @("check", "--locked"),
+                @("test", "--locked"),
+                @("fmt", "--check", "--locked"),
+                @("doc", "--locked"),
+                @("build", "--locked")
+              )) {
+                & $sgpm @arguments 2>&1 | Tee-Object -FilePath $Transcript -Append
+                if ($LASTEXITCODE -ne 0) {
+                  throw "fixture command failed during ${Label}: sgpm $($arguments -join ' ')"
+                }
+              }
+            } finally {
+              Pop-Location
+            }
+
+            foreach ($relative in $protectedFiles) {
+              $after = (Get-FileHash -LiteralPath (Join-Path $project $relative) -Algorithm SHA256).Hash
+              if ($after -ne $before[$relative]) {
+                throw "release transition rewrote protected fixture file: $relative"
+              }
+            }
+          }
+
+          $currentVersion = "${{ github.ref_name }}".Substring(1)
+          switch ($currentVersion) {
+            "0.2.0-rc.1" {
+              $previousVersion = "0.1.0-rc.1"
+              $fixtureRelative = "examples/compat/v0.1.0-rc.1"
+            }
+            "0.2.0-rc.2" {
+              $previousVersion = "0.2.0-rc.1"
+              $fixtureRelative = "examples/compat/v0.2.0-rc.1"
+            }
+            "0.2.0" {
+              $previousVersion = "0.2.0-rc.2"
+              $fixtureRelative = "examples/compat/v0.2.0-rc.1"
+            }
+            default {
+              throw "release transition predecessor is not pinned for $currentVersion"
+            }
+          }
+
+          $currentArchives = @(Get-ChildItem -LiteralPath target/current -File -Recurse | Where-Object {
+            $_.Name -eq "sengoo-$currentVersion-${{ matrix.target }}.zip" -or
+            $_.Name -eq "sengoo-$currentVersion-${{ matrix.target }}.tar.gz"
+          })
+          if ($currentArchives.Count -ne 1) {
+            throw "expected one current archive, found $($currentArchives.Count)"
+          }
+          $currentArchive = $currentArchives[0]
+          $currentChecksum = "$($currentArchive.FullName).sha256"
+          if (-not (Test-Path -LiteralPath $currentChecksum)) {
+            throw "current archive checksum is missing: $currentChecksum"
+          }
+
+          $releaseFeedRoot = Join-Path $env:RUNNER_TEMP "sengoo-published-transition-${{ matrix.artifact }}"
+          $downloadRoot = Join-Path $releaseFeedRoot "releases/download"
+          Remove-Item -LiteralPath $releaseFeedRoot -Recurse -Force -ErrorAction SilentlyContinue
+          $currentReleaseDir = Join-Path $downloadRoot "v$currentVersion"
+          $previousReleaseDir = Join-Path $downloadRoot "v$previousVersion"
+          New-Item -ItemType Directory -Force -Path $currentReleaseDir, $previousReleaseDir | Out-Null
+          Copy-Item -LiteralPath $currentArchive.FullName -Destination (Join-Path $currentReleaseDir $currentArchive.Name)
+          Copy-Item -LiteralPath $currentChecksum -Destination (Join-Path $currentReleaseDir "$($currentArchive.Name).sha256")
+
+          $previousArchiveName = $currentArchive.Name.Replace(
+            "sengoo-$currentVersion-",
+            "sengoo-$previousVersion-"
+          )
+          if ($previousArchiveName -eq $currentArchive.Name) {
+            throw "cannot derive previous archive name from $($currentArchive.Name)"
+          }
+          $previousReleaseUrl = "https://github.com/${{ github.repository }}/releases/download/v$previousVersion"
+          Invoke-WebRequest -Uri "$previousReleaseUrl/$previousArchiveName" -OutFile (Join-Path $previousReleaseDir $previousArchiveName)
+          Invoke-WebRequest -Uri "$previousReleaseUrl/$previousArchiveName.sha256" -OutFile (Join-Path $previousReleaseDir "$previousArchiveName.sha256")
+
+          $transcript = Join-Path $env:GITHUB_WORKSPACE "release-transition-${{ matrix.artifact }}.txt"
+          $installRoot = Join-Path $env:RUNNER_TEMP "sengoo-published-transition-install-${{ matrix.artifact }}"
+          Remove-Item -LiteralPath $installRoot -Recurse -Force -ErrorAction SilentlyContinue
+
+          Invoke-ToolchainInstall $previousVersion $installRoot
+          $previousSignature = Assert-InstalledToolVersions $installRoot $previousVersion $transcript
+          Invoke-CompatibilityFixture "previous" $installRoot $fixtureRelative $transcript
+
+          Invoke-ToolchainInstall $currentVersion $installRoot
+          $currentSignature = Assert-InstalledToolVersions $installRoot $currentVersion $transcript
+          if ($currentSignature -eq $previousSignature) {
+            throw "upgrade did not replace the installed toolchain identity"
+          }
+          Invoke-CompatibilityFixture "upgraded" $installRoot $fixtureRelative $transcript
+
+          Invoke-ToolchainInstall $previousVersion $installRoot
+          $rollbackSignature = Assert-InstalledToolVersions $installRoot $previousVersion $transcript
+          if ($rollbackSignature -ne $previousSignature) {
+            throw "rollback did not restore the previous published toolchain identity"
+          }
+          Invoke-CompatibilityFixture "rolled-back" $installRoot $fixtureRelative $transcript
+
+      - name: Upload release transition transcript
+        uses: actions/upload-artifact@v4
+        with:
+          name: release-transition-${{ matrix.artifact }}
+          path: release-transition-${{ matrix.artifact }}.txt
+          if-no-files-found: error
+
   publish-release:
     name: publish complete toolchain release
     if: startsWith(github.ref, 'refs/tags/v')
-    needs: package-smoke
+    needs: [package-smoke, release-transition]
     runs-on: ubuntu-latest
     permissions:
+      actions: read
       contents: write
       id-token: write
       attestations: write
 
     steps:
+      - uses: actions/checkout@v4
+
+      - name: Collect required one-SHA gate runs
+        env:
+          GH_TOKEN: ${{ github.token }}
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = "Stop"
+          $repository = "${{ github.repository }}"
+          $sourceRevision = "${{ github.sha }}"
+          $currentRunId = "${{ github.run_id }}"
+
+          function Invoke-GhJson([string]$Path) {
+            $raw = @(& gh api $Path)
+            if ($LASTEXITCODE -ne 0) {
+              throw "GitHub API request failed: $Path"
+            }
+            return (($raw -join "`n") | ConvertFrom-Json)
+          }
+
+          function Get-RunJobs([string]$RunId) {
+            $response = Invoke-GhJson "repos/$repository/actions/runs/$RunId/jobs?per_page=100"
+            return @($response.jobs | ForEach-Object {
+              [ordered]@{
+                name = [string]$_.name
+                status = [string]$_.status
+                conclusion = [string]$_.conclusion
+                url = [string]$_.html_url
+              }
+            })
+          }
+
+          function Get-RunArtifacts([string]$RunId) {
+            $response = Invoke-GhJson "repos/$repository/actions/runs/$RunId/artifacts?per_page=100"
+            return @($response.artifacts | ForEach-Object {
+              [ordered]@{
+                id = [string]$_.id
+                name = [string]$_.name
+                size_in_bytes = [long]$_.size_in_bytes
+                expired = [bool]$_.expired
+                url = [string]$_.archive_download_url
+              }
+            })
+          }
+
+          $runsResponse = Invoke-GhJson "repos/$repository/actions/runs?head_sha=$sourceRevision&per_page=100"
+          $requiredWorkflows = @(
+            "core-conformance",
+            "native-safety",
+            "hardening-fuzz",
+            "compatibility-prerelease",
+            "realworld-e2e",
+            "perf-smoke"
+          )
+          $requiredRuns = @()
+          foreach ($workflowName in $requiredWorkflows) {
+            $matches = @($runsResponse.workflow_runs | Where-Object {
+              [string]$_.name -eq $workflowName -and
+              [string]$_.head_sha -eq $sourceRevision -and
+              [string]$_.head_branch -eq "main" -and
+              [string]$_.event -eq "push" -and
+              [string]$_.status -eq "completed" -and
+              [string]$_.conclusion -eq "success"
+            } | Sort-Object run_number -Descending)
+            if ($matches.Count -eq 0) {
+              throw "missing successful main-push $workflowName run for $sourceRevision"
+            }
+            $run = $matches[0]
+            $jobs = @(Get-RunJobs ([string]$run.id))
+            $failedJobs = @($jobs | Where-Object {
+              $_.status -ne "completed" -or $_.conclusion -ne "success"
+            })
+            if ($failedJobs.Count -ne 0) {
+              throw "$workflowName contains a non-success job: $($failedJobs.name -join ', ')"
+            }
+            $requiredRuns += [ordered]@{
+              workflow = $workflowName
+              id = [string]$run.id
+              attempt = [string]$run.run_attempt
+              event = [string]$run.event
+              head_branch = [string]$run.head_branch
+              head_sha = [string]$run.head_sha
+              status = [string]$run.status
+              conclusion = [string]$run.conclusion
+              url = [string]$run.html_url
+              jobs = $jobs
+              artifacts = @(Get-RunArtifacts ([string]$run.id))
+            }
+          }
+
+          $distributionJobs = @(Get-RunJobs $currentRunId)
+          $packageJobs = @($distributionJobs | Where-Object { $_.name -like "package smoke (*)" })
+          $transitionJobs = @($distributionJobs | Where-Object {
+            $_.name -like "published upgrade and rollback (*)"
+          })
+          foreach ($jobs in @($packageJobs, $transitionJobs)) {
+            if ($jobs.Count -ne 4) {
+              throw "current distribution run must expose four package and four transition jobs"
+            }
+            $failedJobs = @($jobs | Where-Object {
+              $_.status -ne "completed" -or $_.conclusion -ne "success"
+            })
+            if ($failedJobs.Count -ne 0) {
+              throw "current distribution prerequisite failed: $($failedJobs.name -join ', ')"
+            }
+          }
+
+          $gateEvidence = [ordered]@{
+            schema_version = 1
+            source_revision = $sourceRevision
+            required_runs = $requiredRuns
+            distribution_prerequisites = [ordered]@{
+              run_id = $currentRunId
+              run_url = "${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}"
+              head_sha = $sourceRevision
+              package_jobs = $packageJobs
+              transition_jobs = $transitionJobs
+              artifacts = @(Get-RunArtifacts $currentRunId)
+            }
+            known_platform_skips = @()
+          }
+          New-Item -ItemType Directory -Force -Path target/dist | Out-Null
+          $gateEvidence | ConvertTo-Json -Depth 12 | Set-Content `
+            -LiteralPath target/dist/required-gate-runs.json -Encoding utf8NoBOM
+
       - name: Download all smoke-gated archives
         uses: actions/download-artifact@v4
         with:
@@ -427,11 +911,42 @@ jobs:
           merge-multiple: true
 
       - name: Attest release archives
+        id: archive-provenance
         uses: actions/attest-build-provenance@v2
         with:
           subject-path: |
             target/dist/*.zip
             target/dist/*.tar.gz
+
+      - name: Generate one-SHA release evidence
+        shell: pwsh
+        run: |
+          $version = "${{ github.ref_name }}".Substring(1)
+          $previousVersion = switch ($version) {
+            "0.2.0-rc.1" { "0.1.0-rc.1" }
+            "0.2.0-rc.2" { "0.2.0-rc.1" }
+            "0.2.0" { "0.2.0-rc.2" }
+            default { throw "release transition predecessor is not pinned for $version" }
+          }
+          $compatibilityFixture = switch ($version) {
+            "0.2.0-rc.1" { "examples/compat/v0.1.0-rc.1" }
+            "0.2.0-rc.2" { "examples/compat/v0.2.0-rc.1" }
+            "0.2.0" { "examples/compat/v0.2.0-rc.1" }
+            default { throw "compatibility fixture is not pinned for $version" }
+          }
+          ./scripts/generate-release-evidence.ps1 `
+            -DistDir target/dist `
+            -OutputPath target/dist/release-evidence.json `
+            -Version $version `
+            -SourceRevision "${{ github.sha }}" `
+            -PreviousVersion $previousVersion `
+            -GateRunsPath target/dist/required-gate-runs.json `
+            -CompatibilityFixturePath $compatibilityFixture `
+            -Repository "${{ github.repository }}" `
+            -RunId "${{ github.run_id }}" `
+            -RunAttempt "${{ github.run_attempt }}" `
+            -RunUrl "${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}" `
+            -ProvenanceUrl "${{ steps.archive-provenance.outputs['attestation-url'] }}"
 
       - name: Publish GitHub release assets
         uses: softprops/action-gh-release@v2
@@ -441,3 +956,4 @@ jobs:
             target/dist/*.zip
             target/dist/*.tar.gz
             target/dist/*.sha256
+            target/dist/release-evidence.json

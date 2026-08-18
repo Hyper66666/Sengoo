@@ -1524,6 +1524,78 @@ mod tests {
         assert_eq!(sengoo_http_server_close(server), 1);
     }
 
+    fn assert_ready_http_future_abandonment_releases_request(cancel: bool) {
+        let _guard = net_test_lock();
+        let host = b"127.0.0.1\0";
+        let server = sengoo_http_server_bind(host.as_ptr(), 0);
+        assert!(server != 0);
+        let port = sengoo_http_server_local_port(server) as u16;
+        let table_len_before = net_runtime().http_request_table_len();
+
+        let future = sengoo_http_server_next_request_async__start(server, 4_000);
+        assert!(future != 0);
+        let client = thread::spawn(move || {
+            let request = b"POST /abandoned-ready HTTP/1.1\r\nHost: localhost\r\nContent-Length: 2\r\nConnection: close\r\n\r\nok";
+            send_raw_http_request(port, request)
+        });
+        assert_eq!(poll_http_next_request_until_ready(future, 4_000), 1);
+        assert_eq!(
+            net_runtime().http_request_pending_count(server).unwrap(),
+            1,
+            "the ready future owns one unpublished request"
+        );
+
+        if cancel {
+            assert!(unsafe { sengoo_http_server_next_request_async__cancel(future) });
+        } else {
+            unsafe { sengoo_http_server_next_request_async__drop(future) };
+        }
+
+        let table_len_after = net_runtime().http_request_table_len();
+        let pending_after = net_runtime().http_request_pending_count(server).unwrap();
+        if table_len_after != table_len_before || pending_after != 0 {
+            assert_eq!(
+                sengoo_http_server_close(server),
+                1,
+                "RED cleanup must drain a leaked unpublished request"
+            );
+        }
+        let (status, body) = parse_http_status_and_body(&client.join().expect("client"));
+        assert_eq!(status, 504);
+        assert_eq!(body, b"gateway timeout");
+        assert_eq!(
+            table_len_after, table_len_before,
+            "abandoning a ready future must remove its unpublished request handle"
+        );
+        assert_eq!(pending_after, 0);
+
+        let next_client = thread::spawn(move || {
+            let request = b"GET /after-ready-abandon HTTP/1.1\r\nHost: localhost\r\nConnection: close\r\n\r\n";
+            send_raw_http_request(port, request)
+        });
+        let next = sengoo_http_server_next_request(server, 4_000);
+        assert!(
+            next != 0,
+            "server must remain usable after ready abandonment"
+        );
+        assert_eq!(sengoo_http_request_respond(next, 200, b"ok".as_ptr(), 2), 1);
+        let (next_status, next_body) =
+            parse_http_status_and_body(&next_client.join().expect("next client"));
+        assert_eq!(next_status, 200);
+        assert_eq!(next_body, b"ok");
+        assert_eq!(sengoo_http_server_close(server), 1);
+    }
+
+    #[test]
+    fn http_server_next_request_async_drop_ready_releases_unpublished_request() {
+        assert_ready_http_future_abandonment_releases_request(false);
+    }
+
+    #[test]
+    fn http_server_next_request_async_cancel_ready_releases_unpublished_request() {
+        assert_ready_http_future_abandonment_releases_request(true);
+    }
+
     #[test]
     fn http_server_next_request_async_slow_client_never_publishes_partial_request() {
         let _guard = net_test_lock();

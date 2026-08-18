@@ -2,6 +2,7 @@ use clap::{Parser as ClapParser, Subcommand};
 use miette::Result;
 use std::path::Path;
 
+use crate::installed_runtime::{initialize_native_runtime_mode, NativeRuntimeMode};
 use crate::{
     cmd_bench_compile, cmd_bench_incremental, cmd_bench_reflection, cmd_bench_run, cmd_build,
     cmd_check, cmd_daemon, cmd_doc, cmd_dump_ast, cmd_repl, cmd_run, cmd_test,
@@ -34,6 +35,15 @@ pub(crate) struct Cli {
     /// Print compiler instrumentation (cache, workset, frontend, toolchain).
     #[arg(short = 'v', long = "verbose", global = true)]
     verbose: bool,
+
+    /// Native runtime source policy for this compiler process.
+    #[arg(
+        long = "runtime-mode",
+        global = true,
+        value_enum,
+        default_value_t = NativeRuntimeMode::Installed
+    )]
+    runtime_mode: NativeRuntimeMode,
 
     #[command(subcommand)]
     command: Commands,
@@ -346,7 +356,20 @@ pub(crate) async fn run() -> Result<()> {
     let cli = Cli::parse();
     set_error_format(cli.error_format);
     set_verbose_output(cli.verbose);
+    initialize_native_runtime_mode(cli.runtime_mode)?;
     dispatch(cli.command).await
+}
+
+pub(crate) fn validate_runtime_mode_daemon_combination(
+    runtime_mode: NativeRuntimeMode,
+    daemon_requested: bool,
+) -> Result<()> {
+    if daemon_requested && runtime_mode == NativeRuntimeMode::SourceDevelopment {
+        miette::bail!(
+            "source-development runtime mode does not support daemon startup or dispatch; run the command directly so non-release provenance stays process-local"
+        );
+    }
+    Ok(())
 }
 
 async fn dispatch(command: Commands) -> Result<()> {
@@ -370,6 +393,11 @@ async fn dispatch(command: Commands) -> Result<()> {
             timings_json,
             debug_info,
         } => {
+            crate::installed_runtime::validate_native_runtime_mode_environment()?;
+            validate_runtime_mode_daemon_combination(
+                crate::installed_runtime::native_runtime_mode(),
+                daemon,
+            )?;
             if matches!(target.as_deref(), Some("wasm" | "bytecode")) {
                 if daemon {
                     miette::bail!("portable targets do not support daemon dispatch");
@@ -451,6 +479,11 @@ async fn dispatch(command: Commands) -> Result<()> {
             target,
             args,
         } => {
+            crate::installed_runtime::validate_native_runtime_mode_environment()?;
+            validate_runtime_mode_daemon_combination(
+                crate::installed_runtime::native_runtime_mode(),
+                daemon,
+            )?;
             if let Some(target) = target.as_deref() {
                 match target {
                     "bytecode" => {
@@ -574,7 +607,13 @@ async fn dispatch(command: Commands) -> Result<()> {
         Commands::Doc { input, output } => cmd_doc(&input, &output).await,
         Commands::Repl => cmd_repl().await,
         Commands::DumpAst { input } => cmd_dump_ast(&input).await,
-        Commands::Daemon { addr } => cmd_daemon(&addr).await,
+        Commands::Daemon { addr } => {
+            validate_runtime_mode_daemon_combination(
+                crate::installed_runtime::native_runtime_mode(),
+                true,
+            )?;
+            cmd_daemon(&addr).await
+        }
         Commands::Bench { command } => match command {
             BenchCommands::Run {
                 suite,

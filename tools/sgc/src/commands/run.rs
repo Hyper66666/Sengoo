@@ -37,6 +37,7 @@ pub(crate) async fn cmd_run(
     reflection: ReflectionCliOptions,
     debug_info: bool,
 ) -> Result<()> {
+    crate::installed_runtime::validate_native_runtime_mode_environment()?;
     vprintln!("Running: {}", input);
 
     let input_path = Path::new(input);
@@ -226,11 +227,25 @@ pub(crate) async fn cmd_run(
     drop(graph_snapshot);
 
     let runtime_c = find_runtime_c();
-    let runtime_c_fingerprint = optional_runtime_bundle_fingerprint(runtime_c.as_deref())?;
+    let runtime_source_fingerprint = optional_runtime_bundle_fingerprint(runtime_c.as_deref())?;
     let clang_exe = find_clang();
     let lli_exe = find_lli();
 
     let resolved_engine = resolve_engine(requested_engine, clang_exe.is_some(), lli_exe.is_some())?;
+    let (installed_runtime_fingerprint, runtime_provenance) =
+        if matches!(resolved_engine, RunEngine::Native) {
+            crate::installed_runtime::native_runtime_cache_context(&NativeBuildTarget::host())?
+        } else {
+            (None, NativeRuntimeProvenance::not_linked())
+        };
+    let runtime_c_fingerprint = crate::installed_runtime::combine_runtime_cache_fingerprints(
+        runtime_source_fingerprint,
+        installed_runtime_fingerprint,
+    );
+    let runtime_c_identity = crate::installed_runtime::runtime_source_cache_identity(
+        runtime_c.as_deref(),
+        &runtime_provenance,
+    );
     if matches!(resolved_engine, RunEngine::Native) {
         let clang = clang_exe
             .as_deref()
@@ -281,7 +296,11 @@ pub(crate) async fn cmd_run(
         debug_info,
         requested_engine,
         resolved_engine,
-        RuntimeSourceIdentity::new(runtime_c.clone(), runtime_c_fingerprint),
+        RuntimeSourceIdentity::with_provenance(
+            runtime_c_identity.clone(),
+            runtime_c_fingerprint,
+            runtime_provenance.clone(),
+        ),
     );
     let mut edit_impact: Option<EditImpact> = None;
 
@@ -356,7 +375,14 @@ pub(crate) async fn cmd_run(
             }
             edit_impact = Some(impact);
         }
-        Some(metadata)
+        if metadata.runtime_c_fingerprint != runtime_c_fingerprint
+            || metadata.runtime_provenance != runtime_provenance
+        {
+            println!("run workset reuse disabled: runtime identity changed");
+            None
+        } else {
+            Some(metadata)
+        }
     } else {
         vprintln!(
             "cache miss: no cache metadata at {}",
@@ -374,7 +400,7 @@ pub(crate) async fn cmd_run(
         debug_info,
         requested_engine,
         resolved_engine,
-        runtime_c.as_deref(),
+        runtime_c_identity.as_deref(),
     );
     if previous_run_metadata.is_some()
         && can_skip_codegen_via_generic_cache(edit_impact.as_ref(), &graph_v2, &generic_plan_stats)
@@ -558,7 +584,7 @@ pub(crate) async fn cmd_run(
                         previous,
                         llvm_ir_hash,
                         &object_path,
-                        runtime_c.as_deref(),
+                        runtime_c_identity.as_deref(),
                         opt_level,
                         contract_checks_enabled,
                         debug_info,
@@ -678,8 +704,9 @@ pub(crate) async fn cmd_run(
         debug_info,
         requested_engine,
         resolved_engine,
-        runtime_c,
+        runtime_c: runtime_c_identity,
         runtime_c_fingerprint,
+        runtime_provenance,
         llvm_ir_path: llvm_ir_path.to_string_lossy().to_string(),
         executable_path: if matches!(resolved_engine, RunEngine::Native) {
             Some(executable_path.to_string_lossy().to_string())

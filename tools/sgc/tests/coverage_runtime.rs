@@ -1,12 +1,10 @@
+mod common;
+
+use common::source_sgc_command;
 use serde_json::Value;
 use std::fs;
 use std::path::PathBuf;
-use std::process::Command;
 use std::time::{SystemTime, UNIX_EPOCH};
-
-fn sgc() -> PathBuf {
-    PathBuf::from(env!("CARGO_BIN_EXE_sgc"))
-}
 
 fn temp_project() -> PathBuf {
     let stamp = SystemTime::now()
@@ -55,7 +53,7 @@ def never_called() -> i64 {
     )
     .expect("write coverage fixture");
 
-    let output = Command::new(sgc())
+    let output = source_sgc_command()
         .current_dir(&root)
         .args(["test", "--coverage", "--format", "json"])
         .output()

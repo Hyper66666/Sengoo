@@ -1,6 +1,21 @@
 # Current Inventory (mainstream-adoption-gap-closure)
 
-## Status Snapshot (June 2026)
+## Closure Snapshot (July 2026)
+
+All four child changes are archived. Source debug info is proven by Windows
+CDB and Linux LLDB transcripts, cancellation is canonical, the production HTTP
+subset is archived with Windows verified-TLS composition, and the published
+`v0.1.0-rc.1` archives prove installed Windows/Linux adoption. PR #51 Actions
+runs `29613261605`, `29613261610`, `29613261611`, `29613261614`, and
+`29613261662` re-proved core, compile-scale, sanitizer, four-host package, and
+installed realworld gates after debug-info landed.
+
+POSIX rustls HTTP composition is intentionally not promoted here. It remains a
+Platform-specific row and a required host role of
+`v0-2-release-candidate-closure`; that release-specific proof does not keep
+this historical capability umbrella active.
+
+## Historical Baseline (June 2026)
 
 Baseline audit performed against the working tree on branch
 `codex/mainstream-usable-loop`; updated after the `async-cancellation-semantics`
@@ -17,9 +32,9 @@ archive.
 
 | Child change | Pillar | Capability delta | Status |
 | --- | --- | --- | --- |
-| `native-debug-info` | A | new `native-debug-info` | Proposed, strictly validated; prerequisite archive satisfied; codegen edits unblocked |
+| `native-debug-info` | A | new `native-debug-info` | Archived 2026-07-16; later Windows CDB and Linux LLDB evidence is linked from the support matrix |
 | `async-cancellation-semantics` | B | new `async-cancellation` | Archived 2026-06-12; PR #17 Windows/Ubuntu evidence recorded |
-| `http-production-serving` | C | ADDED requirements on `stdlib-http-server` | Proposed, strictly validated; sequenced after Pillar B |
+| `http-production-serving` | C | ADDED requirements on `stdlib-http-server` | Archived 2026-07-25 with handlers, keep-alive, streaming, and verified Windows TLS composition |
 | `toolchain-distribution` | D | new `toolchain-distribution` | Archived 2026-06-13 after PR #22 Windows/Linux dry-run evidence |
 
 ## Dependencies (not owned here)
@@ -28,9 +43,9 @@ archive.
 | --- | --- | --- |
 | `codegen-ir-correctness-and-gate` | Archived as `2026-06-11-codegen-ir-correctness-and-gate`; latest core-conformance run `27366666789` passed | IR emission and the conformance gate must be trustworthy before debug-metadata emission edits the same codegen path |
 | `compile-scale-production-gate` | Archived 2026-06-08 with passing 100k/1000k evidence; `frontend-1000k-perf-gate` archived 2026-06-13 as superseded baseline context | Phase 5 re-runs the compile-scale gate after `-g` work to prove no default-mode regression |
-| `six-pillar-gap-closure` | Active umbrella, final verification open | Prior wave must not have its capabilities re-claimed by this wave's children |
+| `six-pillar-gap-closure` | Historical umbrella archived during the same reconciliation | Prior wave capabilities remain owned by their canonical child specs |
 
-## Pillar A â€?Source-level debugging
+## Pillar A - Source-level debugging
 
 | Item | Current evidence |
 | --- | --- |
@@ -39,7 +54,7 @@ archive.
 | Debugger docs | `docs/debugging-native.md` exists (Pillar 6 of prior wave) but documents symbol-less native attach |
 | Cache interaction | Artifact cache fingerprints runtime/source bytes; no debug-mode dimension yet (`tools/sgc/src/cache.rs`) |
 
-## Pillar B â€?Cancellation semantics
+## Pillar B - Cancellation semantics
 
 | Item | Current evidence |
 | --- | --- |
@@ -49,7 +64,7 @@ archive.
 | Process cancellation | `ProcessHandle.wait_cancellable(timeout_ms)` maps killed waits to `STATUS_CANCELED` and is proven on Windows plus Ubuntu CI |
 | Reactor interest cleanup | Pending async drop and select-cancel loser cleanup unregister listener interest in the supported subset |
 
-## Pillar C â€?Production HTTP serving
+## Pillar C - Production HTTP serving
 
 | Item | Current evidence |
 | --- | --- |
@@ -60,7 +75,7 @@ archive.
 | Streaming bodies | Not implemented |
 | TLS server | Not implemented; client stacks exist (Schannel verified on Windows; rustls implemented with POSIX reference-host success evidence still pending under `six-pillar-gap-closure`) |
 
-## Pillar D â€?Toolchain distribution
+## Pillar D - Toolchain distribution
 
 | Item | Current evidence |
 | --- | --- |
@@ -90,5 +105,5 @@ Recorded so they are not silently lost; each needs its own future change:
 | Select loser cancellation | Deferred | Supported subset (`select_cancel`; complete via `async-cancellation-semantics`) |
 | Process cancellation | Deferred | Supported subset (complete via `async-cancellation-semantics`) |
 | HTTP server dynamic serving | Supported subset (close-only) | Supported subset incl. keep-alive, handlers, streaming, TLS-server row(s) |
-| (new row) Source-level debugging | â€?| Supported subset (line-level) |
-| (new row) Toolchain distribution | â€?| Supported (win-x64, linux-x64) |
+| (new row) Source-level debugging | Absent | Supported subset (line-level) |
+| (new row) Toolchain distribution | Absent | Supported (win-x64, linux-x64) |

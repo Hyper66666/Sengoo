@@ -32,6 +32,7 @@ fn net_async_stdlib_prefix() -> String {
         "ffi.sg",
         "status.sg",
         "string.sg",
+        "collections.sg",
         "async.sg",
         "net.sg",
     ];

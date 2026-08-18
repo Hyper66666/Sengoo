@@ -1,12 +1,10 @@
+mod common;
+
+use common::source_sgc_command;
 use serde_json::Value;
 use std::fs;
 use std::path::{Path, PathBuf};
-use std::process::Command;
 use std::time::{SystemTime, UNIX_EPOCH};
-
-fn sgc() -> PathBuf {
-    PathBuf::from(env!("CARGO_BIN_EXE_sgc"))
-}
 
 fn temp_dir(name: &str) -> PathBuf {
     let stamp = SystemTime::now()
@@ -48,7 +46,7 @@ fn sgc_test_reports_structured_assertion_failure_in_json_mode() {
     let root = temp_dir("json_assertion");
     write_failing_assert_test(&root);
 
-    let output = Command::new(sgc())
+    let output = source_sgc_command()
         .current_dir(&root)
         .args(["test", "--format", "json"])
         .output()
@@ -92,7 +90,7 @@ fn sgc_test_reports_assertion_message_in_text_mode_with_nocapture() {
     let root = temp_dir("text_assertion");
     write_failing_assert_test(&root);
 
-    let output = Command::new(sgc())
+    let output = source_sgc_command()
         .current_dir(&root)
         .args(["test", "--nocapture"])
         .output()

@@ -21,31 +21,34 @@ Sengoo 现在可以打包成自包含工具链归档，包含 `sgc`、`sgpm`、
 
 ```powershell
 cargo build -p sgc -p sgpm -p sgfmt -p sglsp --release
-.\scripts\package-toolchain.ps1 -Version 0.1.0-smoke -NoBuild
+.\scripts\package-toolchain.ps1 -Version 0.2.0-smoke -NoBuild
 $archive = Get-Content target/dist/latest-archive.txt
 .\scripts\install.ps1 -Archive $archive -InstallDir target/install-smoke
 ```
 
-已发布预发布安装 / 升级（当前公开 tag）：
+稳定版安装 / 升级：
 
 ```powershell
-.\scripts\install.ps1 -Version 0.1.0-rc.1
+.\scripts\install.ps1 -Version 0.2.0
 ```
 
 ```sh
-sh scripts/install.sh --version 0.1.0-rc.1
+sh scripts/install.sh --version 0.2.0
 ```
 
-公开预发布：[`v0.1.0-rc.1`](https://github.com/Hyper66666/Sengoo/releases/tag/v0.1.0-rc.1)。
-v0.2 主线见 `sengoo-v0-2-mainstream-core`，此处不宣称已发布 v0.2.0。
+稳定版：[`v0.2.0`](https://github.com/Hyper66666/Sengoo/releases/tag/v0.2.0)。
+具体变更见 [v0.2.0 发布说明](docs/release-notes-v0.2.0.md)和
+[v0.1 到 v0.2 迁移指南](docs/migration-v0-1-to-v0-2.md)。
 
-**v0.2 mainstream-core 本地门禁证据 SHA：**
-`084b623037f007344d76ce50f2e0d01fac57b565`（分支 `codex/sengoo-v0-2-openspec`，
-[PR #47](https://github.com/Hyper66666/Sengoo/pull/47)）。该提交对应已归档的
-M1–M4 OpenSpec 子变更与本地 fmt / Clippy `-D warnings` / 聚焦工具测试 /
-`openspec validate --all --strict` 绿证据；**不**宣称多主机 Actions 成功，
-也不宣称 HTTP handlers/keep-alive/streaming/TLS server 为 Supported（见
-`examples/realworld/SUPPORT_MATRIX.md` 与 umbrella `RESIDUAL.md`）。
+**v0.2 稳定版门禁证据 SHA：**
+`92c8f399f61b73d63990581c637da68572b6e133`（[PR #56](https://github.com/Hyper66666/Sengoo/pull/56)）。
+六项同 SHA 主干门禁和四主机 `v0.2.0` 发布运行
+[`30191226253`](https://github.com/Hyper66666/Sengoo/actions/runs/30191226253)
+已通过核心语言、编译规模、sanitizer、有界 fuzz、兼容性、安装版 realworld、
+打包、升级和回滚检查。生产 HTTP 包含精确路由 Sengoo handler、有界
+opt-in keep-alive、有界响应流，以及 Windows Schannel、Linux 和两种 macOS
+架构 rustls 的已验证 TLS 组合。准确支持范围以
+`examples/realworld/SUPPORT_MATRIX.md` 为准。
 
 原生 debug-info 构建使用 `-g` / `--debug-info`：
 

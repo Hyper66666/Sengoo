@@ -36,6 +36,7 @@ impl Drop for TempSource {
 fn sgc() -> Command {
     let mut command = Command::new(env!("CARGO_BIN_EXE_sgc"));
     command.env("RUST_LOG", "off");
+    command.args(["--runtime-mode", "source-development"]);
     command
 }
 

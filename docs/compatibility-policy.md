@@ -4,13 +4,16 @@ This policy describes the supported pre-1.0 toolchain line. It is a contract
 for release decisions, not a claim that every operating-system or dependency
 version works.
 
-**v0.2 mainstream-core policy + fixture evidence SHA:**
-`084b623037f007344d76ce50f2e0d01fac57b565` ([PR #47](https://github.com/Hyper66666/Sengoo/pull/47)).
+**v0.2 Stable-surface and fixture evidence SHA:**
+`92c8f399f61b73d63990581c637da68572b6e133` ([PR #56](https://github.com/Hyper66666/Sengoo/pull/56)).
 Surface classes, edition `2026` rejection, migration notes, public-input panic
 policy, and retained fixtures (`examples/compat/v0.1.0-rc.1`,
-`examples/compat/v0.2.0-rc.1`) are documented against that local gate commit.
-Two consecutive four-host release-candidate matrices remain Actions residual
-and are not asserted green by this SHA citation.
+`examples/compat/v0.2.0-rc.1`) are documented against that stable release.
+Two consecutive four-host candidates passed; `v0.2.0-rc.2` release run
+[`30188454330`](https://github.com/Hyper66666/Sengoo/actions/runs/30188454330)
+retains the RC1 upgrade and rollback proof, while stable run
+[`30191226253`](https://github.com/Hyper66666/Sengoo/actions/runs/30191226253)
+retains the RC2 upgrade, compatibility, and checksum-verified rollback proof.
 
 ## Surface stability classes
 
@@ -116,9 +119,9 @@ conformance reference job pins LLVM 19.
 
 ## Release support window
 
-Before 1.0, the project supports the latest prerelease line. The immediately
-previous prerelease is retained as a compatibility-test input, but normally
-receives no fixes after its successor is published. Security or soundness
+Before 1.0, the project supports the latest stable 0.x line. The immediately
+previous release candidate is retained as a compatibility and rollback input,
+but normally receives no fixes after stable publication. Security or soundness
 advisories state whether an older artifact must be withdrawn.
 
 Every candidate must publish checksums and provenance, install into a clean
@@ -134,7 +137,10 @@ The v0.2 candidate fixture under `examples/compat/v0.2.0-rc.1` freezes the
 v0.2 source surface (edition 2026, stream/Unicode baseline imports allowed only
 when retained as additive). Two consecutive release-candidate matrices on the
 same host set are required before tagging `v0.2.0`; a P0/P1 Stable-behavior fix
-restarts the candidate sequence.
+restarts the candidate sequence. Candidate runs `30184545506` and
+`30188454330` satisfy that gate without a Stable-behavior change between them.
+
+Release notes for this line live in `docs/release-notes-v0.2.0.md`.
 
 ## Public-input panic policy
 

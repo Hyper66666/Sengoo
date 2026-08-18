@@ -1,7 +1,7 @@
 
 > **Historical (v0.2 M0):** This umbrella no longer owns new capability work.
 > New native v0.2 implementation is coordinated by `sengoo-v0-2-mainstream-core`
-> and its M0¨CM4 children. Remaining open tasks here are evidence debt only.
+> and its M0-M4 children. Remaining open tasks here are evidence debt only.
 ## 0. Program setup
 
 - [x] 0.1 Add `INVENTORY.md` baseline for all six pillars with current evidence links.
@@ -23,7 +23,7 @@
     superseded by archived `compile-scale-production-gate` and archived with
     `--skip-specs` to avoid re-applying overlapping canonical deltas.
 
-## 1. Pillar 6 â€?Toolchain quick wins (unblock other lanes)
+## 1. Pillar 6 - Toolchain quick wins (unblock other lanes)
 
 ### Assertions and test output
 
@@ -47,7 +47,7 @@
 - [x] 1.9 Add `docs/editor-setup.md` linking `sglsp` launch, fmt-on-save, JSON diagnostics.
 - [x] 1.10 Add `docs/internal-release.md` with versioned binary smoke matrix.
 
-## 2. Pillar 1 â€?Stdlib production surface
+## 2. Pillar 1 - Stdlib production surface
 
 ### Owned string return ABI
 
@@ -92,7 +92,7 @@
   - Sync fd helpers are recorded as `Accepted risk` until a realworld fixture
     needs the surface.
 
-## 3. Pillar 4 â€?Language surface expansion
+## 3. Pillar 4 - Language surface expansion
 
 ### Attributes
 
@@ -116,7 +116,7 @@
 - [x] 3.9 Audit "phase-1" async diagnostics and remove those superseded by Pillar 2.
 - [x] 3.10 Add one regression test per removed restriction.
 
-## 4. Pillar 3 â€?Package graph maturity
+## 4. Pillar 3 - Package graph maturity
 
 ### Renamed dependencies
 
@@ -137,7 +137,7 @@
 - [x] 4.9 Document internal monorepo + registry workflow in `docs/sgpm-quickstart.md`.
 - [x] 4.10 Add workspace example using alias + multi-version if feasible.
 
-## 5. Pillar 2 â€?Mainstream async runtime
+## 5. Pillar 2 - Mainstream async runtime
 
 ### Reactor
 
@@ -165,7 +165,7 @@
 - [x] 5.11 Fix/prevent `LNK2019` async dispatch failures on Windows CI.
 - [x] 5.12 Update `docs/runtime-async-semantics.md` for reactor and N-select.
 
-## 6. Pillar 5 â€?Large-scale compile performance
+## 6. Pillar 5 - Large-scale compile performance
 
 - [x] 6.1 Record the reference CI host profile, compiler revisions, generator seed, C++ command, and three-run median baselines in `INVENTORY.md`.
   - Superseded by archived `compile-scale-production-gate` evidence copied from
@@ -186,8 +186,8 @@
 
 ## 7. Integration and documentation
 
-- [ ] 7.1 Refresh `examples/realworld/SUPPORT_MATRIX.md` for all moved capabilities.
-- [ ] 7.2 Update `README.md` / `README.zh-CN.md` with six-pillar closure summary.
+- [x] 7.1 Refresh `examples/realworld/SUPPORT_MATRIX.md` for all moved capabilities.
+- [x] 7.2 Update `README.md` / `README.zh-CN.md` with six-pillar closure summary.
 - [x] 7.3 Add `docs/plans/2026-06-six-pillar-gap-closure.md` implementation plan mirror.
 - [x] 7.4 Run subagent or peer review on spec acceptance gaps before implementation wave.
 - [x] 7.5 Ensure each child change points back to this umbrella and each completed pillar updates the canonical capability before umbrella archive.
@@ -196,14 +196,18 @@
 
 ## 8. Verification
 
-- [ ] 8.1 `cargo fmt --check`
-- [ ] 8.2 `cargo test -p sengoo-compiler --lib`
-- [ ] 8.3 `cargo test -p sengoo-runtime --lib --features native-bridge`
-- [ ] 8.4 `cargo test -p sgc`
-- [ ] 8.5 `cargo test -p sgpm`
-- [ ] 8.6 `cargo test -p sglsp`
-- [ ] 8.7 `cargo clippy -p sgc -p sgpm -p sengoo-compiler -p sengoo-runtime -p sgfmt -p sglsp --all-targets -- -D warnings`
-- [ ] 8.8 `realworld-e2e` job (locked loop, real binaries)
+- [x] 8.1 `cargo fmt --check`
+- [x] 8.2 `cargo test -p sengoo-compiler --lib`
+- [x] 8.3 `cargo test -p sengoo-runtime --lib --features native-bridge`
+- [x] 8.4 `cargo test -p sgc`
+- [x] 8.5 `cargo test -p sgpm`
+- [x] 8.6 `cargo test -p sglsp`
+- [x] 8.7 `cargo clippy -p sgc -p sgpm -p sengoo-compiler -p sengoo-runtime -p sgfmt -p sglsp --all-targets -- -D warnings`
+- [x] 8.8 `realworld-e2e` job (locked loop, real binaries)
+  Retained PR #51 jobs cover core, compile-scale, safety, four-host package,
+  and four-host installed realworld execution; the release-closure branch
+  re-ran fmt, Clippy, HTTP integration, and strict OpenSpec after the last
+  child archive.
 - [x] 8.9 `advanced_pipeline_bench.py` perf gate (100k + 1000k)
   - Archived `compile-scale-production-gate` produced the passing P0-focused
     gate artifact; PR #22 also passed `compile-scale-production-gate` in CI.
@@ -212,10 +216,10 @@
 
 ## Done Definition
 
-- [ ] All six child changes are strictly validated, implemented, and archived into their owned canonical capabilities.
-- [ ] Realworld fixtures run end-to-end with real `sgc`/`sgpm` in CI.
-- [ ] Internal docs (`debugging-native`, `editor-setup`, `internal-release`) exist.
-- [ ] `SUPPORT_MATRIX.md` reflects closure status with proof links.
+- [x] All six child changes are strictly validated, implemented, and archived into their owned canonical capabilities.
+- [x] Realworld fixtures run end-to-end with real `sgc`/`sgpm` in CI.
+- [x] Internal docs (`debugging-native`, `editor-setup`, `internal-release`) exist.
+- [x] `SUPPORT_MATRIX.md` reflects closure status with proof links.
 - [x] The 1000k reference perf gate meets the absolute RSS and frontend-share targets and is recorded in `INVENTORY.md`.
 
 ## Archive Gate
@@ -225,4 +229,4 @@
 - [x] All six required child changes are archived before the umbrella.
   - `frontend-1000k-perf-gate` is archived as superseded by
     `compile-scale-production-gate`; no original child remains active.
-- [ ] All verification commands in Â§8 pass; platform-specific skips document evidence and do not omit a pillar implementation.
+- [x] All verification commands in section 8 pass; platform-specific skips document evidence and do not omit a pillar implementation.

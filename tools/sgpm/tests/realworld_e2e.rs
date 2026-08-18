@@ -156,12 +156,12 @@ fn realworld_locked_loop_uses_real_toolchain_binaries() {
         let before = fs::read_to_string(&lock_path).expect("lockfile should exist after update");
 
         for args in [
-            vec!["check", "--locked"],
-            vec!["test", "--locked"],
+            vec!["--runtime-mode", "source-development", "check", "--locked"],
+            vec!["--runtime-mode", "source-development", "test", "--locked"],
             vec!["fmt", "--check", "--locked"],
-            vec!["doc", "--locked"],
-            vec!["build", "--locked"],
-            vec!["run", "--locked"],
+            vec!["--runtime-mode", "source-development", "doc", "--locked"],
+            vec!["--runtime-mode", "source-development", "build", "--locked"],
+            vec!["--runtime-mode", "source-development", "run", "--locked"],
         ] {
             let output = Command::new(sgpm())
                 .args(&args)
@@ -218,8 +218,25 @@ fn realworld_workflow_packages_and_installs_release_toolchain_before_running_eve
         "workflow should build release toolchain binaries before packaging"
     );
     assert!(
+        build_step.contains(
+            "cargo build --locked -p sengoo-runtime --lib --features native-bridge --profile staticlib"
+        ),
+        "workflow should build the native runtime static library required by -NoBuild packaging"
+    );
+    assert!(
         package_step.contains("./scripts/package-toolchain.ps1 -Version 0.1.0-ci -NoBuild"),
         "workflow should package the prebuilt release binaries with -NoBuild"
+    );
+    assert!(
+        package_step.contains(
+            "$env:SENGOO_BUILD_HASH = \"${{ github.sha }}\".Substring(0, 12)"
+        ),
+        "workflow should pass package-toolchain the 12-character build identity embedded in the binaries"
+    );
+    assert!(
+        workflow.contains("validate package-registry-distribution --strict")
+            && !workflow.contains("validate package-release-defaults --strict"),
+        "workflow should validate canonical package truth after package-release-defaults is archived"
     );
     assert!(
         workflow.find("cargo build --release -p sgc -p sgpm -p sgfmt -p sglsp")

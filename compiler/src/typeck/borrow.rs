@@ -179,7 +179,7 @@ impl BorrowChecker {
 
     pub(crate) fn check_function_block(&mut self, block: &Block) {
         self.prepare_remaining_uses(block);
-        self.check_block_inner(block, true);
+        self.check_block_inner(block, true, true);
     }
 
     /// Check one statement.
@@ -221,15 +221,19 @@ impl BorrowChecker {
         self.borrow_alias_stack.push(self.borrow_aliases.clone());
     }
 
-    fn pop_scope(&mut self) {
+    fn pop_scope(&mut self, merge_moves: bool) {
         if let Some(prev) = self.borrow_stack.pop() {
             self.borrows = prev;
         }
         if let Some(mut prev_moved) = self.moved_stack.pop() {
             for path in std::mem::take(&mut self.moved) {
-                if let Some(span) = self.move_spans.remove(&path) {
-                    prev_moved.insert(path.clone());
-                    self.move_spans.insert(path, span);
+                if merge_moves {
+                    if let Some(span) = self.move_spans.remove(&path) {
+                        prev_moved.insert(path.clone());
+                        self.move_spans.insert(path, span);
+                    }
+                } else if !prev_moved.contains(&path) {
+                    self.move_spans.remove(&path);
                 }
             }
             self.moved = prev_moved;
@@ -240,10 +244,10 @@ impl BorrowChecker {
     }
 
     pub(crate) fn check_block(&mut self, block: &Block) {
-        self.check_block_inner(block, false);
+        self.check_block_inner(block, false, true);
     }
 
-    fn check_block_inner(&mut self, block: &Block, reject_tail_escape: bool) {
+    fn check_block_inner(&mut self, block: &Block, reject_tail_escape: bool, merge_moves: bool) {
         self.push_scope();
         for (index, stmt) in block.stmts.iter().enumerate() {
             let _ = self.check_stmt(stmt);
@@ -258,7 +262,31 @@ impl BorrowChecker {
             // D1: after each statement, end borrows whose aliases have no later use.
             self.end_borrows_with_no_remaining_uses();
         }
-        self.pop_scope();
+        self.pop_scope(merge_moves);
+    }
+
+    fn block_has_unconditional_return_stmt(block: &Block) -> bool {
+        block.stmts.iter().any(
+            |stmt| matches!(&stmt.kind, StmtKind::Expr(expr) if matches!(expr.kind, ExprKind::Return(_))),
+        )
+    }
+
+    fn expr_has_unconditional_return(expr: &Expr) -> bool {
+        match &expr.kind {
+            ExprKind::Return(_) => true,
+            ExprKind::Block(block) => Self::block_has_unconditional_return_stmt(block),
+            ExprKind::If {
+                then_branch,
+                else_branch,
+                ..
+            } => {
+                Self::block_has_unconditional_return_stmt(then_branch)
+                    && else_branch
+                        .as_ref()
+                        .is_some_and(|else_expr| Self::expr_has_unconditional_return(else_expr))
+            }
+            _ => false,
+        }
     }
 
     fn end_borrows_with_no_remaining_uses(&mut self) {
@@ -376,9 +404,41 @@ impl BorrowChecker {
                 else_branch,
             } => {
                 self.check_expr(cond);
-                self.check_block(then_branch);
+                // Branch-local moves are checked from the same pre-if state,
+                // then only fallthrough paths are merged into the parent.
+                let before_moved = self.moved.clone();
+                let before_spans = self.move_spans.clone();
+                self.check_block_inner(then_branch, false, true);
+                let then_moved = self.moved.clone();
+                let then_spans = self.move_spans.clone();
+                self.moved = before_moved.clone();
+                self.move_spans = before_spans.clone();
                 if let Some(else_expr) = else_branch {
                     self.check_expr(else_expr);
+                    let else_moved = std::mem::take(&mut self.moved);
+                    let else_spans = std::mem::take(&mut self.move_spans);
+                    let then_falls = !Self::block_has_unconditional_return_stmt(then_branch);
+                    let else_falls = !Self::expr_has_unconditional_return(else_expr);
+                    self.moved = before_moved;
+                    self.move_spans = before_spans;
+                    if then_falls {
+                        self.moved = then_moved;
+                        self.move_spans = then_spans;
+                    }
+                    if else_falls {
+                        for path in else_moved {
+                            if let Some(span) = else_spans.get(&path).copied() {
+                                self.moved.insert(path.clone());
+                                self.move_spans.entry(path).or_insert(span);
+                            }
+                        }
+                    }
+                } else if Self::block_has_unconditional_return_stmt(then_branch) {
+                    self.moved = before_moved;
+                    self.move_spans = before_spans;
+                } else {
+                    self.moved = then_moved;
+                    self.move_spans = then_spans;
                 }
             }
             ExprKind::IfLet {

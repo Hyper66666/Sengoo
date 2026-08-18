@@ -41,7 +41,9 @@ jobs:
         run: choco install llvm -y
 
       - name: Build toolchain binaries
-        run: cargo build --release -p sgc -p sgpm -p sgfmt -p sglsp
+        run: |
+          cargo build --release -p sgc -p sgpm -p sgfmt -p sglsp
+          cargo build --locked -p sengoo-runtime --lib --features native-bridge --profile staticlib
 
       - name: Run realworld integration tests
         run: cargo test -p sgpm realworld -- --nocapture
@@ -58,16 +60,15 @@ jobs:
         if: runner.os == 'Linux'
         run: cargo test -p sengoo-runtime net::tls -- --nocapture
 
-      - name: Validate OpenSpec child change
-        run: npx --yes @fission-ai/openspec@1.4.1 validate package-release-defaults --strict
-        continue-on-error: true
+      - name: Validate canonical package registry spec
+        run: npx --yes @fission-ai/openspec@1.4.1 validate package-registry-distribution --strict
 
       - name: Package toolchain
         shell: pwsh
         env:
-          SENGOO_BUILD_HASH: ${{ github.sha }}
           SENGOO_DIST_TARGET: ${{ matrix.target }}
         run: |
+          $env:SENGOO_BUILD_HASH = "${{ github.sha }}".Substring(0, 12)
           ./scripts/package-toolchain.ps1 -Version 0.1.0-ci -NoBuild -SmokeEvidence "realworld-e2e installed fixture loop ${{ matrix.os }} ${{ github.sha }}"
 
       - name: Install package (POSIX)
@@ -185,6 +186,22 @@ jobs:
           $summaryPath = Join-Path $workRoot "installed-realworld-summary.json"
           $summary | ConvertTo-Json -Depth 4 | Set-Content -LiteralPath $summaryPath -Encoding utf8
           "SENGOO_REALWORLD_SUMMARY=$summaryPath" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
+
+      - name: Verify installed sgc HTTP TLS composition
+        shell: pwsh
+        run: |
+          $suffix = ""
+          if ($IsWindows -or $PSVersionTable.PSEdition -eq "Desktop") {
+            $suffix = ".exe"
+          }
+          $env:SENGOO_TEST_INSTALLED_SGC = Join-Path $env:SENGOO_INSTALLED_BIN "sgc$suffix"
+          Remove-Item Env:SENGOO_ROOT -ErrorAction SilentlyContinue
+          Remove-Item Env:SENGOO_STDLIB -ErrorAction SilentlyContinue
+          Remove-Item Env:SENGOO_RUNTIME -ErrorAction SilentlyContinue
+          cargo test -p sgc --test http_request_strings real_sgc_tls_router_keep_alive_streaming_composes_with_verified_ca -- --nocapture --test-threads=1
+          if ($LASTEXITCODE -ne 0) {
+            throw "installed sgc HTTP TLS composition failed on ${{ matrix.os }}"
+          }
 
       - name: Verify reviewed official package set
         shell: pwsh

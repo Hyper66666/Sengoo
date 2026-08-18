@@ -618,7 +618,15 @@ def sengoo_build_cmd(
     output: Path | None = None,
     daemon_addr: str | None = None,
 ) -> list[str]:
-    cmd = [str(sgc_bin), "build", str(input_file), "-O", str(opt_level)]
+    cmd = [
+        str(sgc_bin),
+        "--runtime-mode",
+        "source-development",
+        "build",
+        str(input_file),
+        "-O",
+        str(opt_level),
+    ]
     if emit_llvm:
         cmd.append("--emit-llvm")
     if output is not None:

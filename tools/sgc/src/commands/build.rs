@@ -27,6 +27,7 @@ pub(crate) async fn cmd_build(
     timings_json: Option<&str>,
     debug_info: bool,
 ) -> Result<()> {
+    crate::installed_runtime::validate_native_runtime_mode_environment()?;
     let build_target = NativeBuildTarget::resolve(target)?;
     if build_target.is_cross() {
         vprintln!("cross-compile target: {}", build_target.triple);
@@ -184,7 +185,20 @@ pub(crate) async fn cmd_build(
         }
     }
     let runtime_c = find_runtime_c();
-    let runtime_c_fingerprint = optional_runtime_bundle_fingerprint(runtime_c.as_deref())?;
+    let runtime_source_fingerprint = optional_runtime_bundle_fingerprint(runtime_c.as_deref())?;
+    let (installed_runtime_fingerprint, runtime_provenance) = if emit_llvm {
+        (None, NativeRuntimeProvenance::not_linked())
+    } else {
+        crate::installed_runtime::native_runtime_cache_context(&build_target)?
+    };
+    let runtime_c_fingerprint = crate::installed_runtime::combine_runtime_cache_fingerprints(
+        runtime_source_fingerprint,
+        installed_runtime_fingerprint,
+    );
+    let runtime_c_identity = crate::installed_runtime::runtime_source_cache_identity(
+        runtime_c.as_deref(),
+        &runtime_provenance,
+    );
 
     let output_file = if let Some(out) = output {
         out.to_string()
@@ -264,7 +278,11 @@ pub(crate) async fn cmd_build(
         contract_checks_enabled,
         debug_info,
         emit_llvm,
-        RuntimeSourceIdentity::new(runtime_c.clone(), runtime_c_fingerprint),
+        RuntimeSourceIdentity::with_provenance(
+            runtime_c_identity.clone(),
+            runtime_c_fingerprint,
+            runtime_provenance.clone(),
+        ),
         output_file.clone(),
     );
     let mut edit_impact: Option<EditImpact> = None;
@@ -312,7 +330,14 @@ pub(crate) async fn cmd_build(
             }
             edit_impact = Some(impact);
         }
-        Some(metadata)
+        if metadata.runtime_c_fingerprint != runtime_c_fingerprint
+            || metadata.runtime_provenance != runtime_provenance
+        {
+            println!("build workset reuse disabled: runtime identity changed");
+            None
+        } else {
+            Some(metadata)
+        }
     } else {
         vprintln!(
             "build cache miss: no cache metadata at {}",
@@ -330,7 +355,7 @@ pub(crate) async fn cmd_build(
         contract_checks_enabled,
         debug_info,
         &output_file,
-        runtime_c.as_deref(),
+        runtime_c_identity.as_deref(),
     );
     if previous_build_metadata.is_some()
         && can_skip_codegen_via_generic_cache(edit_impact.as_ref(), &graph_v2, &generic_plan_stats)
@@ -505,8 +530,9 @@ pub(crate) async fn cmd_build(
             contract_checks: contract_checks_enabled,
             debug_info,
             emit_llvm: true,
-            runtime_c,
+            runtime_c: runtime_c_identity,
             runtime_c_fingerprint,
+            runtime_provenance,
             llvm_ir_path: llvm_ir_path.to_string_lossy().to_string(),
             output_path: output_file.clone(),
             llvm_ir_hash,
@@ -548,7 +574,7 @@ pub(crate) async fn cmd_build(
                 llvm_ir_hash,
                 &object_path,
                 &output_file,
-                runtime_c.as_deref(),
+                runtime_c_identity.as_deref(),
                 opt_level,
                 contract_checks_enabled,
                 debug_info,
@@ -644,8 +670,9 @@ pub(crate) async fn cmd_build(
         contract_checks: contract_checks_enabled,
         debug_info,
         emit_llvm: false,
-        runtime_c,
+        runtime_c: runtime_c_identity,
         runtime_c_fingerprint,
+        runtime_provenance,
         llvm_ir_path: llvm_ir_path.to_string_lossy().to_string(),
         output_path: output_file.clone(),
         llvm_ir_hash,
