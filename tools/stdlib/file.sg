@@ -35,9 +35,9 @@ def PATH_KIND_SYMLINK() -> i64 { 3 }
 
 def file_status_i64_result(value: i64) -> Result<i64, i64> {
     if value >= 0 {
-        Result { is_ok: true, value: value, error: 0 }
+        Ok(value)
     } else {
-        Result { is_ok: false, value: 0, error: status_from_raw_ffi(value) }
+        Err(status_from_raw_ffi(value))
     }
 }
 
@@ -52,9 +52,9 @@ def file_exists(path: &str) -> bool {
 def file_len_raw(path_ptr: i64) -> Result<i64, i64> {
     let len = sengoo_file_len(path_ptr);
     if len >= 0 {
-        Result { is_ok: true, value: len, error: 0 }
+        Ok(len)
     } else {
-        Result { is_ok: false, value: 0, error: status_from_raw_ffi(len) }
+        Err(status_from_raw_ffi(len))
     }
 }
 
@@ -65,9 +65,9 @@ def file_len(path: &str) -> Result<i64, i64> {
 def file_read_into_raw(path_ptr: i64, buffer_ptr: i64, capacity: i64) -> Result<i64, i64> {
     let read = sengoo_file_read_into(path_ptr, buffer_ptr, capacity);
     if read >= 0 {
-        Result { is_ok: true, value: read, error: 0 }
+        Ok(read)
     } else {
-        Result { is_ok: false, value: 0, error: status_from_raw_ffi(read) }
+        Err(status_from_raw_ffi(read))
     }
 }
 
@@ -78,9 +78,9 @@ def file_read_into(path: &str, buffer: Buffer) -> Result<i64, i64> {
 def file_write_str_raw(path_ptr: i64, data_ptr: i64, len: i64) -> Result<i64, i64> {
     let wrote = sengoo_file_write_str(path_ptr, data_ptr, len);
     if wrote >= 0 {
-        Result { is_ok: true, value: wrote, error: 0 }
+        Ok(wrote)
     } else {
-        Result { is_ok: false, value: 0, error: status_from_raw_ffi(wrote) }
+        Err(status_from_raw_ffi(wrote))
     }
 }
 
@@ -91,9 +91,9 @@ def file_write_str(path: &str, data: &str) -> Result<i64, i64> {
 def file_append_str_raw(path_ptr: i64, data_ptr: i64, len: i64) -> Result<i64, i64> {
     let wrote = sengoo_file_append_str(path_ptr, data_ptr, len);
     if wrote >= 0 {
-        Result { is_ok: true, value: wrote, error: 0 }
+        Ok(wrote)
     } else {
-        Result { is_ok: false, value: 0, error: status_from_raw_ffi(wrote) }
+        Err(status_from_raw_ffi(wrote))
     }
 }
 
@@ -112,9 +112,9 @@ def file_remove(path: &str) -> bool {
 def file_copy_raw(source_ptr: i64, destination_ptr: i64, overwrite: bool) -> Result<i64, i64> {
     let copied = sengoo_file_copy(source_ptr, destination_ptr, if overwrite { 1 } else { 0 });
     if copied >= 0 {
-        Result { is_ok: true, value: copied, error: 0 }
+        Ok(copied)
     } else {
-        Result { is_ok: false, value: 0, error: status_from_raw_ffi(copied) }
+        Err(status_from_raw_ffi(copied))
     }
 }
 
@@ -129,9 +129,9 @@ def file_copy(source: &str, destination: &str, overwrite: bool) -> Result<i64, i
 def file_move_raw(source_ptr: i64, destination_ptr: i64, overwrite: bool) -> Result<bool, i64> {
     let status = sengoo_file_move(source_ptr, destination_ptr, if overwrite { 1 } else { 0 });
     if status == 0 {
-        Result { is_ok: true, value: true, error: 0 }
+        Ok(true)
     } else {
-        Result { is_ok: false, value: false, error: status_from_raw_ffi(status) }
+        Err(status_from_raw_ffi(status))
     }
 }
 
@@ -170,13 +170,9 @@ def file_modified_unix_ms(path: &str) -> Result<i64, i64> {
 def async_file_open(path: &str) -> Result<AsyncFile, i64> {
     let handle = sengoo_async_file_open_read(sengoo_stdlib_str_ptr(path));
     if handle > 0 {
-        Result { is_ok: true, value: AsyncFile { handle: handle }, error: 0 }
+        Ok(AsyncFile { handle: handle })
     } else {
-        Result {
-            is_ok: false,
-            value: AsyncFile { handle: 0 },
-            error: status_from_raw_ffi(handle),
-        }
+        Err(status_from_raw_ffi(handle))
     }
 }
 

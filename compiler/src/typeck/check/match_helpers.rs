@@ -38,17 +38,21 @@ impl TypeChecker {
             if arm
                 .patterns
                 .iter()
-                .any(|pat| self.pattern_is_catch_all(pat, arm.guard.is_none()))
+                .any(|pat| self.pattern_is_catch_all(pat, arm.guard.is_none(), &scrutinee_ty))
             {
                 has_catch_all = true;
             }
 
             self.env.push_scope();
+            let mut guard_binding_names = HashSet::new();
             for pattern in &arm.patterns {
-                self.bind_pattern_vars(pattern, &scrutinee_ty)?;
+                guard_binding_names.extend(self.bind_pattern_vars(pattern, &scrutinee_ty)?);
             }
             if let Some(guard) = &arm.guard {
-                let guard_ty = self.check_expr(guard)?;
+                self.match_guard_bindings.push(guard_binding_names);
+                let checked_guard = self.check_expr(guard);
+                self.match_guard_bindings.pop();
+                let guard_ty = checked_guard?;
                 self.infer.unify(&guard_ty, &self.env.bool_ty())?;
                 if !matches!(self.infer.apply_subst(&guard_ty).kind, TyKind::Bool) {
                     return Err(TypeckError::GuardNotBool {
@@ -85,11 +89,82 @@ impl TypeChecker {
         Ok(result_ty)
     }
 
-    fn pattern_is_catch_all(&self, pat: &Pattern, unguarded: bool) -> bool {
+    fn pattern_is_catch_all(&self, pat: &Pattern, unguarded: bool, scrutinee_ty: &Ty) -> bool {
         if !unguarded {
             return false;
         }
-        matches!(pat.kind, PatternKind::Wildcard)
+        match &pat.kind {
+            PatternKind::Wildcard => true,
+            // A bare name that is NOT a variant of the scrutinee's enum binds
+            // everything, so it is a catch-all; a variant name matches only
+            // that variant.
+            PatternKind::Ident(ident) => {
+                !self.ident_is_scrutinee_variant(&ident.name, scrutinee_ty)
+            }
+            _ => false,
+        }
+    }
+
+    pub(super) fn if_let_pattern_is_irrefutable(&self, pat: &Pattern, scrutinee_ty: &Ty) -> bool {
+        match &pat.kind {
+            PatternKind::Wildcard => true,
+            PatternKind::Ident(ident) => {
+                !self.ident_is_scrutinee_variant(&ident.name, scrutinee_ty)
+            }
+            PatternKind::Tuple(pats) => pats
+                .iter()
+                .all(|pat| self.if_let_pattern_is_irrefutable(pat, scrutinee_ty)),
+            PatternKind::Struct { path, fields, .. } => {
+                let Some(name) = path.segments.last() else {
+                    return false;
+                };
+                if self.ident_is_scrutinee_variant(&name.name, scrutinee_ty) {
+                    return false;
+                }
+                if Self::scrutinee_enum_name(scrutinee_ty).is_some() {
+                    return false;
+                }
+                fields
+                    .iter()
+                    .all(|field| self.if_let_pattern_is_irrefutable(&field.pattern, scrutinee_ty))
+            }
+            PatternKind::Or(pats) => pats
+                .iter()
+                .all(|pat| self.if_let_pattern_is_irrefutable(pat, scrutinee_ty)),
+            _ => false,
+        }
+    }
+
+    #[inline(never)]
+    pub(super) fn check_if_let(
+        &mut self,
+        pattern: &Pattern,
+        scrutinee: &Expr,
+        then_branch: &crate::ast::Block,
+        else_branch: &Option<Box<Expr>>,
+        _span: crate::lexer::Span,
+    ) -> TyResult<Ty> {
+        let checked = self.check_expr(scrutinee)?;
+        let scrutinee_ty = self.infer.apply_subst(&checked);
+        if self.if_let_pattern_is_irrefutable(pattern, &scrutinee_ty) {
+            return Err(TypeckError::diagnostic(
+                "irrefutable-if-let",
+                "irrefutable if-let pattern; the condition can never fail, so use `let` instead",
+                pattern.span.lo,
+                pattern.span.hi,
+            ));
+        }
+        self.check_pattern_or_bindings(pattern, &scrutinee_ty)?;
+        self.env.push_scope();
+        self.bind_pattern_vars(pattern, &scrutinee_ty)?;
+        let then_ty = self.check_block(then_branch)?;
+        self.env.pop_scope();
+        let else_ty = match else_branch {
+            Some(expr) => self.check_expr(expr)?,
+            None => self.env.unit_ty(),
+        };
+        self.infer.unify(&then_ty, &else_ty)?;
+        Ok(then_ty)
     }
 
     fn check_alternative_pattern_bindings(
@@ -138,12 +213,14 @@ impl TypeChecker {
         }
     }
 
-    fn bind_pattern_vars(&mut self, pat: &Pattern, scrutinee_ty: &Ty) -> TyResult<()> {
+    fn bind_pattern_vars(&mut self, pat: &Pattern, scrutinee_ty: &Ty) -> TyResult<Vec<String>> {
         let bindings = self.collect_pattern_bindings(pat, scrutinee_ty)?;
+        let mut names = Vec::with_capacity(bindings.names.len());
         for (name, ty) in bindings.names {
-            self.env.insert_var(name, ty);
+            self.env.insert_var(name.clone(), ty);
+            names.push(name);
         }
-        Ok(())
+        Ok(names)
     }
 
     fn scrutinee_enum_name(scrutinee_ty: &Ty) -> Option<String> {
@@ -158,19 +235,23 @@ impl TypeChecker {
         pat: &Pattern,
         scrutinee_ty: &Ty,
     ) -> TyResult<PatternBindings> {
-        let scrutinee_enum = Self::scrutinee_enum_name(scrutinee_ty);
         match &pat.kind {
             PatternKind::Wildcard => Ok(PatternBindings::default()),
             PatternKind::Literal(_) => Ok(PatternBindings::default()),
-            PatternKind::Ident(ident) => Ok(PatternBindings {
-                names: vec![(ident.name.clone(), scrutinee_ty.clone())],
-            }),
+            PatternKind::Ident(ident) => {
+                // A bare `None` arm matches the variant; only non-variant
+                // names bind the scrutinee to a fresh variable.
+                if self.ident_is_scrutinee_variant(&ident.name, scrutinee_ty) {
+                    return Ok(PatternBindings::default());
+                }
+                Ok(PatternBindings {
+                    names: vec![(ident.name.clone(), scrutinee_ty.clone())],
+                })
+            }
             PatternKind::Path(_) => Ok(PatternBindings::default()),
             PatternKind::TupleStruct { path, patterns } => {
                 let mut names = Vec::new();
-                if let Some(field_tys) =
-                    self.enum_variant_field_tys_for_path(path, scrutinee_enum.as_deref())
-                {
+                if let Some(field_tys) = self.enum_variant_field_tys_for_path(path, scrutinee_ty) {
                     for (sub, field_ty) in patterns.iter().zip(field_tys.iter()) {
                         names.extend(self.collect_pattern_bindings(sub, field_ty)?.names);
                     }
@@ -183,9 +264,7 @@ impl TypeChecker {
             }
             PatternKind::Struct { path, fields, .. } => {
                 let mut names = Vec::new();
-                if let Some(field_tys) =
-                    self.enum_variant_field_tys_for_path(path, scrutinee_enum.as_deref())
-                {
+                if let Some(field_tys) = self.enum_variant_field_tys_for_path(path, scrutinee_ty) {
                     for (field, field_ty) in fields.iter().zip(field_tys.iter()) {
                         names.extend(
                             self.collect_pattern_bindings(&field.pattern, field_ty)?
@@ -249,6 +328,12 @@ impl TypeChecker {
                     covered.insert(ident.name.clone());
                 }
             }
+            // A bare arm name is either a payload-free variant (`None`) or a
+            // catch-all binding; both mark that name as covered, and the
+            // caller ignores names that are not variants of the scrutinee.
+            PatternKind::Ident(ident) => {
+                covered.insert(ident.name.clone());
+            }
             PatternKind::Or(alts) => {
                 for alt in alts {
                     self.collect_covered_variants(alt, covered);
@@ -263,18 +348,66 @@ impl TypeChecker {
     fn enum_variant_field_tys_for_path(
         &self,
         path: &crate::ast::Path,
-        scrutinee_enum: Option<&str>,
+        scrutinee_ty: &Ty,
     ) -> Option<Vec<Ty>> {
         let variant_name = path.segments.last()?.name.clone();
         let enum_name = if path.segments.len() >= 2 {
             path.segments[0].name.clone()
         } else {
-            scrutinee_enum?.to_string()
+            Self::scrutinee_enum_name(scrutinee_ty)?
         };
-        self.enum_variant_field_tys
-            .get(&enum_name)?
-            .get(&variant_name)
-            .cloned()
+        self.enum_variant_field_tys_for_name(&variant_name, &enum_name, scrutinee_ty)
+    }
+
+    /// Payload types of one variant, with the scrutinee's type arguments
+    /// substituted for the enum's parameters.
+    ///
+    /// Without the substitution a `Some(v)` arm binds `v` at the declaration's
+    /// own `T` variable rather than at the `i64` the scrutinee pins.
+    fn enum_variant_field_tys_for_name(
+        &self,
+        variant_name: &str,
+        enum_name: &str,
+        scrutinee_ty: &Ty,
+    ) -> Option<Vec<Ty>> {
+        let raw_field_tys = self
+            .enum_variant_field_tys
+            .get(enum_name)?
+            .get(variant_name)?
+            .clone();
+        let type_args = match &scrutinee_ty.kind {
+            TyKind::Adt { name, args } if name == enum_name => args.clone(),
+            _ => Vec::new(),
+        };
+        let subst = self
+            .generic_type_metas
+            .get(enum_name)
+            .map(|meta| {
+                meta.params
+                    .iter()
+                    .map(|param| param.var_id)
+                    .zip(type_args.iter().cloned())
+                    .collect::<std::collections::HashMap<_, _>>()
+            })
+            .unwrap_or_default();
+        Some(
+            raw_field_tys
+                .iter()
+                .map(|field_ty| self.substitute_ty_vars(field_ty, &subst))
+                .collect(),
+        )
+    }
+
+    /// Whether an unqualified pattern name is a variant of the scrutinee's
+    /// enum, in which case it matches that variant instead of binding a new
+    /// variable.
+    fn ident_is_scrutinee_variant(&self, name: &str, scrutinee_ty: &Ty) -> bool {
+        let Some(enum_name) = Self::scrutinee_enum_name(scrutinee_ty) else {
+            return false;
+        };
+        self.enum_variants
+            .get(&enum_name)
+            .is_some_and(|variants| variants.iter().any(|variant| variant == name))
     }
 }
 

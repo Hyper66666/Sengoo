@@ -75,42 +75,42 @@ def json_error_or_unknown() -> i64 {
 
 def json_doc_result(handle: i64) -> Result<JsonDoc, i64> {
     if handle != 0 {
-        Result { is_ok: true, value: JsonDoc { handle: handle }, error: 0 }
+        Ok(JsonDoc { handle: handle })
     } else {
-        Result { is_ok: false, value: JsonDoc { handle: 0 }, error: json_error_or_unknown() }
+        Err(json_error_or_unknown())
     }
 }
 
 def json_value_result(doc_handle: i64, node_id: i64) -> Result<JsonValue, i64> {
     if doc_handle != 0 && node_id != 0 {
-        Result { is_ok: true, value: JsonValue { doc_handle: doc_handle, node_id: node_id }, error: 0 }
+        Ok(JsonValue { doc_handle: doc_handle, node_id: node_id })
     } else {
-        Result { is_ok: false, value: JsonValue { doc_handle: 0, node_id: 0 }, error: json_error_or_unknown() }
+        Err(json_error_or_unknown())
     }
 }
 
 def json_i64_result(value: i64) -> Result<i64, i64> {
     let code = sengoo_json_last_error_code();
     if code == 0 {
-        Result { is_ok: true, value: value, error: 0 }
+        Ok(value)
     } else {
-        Result { is_ok: false, value: 0, error: code }
+        Err(code)
     }
 }
 
 def json_count_result(value: i64) -> Result<i64, i64> {
     if value >= 0 {
-        Result { is_ok: true, value: value, error: 0 }
+        Ok(value)
     } else {
-        Result { is_ok: false, value: 0, error: 0 - value }
+        Err(0 - value)
     }
 }
 
 def json_string_result(value: i64) -> Result<String, i64> {
     if value >= 0 {
-        Result { is_ok: true, value: String { handle: value }, error: 0 }
+        Ok(String { handle: value })
     } else {
-        Result { is_ok: false, value: String { handle: 0 }, error: json_error_or_unknown() }
+        Err(json_error_or_unknown())
     }
 }
 
@@ -120,18 +120,18 @@ def json_value_as_string(value: JsonValue) -> Result<String, i64> {
 
 def json_bool_status_result(value: i64) -> Result<bool, i64> {
     if value >= 0 {
-        Result { is_ok: true, value: value != 0, error: 0 }
+        Ok(value != 0)
     } else {
-        Result { is_ok: false, value: false, error: 0 - value }
+        Err(0 - value)
     }
 }
 
 def json_f64_result(value: f64) -> Result<f64, i64> {
     let code = sengoo_json_last_error_code();
     if code == 0 {
-        Result { is_ok: true, value: value, error: 0 }
+        Ok(value)
     } else {
-        Result { is_ok: false, value: value, error: code }
+        Err(code)
     }
 }
 
@@ -296,9 +296,9 @@ impl JsonValue {
         let value = sengoo_json_bool_value(self.doc_handle, self.node_id);
         let code = sengoo_json_last_error_code();
         if code == 0 {
-            Result { is_ok: true, value: value != 0, error: 0 }
+            Ok(value != 0)
         } else {
-            Result { is_ok: false, value: false, error: code }
+            Err(code)
         }
     }
 

@@ -1,19 +1,19 @@
 # Sengoo Language Reference
 
-Reference version: draft for toolchain `0.1.x` with v0.2 mainstream-core
-program evidence on SHA `084b623037f007344d76ce50f2e0d01fac57b565`
-([PR #47](https://github.com/Hyper66666/Sengoo/pull/47)).
+Reference version: toolchain `0.2.0`, frozen by stable release evidence on SHA
+`92c8f399f61b73d63990581c637da68572b6e133`
+([PR #56](https://github.com/Hyper66666/Sengoo/pull/56)).
 
 This is the authoritative entry point for Sengoo language behavior. It records
 implemented status first, and links each major surface to a proof example,
 test, or deeper document. Historical design notes may describe features that do
 not exist yet; this reference wins when they disagree.
 
-Local gate evidence for the v0.2 M1–M4 archive set (language coherence, developer
-loop, production stdlib streams/Unicode baseline, stability contract) is pinned
-to that SHA. Multi-host installed-release matrices and HTTP production serving
-(handlers / keep-alive / streaming / TLS server) are residual and are not
-claimed Supported by this citation alone.
+The six main gates and release run
+[`30191226253`](https://github.com/Hyper66666/Sengoo/actions/runs/30191226253)
+pin the native v0.2 language, installed toolchain, HTTP production subset, and
+four-host compatibility/rollback evidence to that SHA. Experimental portable
+backends remain outside the Supported native release claim.
 
 Status labels:
 
@@ -109,7 +109,7 @@ import std::result;
 
 def propagate(value: Result<i64, i64>) -> Result<i64, i64> {
     let inner = value?;
-    Result { is_ok: true, value: inner + 1, error: 0 }
+    Ok(inner + 1)
 }
 
 def main() -> i64 { 0 }
@@ -150,6 +150,7 @@ def main() -> i64 {
 | `String` | Supported | Owned UTF-8 handle with move/drop, formatting, comparison, slicing, and push helpers. |
 | Structs | Supported | Named fields, literals, methods, derives. |
 | Enums | Supported | Unit and payload variants, construction, return values, and `match`. |
+| `Option<T>` / `Result<T, E>` | Supported | Enum form `None`/`Some(T)` and `Ok(T)`/`Err(E)` with `match` and `?`. Compatibility field reads (`.is_ok`, `.is_some`, `.value`, `.error`) and placeholder constructors (`option_none_with`, `result_*_with`) remain for one release with `attributes::deprecated_use`. Proof: `compiler/src/tests/compat_enum_field_tests.rs`, `tools/stdlib/option.sg`, `tools/stdlib/result.sg`. |
 | Arrays | Supported | Fixed-array index bounds diagnostics (`array-index-out-of-bounds`), assignment, and `for` iteration lower to MIR; see `compiler/src/tests/m1_language_coherence_tests.rs` and `array_assign_tests`. |
 | Generic collections | Supported | `Vec<T>`, `VecDeque<T>`, `HashMap<K,V>`, `HashSet<T>`, `BTreeMap<K,V>`, and `BTreeSet<T>` use owning ABI-v1 storage with exact Drop; see `examples/realworld/default-library-conformance`. |
 | References | Subset | Intraprocedural last-use borrow ending is implemented for straight-line and remaining-use look-ahead; live borrows still block owner moves; escaping locals report `borrow-escapes-owner`. Full temporary/NLL precision remains open. |
@@ -161,8 +162,9 @@ def main() -> i64 {
 | --- | --- | --- |
 | `let` / `let mut` | Supported | Immutable assignment diagnostics are shared by `sgc` and `sglsp`. |
 | Blocks and tail expressions | Supported | Core examples. |
-| `if` / `else` | Supported | Snapshot and conformance tests. |
-| `while` / `for` / `loop` | Subset | Common loops compile; drop coverage is verified for current lowering paths. |
+| `if` / `else` | Supported | Snapshot and conformance tests. `if let PATTERN = EXPR { .. } else { .. }` binds a single pattern; irrefutable patterns report `irrefutable-if-let`. Proof: `compiler/src/tests/everyday_syntax_tests.rs`. |
+| `vec![]` | Supported | Pinned built-in `vec![a, b, c]` and `vec![value; count]` lower to `vec_new` plus `push`. Other `name![]` forms are rejected. Proof: `compiler/src/tests/everyday_syntax_tests.rs`. |
+| `while` / `for` / `loop` | Supported | Arrays, slices, and ranges keep direct lowering. `for` also iterates `Vec`/`VecDeque`/`HashSet`/`BTreeSet` elements, `HashMap`/`BTreeMap` entries, `keys()`/`values()`, and `Iterator` adapters (`map`/`filter`/`take`/`skip`/`enumerate`). Proof: `compiler/src/tests/for_loop_tests.rs`. |
 | `return`, `break`, `continue` | Subset | Implemented in current MIR/drop paths; edge cases stay under AMM follow-up tests. |
 | Method calls | Supported | Inherent methods and trait methods. |
 | Operators | Supported | Primitive intrinsics and user-defined `Add`/`Sub`/`Mul`/`Div`/`Rem`/`Neg` dispatch are covered by `numeric_operator_traits`. |
@@ -333,9 +335,14 @@ Status: **Subset**.
 Supported:
 
 - `format` owned `String` builder.
-- `{}`, `{:?}` for scalar/current derived shapes.
+- `{}` Display placeholders and `{:?}` Debug placeholders. `{:?}` requires
+  `#[derive(Debug)]` or an `impl Debug`; missing Debug reports
+  `missing-debug-derive`.
 - Positional placeholders, right alignment, and f64 precision such as `{:.2}`.
-- f-string lowering through the same formatting path.
+- f-string lowering through the same formatting path, including specs such as
+  `{p:?}`.
+- `print` / `println` / `eprintln` accept a format string plus arguments and
+  route them through the same pipeline as `format`.
 
 Proof: formatting tests in `compiler/src/tests/` and `docs/language-features.md`.
 

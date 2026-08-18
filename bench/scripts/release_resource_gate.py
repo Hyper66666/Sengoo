@@ -25,6 +25,16 @@ DEFAULT_BUDGETS = {
 }
 
 
+def sgc_command(
+    sgc: Path, runtime_mode: str | None, *arguments: str
+) -> list[str]:
+    command = [str(sgc)]
+    if runtime_mode is not None:
+        command.extend(["--runtime-mode", runtime_mode])
+    command.extend(arguments)
+    return command
+
+
 def run_timed(command: list[str], cwd: Path, timeout_seconds: float) -> tuple[float, str]:
     started = time.perf_counter()
     completed = subprocess.run(
@@ -102,6 +112,11 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--scenario", type=Path, required=True)
     parser.add_argument("--output", type=Path, required=True)
     parser.add_argument("--iterations", type=int, default=10)
+    parser.add_argument(
+        "--runtime-mode",
+        choices=("installed", "source-development"),
+        help="Explicit sgc runtime provenance mode; omit for the installed default.",
+    )
     for name, value in DEFAULT_BUDGETS.items():
         parser.add_argument(f"--max-{name.replace('_', '-')}", type=float, default=value)
     return parser.parse_args()
@@ -120,7 +135,10 @@ def main() -> int:
         raise RuntimeError("iterations must be in 3..=100")
 
     startup_samples, version = measure_repeated(
-        [str(sgc), "--version"], root, args.iterations, 10.0
+        sgc_command(sgc, args.runtime_mode, "--version"),
+        root,
+        args.iterations,
+        10.0,
     )
     with tempfile.TemporaryDirectory(prefix="sengoo-release-resource-") as temp:
         temp_root = Path(temp)
@@ -130,13 +148,17 @@ def main() -> int:
         shutil.copy2(scenario, temp_scenario)
 
         check_samples, _ = measure_repeated(
-            [str(sgc), "check", str(temp_scenario)], root, args.iterations, 30.0
+            sgc_command(sgc, args.runtime_mode, "check", str(temp_scenario)),
+            root,
+            args.iterations,
+            30.0,
         )
         suffix = ".exe" if sys.platform == "win32" else ""
         program = temp_root / f"runtime-loop{suffix}"
         full_build_samples, _ = measure_repeated(
-            [
-                str(sgc),
+            sgc_command(
+                sgc,
+                args.runtime_mode,
                 "build",
                 str(temp_scenario),
                 "--force-rebuild",
@@ -144,7 +166,7 @@ def main() -> int:
                 "2",
                 "-o",
                 str(program),
-            ],
+            ),
             root,
             args.iterations,
             120.0,

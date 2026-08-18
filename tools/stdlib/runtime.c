@@ -1197,7 +1197,6 @@ long long sengoo_ffi_buffer_write_u32_be(long long buffer_handle, long long offs
     }
     return 1;
 }
-
 long long sengoo_ffi_buffer_ptr(long long buffer_handle) {
     sengoo_ffi_clear_error_state();
     SengooFfiBuffer* buffer = sengoo_ffi_buffer_from_handle(buffer_handle);
@@ -5614,6 +5613,20 @@ long long sengoo_async_fallback_main_result(long long handle) {
     return 0;
 }
 
+long long sengoo_async_fallback_builtin_poll(long long handle) {
+    (void)handle;
+    return 1;
+}
+
+unsigned char sengoo_async_fallback_builtin_cancel(long long handle) {
+    (void)handle;
+    return 0;
+}
+
+void sengoo_async_fallback_builtin_drop(long long handle) {
+    (void)handle;
+}
+
 #if defined(_WIN32)
 #pragma comment(linker, "/alternatename:main__start=sengoo_async_fallback_main_start")
 #pragma comment(linker, "/alternatename:main__poll=sengoo_async_fallback_main_poll")
@@ -5628,6 +5641,15 @@ long long sengoo_async_fallback_main_result(long long handle) {
 #pragma comment(linker, "/alternatename:sengoo_async_result_dispatch_bool=sengoo_async_fallback_dispatch_bool")
 #pragma comment(linker, "/alternatename:sengoo_async_result_dispatch_f32=sengoo_async_fallback_dispatch_f32")
 #pragma comment(linker, "/alternatename:sengoo_async_result_dispatch_f64=sengoo_async_fallback_dispatch_f64")
+#pragma comment(linker, "/alternatename:sengoo_async_sleep__poll=sengoo_async_fallback_builtin_poll")
+#pragma comment(linker, "/alternatename:sengoo_async_sleep__cancel=sengoo_async_fallback_builtin_cancel")
+#pragma comment(linker, "/alternatename:sengoo_async_sleep__drop=sengoo_async_fallback_builtin_drop")
+#pragma comment(linker, "/alternatename:sengoo_async_timeout_bool__poll=sengoo_async_fallback_builtin_poll")
+#pragma comment(linker, "/alternatename:sengoo_async_timeout_bool__cancel=sengoo_async_fallback_builtin_cancel")
+#pragma comment(linker, "/alternatename:sengoo_async_timeout_bool__drop=sengoo_async_fallback_builtin_drop")
+#pragma comment(linker, "/alternatename:sengoo_async_timeout_cancel_i64__poll=sengoo_async_fallback_builtin_poll")
+#pragma comment(linker, "/alternatename:sengoo_async_timeout_cancel_i64__cancel=sengoo_async_fallback_builtin_cancel")
+#pragma comment(linker, "/alternatename:sengoo_async_timeout_cancel_i64__drop=sengoo_async_fallback_builtin_drop")
 #else
 __attribute__((weak)) long long main__start(void) {
     return sengoo_async_fallback_main_start();
@@ -5679,5 +5701,41 @@ __attribute__((weak)) float sengoo_async_result_dispatch_f32(long long kind, lon
 
 __attribute__((weak)) double sengoo_async_result_dispatch_f64(long long kind, long long handle) {
     return sengoo_async_fallback_dispatch_f64(kind, handle);
+}
+
+__attribute__((weak)) long long sengoo_async_sleep__poll(long long handle) {
+    return sengoo_async_fallback_builtin_poll(handle);
+}
+
+__attribute__((weak)) unsigned char sengoo_async_sleep__cancel(long long handle) {
+    return sengoo_async_fallback_builtin_cancel(handle);
+}
+
+__attribute__((weak)) void sengoo_async_sleep__drop(long long handle) {
+    sengoo_async_fallback_builtin_drop(handle);
+}
+
+__attribute__((weak)) long long sengoo_async_timeout_bool__poll(long long handle) {
+    return sengoo_async_fallback_builtin_poll(handle);
+}
+
+__attribute__((weak)) unsigned char sengoo_async_timeout_bool__cancel(long long handle) {
+    return sengoo_async_fallback_builtin_cancel(handle);
+}
+
+__attribute__((weak)) void sengoo_async_timeout_bool__drop(long long handle) {
+    sengoo_async_fallback_builtin_drop(handle);
+}
+
+__attribute__((weak)) long long sengoo_async_timeout_cancel_i64__poll(long long handle) {
+    return sengoo_async_fallback_builtin_poll(handle);
+}
+
+__attribute__((weak)) unsigned char sengoo_async_timeout_cancel_i64__cancel(long long handle) {
+    return sengoo_async_fallback_builtin_cancel(handle);
+}
+
+__attribute__((weak)) void sengoo_async_timeout_cancel_i64__drop(long long handle) {
+    sengoo_async_fallback_builtin_drop(handle);
 }
 #endif

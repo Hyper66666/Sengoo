@@ -69,10 +69,20 @@ foreach ($override in @(
         throw "$($override.name) must equal repository HEAD $sourceRevision"
     }
 }
-$buildHash = $sourceRevision.Substring(0, 12)
-if ($env:SENGOO_BUILD_HASH -and
-    $env:SENGOO_BUILD_HASH.ToLowerInvariant() -ne $buildHash) {
-    throw "SENGOO_BUILD_HASH must equal repository HEAD prefix $buildHash"
+$headBuildHash = $sourceRevision.Substring(0, 12)
+$buildHash = $headBuildHash
+if ($env:SENGOO_BUILD_HASH) {
+    $requestedBuildHash = $env:SENGOO_BUILD_HASH.ToLowerInvariant()
+    if ($requestedBuildHash -notmatch '^[0-9a-f]{12}$') {
+        throw "SENGOO_BUILD_HASH must be exactly 12 hexadecimal characters"
+    }
+    if (-not $NoBuild -and $requestedBuildHash -ne $headBuildHash) {
+        throw "release-eligible SENGOO_BUILD_HASH must equal repository HEAD prefix $headBuildHash"
+    }
+    # A prebuilt -NoBuild package is explicitly non-release provenance. Allow
+    # installer upgrade tests to distinguish two local payloads without
+    # misrepresenting the source revision or becoming publication eligible.
+    $buildHash = $requestedBuildHash
 }
 $env:SENGOO_BUILD_HASH = $buildHash
 

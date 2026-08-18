@@ -941,7 +941,7 @@ fn composite_probe_builds_for_native_debugging() {
     let source = project.composite_source_path();
     fs::write(&source, COMPOSITE_PROBE_SOURCE).expect("write composite debugger probe source");
 
-    let check = Command::new(sgc())
+    let check = source_sgc_command()
         .arg("check")
         .arg(&source)
         .output()
@@ -970,7 +970,7 @@ fn native_lldb_steps_and_inspects_composite_surfaces() {
     let source = project.composite_source_path();
     fs::write(&source, COMPOSITE_PROBE_SOURCE).expect("write composite debugger probe source");
 
-    let build = Command::new(sgc())
+    let build = source_sgc_command()
         .arg("build")
         .arg(&source)
         .args(["-O", "0", "--debug-info", "--force-rebuild"])

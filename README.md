@@ -22,37 +22,38 @@ Local dry-run packaging:
 
 ```powershell
 cargo build -p sgc -p sgpm -p sgfmt -p sglsp --release
-.\scripts\package-toolchain.ps1 -Version 0.1.0-smoke -NoBuild
+.\scripts\package-toolchain.ps1 -Version 0.2.0-smoke -NoBuild
 $archive = Get-Content target/dist/latest-archive.txt
 .\scripts\install.ps1 -Archive $archive -InstallDir target/install-smoke
 ```
 
-Pinned release install or upgrade (current published prerelease):
+Pinned stable release install or upgrade:
 
 ```powershell
-.\scripts\install.ps1 -Version 0.1.0-rc.1
+.\scripts\install.ps1 -Version 0.2.0
 ```
 
 ```sh
-sh scripts/install.sh --version 0.1.0-rc.1
+sh scripts/install.sh --version 0.2.0
 ```
 
 The release workflow builds native Windows x64, Linux x64, macOS arm64, and
 macOS x64 archives, verifies SHA-256 during installation, and publishes signed
-GitHub build provenance after platform smoke. The published prerelease tag is
-[`v0.1.0-rc.1`](https://github.com/Hyper66666/Sengoo/releases/tag/v0.1.0-rc.1).
-A later v0.2.0 channel is the target of the `sengoo-v0-2-mainstream-core`
-program and is not claimed installed here.
+GitHub build provenance after platform smoke. The stable release is
+[`v0.2.0`](https://github.com/Hyper66666/Sengoo/releases/tag/v0.2.0); see the
+[release notes](docs/release-notes-v0.2.0.md) and
+[migration guide](docs/migration-v0-1-to-v0-2.md).
 
-**v0.2 mainstream-core local gate evidence SHA:**
-`084b623037f007344d76ce50f2e0d01fac57b565` (branch `codex/sengoo-v0-2-openspec`,
-[PR #47](https://github.com/Hyper66666/Sengoo/pull/47)). That commit carries the
-archived M1–M4 OpenSpec children and green local fmt / Clippy `-D warnings` /
-focused tool tests / `openspec validate --all --strict` evidence. It does not
-claim multi-host Actions success or production HTTP handlers/keep-alive/
-streaming/TLS server support; those remain residual (see
-`examples/realworld/SUPPORT_MATRIX.md` and
-`openspec/changes/archive/2026-07-16-sengoo-v0-2-mainstream-core/RESIDUAL.md`).
+**v0.2 stable release evidence SHA:**
+`92c8f399f61b73d63990581c637da68572b6e133` ([PR #56](https://github.com/Hyper66666/Sengoo/pull/56)).
+The six one-SHA main gates and the four-host `v0.2.0` release run
+[`30191226253`](https://github.com/Hyper66666/Sengoo/actions/runs/30191226253)
+passed core language, compile-scale, sanitizer, bounded fuzz, compatibility,
+installed realworld, package, upgrade, and rollback checks. Production HTTP
+includes exact-route Sengoo handlers, bounded opt-in keep-alive, bounded
+response streaming, and verified TLS composition using Schannel on Windows
+and rustls on Linux plus both macOS architectures. See
+`examples/realworld/SUPPORT_MATRIX.md` for the exact supported subsets.
 
 Native debug-info builds use `-g` / `--debug-info`:
 

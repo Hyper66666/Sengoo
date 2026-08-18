@@ -130,7 +130,7 @@ impl TypeChecker {
         Ok(Ty::new(ty.id, kind))
     }
 
-    fn instantiate_method_function_ty(
+    pub(crate) fn instantiate_method_function_ty(
         &mut self,
         fn_ty: &FunctionTy,
         subst: &HashMap<TyVarId, Ty>,
@@ -140,7 +140,7 @@ impl TypeChecker {
             call_subst.insert(*generic_param, self.infer.fresh_ty_var());
         }
         FunctionTy::new(
-            fn_ty.has_self,
+            fn_ty.self_param,
             fn_ty
                 .param_types
                 .iter()
@@ -149,7 +149,7 @@ impl TypeChecker {
             self.substitute_ty_vars(&fn_ty.return_type, &call_subst),
         )
     }
-    fn lookup_generic_inherent_method(
+    pub(crate) fn lookup_generic_inherent_method(
         &mut self,
         receiver_ty: &Ty,
         method_name: &str,
@@ -236,6 +236,15 @@ impl TypeChecker {
             .implements_trait("Display", &type_key(ty))
     }
 
+    /// `print`/`println`/`eprintln` only take the format pipeline when the first
+    /// argument is a string literal template, so `print(1, 2)` stays arity mismatch.
+    fn first_arg_is_string_literal(args: &[Expr]) -> bool {
+        matches!(
+            args.first().map(|arg| &arg.kind),
+            Some(ExprKind::Literal(crate::ast::Literal::String(_)))
+        )
+    }
+
     /// Type-check a `format(template, args...)` call: the template must be a
     /// string literal, its `{}` placeholders must match the argument count, and
     /// every argument must be renderable (built-in printable or `impl Display`).
@@ -277,19 +286,78 @@ impl TypeChecker {
                 template_arg.span.hi,
             ));
         }
+        let mut arg_tys = Vec::with_capacity(value_args.len());
         for arg in value_args {
-            let arg_ty = self.check_expr(arg)?;
-            let mut visiting = HashSet::new();
+            arg_tys.push(self.check_expr(arg)?);
+        }
+        let mut auto_index = 0usize;
+        for segment in &segments {
+            let crate::format_template::FormatSegment::Placeholder(placeholder) = segment else {
+                continue;
+            };
+            let index = placeholder.position.unwrap_or_else(|| {
+                let index = auto_index;
+                auto_index += 1;
+                index
+            });
+            let arg_ty = &arg_tys[index];
             let context = match &arg_ty.kind {
                 TyKind::Adt { name, .. } => name.clone(),
                 _ => "format argument".to_string(),
             };
-            self.ensure_type_printable_for_print(&arg_ty, &context, &mut visiting)?;
+            match placeholder.style {
+                crate::format_template::FormatStyle::Debug => {
+                    self.ensure_type_debug_formattable(
+                        arg_ty,
+                        &context,
+                        value_args[index].span.lo,
+                        value_args[index].span.hi,
+                    )?;
+                }
+                crate::format_template::FormatStyle::Display => {
+                    let mut visiting = HashSet::new();
+                    self.ensure_type_printable_for_print(arg_ty, &context, &mut visiting)?;
+                }
+            }
         }
         Ok(self.env.new_ty(TyKind::Adt {
             name: "String".to_string(),
             args: Vec::new(),
         }))
+    }
+
+    fn type_implements_debug(&self, ty: &Ty) -> bool {
+        self.impl_registry.implements_trait("Debug", &type_key(ty))
+    }
+
+    fn is_builtin_debug_ty(&self, ty: &Ty) -> bool {
+        match &ty.kind {
+            TyKind::Int(_) | TyKind::Bool | TyKind::Float(_) | TyKind::Str | TyKind::Char => true,
+            TyKind::Ref(_, inner) => self.is_builtin_debug_ty(inner),
+            TyKind::Adt { name, .. } if name == "String" => true,
+            _ => false,
+        }
+    }
+
+    fn ensure_type_debug_formattable(
+        &mut self,
+        ty: &Ty,
+        context: &str,
+        span_lo: u32,
+        span_hi: u32,
+    ) -> TyResult<()> {
+        let ty = self.infer.apply_subst(ty);
+        if self.is_builtin_debug_ty(&ty) || self.type_implements_debug(&ty) {
+            return Ok(());
+        }
+        Err(TypeckError::diagnostic(
+            "missing-debug-derive",
+            format!(
+                "type {context} does not implement Debug; add `#[derive(Debug)]` or an `impl Debug`"
+            ),
+            span_lo,
+            span_hi,
+        ))
     }
 
     fn ensure_struct_printable(
@@ -475,6 +543,18 @@ impl TypeChecker {
                     Self::collect_capture_idents(else_branch, params, captures, seen);
                 }
             }
+            ExprKind::IfLet {
+                expr,
+                then_branch,
+                else_branch,
+                ..
+            } => {
+                Self::collect_capture_idents(expr, params, captures, seen);
+                Self::collect_capture_from_block(then_branch, params, captures, seen);
+                if let Some(else_branch) = else_branch {
+                    Self::collect_capture_idents(else_branch, params, captures, seen);
+                }
+            }
             ExprKind::Block(block) => {
                 Self::collect_capture_from_block(block, params, captures, seen);
             }
@@ -501,6 +581,14 @@ impl TypeChecker {
             ExprKind::Tuple(items) | ExprKind::Array(items) => {
                 for item in items {
                     Self::collect_capture_idents(item, params, captures, seen);
+                }
+            }
+            ExprKind::VecBang { elements, count } => {
+                for item in elements {
+                    Self::collect_capture_idents(item, params, captures, seen);
+                }
+                if let Some(count) = count {
+                    Self::collect_capture_idents(count, params, captures, seen);
                 }
             }
             ExprKind::Struct { fields, base, .. } => {
@@ -641,6 +729,45 @@ impl TypeChecker {
         self.check_call_with_expected(func, args, call_span, None)
     }
 
+    /// Construct the enum variant a callee names, if it names one.
+    fn check_variant_callee(
+        &mut self,
+        func: &Expr,
+        args: &[Expr],
+        expected_return: Option<&Ty>,
+    ) -> Option<TyResult<Ty>> {
+        enum Callee {
+            Qualified(Path),
+            Bare(Ident),
+        }
+
+        let callee = match &func.kind {
+            ExprKind::Path(path) if path.segments.len() >= 2 => Callee::Qualified(path.clone()),
+            ExprKind::Path(path) if path.segments.len() == 1 => {
+                Callee::Bare(path.segments[0].clone())
+            }
+            ExprKind::Ident(ident) => Callee::Bare(ident.clone()),
+            _ => return None,
+        };
+        if let Callee::Bare(ident) = &callee {
+            if self.env.contains(&ident.name) {
+                return None;
+            }
+        }
+
+        let pushed = expected_return.cloned().inspect(|expected| {
+            self.expected_return_types.push(expected.clone());
+        });
+        let result = match &callee {
+            Callee::Qualified(path) => self.check_enum_variant_constructor(path, args),
+            Callee::Bare(ident) => self.check_bare_enum_variant(&ident.name, ident.span, args),
+        };
+        if pushed.is_some() {
+            self.expected_return_types.pop();
+        }
+        result
+    }
+
     pub(super) fn check_call_with_expected(
         &mut self,
         func: &Expr,
@@ -648,10 +775,16 @@ impl TypeChecker {
         call_span: crate::lexer::Span,
         expected_return: Option<&Ty>,
     ) -> TyResult<Ty> {
-        if let ExprKind::Path(path) = &func.kind {
-            if let Some(result) = self.check_enum_variant_constructor(path, args) {
-                return result;
-            }
+        // A callee that names an enum variant constructs it rather than calling
+        // a function. Unqualified names (`Some(v)`) only take this path when
+        // nothing else in scope claims the name. The expected type is pushed
+        // for the duration so that generic parameters no argument pins — the
+        // `E` of `Ok(value)` — are recovered from it.
+        if let Some(result) = self.check_variant_callee(func, args, expected_return) {
+            let resolved = result?;
+            self.env
+                .record_call_return_type(call_span.lo, resolved.clone());
+            return Ok(resolved);
         }
 
         let builtin_name = match &func.kind {
@@ -1074,6 +1207,10 @@ impl TypeChecker {
             _ => false,
         };
         if is_print {
+            if args.len() > 1 && Self::first_arg_is_string_literal(args) {
+                let _formatted = self.check_format_call(args)?;
+                return Ok(self.env.unit_ty());
+            }
             // print expects exactly one argument
             if args.len() != 1 {
                 return Err(TypeckError::ArgumentCountMismatch {
@@ -1143,6 +1280,7 @@ impl TypeChecker {
                 let expected_ty =
                     self.resolve_associated_projection(&self.infer.apply_subst(arg_ty))?;
                 let actual_ty = self.check_expr_with_expected(arg_expr, &expected_ty)?;
+                self.reject_match_guard_binding_move(arg_expr, &expected_ty, &actual_ty)?;
                 // Passing an unawaited Future as a function argument is an escape.
                 // The caller must `await` it at the call-site first.
                 if self.contains_future_escape_ty(&actual_ty) {
@@ -1208,6 +1346,80 @@ impl TypeChecker {
                     .collect::<Vec<_>>()
                     .join("_"),
             ),
+            _ => None,
+        }
+    }
+
+    fn reject_match_guard_binding_move(
+        &self,
+        arg: &Expr,
+        expected_ty: &Ty,
+        actual_ty: &Ty,
+    ) -> TyResult<()> {
+        if matches!(self.infer.apply_subst(expected_ty).kind, TyKind::Ref(..))
+            || !self
+                .env
+                .type_contains_drop_owned_value(&self.infer.apply_subst(actual_ty))
+        {
+            return Ok(());
+        }
+        let Some(binding) = self.moved_match_guard_binding(arg) else {
+            return Ok(());
+        };
+        Err(TypeckError::diagnostic(
+            "match-guard-move",
+            format!("match guard cannot move pattern binding `{binding}`; borrow it instead"),
+            arg.span.lo,
+            arg.span.hi,
+        ))
+    }
+
+    fn reject_match_guard_receiver_move(
+        &self,
+        receiver: &Expr,
+        method: &str,
+        self_param: Option<SelfParam>,
+        receiver_ty: &Ty,
+    ) -> TyResult<()> {
+        if self
+            .env
+            .legacy_handle_method_borrows_receiver(receiver_ty, method)
+        {
+            return Ok(());
+        }
+        if !matches!(
+            self_param,
+            Some(SelfParam::Owned) | Some(SelfParam::OwnedMut)
+        ) {
+            return Ok(());
+        }
+        self.reject_match_guard_binding_move(receiver, receiver_ty, receiver_ty)
+    }
+
+    fn moved_match_guard_binding(&self, expr: &Expr) -> Option<String> {
+        let active = self.match_guard_bindings.last()?;
+        match &expr.kind {
+            ExprKind::Ident(ident) => active.contains(&ident.name).then(|| ident.name.clone()),
+            ExprKind::Path(path) if path.segments.len() == 1 => {
+                let name = &path.segments[0].name;
+                active.contains(name).then(|| name.clone())
+            }
+            ExprKind::Field { base, .. } | ExprKind::Index { base, .. } => {
+                self.moved_match_guard_binding(base)
+            }
+            ExprKind::Paren(inner) | ExprKind::Try(inner) | ExprKind::Await(inner) => {
+                self.moved_match_guard_binding(inner)
+            }
+            ExprKind::Tuple(items) | ExprKind::Array(items) => items
+                .iter()
+                .find_map(|item| self.moved_match_guard_binding(item)),
+            ExprKind::Struct { fields, base, .. } => fields
+                .iter()
+                .find_map(|field| self.moved_match_guard_binding(&field.value))
+                .or_else(|| {
+                    base.as_deref()
+                        .and_then(|base| self.moved_match_guard_binding(base))
+                }),
             _ => None,
         }
     }
@@ -1303,7 +1515,13 @@ impl TypeChecker {
                     ));
                 }
             };
-            for (expected, actual) in method_ty.param_types.iter().zip(actual_types.iter()) {
+            for ((expected, actual), arg) in method_ty
+                .param_types
+                .iter()
+                .zip(actual_types.iter())
+                .zip(args)
+            {
+                self.reject_match_guard_binding_move(arg, expected, actual)?;
                 self.infer.unify(expected, actual)?;
             }
             let trait_args = impl_info
@@ -1358,6 +1576,7 @@ impl TypeChecker {
             }
             for (expected, arg) in method_ty.param_types.iter().zip(args) {
                 let actual = self.check_expr_with_expected(arg, expected)?;
+                self.reject_match_guard_binding_move(arg, expected, &actual)?;
                 self.infer.unify(expected, &actual)?;
             }
             let resolved_return = self.infer.apply_subst(&method_ty.return_type);
@@ -1411,7 +1630,13 @@ impl TypeChecker {
                 ));
             }
         };
-        for (expected, actual) in method_ty.param_types.iter().zip(actual_types.iter()) {
+        for ((expected, actual), arg) in method_ty
+            .param_types
+            .iter()
+            .zip(actual_types.iter())
+            .zip(args)
+        {
+            self.reject_match_guard_binding_move(arg, expected, actual)?;
             self.infer.unify(expected, actual)?;
         }
         let trait_args = impl_info
@@ -1642,6 +1867,12 @@ impl TypeChecker {
                 && args.is_empty()
                 && matches!(receiver_ty.kind, TyKind::Dyn(_))
             {
+                self.reject_match_guard_receiver_move(
+                    receiver,
+                    method_name,
+                    Some(SelfParam::Owned),
+                    &receiver_ty,
+                )?;
                 return Ok(self.env.unit_ty());
             }
             for trait_name in &traits {
@@ -1657,8 +1888,20 @@ impl TypeChecker {
                         found: args.len(),
                     });
                 }
-                for (expected, actual) in method_sig.param_types.iter().zip(arg_types.iter()) {
+                self.reject_match_guard_receiver_move(
+                    receiver,
+                    method_name,
+                    method_sig.self_param,
+                    &receiver_ty,
+                )?;
+                for ((expected, actual), arg) in method_sig
+                    .param_types
+                    .iter()
+                    .zip(arg_types.iter())
+                    .zip(args)
+                {
                     let expected = self.infer.apply_subst(expected);
+                    self.reject_match_guard_binding_move(arg, &expected, actual)?;
                     self.infer.unify(&expected, actual)?;
                 }
                 return Ok(self.infer.apply_subst(&method_sig.return_type));
@@ -1756,7 +1999,16 @@ impl TypeChecker {
                 });
             }
 
-            for (expected, actual) in fn_ty.param_types.iter().zip(arg_types.iter()) {
+            self.reject_match_guard_receiver_move(
+                receiver,
+                method_name,
+                fn_ty.self_param,
+                &receiver_ty,
+            )?;
+            for ((expected, actual), arg) in
+                fn_ty.param_types.iter().zip(arg_types.iter()).zip(args)
+            {
+                self.reject_match_guard_binding_move(arg, expected, actual)?;
                 self.infer.unify(expected, actual)?;
             }
 
@@ -1768,7 +2020,16 @@ impl TypeChecker {
         if let Some(fn_ty) =
             self.select_generic_bound_method_candidate(&receiver_ty, method_name, args.len())?
         {
-            for (expected, actual) in fn_ty.param_types.iter().zip(arg_types.iter()) {
+            self.reject_match_guard_receiver_move(
+                receiver,
+                method_name,
+                fn_ty.self_param,
+                &receiver_ty,
+            )?;
+            for ((expected, actual), arg) in
+                fn_ty.param_types.iter().zip(arg_types.iter()).zip(args)
+            {
+                self.reject_match_guard_binding_move(arg, expected, actual)?;
                 self.infer.unify(expected, actual)?;
             }
             return self.resolve_associated_projection(&self.infer.apply_subst(&fn_ty.return_type));
@@ -1782,7 +2043,16 @@ impl TypeChecker {
             expected_return,
             call_span,
         )? {
-            for (expected, actual) in fn_ty.param_types.iter().zip(arg_types.iter()) {
+            self.reject_match_guard_receiver_move(
+                receiver,
+                method_name,
+                fn_ty.self_param,
+                &receiver_ty,
+            )?;
+            for ((expected, actual), arg) in
+                fn_ty.param_types.iter().zip(arg_types.iter()).zip(args)
+            {
+                self.reject_match_guard_binding_move(arg, expected, actual)?;
                 self.infer.unify(expected, actual)?;
             }
             let resolved =
@@ -1837,7 +2107,7 @@ impl TypeChecker {
                 continue;
             }
             let fn_ty = FunctionTy::with_generic_params(
-                true,
+                method_sig.self_param,
                 method_sig.param_types,
                 method_sig.return_type,
                 method_sig.generic_params,

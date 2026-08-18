@@ -45,3 +45,24 @@ pub fn variant_discriminant(enum_name: &str, variant_name: &str) -> Option<u32> 
         })
     })
 }
+
+/// Enum that uniquely declares `variant_name`, if exactly one does.
+///
+/// Lets bare `Some(v)` / `None` resolve without a qualifying prefix; an
+/// ambiguous name returns `None` here and the type checker reports it.
+pub fn variant_unique_owner(variant_name: &str) -> Option<(String, u32)> {
+    ACTIVE_ENUM_INDEX.with(|cell| {
+        cell.borrow().as_ref().and_then(|index| {
+            let mut found = None;
+            for (enum_name, variants) in index.iter() {
+                if let Some(discriminant) = variants.get(variant_name) {
+                    if found.is_some() {
+                        return None;
+                    }
+                    found = Some((enum_name.clone(), *discriminant));
+                }
+            }
+            found
+        })
+    })
+}

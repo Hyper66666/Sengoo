@@ -843,12 +843,18 @@ fn scan_fstring_body(remainder: &str) -> Option<(FStringLiteral, usize)> {
             b'{' => {
                 i += 1;
                 let expr_lo = i;
-                let expr_hi = scan_interpolation_end(bytes, &mut i)?;
+                let (expr_hi, spec) = scan_interpolation_end(bytes, &mut i)?;
                 interpolations.push(Span::new(
                     (expr_lo + FSTRING_PREFIX_LEN) as u32,
                     (expr_hi + FSTRING_PREFIX_LEN) as u32,
                 ));
-                raw_template.push_str("{}");
+                if let Some(spec) = spec {
+                    raw_template.push('{');
+                    raw_template.push_str(&spec);
+                    raw_template.push('}');
+                } else {
+                    raw_template.push_str("{}");
+                }
             }
             _ => {
                 let c = remainder[i..].chars().next()?;
@@ -861,16 +867,37 @@ fn scan_fstring_body(remainder: &str) -> Option<(FStringLiteral, usize)> {
     None
 }
 
-/// 扫描插值表达式直到深度为 0 的闭合 `}`，返回其字节下标。
+/// 扫描插值表达式直到深度为 0 的闭合 `}`，返回表达式结束下标与可选格式说明。
+///
+/// `:` 在深度 0 且不是 `::` 时开始格式说明（如 `{p:?}` / `{x:>8}`）。
 /// 表达式内部的嵌套花括号与字符串/字符字面量会被正确跳过。
-fn scan_interpolation_end(bytes: &[u8], i: &mut usize) -> Option<usize> {
+fn scan_interpolation_end(bytes: &[u8], i: &mut usize) -> Option<(usize, Option<String>)> {
     let mut depth = 0usize;
     while *i < bytes.len() {
         match bytes[*i] {
+            b':' if depth == 0 && bytes.get(*i + 1) == Some(&b':') => {
+                *i += 2;
+            }
+            b':' if depth == 0 => {
+                let expr_hi = *i;
+                let spec_lo = *i;
+                while *i < bytes.len() {
+                    match bytes[*i] {
+                        b'}' => {
+                            let spec = std::str::from_utf8(&bytes[spec_lo..*i]).ok()?.to_string();
+                            *i += 1;
+                            return Some((expr_hi, Some(spec)));
+                        }
+                        b'\n' => return None,
+                        _ => *i += 1,
+                    }
+                }
+                return None;
+            }
             b'}' if depth == 0 => {
                 let end = *i;
                 *i += 1;
-                return Some(end);
+                return Some((end, None));
             }
             b'{' => {
                 depth += 1;

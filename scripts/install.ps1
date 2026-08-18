@@ -116,47 +116,53 @@ try {
 
     $manifestPath = Join-Path $payload.FullName "manifest.json"
     $manifest = Get-Content -LiteralPath $manifestPath -Raw | ConvertFrom-Json
-    if ($manifest.schema_version -ne 2) {
+    $isLegacyV010Rc1 = $manifest.version -eq "0.1.0-rc.1" -and (-not $Version -or $Version -eq "0.1.0-rc.1")
+    if ($manifest.schema_version -ne 2 -and -not $isLegacyV010Rc1) {
         throw "unsupported Sengoo manifest schema: $($manifest.schema_version)"
     }
     $payloadChecksums = Join-Path $payload.FullName "payloads.sha256"
     if (-not (Test-Path -LiteralPath $payloadChecksums)) {
-        throw "archive does not contain payloads.sha256"
-    }
-    $payloadRoot = [System.IO.Path]::GetFullPath($payload.FullName).TrimEnd([char[]]@('\', '/'))
-    $verifiedPayloads = [System.Collections.Generic.HashSet[string]]::new([System.StringComparer]::OrdinalIgnoreCase)
-    foreach ($line in Get-Content -LiteralPath $payloadChecksums) {
-        if ($line -notmatch '^([0-9a-fA-F]{64})  (.+)$') {
-            throw "invalid payload checksum entry: $line"
+        if ($isLegacyV010Rc1) {
+            Write-Warning "v0.1.0-rc.1 predates payloads.sha256; relying on the verified release archive SHA-256"
+        } else {
+            throw "archive does not contain payloads.sha256"
         }
-        $expectedPayloadHash = $Matches[1].ToLowerInvariant()
-        $relativePayloadPath = $Matches[2].Replace('/', [System.IO.Path]::DirectorySeparatorChar)
-        $payloadPath = [System.IO.Path]::GetFullPath((Join-Path $payloadRoot $relativePayloadPath))
-        if (-not $payloadPath.StartsWith($payloadRoot + [System.IO.Path]::DirectorySeparatorChar, [System.StringComparison]::OrdinalIgnoreCase)) {
-            throw "payload checksum path escapes archive root: $relativePayloadPath"
+    } else {
+        $payloadRoot = [System.IO.Path]::GetFullPath($payload.FullName).TrimEnd([char[]]@('\', '/'))
+        $verifiedPayloads = [System.Collections.Generic.HashSet[string]]::new([System.StringComparer]::OrdinalIgnoreCase)
+        foreach ($line in Get-Content -LiteralPath $payloadChecksums) {
+            if ($line -notmatch '^([0-9a-fA-F]{64})  (.+)$') {
+                throw "invalid payload checksum entry: $line"
+            }
+            $expectedPayloadHash = $Matches[1].ToLowerInvariant()
+            $relativePayloadPath = $Matches[2].Replace('/', [System.IO.Path]::DirectorySeparatorChar)
+            $payloadPath = [System.IO.Path]::GetFullPath((Join-Path $payloadRoot $relativePayloadPath))
+            if (-not $payloadPath.StartsWith($payloadRoot + [System.IO.Path]::DirectorySeparatorChar, [System.StringComparison]::OrdinalIgnoreCase)) {
+                throw "payload checksum path escapes archive root: $relativePayloadPath"
+            }
+            if (-not (Test-Path -LiteralPath $payloadPath -PathType Leaf)) {
+                throw "payload file is missing: $relativePayloadPath"
+            }
+            $actualPayloadHash = (Get-FileHash -Algorithm SHA256 -LiteralPath $payloadPath).Hash.ToLowerInvariant()
+            if ($expectedPayloadHash -ne $actualPayloadHash) {
+                throw "payload checksum mismatch for $relativePayloadPath"
+            }
+            $null = $verifiedPayloads.Add($payloadPath)
         }
-        if (-not (Test-Path -LiteralPath $payloadPath -PathType Leaf)) {
-            throw "payload file is missing: $relativePayloadPath"
+        $unlistedPayloads = @(
+            Get-ChildItem -LiteralPath $payloadRoot -Recurse -File | Where-Object {
+                $_.FullName -ne $manifestPath -and
+                $_.FullName -ne $payloadChecksums -and
+                -not $verifiedPayloads.Contains([System.IO.Path]::GetFullPath($_.FullName))
+            }
+        )
+        if ($unlistedPayloads.Count -ne 0) {
+            throw "archive contains payload files missing from payloads.sha256: $($unlistedPayloads.FullName -join ', ')"
         }
-        $actualPayloadHash = (Get-FileHash -Algorithm SHA256 -LiteralPath $payloadPath).Hash.ToLowerInvariant()
-        if ($expectedPayloadHash -ne $actualPayloadHash) {
-            throw "payload checksum mismatch for $relativePayloadPath"
+        $actualBuildManifestId = (Get-FileHash -Algorithm SHA256 -LiteralPath $payloadChecksums).Hash.ToLowerInvariant()
+        if ($manifest.build_manifest_id -ne $actualBuildManifestId) {
+            throw "payload checksum manifest identity mismatch"
         }
-        $null = $verifiedPayloads.Add($payloadPath)
-    }
-    $unlistedPayloads = @(
-        Get-ChildItem -LiteralPath $payloadRoot -Recurse -File | Where-Object {
-            $_.FullName -ne $manifestPath -and
-            $_.FullName -ne $payloadChecksums -and
-            -not $verifiedPayloads.Contains([System.IO.Path]::GetFullPath($_.FullName))
-        }
-    )
-    if ($unlistedPayloads.Count -ne 0) {
-        throw "archive contains payload files missing from payloads.sha256: $($unlistedPayloads.FullName -join ', ')"
-    }
-    $actualBuildManifestId = (Get-FileHash -Algorithm SHA256 -LiteralPath $payloadChecksums).Hash.ToLowerInvariant()
-    if ($manifest.build_manifest_id -ne $actualBuildManifestId) {
-        throw "payload checksum manifest identity mismatch"
     }
 
     Remove-Item -LiteralPath $InstallDir -Recurse -Force -ErrorAction SilentlyContinue

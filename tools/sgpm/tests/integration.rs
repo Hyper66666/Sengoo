@@ -1,5 +1,5 @@
 use std::fs;
-use std::io::{Read, Write};
+use std::io::{BufRead, BufReader, Read, Write};
 use std::net::{TcpListener, TcpStream};
 use std::path::{Path, PathBuf};
 use std::process::{Child, Command, Output, Stdio};
@@ -40,7 +40,7 @@ fn reserve_local_addr() -> String {
 }
 
 fn spawn_reference_registry(root: &Path, addr: &str, max_requests: usize) -> Child {
-    Command::new(sgpm())
+    let mut child = Command::new(sgpm())
         .args([
             "registry",
             "serve",
@@ -51,10 +51,24 @@ fn spawn_reference_registry(root: &Path, addr: &str, max_requests: usize) -> Chi
             "--max-requests",
             &max_requests.to_string(),
         ])
-        .stdout(Stdio::null())
-        .stderr(Stdio::null())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::inherit())
         .spawn()
-        .expect("spawn reference registry")
+        .expect("spawn reference registry");
+    let stdout = child
+        .stdout
+        .take()
+        .expect("reference registry stdout should be piped");
+    let mut ready = String::new();
+    BufReader::new(stdout)
+        .read_line(&mut ready)
+        .expect("read reference registry readiness");
+    assert_eq!(
+        ready.trim(),
+        format!("sgpm reference registry listening on http://{addr}"),
+        "reference registry did not report readiness"
+    );
+    child
 }
 
 fn send_http_request(
@@ -4128,8 +4142,10 @@ fn build_locked_rejects_stale_lockfile_before_invoking_sgc() {
 
     assert!(!output.status.success());
     let stderr = String::from_utf8_lossy(&output.stderr);
+    // Unparseable garbage is reported as malformed (not "out of date"),
+    // still pointing at `sgpm update` as the remedy.
     assert!(
-        stderr.contains("Sengoo.lock is out of date") && stderr.contains("sgpm update"),
+        stderr.contains("malformed") && stderr.contains("sgpm update"),
         "stderr:\n{}",
         stderr
     );

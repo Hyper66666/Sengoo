@@ -643,9 +643,9 @@ impl i32 {
     def checked_add(self, rhs: i32) -> Option<i32> {
         let result = (self as i64) + (rhs as i64);
         if result < -2147483648 {
-            option_none_with(0i32)
+            None
         } else if result > 2147483647 {
-            option_none_with(0i32)
+            None
         } else {
             option_some(result as i32)
         }
@@ -654,9 +654,9 @@ impl i32 {
     def checked_sub(self, rhs: i32) -> Option<i32> {
         let result = (self as i64) - (rhs as i64);
         if result < -2147483648 {
-            option_none_with(0i32)
+            None
         } else if result > 2147483647 {
-            option_none_with(0i32)
+            None
         } else {
             option_some(result as i32)
         }
@@ -665,9 +665,9 @@ impl i32 {
     def checked_mul(self, rhs: i32) -> Option<i32> {
         let result = (self as i64) * (rhs as i64);
         if result < -2147483648 {
-            option_none_with(0i32)
+            None
         } else if result > 2147483647 {
-            option_none_with(0i32)
+            None
         } else {
             option_some(result as i32)
         }
@@ -723,9 +723,9 @@ impl i16 {
     def checked_add(self, rhs: i16) -> Option<i16> {
         let result = (self as i64) + (rhs as i64);
         if result < -32768 {
-            option_none_with(0i16)
+            None
         } else if result > 32767 {
-            option_none_with(0i16)
+            None
         } else {
             option_some(result as i16)
         }
@@ -734,9 +734,9 @@ impl i16 {
     def checked_sub(self, rhs: i16) -> Option<i16> {
         let result = (self as i64) - (rhs as i64);
         if result < -32768 {
-            option_none_with(0i16)
+            None
         } else if result > 32767 {
-            option_none_with(0i16)
+            None
         } else {
             option_some(result as i16)
         }
@@ -745,9 +745,9 @@ impl i16 {
     def checked_mul(self, rhs: i16) -> Option<i16> {
         let result = (self as i64) * (rhs as i64);
         if result < -32768 {
-            option_none_with(0i16)
+            None
         } else if result > 32767 {
-            option_none_with(0i16)
+            None
         } else {
             option_some(result as i16)
         }
@@ -803,9 +803,9 @@ impl i8 {
     def checked_add(self, rhs: i8) -> Option<i8> {
         let result = (self as i64) + (rhs as i64);
         if result < -128 {
-            option_none_with(0i8)
+            None
         } else if result > 127 {
-            option_none_with(0i8)
+            None
         } else {
             option_some(result as i8)
         }
@@ -814,9 +814,9 @@ impl i8 {
     def checked_sub(self, rhs: i8) -> Option<i8> {
         let result = (self as i64) - (rhs as i64);
         if result < -128 {
-            option_none_with(0i8)
+            None
         } else if result > 127 {
-            option_none_with(0i8)
+            None
         } else {
             option_some(result as i8)
         }
@@ -825,9 +825,9 @@ impl i8 {
     def checked_mul(self, rhs: i8) -> Option<i8> {
         let result = (self as i64) * (rhs as i64);
         if result < -128 {
-            option_none_with(0i8)
+            None
         } else if result > 127 {
-            option_none_with(0i8)
+            None
         } else {
             option_some(result as i8)
         }
@@ -883,7 +883,7 @@ impl u32 {
     def checked_add(self, rhs: u32) -> Option<u32> {
         let result = (self as u64) + (rhs as u64);
         if result > 4294967295u64 {
-            option_none_with(0u32)
+            None
         } else {
             option_some(result as u32)
         }
@@ -891,7 +891,7 @@ impl u32 {
 
     def checked_sub(self, rhs: u32) -> Option<u32> {
         if self < rhs {
-            option_none_with(0u32)
+            None
         } else {
             option_some(self - rhs)
         }
@@ -900,7 +900,7 @@ impl u32 {
     def checked_mul(self, rhs: u32) -> Option<u32> {
         let result = (self as u64) * (rhs as u64);
         if result > 4294967295u64 {
-            option_none_with(0u32)
+            None
         } else {
             option_some(result as u32)
         }
@@ -950,7 +950,7 @@ impl u64 {
         if sengoo_u64_checked_add_ok(self, rhs) != 0 {
             option_some(self + rhs)
         } else {
-            option_none_with(0u64)
+            None
         }
     }
 
@@ -958,7 +958,7 @@ impl u64 {
         if sengoo_u64_checked_sub_ok(self, rhs) != 0 {
             option_some(self - rhs)
         } else {
-            option_none_with(0u64)
+            None
         }
     }
 
@@ -966,7 +966,7 @@ impl u64 {
         if sengoo_u64_checked_mul_ok(self, rhs) != 0 {
             option_some(self * rhs)
         } else {
-            option_none_with(0u64)
+            None
         }
     }
 
@@ -1011,7 +1011,7 @@ impl usize {
     def checked_add(self, rhs: usize) -> Option<usize> {
         let max = usize_max_value();
         if rhs > max - self {
-            option_none_with(0usize)
+            None
         } else {
             option_some(self + rhs)
         }
@@ -1019,7 +1019,7 @@ impl usize {
 
     def checked_sub(self, rhs: usize) -> Option<usize> {
         if self < rhs {
-            option_none_with(0usize)
+            None
         } else {
             option_some(self - rhs)
         }
@@ -1028,7 +1028,7 @@ impl usize {
     def checked_mul(self, rhs: usize) -> Option<usize> {
         let max = usize_max_value();
         if self != 0usize && rhs > max / self {
-            option_none_with(0usize)
+            None
         } else {
             option_some(self * rhs)
         }
@@ -1066,12 +1066,12 @@ impl isize {
         if sengoo_i64_checked_add_ok(self as i64, rhs as i64) != 0 {
             let value = (self as i64) + (rhs as i64);
             if value < (isize_min_value() as i64) || value > (isize_max_value() as i64) {
-                option_none_with(0isize)
+                None
             } else {
                 option_some(value as isize)
             }
         } else {
-            option_none_with(0isize)
+            None
         }
     }
 
@@ -1079,12 +1079,12 @@ impl isize {
         if sengoo_i64_checked_sub_ok(self as i64, rhs as i64) != 0 {
             let value = (self as i64) - (rhs as i64);
             if value < (isize_min_value() as i64) || value > (isize_max_value() as i64) {
-                option_none_with(0isize)
+                None
             } else {
                 option_some(value as isize)
             }
         } else {
-            option_none_with(0isize)
+            None
         }
     }
 
@@ -1092,12 +1092,12 @@ impl isize {
         if sengoo_i64_checked_mul_ok(self as i64, rhs as i64) != 0 {
             let value = (self as i64) * (rhs as i64);
             if value < (isize_min_value() as i64) || value > (isize_max_value() as i64) {
-                option_none_with(0isize)
+                None
             } else {
                 option_some(value as isize)
             }
         } else {
-            option_none_with(0isize)
+            None
         }
     }
 
@@ -1151,7 +1151,7 @@ impl u16 {
     def checked_add(self, rhs: u16) -> Option<u16> {
         let result = (self as i64) + (rhs as i64);
         if result > 65535 {
-            option_none_with(0u16)
+            None
         } else {
             option_some(result as u16)
         }
@@ -1159,7 +1159,7 @@ impl u16 {
 
     def checked_sub(self, rhs: u16) -> Option<u16> {
         if self < rhs {
-            option_none_with(0u16)
+            None
         } else {
             option_some(self - rhs)
         }
@@ -1168,7 +1168,7 @@ impl u16 {
     def checked_mul(self, rhs: u16) -> Option<u16> {
         let result = (self as i64) * (rhs as i64);
         if result > 65535 {
-            option_none_with(0u16)
+            None
         } else {
             option_some(result as u16)
         }
@@ -1217,7 +1217,7 @@ impl u8 {
     def checked_add(self, rhs: u8) -> Option<u8> {
         let result = (self as i64) + (rhs as i64);
         if result > 255 {
-            option_none_with(0u8)
+            None
         } else {
             option_some(result as u8)
         }
@@ -1225,7 +1225,7 @@ impl u8 {
 
     def checked_sub(self, rhs: u8) -> Option<u8> {
         if self < rhs {
-            option_none_with(0u8)
+            None
         } else {
             option_some(self - rhs)
         }
@@ -1234,7 +1234,7 @@ impl u8 {
     def checked_mul(self, rhs: u8) -> Option<u8> {
         let result = (self as i64) * (rhs as i64);
         if result > 255 {
-            option_none_with(0u8)
+            None
         } else {
             option_some(result as u8)
         }
@@ -1268,650 +1268,650 @@ impl u8 {
 }
 
 def checked_i8_to_i16(value: i8) -> Result<i16, i64> {
-    Result { is_ok: true, value: value as i16, error: 0 }
+    Ok(value as i16)
 }
 
 def checked_i8_to_i32(value: i8) -> Result<i32, i64> {
-    Result { is_ok: true, value: value as i32, error: 0 }
+    Ok(value as i32)
 }
 
 def checked_i8_to_i64(value: i8) -> Result<i64, i64> {
-    Result { is_ok: true, value: value as i64, error: 0 }
+    Ok(value as i64)
 }
 
 def checked_i8_to_isize(value: i8) -> Result<isize, i64> {
-    Result { is_ok: true, value: value as isize, error: 0 }
+    Ok(value as isize)
 }
 
 def checked_i8_to_usize(value: i8) -> Result<usize, i64> {
     if value < 0i8 {
-        Result { is_ok: false, value: 0usize, error: STATUS_INVALID_ARGUMENT() }
+        Err(STATUS_INVALID_ARGUMENT())
     } else {
-        Result { is_ok: true, value: value as usize, error: 0 }
+        Ok(value as usize)
     }
 }
 
 def checked_i16_to_i32(value: i16) -> Result<i32, i64> {
-    Result { is_ok: true, value: value as i32, error: 0 }
+    Ok(value as i32)
 }
 
 def checked_i16_to_i64(value: i16) -> Result<i64, i64> {
-    Result { is_ok: true, value: value as i64, error: 0 }
+    Ok(value as i64)
 }
 
 def checked_i16_to_isize(value: i16) -> Result<isize, i64> {
-    Result { is_ok: true, value: value as isize, error: 0 }
+    Ok(value as isize)
 }
 
 def checked_i16_to_usize(value: i16) -> Result<usize, i64> {
     if value < 0i16 {
-        Result { is_ok: false, value: 0usize, error: STATUS_INVALID_ARGUMENT() }
+        Err(STATUS_INVALID_ARGUMENT())
     } else {
-        Result { is_ok: true, value: value as usize, error: 0 }
+        Ok(value as usize)
     }
 }
 
 def checked_i32_to_i64(value: i32) -> Result<i64, i64> {
-    Result { is_ok: true, value: value as i64, error: 0 }
+    Ok(value as i64)
 }
 
 def checked_i32_to_isize(value: i32) -> Result<isize, i64> {
-    Result { is_ok: true, value: value as isize, error: 0 }
+    Ok(value as isize)
 }
 
 def checked_i32_to_usize(value: i32) -> Result<usize, i64> {
     if value < 0i32 {
-        Result { is_ok: false, value: 0usize, error: STATUS_INVALID_ARGUMENT() }
+        Err(STATUS_INVALID_ARGUMENT())
     } else {
-        Result { is_ok: true, value: value as usize, error: 0 }
+        Ok(value as usize)
     }
 }
 
 def checked_i64_to_isize(value: i64) -> Result<isize, i64> {
     if value < (isize_min_value() as i64) {
-        Result { is_ok: false, value: 0isize, error: STATUS_OVERFLOW() }
+        Err(STATUS_OVERFLOW())
     } else if value > (isize_max_value() as i64) {
-        Result { is_ok: false, value: 0isize, error: STATUS_OVERFLOW() }
+        Err(STATUS_OVERFLOW())
     } else {
-        Result { is_ok: true, value: value as isize, error: 0 }
+        Ok(value as isize)
     }
 }
 
 def checked_i64_to_usize(value: i64) -> Result<usize, i64> {
     if value < 0i64 {
-        Result { is_ok: false, value: 0usize, error: STATUS_INVALID_ARGUMENT() }
+        Err(STATUS_INVALID_ARGUMENT())
     } else if (value as u64) > (usize_max_value() as u64) {
-        Result { is_ok: false, value: 0usize, error: STATUS_OVERFLOW() }
+        Err(STATUS_OVERFLOW())
     } else {
-        Result { is_ok: true, value: value as usize, error: 0 }
+        Ok(value as usize)
     }
 }
 
 def checked_isize_to_usize(value: isize) -> Result<usize, i64> {
     if value < 0isize {
-        Result { is_ok: false, value: 0usize, error: STATUS_INVALID_ARGUMENT() }
+        Err(STATUS_INVALID_ARGUMENT())
     } else {
-        Result { is_ok: true, value: value as usize, error: 0 }
+        Ok(value as usize)
     }
 }
 
 def checked_u8_to_isize(value: u8) -> Result<isize, i64> {
-    Result { is_ok: true, value: value as isize, error: 0 }
+    Ok(value as isize)
 }
 
 def checked_u8_to_usize(value: u8) -> Result<usize, i64> {
-    Result { is_ok: true, value: value as usize, error: 0 }
+    Ok(value as usize)
 }
 
 def checked_u16_to_isize(value: u16) -> Result<isize, i64> {
-    Result { is_ok: true, value: value as isize, error: 0 }
+    Ok(value as isize)
 }
 
 def checked_u16_to_usize(value: u16) -> Result<usize, i64> {
-    Result { is_ok: true, value: value as usize, error: 0 }
+    Ok(value as usize)
 }
 
 def checked_u32_to_isize(value: u32) -> Result<isize, i64> {
     if (value as u64) > (isize_max_value() as u64) {
-        Result { is_ok: false, value: 0isize, error: STATUS_OVERFLOW() }
+        Err(STATUS_OVERFLOW())
     } else {
-        Result { is_ok: true, value: value as isize, error: 0 }
+        Ok(value as isize)
     }
 }
 
 def checked_u32_to_u64(value: u32) -> Result<u64, i64> {
-    Result { is_ok: true, value: value as u64, error: 0 }
+    Ok(value as u64)
 }
 
 def checked_u32_to_usize(value: u32) -> Result<usize, i64> {
-    Result { is_ok: true, value: value as usize, error: 0 }
+    Ok(value as usize)
 }
 
 def checked_u64_to_i8(value: u64) -> Result<i8, i64> {
     if value > 127u64 {
-        Result { is_ok: false, value: 0i8, error: STATUS_OVERFLOW() }
+        Err(STATUS_OVERFLOW())
     } else {
-        Result { is_ok: true, value: value as i8, error: 0 }
+        Ok(value as i8)
     }
 }
 
 def checked_u64_to_i16(value: u64) -> Result<i16, i64> {
     if value > 32767u64 {
-        Result { is_ok: false, value: 0i16, error: STATUS_OVERFLOW() }
+        Err(STATUS_OVERFLOW())
     } else {
-        Result { is_ok: true, value: value as i16, error: 0 }
+        Ok(value as i16)
     }
 }
 
 def checked_u64_to_i32(value: u64) -> Result<i32, i64> {
     if value > 2147483647u64 {
-        Result { is_ok: false, value: 0i32, error: STATUS_OVERFLOW() }
+        Err(STATUS_OVERFLOW())
     } else {
-        Result { is_ok: true, value: value as i32, error: 0 }
+        Ok(value as i32)
     }
 }
 
 def checked_u64_to_i64(value: u64) -> Result<i64, i64> {
     if value > 9223372036854775807u64 {
-        Result { is_ok: false, value: 0i64, error: STATUS_OVERFLOW() }
+        Err(STATUS_OVERFLOW())
     } else {
-        Result { is_ok: true, value: value as i64, error: 0 }
+        Ok(value as i64)
     }
 }
 
 def checked_u64_to_isize(value: u64) -> Result<isize, i64> {
     if value > (isize_max_value() as u64) {
-        Result { is_ok: false, value: 0isize, error: STATUS_OVERFLOW() }
+        Err(STATUS_OVERFLOW())
     } else {
-        Result { is_ok: true, value: value as isize, error: 0 }
+        Ok(value as isize)
     }
 }
 
 def checked_u64_to_u8(value: u64) -> Result<u8, i64> {
     if value > 255u64 {
-        Result { is_ok: false, value: 0u8, error: STATUS_OVERFLOW() }
+        Err(STATUS_OVERFLOW())
     } else {
-        Result { is_ok: true, value: value as u8, error: 0 }
+        Ok(value as u8)
     }
 }
 
 def checked_u64_to_u16(value: u64) -> Result<u16, i64> {
     if value > 65535u64 {
-        Result { is_ok: false, value: 0u16, error: STATUS_OVERFLOW() }
+        Err(STATUS_OVERFLOW())
     } else {
-        Result { is_ok: true, value: value as u16, error: 0 }
+        Ok(value as u16)
     }
 }
 
 def checked_u64_to_u32(value: u64) -> Result<u32, i64> {
     if value > 4294967295u64 {
-        Result { is_ok: false, value: 0u32, error: STATUS_OVERFLOW() }
+        Err(STATUS_OVERFLOW())
     } else {
-        Result { is_ok: true, value: value as u32, error: 0 }
+        Ok(value as u32)
     }
 }
 
 def checked_u64_to_usize(value: u64) -> Result<usize, i64> {
     if value > (usize_max_value() as u64) {
-        Result { is_ok: false, value: 0usize, error: STATUS_OVERFLOW() }
+        Err(STATUS_OVERFLOW())
     } else {
-        Result { is_ok: true, value: value as usize, error: 0 }
+        Ok(value as usize)
     }
 }
 
 def checked_usize_to_isize(value: usize) -> Result<isize, i64> {
     if (value as u64) > (isize_max_value() as u64) {
-        Result { is_ok: false, value: 0isize, error: STATUS_OVERFLOW() }
+        Err(STATUS_OVERFLOW())
     } else {
-        Result { is_ok: true, value: value as isize, error: 0 }
+        Ok(value as isize)
     }
 }
 
 def checked_i64_to_i32(value: i64) -> Result<i32, i64> {
     if value < -2147483648 {
-        Result { is_ok: false, value: 0i32, error: STATUS_OVERFLOW() }
+        Err(STATUS_OVERFLOW())
     } else if value > 2147483647 {
-        Result { is_ok: false, value: 0i32, error: STATUS_OVERFLOW() }
+        Err(STATUS_OVERFLOW())
     } else {
-        Result { is_ok: true, value: value as i32, error: 0 }
+        Ok(value as i32)
     }
 }
 
 def checked_i64_to_i16(value: i64) -> Result<i16, i64> {
     if value < -32768 {
-        Result { is_ok: false, value: 0i16, error: STATUS_OVERFLOW() }
+        Err(STATUS_OVERFLOW())
     } else if value > 32767 {
-        Result { is_ok: false, value: 0i16, error: STATUS_OVERFLOW() }
+        Err(STATUS_OVERFLOW())
     } else {
-        Result { is_ok: true, value: value as i16, error: 0 }
+        Ok(value as i16)
     }
 }
 
 def checked_i64_to_i8(value: i64) -> Result<i8, i64> {
     if value < -128 {
-        Result { is_ok: false, value: 0i8, error: STATUS_OVERFLOW() }
+        Err(STATUS_OVERFLOW())
     } else if value > 127 {
-        Result { is_ok: false, value: 0i8, error: STATUS_OVERFLOW() }
+        Err(STATUS_OVERFLOW())
     } else {
-        Result { is_ok: true, value: value as i8, error: 0 }
+        Ok(value as i8)
     }
 }
 
 def checked_i64_to_u32(value: i64) -> Result<u32, i64> {
     if value < 0 {
-        Result { is_ok: false, value: 0u32, error: STATUS_INVALID_ARGUMENT() }
+        Err(STATUS_INVALID_ARGUMENT())
     } else if value > 4294967295 {
-        Result { is_ok: false, value: 0u32, error: STATUS_OVERFLOW() }
+        Err(STATUS_OVERFLOW())
     } else {
-        Result { is_ok: true, value: value as u32, error: 0 }
+        Ok(value as u32)
     }
 }
 
 def checked_i64_to_u64(value: i64) -> Result<u64, i64> {
     if value < 0 {
-        Result { is_ok: false, value: 0u64, error: STATUS_INVALID_ARGUMENT() }
+        Err(STATUS_INVALID_ARGUMENT())
     } else {
-        Result { is_ok: true, value: value as u64, error: 0 }
+        Ok(value as u64)
     }
 }
 
 def checked_i64_to_u16(value: i64) -> Result<u16, i64> {
     if value < 0 {
-        Result { is_ok: false, value: 0u16, error: STATUS_INVALID_ARGUMENT() }
+        Err(STATUS_INVALID_ARGUMENT())
     } else if value > 65535 {
-        Result { is_ok: false, value: 0u16, error: STATUS_OVERFLOW() }
+        Err(STATUS_OVERFLOW())
     } else {
-        Result { is_ok: true, value: value as u16, error: 0 }
+        Ok(value as u16)
     }
 }
 
 def checked_i64_to_u8(value: i64) -> Result<u8, i64> {
     if value < 0 {
-        Result { is_ok: false, value: 0u8, error: STATUS_INVALID_ARGUMENT() }
+        Err(STATUS_INVALID_ARGUMENT())
     } else if value > 255 {
-        Result { is_ok: false, value: 0u8, error: STATUS_OVERFLOW() }
+        Err(STATUS_OVERFLOW())
     } else {
-        Result { is_ok: true, value: value as u8, error: 0 }
+        Ok(value as u8)
     }
 }
 
 def checked_i32_to_i16(value: i32) -> Result<i16, i64> {
     if value < -32768i32 {
-        Result { is_ok: false, value: 0i16, error: STATUS_OVERFLOW() }
+        Err(STATUS_OVERFLOW())
     } else if value > 32767i32 {
-        Result { is_ok: false, value: 0i16, error: STATUS_OVERFLOW() }
+        Err(STATUS_OVERFLOW())
     } else {
-        Result { is_ok: true, value: value as i16, error: 0 }
+        Ok(value as i16)
     }
 }
 
 def checked_i32_to_i8(value: i32) -> Result<i8, i64> {
     if value < -128i32 {
-        Result { is_ok: false, value: 0i8, error: STATUS_OVERFLOW() }
+        Err(STATUS_OVERFLOW())
     } else if value > 127i32 {
-        Result { is_ok: false, value: 0i8, error: STATUS_OVERFLOW() }
+        Err(STATUS_OVERFLOW())
     } else {
-        Result { is_ok: true, value: value as i8, error: 0 }
+        Ok(value as i8)
     }
 }
 
 def checked_i32_to_u64(value: i32) -> Result<u64, i64> {
     if value < 0i32 {
-        Result { is_ok: false, value: 0u64, error: STATUS_INVALID_ARGUMENT() }
+        Err(STATUS_INVALID_ARGUMENT())
     } else {
-        Result { is_ok: true, value: value as u64, error: 0 }
+        Ok(value as u64)
     }
 }
 
 def checked_i32_to_u32(value: i32) -> Result<u32, i64> {
     if value < 0i32 {
-        Result { is_ok: false, value: 0u32, error: STATUS_INVALID_ARGUMENT() }
+        Err(STATUS_INVALID_ARGUMENT())
     } else {
-        Result { is_ok: true, value: value as u32, error: 0 }
+        Ok(value as u32)
     }
 }
 
 def checked_i32_to_u16(value: i32) -> Result<u16, i64> {
     if value < 0i32 {
-        Result { is_ok: false, value: 0u16, error: STATUS_INVALID_ARGUMENT() }
+        Err(STATUS_INVALID_ARGUMENT())
     } else if value > 65535i32 {
-        Result { is_ok: false, value: 0u16, error: STATUS_OVERFLOW() }
+        Err(STATUS_OVERFLOW())
     } else {
-        Result { is_ok: true, value: value as u16, error: 0 }
+        Ok(value as u16)
     }
 }
 
 def checked_i32_to_u8(value: i32) -> Result<u8, i64> {
     if value < 0i32 {
-        Result { is_ok: false, value: 0u8, error: STATUS_INVALID_ARGUMENT() }
+        Err(STATUS_INVALID_ARGUMENT())
     } else if value > 255i32 {
-        Result { is_ok: false, value: 0u8, error: STATUS_OVERFLOW() }
+        Err(STATUS_OVERFLOW())
     } else {
-        Result { is_ok: true, value: value as u8, error: 0 }
+        Ok(value as u8)
     }
 }
 
 def checked_i16_to_i8(value: i16) -> Result<i8, i64> {
     if value < -128i16 {
-        Result { is_ok: false, value: 0i8, error: STATUS_OVERFLOW() }
+        Err(STATUS_OVERFLOW())
     } else if value > 127i16 {
-        Result { is_ok: false, value: 0i8, error: STATUS_OVERFLOW() }
+        Err(STATUS_OVERFLOW())
     } else {
-        Result { is_ok: true, value: value as i8, error: 0 }
+        Ok(value as i8)
     }
 }
 
 def checked_i16_to_u64(value: i16) -> Result<u64, i64> {
     if value < 0i16 {
-        Result { is_ok: false, value: 0u64, error: STATUS_INVALID_ARGUMENT() }
+        Err(STATUS_INVALID_ARGUMENT())
     } else {
-        Result { is_ok: true, value: value as u64, error: 0 }
+        Ok(value as u64)
     }
 }
 
 def checked_i16_to_u32(value: i16) -> Result<u32, i64> {
     if value < 0i16 {
-        Result { is_ok: false, value: 0u32, error: STATUS_INVALID_ARGUMENT() }
+        Err(STATUS_INVALID_ARGUMENT())
     } else {
-        Result { is_ok: true, value: value as u32, error: 0 }
+        Ok(value as u32)
     }
 }
 
 def checked_i16_to_u16(value: i16) -> Result<u16, i64> {
     if value < 0i16 {
-        Result { is_ok: false, value: 0u16, error: STATUS_INVALID_ARGUMENT() }
+        Err(STATUS_INVALID_ARGUMENT())
     } else {
-        Result { is_ok: true, value: value as u16, error: 0 }
+        Ok(value as u16)
     }
 }
 
 def checked_i16_to_u8(value: i16) -> Result<u8, i64> {
     if value < 0i16 {
-        Result { is_ok: false, value: 0u8, error: STATUS_INVALID_ARGUMENT() }
+        Err(STATUS_INVALID_ARGUMENT())
     } else if value > 255i16 {
-        Result { is_ok: false, value: 0u8, error: STATUS_OVERFLOW() }
+        Err(STATUS_OVERFLOW())
     } else {
-        Result { is_ok: true, value: value as u8, error: 0 }
+        Ok(value as u8)
     }
 }
 
 def checked_i8_to_u64(value: i8) -> Result<u64, i64> {
     if value < 0i8 {
-        Result { is_ok: false, value: 0u64, error: STATUS_INVALID_ARGUMENT() }
+        Err(STATUS_INVALID_ARGUMENT())
     } else {
-        Result { is_ok: true, value: value as u64, error: 0 }
+        Ok(value as u64)
     }
 }
 
 def checked_i8_to_u32(value: i8) -> Result<u32, i64> {
     if value < 0i8 {
-        Result { is_ok: false, value: 0u32, error: STATUS_INVALID_ARGUMENT() }
+        Err(STATUS_INVALID_ARGUMENT())
     } else {
-        Result { is_ok: true, value: value as u32, error: 0 }
+        Ok(value as u32)
     }
 }
 
 def checked_i8_to_u16(value: i8) -> Result<u16, i64> {
     if value < 0i8 {
-        Result { is_ok: false, value: 0u16, error: STATUS_INVALID_ARGUMENT() }
+        Err(STATUS_INVALID_ARGUMENT())
     } else {
-        Result { is_ok: true, value: value as u16, error: 0 }
+        Ok(value as u16)
     }
 }
 
 def checked_i8_to_u8(value: i8) -> Result<u8, i64> {
     if value < 0i8 {
-        Result { is_ok: false, value: 0u8, error: STATUS_INVALID_ARGUMENT() }
+        Err(STATUS_INVALID_ARGUMENT())
     } else {
-        Result { is_ok: true, value: value as u8, error: 0 }
+        Ok(value as u8)
     }
 }
 
 def checked_u32_to_i64(value: u32) -> Result<i64, i64> {
-    Result { is_ok: true, value: value as i64, error: 0 }
+    Ok(value as i64)
 }
 
 def checked_u32_to_i32(value: u32) -> Result<i32, i64> {
     if value > 2147483647u32 {
-        Result { is_ok: false, value: 0i32, error: STATUS_OVERFLOW() }
+        Err(STATUS_OVERFLOW())
     } else {
-        Result { is_ok: true, value: value as i32, error: 0 }
+        Ok(value as i32)
     }
 }
 
 def checked_u32_to_i16(value: u32) -> Result<i16, i64> {
     if value > 32767u32 {
-        Result { is_ok: false, value: 0i16, error: STATUS_OVERFLOW() }
+        Err(STATUS_OVERFLOW())
     } else {
-        Result { is_ok: true, value: value as i16, error: 0 }
+        Ok(value as i16)
     }
 }
 
 def checked_u32_to_i8(value: u32) -> Result<i8, i64> {
     if value > 127u32 {
-        Result { is_ok: false, value: 0i8, error: STATUS_OVERFLOW() }
+        Err(STATUS_OVERFLOW())
     } else {
-        Result { is_ok: true, value: value as i8, error: 0 }
+        Ok(value as i8)
     }
 }
 
 def checked_u32_to_u16(value: u32) -> Result<u16, i64> {
     if value > 65535u32 {
-        Result { is_ok: false, value: 0u16, error: STATUS_OVERFLOW() }
+        Err(STATUS_OVERFLOW())
     } else {
-        Result { is_ok: true, value: value as u16, error: 0 }
+        Ok(value as u16)
     }
 }
 
 def checked_u32_to_u8(value: u32) -> Result<u8, i64> {
     if value > 255u32 {
-        Result { is_ok: false, value: 0u8, error: STATUS_OVERFLOW() }
+        Err(STATUS_OVERFLOW())
     } else {
-        Result { is_ok: true, value: value as u8, error: 0 }
+        Ok(value as u8)
     }
 }
 
 def checked_u16_to_i64(value: u16) -> Result<i64, i64> {
-    Result { is_ok: true, value: value as i64, error: 0 }
+    Ok(value as i64)
 }
 
 def checked_u16_to_i32(value: u16) -> Result<i32, i64> {
-    Result { is_ok: true, value: value as i32, error: 0 }
+    Ok(value as i32)
 }
 
 def checked_u16_to_i16(value: u16) -> Result<i16, i64> {
     if value > 32767u16 {
-        Result { is_ok: false, value: 0i16, error: STATUS_OVERFLOW() }
+        Err(STATUS_OVERFLOW())
     } else {
-        Result { is_ok: true, value: value as i16, error: 0 }
+        Ok(value as i16)
     }
 }
 
 def checked_u16_to_i8(value: u16) -> Result<i8, i64> {
     if value > 127u16 {
-        Result { is_ok: false, value: 0i8, error: STATUS_OVERFLOW() }
+        Err(STATUS_OVERFLOW())
     } else {
-        Result { is_ok: true, value: value as i8, error: 0 }
+        Ok(value as i8)
     }
 }
 
 def checked_u16_to_u32(value: u16) -> Result<u32, i64> {
-    Result { is_ok: true, value: value as u32, error: 0 }
+    Ok(value as u32)
 }
 
 def checked_u16_to_u64(value: u16) -> Result<u64, i64> {
-    Result { is_ok: true, value: value as u64, error: 0 }
+    Ok(value as u64)
 }
 
 def checked_u16_to_u8(value: u16) -> Result<u8, i64> {
     if value > 255u16 {
-        Result { is_ok: false, value: 0u8, error: STATUS_OVERFLOW() }
+        Err(STATUS_OVERFLOW())
     } else {
-        Result { is_ok: true, value: value as u8, error: 0 }
+        Ok(value as u8)
     }
 }
 
 def checked_u8_to_i64(value: u8) -> Result<i64, i64> {
-    Result { is_ok: true, value: value as i64, error: 0 }
+    Ok(value as i64)
 }
 
 def checked_u8_to_i32(value: u8) -> Result<i32, i64> {
-    Result { is_ok: true, value: value as i32, error: 0 }
+    Ok(value as i32)
 }
 
 def checked_u8_to_i16(value: u8) -> Result<i16, i64> {
-    Result { is_ok: true, value: value as i16, error: 0 }
+    Ok(value as i16)
 }
 
 def checked_u8_to_i8(value: u8) -> Result<i8, i64> {
     if value > 127u8 {
-        Result { is_ok: false, value: 0i8, error: STATUS_OVERFLOW() }
+        Err(STATUS_OVERFLOW())
     } else {
-        Result { is_ok: true, value: value as i8, error: 0 }
+        Ok(value as i8)
     }
 }
 
 def checked_u8_to_u16(value: u8) -> Result<u16, i64> {
-    Result { is_ok: true, value: value as u16, error: 0 }
+    Ok(value as u16)
 }
 
 def checked_u8_to_u32(value: u8) -> Result<u32, i64> {
-    Result { is_ok: true, value: value as u32, error: 0 }
+    Ok(value as u32)
 }
 
 def checked_u8_to_u64(value: u8) -> Result<u64, i64> {
-    Result { is_ok: true, value: value as u64, error: 0 }
+    Ok(value as u64)
 }
 
 def checked_isize_to_i64(value: isize) -> Result<i64, i64> {
-    Result { is_ok: true, value: value as i64, error: 0 }
+    Ok(value as i64)
 }
 
 def checked_isize_to_i32(value: isize) -> Result<i32, i64> {
     if (value as i64) < -2147483648i64 {
-        Result { is_ok: false, value: 0i32, error: STATUS_OVERFLOW() }
+        Err(STATUS_OVERFLOW())
     } else if (value as i64) > 2147483647i64 {
-        Result { is_ok: false, value: 0i32, error: STATUS_OVERFLOW() }
+        Err(STATUS_OVERFLOW())
     } else {
-        Result { is_ok: true, value: value as i32, error: 0 }
+        Ok(value as i32)
     }
 }
 
 def checked_isize_to_i16(value: isize) -> Result<i16, i64> {
     if (value as i64) < -32768i64 {
-        Result { is_ok: false, value: 0i16, error: STATUS_OVERFLOW() }
+        Err(STATUS_OVERFLOW())
     } else if (value as i64) > 32767i64 {
-        Result { is_ok: false, value: 0i16, error: STATUS_OVERFLOW() }
+        Err(STATUS_OVERFLOW())
     } else {
-        Result { is_ok: true, value: value as i16, error: 0 }
+        Ok(value as i16)
     }
 }
 
 def checked_isize_to_i8(value: isize) -> Result<i8, i64> {
     if (value as i64) < -128i64 {
-        Result { is_ok: false, value: 0i8, error: STATUS_OVERFLOW() }
+        Err(STATUS_OVERFLOW())
     } else if (value as i64) > 127i64 {
-        Result { is_ok: false, value: 0i8, error: STATUS_OVERFLOW() }
+        Err(STATUS_OVERFLOW())
     } else {
-        Result { is_ok: true, value: value as i8, error: 0 }
+        Ok(value as i8)
     }
 }
 
 def checked_isize_to_u64(value: isize) -> Result<u64, i64> {
     if value < 0isize {
-        Result { is_ok: false, value: 0u64, error: STATUS_INVALID_ARGUMENT() }
+        Err(STATUS_INVALID_ARGUMENT())
     } else {
-        Result { is_ok: true, value: value as u64, error: 0 }
+        Ok(value as u64)
     }
 }
 
 def checked_isize_to_u32(value: isize) -> Result<u32, i64> {
     if value < 0isize {
-        Result { is_ok: false, value: 0u32, error: STATUS_INVALID_ARGUMENT() }
+        Err(STATUS_INVALID_ARGUMENT())
     } else if (value as u64) > 4294967295u64 {
-        Result { is_ok: false, value: 0u32, error: STATUS_OVERFLOW() }
+        Err(STATUS_OVERFLOW())
     } else {
-        Result { is_ok: true, value: value as u32, error: 0 }
+        Ok(value as u32)
     }
 }
 
 def checked_isize_to_u16(value: isize) -> Result<u16, i64> {
     if value < 0isize {
-        Result { is_ok: false, value: 0u16, error: STATUS_INVALID_ARGUMENT() }
+        Err(STATUS_INVALID_ARGUMENT())
     } else if (value as u64) > 65535u64 {
-        Result { is_ok: false, value: 0u16, error: STATUS_OVERFLOW() }
+        Err(STATUS_OVERFLOW())
     } else {
-        Result { is_ok: true, value: value as u16, error: 0 }
+        Ok(value as u16)
     }
 }
 
 def checked_isize_to_u8(value: isize) -> Result<u8, i64> {
     if value < 0isize {
-        Result { is_ok: false, value: 0u8, error: STATUS_INVALID_ARGUMENT() }
+        Err(STATUS_INVALID_ARGUMENT())
     } else if (value as u64) > 255u64 {
-        Result { is_ok: false, value: 0u8, error: STATUS_OVERFLOW() }
+        Err(STATUS_OVERFLOW())
     } else {
-        Result { is_ok: true, value: value as u8, error: 0 }
+        Ok(value as u8)
     }
 }
 
 def checked_usize_to_i64(value: usize) -> Result<i64, i64> {
     if (value as u64) > 9223372036854775807u64 {
-        Result { is_ok: false, value: 0, error: STATUS_OVERFLOW() }
+        Err(STATUS_OVERFLOW())
     } else {
-        Result { is_ok: true, value: value as i64, error: 0 }
+        Ok(value as i64)
     }
 }
 
 def checked_usize_to_i32(value: usize) -> Result<i32, i64> {
     if (value as u64) > 2147483647u64 {
-        Result { is_ok: false, value: 0i32, error: STATUS_OVERFLOW() }
+        Err(STATUS_OVERFLOW())
     } else {
-        Result { is_ok: true, value: value as i32, error: 0 }
+        Ok(value as i32)
     }
 }
 
 def checked_usize_to_i16(value: usize) -> Result<i16, i64> {
     if (value as u64) > 32767u64 {
-        Result { is_ok: false, value: 0i16, error: STATUS_OVERFLOW() }
+        Err(STATUS_OVERFLOW())
     } else {
-        Result { is_ok: true, value: value as i16, error: 0 }
+        Ok(value as i16)
     }
 }
 
 def checked_usize_to_i8(value: usize) -> Result<i8, i64> {
     if (value as u64) > 127u64 {
-        Result { is_ok: false, value: 0i8, error: STATUS_OVERFLOW() }
+        Err(STATUS_OVERFLOW())
     } else {
-        Result { is_ok: true, value: value as i8, error: 0 }
+        Ok(value as i8)
     }
 }
 
 def checked_usize_to_u64(value: usize) -> Result<u64, i64> {
-    Result { is_ok: true, value: value as u64, error: 0 }
+    Ok(value as u64)
 }
 
 def checked_usize_to_u32(value: usize) -> Result<u32, i64> {
     if (value as u64) > 4294967295u64 {
-        Result { is_ok: false, value: 0u32, error: STATUS_OVERFLOW() }
+        Err(STATUS_OVERFLOW())
     } else {
-        Result { is_ok: true, value: value as u32, error: 0 }
+        Ok(value as u32)
     }
 }
 
 def checked_usize_to_u16(value: usize) -> Result<u16, i64> {
     if (value as u64) > 65535u64 {
-        Result { is_ok: false, value: 0u16, error: STATUS_OVERFLOW() }
+        Err(STATUS_OVERFLOW())
     } else {
-        Result { is_ok: true, value: value as u16, error: 0 }
+        Ok(value as u16)
     }
 }
 
 def checked_usize_to_u8(value: usize) -> Result<u8, i64> {
     if (value as u64) > 255u64 {
-        Result { is_ok: false, value: 0u8, error: STATUS_OVERFLOW() }
+        Err(STATUS_OVERFLOW())
     } else {
-        Result { is_ok: true, value: value as u8, error: 0 }
+        Ok(value as u8)
     }
 }
 

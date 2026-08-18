@@ -481,43 +481,47 @@ impl fmt::Display for TypeckError {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
             TypeckError::TypeMismatch { expected, found } => {
-                write!(f, "类型不匹配: 期望 {}, 找到 {}", expected, found)
+                write!(f, "type mismatch: expected {}, found {}", expected, found)
             }
             TypeckError::UndefinedType { name } => {
-                write!(f, "未定义的类型: {}", name)
+                write!(f, "undefined type: {}", name)
             }
             TypeckError::UndefinedVariable { name } => {
-                write!(f, "未定义的变量: {}", name)
+                write!(f, "undefined variable: {}", name)
             }
             TypeckError::UndefinedFunction { name } => {
-                write!(f, "未定义的函数: {}", name)
+                write!(f, "undefined function: {}", name)
             }
             TypeckError::ArgumentCountMismatch { expected, found } => {
-                write!(f, "参数数量错误: 期望 {} 个, 找到 {} 个", expected, found)
+                write!(
+                    f,
+                    "argument count mismatch: expected {}, found {}",
+                    expected, found
+                )
             }
             TypeckError::FieldNotFound {
                 type_name,
                 field_name,
             } => {
-                write!(f, "类型 {} 没有字段 {}", type_name, field_name)
+                write!(f, "type {} has no field {}", type_name, field_name)
             }
             TypeckError::MethodNotFound {
                 type_name,
                 method_name,
             } => {
-                write!(f, "类型 {} 没有方法 {}", type_name, method_name)
+                write!(f, "type {} has no method {}", type_name, method_name)
             }
             TypeckError::TypeInferenceFailed => {
-                write!(f, "无法推断类型")
+                write!(f, "cannot infer type")
             }
             TypeckError::RecursiveType { name } => {
-                write!(f, "递归类型: {}", name)
+                write!(f, "recursive type: {}", name)
             }
             TypeckError::TypeTooLarge { ty } => {
-                write!(f, "类型太大: {}", ty)
+                write!(f, "type is too large: {}", ty)
             }
             TypeckError::CyclicType => {
-                write!(f, "循环类型依赖")
+                write!(f, "cyclic type dependency")
             }
             TypeckError::NonExhaustiveMatch { missing, .. } => {
                 write!(

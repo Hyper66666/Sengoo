@@ -2,29 +2,59 @@ import std::net;
 
 import std::status;
 
-def health_handler(request: HttpServerRequest) -> i64 {
-    if request.respond(200, "ok").unwrap_or(false) { 1; } else { 0; };
+def health_handler(request: &mut HttpServerRequest) -> Result<bool, i64> {
+    request.respond(200, "ok");
 }
 
-def echo_handler(request: HttpServerRequest) -> i64 {
-    if request.respond(200, "echo").unwrap_or(false) { 1; } else { 0; };
+def echo_handler(request: &mut HttpServerRequest) -> Result<bool, i64> {
+    request.respond(200, "echo");
 }
 
 def dual_router() -> Result<HttpRouter, i64> {
-    let h_health: fn(HttpServerRequest) -> i64 = health_handler;
-    let h_echo: fn(HttpServerRequest) -> i64 = echo_handler;
-    let r0 = http_router_new();
-    let r1 = http_router_route(r0, "GET", "/health", h_health);
-    if r1.is_ok == false { r1; } else { http_router_route(r1.value, "GET", "/echo", h_echo); };
-}
-
-def dispatch_dual(request: HttpServerRequest) -> bool {
-    let built = dual_router();
-    if built.is_ok == false { false; } else { let ignored = http_router_dispatch(built.value, request); true; };
+    match http_router_new() {
+        Err(error) => Err(error),
+        Ok(mut router) => {
+            let health: fn(&mut HttpServerRequest) -> Result<bool, i64> = health_handler;
+            let echo: fn(&mut HttpServerRequest) -> Result<bool, i64> = echo_handler;
+            match http_router_route(&mut router, "GET", "/health", health) {
+                Err(error) => Err(error),
+                Ok(_) => match http_router_route(&mut router, "GET", "/echo", echo) {
+                    Err(error) => Err(error),
+                    Ok(_) => Ok(router),
+                },
+            }
+        },
+    }
 }
 
 async def main() -> i64 {
-    let bind_result = http_server_bind("127.0.0.1", 0);
-    let unsupported_host = if bind_result.is_ok { false; } else { bind_result.error == STATUS_UNSUPPORTED(); };
-    if bind_result.is_ok { let server = bind_result.value; let claimed = server.claim_serve_mode(HTTP_SERVER_MODE_ROUTER()); if claimed.is_ok == false { server.close(); 1; } else { let outcome = await server.next_request_router_async(5000); let timed_out = if outcome.is_ok { false; } else { outcome.error == STATUS_TIMEOUT(); }; let answered = if outcome.is_ok { dispatch_dual(outcome.value); } else { false; }; let closed = server.close(); if (answered or timed_out) and closed { 0; } else { 1; }; }; } else if unsupported_host { 0; } else { 1; };
+    match http_server_bind("127.0.0.1", 0) {
+        Err(error) => {
+            if error == STATUS_UNSUPPORTED() {
+                0;
+            } else {
+                1;
+            };
+        },
+        Ok(server) => match dual_router() {
+            Err(_) => {
+                server.close();
+                1;
+            },
+            Ok(router) => {
+                let served = await serve_http_timeout(&server, &router, 5000);
+                let timed_out = if served.is_ok {
+                    false;
+                } else {
+                    served.error == STATUS_TIMEOUT();
+                };
+                let closed = server.close();
+                if (served.is_ok or timed_out) and closed {
+                    0;
+                } else {
+                    1;
+                };
+            },
+        },
+    }
 }

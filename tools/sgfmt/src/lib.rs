@@ -1118,6 +1118,200 @@ impl Iterator for Counter {
         assert!(first.contains("1..3"));
         assert!(first.contains("..10"));
     }
+    fn width_options(max_width: usize) -> FormatOptions {
+        FormatOptions {
+            max_width,
+            ..FormatOptions::default()
+        }
+    }
+
+    fn longest_line(source: &str) -> usize {
+        source
+            .lines()
+            .map(|line| line.chars().count())
+            .max()
+            .unwrap_or(0)
+    }
+
+    #[test]
+    fn long_conditional_body_is_rendered_across_lines() {
+        let src = "def classify(total: i64, limit: i64) -> i64 {\n    if total > limit { let overflow = total - limit; let penalty = overflow * 3; return penalty + 1; };\n    total\n}";
+        let formatted = format_test_source(src, FormatOptions::default());
+
+        assert!(
+            formatted.contains("    if total > limit {\n        let overflow = total - limit;\n"),
+            "long conditional body was not broken across lines:\n{formatted}"
+        );
+        assert!(
+            longest_line(&formatted) <= 100,
+            "formatted output still exceeds the default width:\n{formatted}"
+        );
+        assert_eq!(
+            formatted,
+            format_test_source(&formatted, FormatOptions::default())
+        );
+    }
+
+    #[test]
+    fn short_blocks_stay_inline() {
+        let src = "def small(n: i64) -> i64 {\n    if n < 0 { return 0; };\n    let mut i = 0;\n    while i < n { i = i + 1; };\n    n\n}";
+        let formatted = format_test_source(src, FormatOptions::default());
+
+        assert!(formatted.contains("    if n < 0 { return 0; };"));
+        assert!(formatted.contains("    while i < n { i = i + 1; };"));
+    }
+
+    #[test]
+    fn max_width_moves_where_blocks_break() {
+        let src = "def tiers(total: i64, limit: i64) -> i64 {\n    if total > limit { let a = total - limit; return a * 3; };\n    if total < 0 { return 0; };\n    total\n}";
+
+        // 62 characters wide with its indent, so it survives 100 and breaks at 60.
+        let wide = format_test_source(src, width_options(100));
+        assert!(wide.contains("    if total > limit { let a = total - limit; return a * 3; };"));
+        assert!(wide.contains("    if total < 0 { return 0; };"));
+
+        let narrow = format_test_source(src, width_options(60));
+        assert!(
+            narrow.contains("    if total > limit {\n        let a = total - limit;\n"),
+            "width 60 did not break the wider block:\n{narrow}"
+        );
+        // The 31-character block still fits at 60 and only breaks at 25.
+        assert!(narrow.contains("    if total < 0 { return 0; };"));
+
+        let narrowest = format_test_source(src, width_options(25));
+        assert!(
+            narrowest.contains("    if total < 0 {\n        return 0;\n    };"),
+            "width 25 did not break the narrower block:\n{narrowest}"
+        );
+
+        assert_ne!(wide, narrow);
+        assert_ne!(narrow, narrowest);
+    }
+
+    #[test]
+    fn every_block_form_breaks_on_width() {
+        let cases = [
+            (
+                "if",
+                "if total > limit { let a = total * 2; let b = a + limit; acc = b; };",
+                "if total > limit {",
+            ),
+            (
+                "while",
+                "while acc < total { let a = acc * 7; let b = a + limit; acc = b; };",
+                "while acc < total {",
+            ),
+            (
+                "for",
+                "for step in 0..3 { let a = step * limit; let b = a + 17; acc = acc + b; };",
+                "for step in 0..3 {",
+            ),
+            (
+                "loop",
+                "loop { let a = acc * 2; let b = a - limit; acc = b; break acc; };",
+                "loop {",
+            ),
+            (
+                "async",
+                "let d = async { let a = acc + 1; let b = a * 2; b };",
+                "let d = async {",
+            ),
+            (
+                "parallel",
+                "let p = parallel { let a = acc + 3; let b = a * 4; b };",
+                "let p = parallel {",
+            ),
+            (
+                "try",
+                "let t = try { let a = acc + 5; let b = a * 6; b };",
+                "let t = try {",
+            ),
+            (
+                "block",
+                "{ let a = acc + 7; let b = a * 8; acc = b; };",
+                "{",
+            ),
+        ];
+
+        for (label, body, opener) in cases {
+            let src =
+                format!("def probe(total: i64, limit: i64) -> i64 {{\n    let mut acc = 0;\n    {body}\n    acc\n}}");
+
+            let inline = format_test_source(&src, width_options(200));
+            assert!(
+                !inline.contains(&format!("    {opener}\n")),
+                "{label} block should stay inline at width 200:\n{inline}"
+            );
+
+            let broken = format_test_source(&src, width_options(30));
+            assert!(
+                broken.contains(&format!("    {opener}\n")),
+                "{label} block was not broken at width 30:\n{broken}"
+            );
+            assert_eq!(broken, format_test_source(&broken, width_options(30)));
+        }
+    }
+
+    #[test]
+    fn match_arms_break_one_per_line_and_carry_block_bodies() {
+        let src = "def pick(total: i64, limit: i64) -> i64 {\n    let acc = 1;\n    let tag = match total { 0 => 0, 1 => { let doubled = limit * 2; let raised = doubled + acc; raised }, _ => acc };\n    tag\n}";
+
+        let broken = format_test_source(src, width_options(60));
+        assert!(broken.contains("    let tag = match total {\n"));
+        assert!(broken.contains("\n        0 => 0,\n"));
+        assert!(
+            broken.contains("        1 => {\n            let doubled = limit * 2;\n"),
+            "match arm body was not broken:\n{broken}"
+        );
+        assert!(broken.contains("\n        _ => acc,\n"));
+        assert_eq!(broken, format_test_source(&broken, width_options(60)));
+    }
+
+    #[test]
+    fn else_if_chains_break_as_a_whole() {
+        let src = "def chain(total: i64, limit: i64) -> i64 {\n    let mut acc = 0;\n    if total > limit { let inner = total - limit; acc = acc + inner; } else if total < 0 { acc = 0 - total; } else { acc = total; };\n    acc\n}";
+        let formatted = format_test_source(src, FormatOptions::default());
+
+        assert!(formatted.contains("    if total > limit {\n"));
+        assert!(formatted.contains("\n    } else if total < 0 {\n"));
+        assert!(formatted.contains("\n    } else {\n"));
+        assert_eq!(
+            formatted,
+            format_test_source(&formatted, FormatOptions::default())
+        );
+    }
+
+    #[test]
+    fn nested_blocks_keep_their_indentation() {
+        let src = "def nested(total: i64, limit: i64) -> i64 {\n    let mut acc = 0;\n    if total > limit { if total > limit + 10 { let inner = total - limit; acc = acc + inner; } else { acc = acc + 1; }; acc = acc * 2; };\n    acc\n}";
+        let formatted = format_test_source(src, FormatOptions::default());
+
+        assert!(formatted.contains("    if total > limit {\n        if total > limit + 10 {\n            let inner = total - limit;\n"));
+        assert!(formatted.contains("\n        } else {\n            acc = acc + 1;\n        };\n"));
+        assert!(
+            longest_line(&formatted) <= 100,
+            "nested output still exceeds the default width:\n{formatted}"
+        );
+    }
+
+    #[test]
+    fn multi_line_conditional_source_is_already_formatted() {
+        let src = "def classify(total: i64, limit: i64) -> i64 {\n    if total > limit {\n        let overflow = total - limit;\n        let penalty = overflow * 3;\n        return penalty + 1;\n    };\n    total;\n}";
+        assert_eq!(format_test_source(src, FormatOptions::default()), src);
+    }
+
+    #[test]
+    fn empty_blocks_stay_inline_even_when_the_prefix_is_too_wide() {
+        let src =
+            "def spin(total: i64, limit: i64) -> i64 {\n    while total > limit {};\n    total\n}";
+        let formatted = format_test_source(src, width_options(10));
+
+        assert!(
+            formatted.contains("    while total > limit {};"),
+            "empty block should not be split:\n{formatted}"
+        );
+    }
+
     #[test]
     fn bench_samples_are_idempotent() {
         let bench_root = PathBuf::from(env!("CARGO_MANIFEST_DIR"))

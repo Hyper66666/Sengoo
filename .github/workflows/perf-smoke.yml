@@ -27,6 +27,7 @@ jobs:
           $smokePass = "bench/results/release-resource-smoke-pass-${{ github.run_id }}.json"
           python bench/scripts/release_resource_gate.py `
             --sgc target/release/sgc.exe `
+            --runtime-mode source-development `
             --scenario bench/scenarios/release-resource/runtime_loop.sg `
             --iterations 3 `
             --max-sgc-artifact-mib 512 `
@@ -43,6 +44,7 @@ jobs:
           $smokeFail = "bench/results/release-resource-smoke-budget-violation-${{ github.run_id }}.json"
           python bench/scripts/release_resource_gate.py `
             --sgc target/release/sgc.exe `
+            --runtime-mode source-development `
             --scenario bench/scenarios/release-resource/runtime_loop.sg `
             --iterations 3 `
             --max-full-build-ms 0.01 `
@@ -68,6 +70,7 @@ jobs:
         run: |
           python bench/scripts/release_resource_gate.py `
             --sgc target/release/sgc.exe `
+            --runtime-mode source-development `
             --scenario bench/scenarios/release-resource/runtime_loop.sg `
             --output bench/results/release-resource-${{ github.run_id }}.json
 

@@ -53,6 +53,20 @@ pub(crate) fn mir_type_instance_name(ty: &MIRType) -> String {
             format!("tuple_{}", parts.join("_"))
         }
         MIRType::Struct { name, .. } => name.clone(),
+        MIRType::Enum { name, variants, .. } if !name.is_empty() => {
+            let _ = variants;
+            name.clone()
+        }
+        MIRType::Enum { variants, .. } => {
+            let parts: Vec<String> = variants
+                .iter()
+                .map(|(discr, payload)| match payload {
+                    Some(payload) => format!("{}{}", discr, mir_type_instance_name(payload)),
+                    None => format!("{discr}unit"),
+                })
+                .collect();
+            format!("enum_{}", parts.join("_"))
+        }
         _ => "unknown".to_string(),
     }
 }

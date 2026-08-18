@@ -379,8 +379,10 @@ impl BorrowChecker {
                     || (method.name == "get"
                         && self.receiver_is_vec(receiver)
                         && self.method_call_returns_ref(expr))
-                    || (matches!(method.name.as_str(), "iter" | "iter_keys")
-                        && self.method_call_returns_borrowing_iter(expr))
+                    || (matches!(
+                        method.name.as_str(),
+                        "iter" | "iter_keys" | "keys" | "entries"
+                    ) && self.method_call_returns_borrowing_iter(expr))
                     || (matches!(method.name.as_str(), "front" | "back")
                         && self.receiver_is_vec(receiver)
                         && self.method_call_returns_ref(expr))
@@ -402,10 +404,8 @@ impl BorrowChecker {
                 else_branch,
             } => {
                 self.check_expr(cond);
-                // Isolate then/else move sets: merge then into parent only after
-                // else is checked from the pre-if moved state. Otherwise exclusive
-                // ownership transfers in both arms (dogfood worker dispatch) false
-                // fail as use-after-move on the second arm.
+                // Branch-local moves are checked from the same pre-if state,
+                // then only fallthrough paths are merged into the parent.
                 let before_moved = self.moved.clone();
                 let before_spans = self.move_spans.clone();
                 self.check_block_inner(then_branch, false, true);
@@ -417,8 +417,7 @@ impl BorrowChecker {
                     self.check_expr(else_expr);
                     let else_moved = std::mem::take(&mut self.moved);
                     let else_spans = std::mem::take(&mut self.move_spans);
-                    let then_falls =
-                        !Self::block_has_unconditional_return_stmt(then_branch);
+                    let then_falls = !Self::block_has_unconditional_return_stmt(then_branch);
                     let else_falls = !Self::expr_has_unconditional_return(else_expr);
                     self.moved = before_moved;
                     self.move_spans = before_spans;
@@ -442,6 +441,18 @@ impl BorrowChecker {
                     self.move_spans = then_spans;
                 }
             }
+            ExprKind::IfLet {
+                expr,
+                then_branch,
+                else_branch,
+                ..
+            } => {
+                self.check_expr(expr);
+                self.check_block(then_branch);
+                if let Some(else_expr) = else_branch {
+                    self.check_expr(else_expr);
+                }
+            }
             ExprKind::While { cond, body } => {
                 self.push_active_loop_uses(Some(cond), body);
                 self.check_expr(cond);
@@ -450,6 +461,9 @@ impl BorrowChecker {
             }
             ExprKind::For { iter, body, .. } => {
                 self.push_active_loop_uses(Some(iter), body);
+                if Self::expr_move_path(iter).is_some() && self.receiver_is_collection(iter) {
+                    self.add_borrow(iter, BorrowKind::Immutable);
+                }
                 self.check_expr(iter);
                 self.check_block(body);
                 self.active_loop_uses.pop();
@@ -480,6 +494,14 @@ impl BorrowChecker {
             ExprKind::Array(elems) | ExprKind::Tuple(elems) => {
                 for elem in elems {
                     self.check_expr(elem);
+                }
+            }
+            ExprKind::VecBang { elements, count } => {
+                for elem in elements {
+                    self.check_expr(elem);
+                }
+                if let Some(count) = count {
+                    self.check_expr(count);
                 }
             }
             ExprKind::Struct { fields, base, .. } => {
@@ -570,6 +592,16 @@ impl BorrowChecker {
                     self.check_borrow_escape_expr(else_expr);
                 }
             }
+            ExprKind::IfLet {
+                then_branch,
+                else_branch,
+                ..
+            } => {
+                self.check_borrow_escape_block_tail(then_branch);
+                if let Some(else_expr) = else_branch {
+                    self.check_borrow_escape_expr(else_expr);
+                }
+            }
             ExprKind::Block(block) => self.check_borrow_escape_block_tail(block),
             ExprKind::Match { arms, .. } => {
                 for arm in arms {
@@ -582,8 +614,10 @@ impl BorrowChecker {
                 || (method.name == "get"
                     && self.receiver_is_vec(receiver)
                     && self.method_call_returns_ref(expr))
-                || (matches!(method.name.as_str(), "iter" | "iter_keys")
-                    && self.method_call_returns_borrowing_iter(expr)) =>
+                || (matches!(
+                    method.name.as_str(),
+                    "iter" | "iter_keys" | "keys" | "entries"
+                ) && self.method_call_returns_borrowing_iter(expr)) =>
             {
                 let var = Self::expr_move_path(receiver)
                     .map(|path| path.display())
@@ -894,6 +928,14 @@ impl BorrowChecker {
                     Self::collect_expr_ident_uses(elem, uses);
                 }
             }
+            ExprKind::VecBang { elements, count } => {
+                for elem in elements {
+                    Self::collect_expr_ident_uses(elem, uses);
+                }
+                if let Some(count) = count {
+                    Self::collect_expr_ident_uses(count, uses);
+                }
+            }
             ExprKind::Struct { fields, base, .. } => {
                 for field in fields {
                     Self::collect_expr_ident_uses(&field.value, uses);
@@ -908,6 +950,18 @@ impl BorrowChecker {
                 else_branch,
             } => {
                 Self::collect_expr_ident_uses(cond, uses);
+                Self::collect_block_ident_uses(then_branch, uses);
+                if let Some(else_expr) = else_branch {
+                    Self::collect_expr_ident_uses(else_expr, uses);
+                }
+            }
+            ExprKind::IfLet {
+                expr,
+                then_branch,
+                else_branch,
+                ..
+            } => {
+                Self::collect_expr_ident_uses(expr, uses);
                 Self::collect_block_ident_uses(then_branch, uses);
                 if let Some(else_expr) = else_branch {
                     Self::collect_expr_ident_uses(else_expr, uses);
@@ -1115,8 +1169,10 @@ impl BorrowChecker {
                     || (method.name == "get"
                         && self.receiver_is_vec(receiver)
                         && self.method_call_returns_ref(expr))
-                    || (matches!(method.name.as_str(), "iter" | "iter_keys")
-                        && self.method_call_returns_borrowing_iter(expr));
+                    || (matches!(
+                        method.name.as_str(),
+                        "iter" | "iter_keys" | "keys" | "entries"
+                    ) && self.method_call_returns_borrowing_iter(expr));
                 if borrows_receiver {
                     self.add_borrow(receiver, BorrowKind::Immutable);
                     if let Some(source) = Self::expr_move_path(receiver) {
@@ -1158,11 +1214,15 @@ impl BorrowChecker {
     }
 
     fn receiver_is_vec(&self, receiver: &Expr) -> bool {
+        self.receiver_is_collection(receiver)
+    }
+
+    fn receiver_is_collection(&self, receiver: &Expr) -> bool {
         let Some(path) = Self::expr_move_path(receiver) else {
             return false;
         };
         self.move_path_ty(&path).is_some_and(
-            |ty| matches!(&ty.kind, crate::typeck::ty::TyKind::Adt { name, .. } if matches!(name.as_str(), "Vec" | "VecDeque" | "HashMap" | "BTreeMap" | "BTreeSet")),
+            |ty| matches!(&ty.kind, crate::typeck::ty::TyKind::Adt { name, .. } if matches!(name.as_str(), "Vec" | "VecDeque" | "HashMap" | "HashSet" | "BTreeMap" | "BTreeSet")),
         )
     }
 
@@ -1176,7 +1236,7 @@ impl BorrowChecker {
         self._env
             .resolved_method_return_type(call.span)
             .is_some_and(|ty| {
-                matches!(&ty.kind, crate::typeck::ty::TyKind::Adt { name, .. } if matches!(name.as_str(), "RawVecIter" | "RawMapKeyIter"))
+                matches!(&ty.kind, crate::typeck::ty::TyKind::Adt { name, .. } if matches!(name.as_str(), "RawVecIter" | "RawMapKeyIter" | "MapEntryIter"))
             })
     }
 

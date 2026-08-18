@@ -3,12 +3,13 @@
 The MVP standard library is split into small source modules so compiler tests,
 runtime wrappers, and examples can depend on only the surfaces they need.
 
-- `option.sg`: generic `Option<T>`, generic constructors (`option_some`,
-  `option_none_with`), i64/bool convenience constructors, bool/i64 unwrap and
-  expect helpers, and i64 map helpers.
-- `result.sg`: generic `Result<T, E>`, generic constructors (`result_ok_with`,
-  `result_err_with`), i64 and `Result<bool, i64>` convenience constructors, and
-  bool/i64 unwrap, map, and projection helpers.
+- `option.sg`: generic enum `Option<T> { None, Some(T) }`, `Some`/`None`
+  constructors, deprecated placeholder `option_none_with`, i64/bool convenience
+  constructors, bool/i64 unwrap and expect helpers, and i64 map helpers.
+- `result.sg`: generic enum `Result<T, E> { Ok(T), Err(E) }`, `Ok`/`Err`
+  constructors, deprecated placeholder `result_ok_with` / `result_err_with`,
+  i64 and `Result<bool, i64>` convenience constructors, and bool/i64 unwrap,
+  map, and projection helpers.
 - `collections.sg`: ABI-v1 runtime-backed `Vec<T>`, `HashMap<K, V>`,
   `HashSet<T>`, deterministic `BTreeMap<K, V>` / `BTreeSet<T>`, iterators,
   source-compatible scalar/string helper names, `Rc<i64>`/`Rc<bool>`/`Rc<String>` shared
@@ -369,7 +370,7 @@ values to the existing raw-pointer driver calls.
 - `ffi.sg`: wraps `runtime/src/reflect/runtime_ffi.rs`. Lifecycle: `ffi_open`/`ffi_open_raw` returns `CLib`, callbacks use `CallbackToken.unbind`, buffers use `Buffer.free`. Error copy and buffer-to-buffer copy helpers accept managed `Buffer` handles. Fixed-arity `call_i64_0` through `call_i64_4` helpers cover common C calls without raw argument/result pointers; object constructors and methods have matching helpers. Example: `examples/reflection/ffi_load_call.sg`.
 - `lua54.sg`: wraps `runtime/src/reflect/runtime_lua54.rs`. Lifecycle: `lua54_open`/`lua54_open_raw` returns `Lua54`, then call `Lua54.close`. Error copy helpers accept managed `Buffer` handles, and `call_i64_0` through `call_i64_4` cover common calls without raw pointer slots. Native Lua 5.4 availability is runtime/feature-gated, so examples may exercise the diagnostic path when Lua is unavailable. Example: `examples/reflection/lua54_eval.sg`.
 - `proto.sg`: wraps `runtime/src/reflect/runtime_proto.rs` for the currently implemented `ProtoUserEvent` encode/decode shape. `proto_user_event` accepts a normal `&str` name, `proto_user_event_encode` writes into a managed `Buffer`, and `proto_user_event_decode(buffer, input_len)` returns a managed `ProtoDecodedUserEvent` handle with field readers plus `close`. Raw decode/output helpers remain available for explicit pointer handoff. Example: `examples/reflection/proto_encode_decode.sg`.
-- `net.sg`: wraps the public `runtime/src/net.rs` TCP/UDP/HTTP client/server/WS surface and `runtime/src/reflect/runtime_net_bench.rs`. Safe `&str` helpers cover hosts, URLs, text payloads, server routes, and required-header middleware; managed `Buffer` helpers cover receive/body/error/bench output; `_raw` helpers remain for explicit pointer/buffer handoff. Lifecycle: every nonzero handle is closed by its matching `close` method/function. In native `sgc` stdlib builds where the Rust network runtime is not linked, fallback C symbols return stable unsupported or invalid-handle statuses rather than leaving optional network symbols unresolved. Examples: `examples/reflection/net_tcp_echo.sg`, `examples/reflection/net_http_server.sg`.
+- `net.sg`: wraps the public `runtime/src/net.rs` TCP/UDP/HTTP client/server/WS surface and `runtime/src/reflect/runtime_net_bench.rs`. Safe `&str` helpers cover hosts, URLs, text payloads, server routes, and required-header middleware; managed `Buffer` helpers cover receive/body/error/bench output; `_raw` helpers remain for explicit pointer/buffer handoff. `HttpRouter` keeps exact-match `fn(&mut HttpServerRequest) -> Result<bool, i64>` handlers in Sengoo-owned descriptor-backed vectors, and `serve_http` uses the async pull ABI without a reverse Rust callback. Lifecycle: every nonzero handle is closed by its matching `close` method/function. In native `sgc` stdlib builds where the Rust network runtime is not linked, fallback C symbols return stable unsupported or invalid-handle statuses rather than leaving optional network symbols unresolved. Examples: `examples/reflection/net_tcp_echo.sg`, `examples/reflection/net_http_server.sg`.
 
 Current source-level limitation: Sengoo FFI now accepts immutable `&str` C-string
 parameters, and the reflection wrappers expose normal string helpers for common

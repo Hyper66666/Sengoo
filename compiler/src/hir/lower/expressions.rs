@@ -147,14 +147,57 @@ pub(super) fn lower_body(block: &ast::Block, type_env: &TypeEnv) -> HIRBody {
     hir_body
 }
 
+#[inline(never)]
+fn lower_if_let_expr(expr: &ast::Expr, type_env: &TypeEnv) -> Result<HIRExpr, String> {
+    let ast::ExprKind::IfLet {
+        pattern,
+        expr: scrutinee,
+        then_branch,
+        else_branch,
+    } = &expr.kind
+    else {
+        return Err("expected if-let expression".to_string());
+    };
+    let then_expr = ast::Expr::block(then_branch.clone());
+    let else_expr = else_branch
+        .as_ref()
+        .map(|e| e.as_ref().clone())
+        .unwrap_or_else(|| ast::Expr::block(ast::Block::new(Vec::new(), expr.span)));
+    let match_expr = ast::Expr::match_expr(
+        scrutinee.as_ref().clone(),
+        vec![
+            ast::MatchArm::new(vec![pattern.clone()], then_expr, expr.span),
+            ast::MatchArm::new(
+                vec![ast::pattern::Pattern::new(
+                    ast::pattern::PatternKind::Wildcard,
+                    expr.span,
+                )],
+                else_expr,
+                expr.span,
+            ),
+        ],
+        expr.span,
+    );
+    lower_expr(&match_expr, type_env)
+}
+
 /// 降低 AST 表达式到 HIR 表达式
 pub(super) fn lower_expr(expr: &ast::Expr, type_env: &TypeEnv) -> Result<HIRExpr, String> {
     Ok(match &expr.kind {
         ast::ExprKind::Literal(lit) => HIRExpr::Lit(lower_literal(lit)),
-        ast::ExprKind::Ident(name) => HIRExpr::Var {
-            name: name.name.clone(),
-            symbol: name.symbol,
-        },
+        ast::ExprKind::Ident(name) => {
+            // A bare payload-free variant such as `None`: only when the name
+            // is no known symbol and exactly one enum declares it, matching
+            // the type checker's resolution order.
+            if let Some(construct) = bare_variant_construct(&name.name, expr.span, type_env) {
+                construct
+            } else {
+                HIRExpr::Var {
+                    name: name.name.clone(),
+                    symbol: name.symbol,
+                }
+            }
+        }
         ast::ExprKind::Path(path) => {
             if let Some((enum_name, variant_name, discriminant)) = enum_constructor(path) {
                 HIRExpr::EnumConstruct {
@@ -162,11 +205,20 @@ pub(super) fn lower_expr(expr: &ast::Expr, type_env: &TypeEnv) -> Result<HIRExpr
                     variant_name,
                     discriminant,
                     args: Vec::new(),
+                    concrete_type: type_env
+                        .resolved_enum_variant_type(expr.span)
+                        .map(|ty| Box::new(lower_checked_type(ty))),
                 }
             } else if let Some(ident) = path.as_simple() {
-                HIRExpr::Var {
-                    name: ident.name.clone(),
-                    symbol: ident.symbol,
+                // Single-segment paths cover bare payload-free variants
+                // (`None`) exactly like plain identifiers do.
+                if let Some(construct) = bare_variant_construct(&ident.name, expr.span, type_env) {
+                    construct
+                } else {
+                    HIRExpr::Var {
+                        name: ident.name.clone(),
+                        symbol: ident.symbol,
+                    }
                 }
             } else {
                 let name = path
@@ -218,6 +270,7 @@ pub(super) fn lower_expr(expr: &ast::Expr, type_env: &TypeEnv) -> Result<HIRExpr
                 }),
             }
         }
+        ast::ExprKind::IfLet { .. } => lower_if_let_expr(expr, type_env)?,
         ast::ExprKind::Match { scrutinee, arms } => {
             let scrutinee_enum = scrutinee_enum_name(scrutinee, type_env);
             let scrutinee = Box::new(lower_expr(scrutinee, type_env)?);
@@ -254,13 +307,23 @@ pub(super) fn lower_expr(expr: &ast::Expr, type_env: &TypeEnv) -> Result<HIRExpr
             iter,
             body,
         } => {
-            let (var_name, var_symbol) = extract_pattern_var_name(pattern);
-            HIRExpr::For {
-                var_name,
-                var_symbol,
-                iter: Box::new(lower_expr(iter, type_env)?),
-                body: Box::new(lower_body(body, type_env)),
+            if let Some(desugared) = type_env.desugared_for(expr.span) {
+                lower_expr(desugared, type_env)?
+            } else {
+                let (var_name, var_symbol) = extract_pattern_var_name(pattern);
+                HIRExpr::For {
+                    var_name,
+                    var_symbol,
+                    iter: Box::new(lower_expr(iter, type_env)?),
+                    body: Box::new(lower_body(body, type_env)),
+                }
             }
+        }
+        ast::ExprKind::VecBang { .. } => {
+            let desugared = type_env
+                .desugared_for(expr.span)
+                .ok_or_else(|| "vec! was not lowered during type checking".to_string())?;
+            lower_expr(desugared, type_env)?
         }
         ast::ExprKind::Call { func, args } => {
             if let Some(resolved) = type_env.resolved_associated_function(expr.span.lo) {
@@ -279,29 +342,24 @@ pub(super) fn lower_expr(expr: &ast::Expr, type_env: &TypeEnv) -> Result<HIRExpr
                         .map(lower_checked_type),
                 }
             } else {
-                if let ast::ExprKind::Path(path) = &func.kind {
-                    if let Some((enum_name, variant_name, discriminant)) = enum_constructor(path) {
-                        HIRExpr::EnumConstruct {
-                            enum_name,
-                            variant_name,
-                            discriminant,
-                            args: args
-                                .iter()
-                                .filter_map(|arg| lower_expr(arg, type_env).ok())
-                                .collect(),
-                        }
-                    } else {
-                        HIRExpr::Call {
-                            func: Box::new(lower_expr(func, type_env)?),
-                            args: args
-                                .iter()
-                                .filter_map(|arg| lower_expr(arg, type_env).ok())
-                                .collect(),
-                            site_lo: Some(expr.span.lo),
-                            expected_return_type: type_env
-                                .resolved_call_return_type(expr.span.lo)
-                                .map(lower_checked_type),
-                        }
+                if let Some((enum_name, variant_name, discriminant)) =
+                    callee_enum_variant(func, type_env)
+                {
+                    HIRExpr::EnumConstruct {
+                        enum_name,
+                        variant_name,
+                        discriminant,
+                        args: args
+                            .iter()
+                            .filter_map(|arg| lower_expr(arg, type_env).ok())
+                            .collect(),
+                        // A payload variant is called like a function, so the
+                        // checked call return type is the selected enum
+                        // instance. Falls back to `None` when unresolved,
+                        // preserving pre-change behavior.
+                        concrete_type: type_env
+                            .resolved_call_return_type(expr.span.lo)
+                            .map(|ty| Box::new(lower_checked_type(ty))),
                     }
                 } else {
                     HIRExpr::Call {
@@ -565,6 +623,56 @@ fn enum_constructor(path: &ast::Path) -> Option<(String, String, u32)> {
     Some((enum_name, variant_name, discriminant))
 }
 
+/// Lower a bare identifier that names a payload-free variant of exactly one
+/// enum (`None`) into its construction. Names that are in scope as variables
+/// or functions stay variables — the type checker resolves in the same order.
+fn bare_variant_construct(
+    name: &str,
+    span: crate::lexer::Span,
+    type_env: &TypeEnv,
+) -> Option<HIRExpr> {
+    if type_env.lookup(name).is_some() {
+        return None;
+    }
+    let (enum_name, discriminant) = enum_index::variant_unique_owner(name)?;
+    Some(HIRExpr::EnumConstruct {
+        enum_name,
+        variant_name: name.to_string(),
+        discriminant,
+        args: Vec::new(),
+        concrete_type: type_env
+            .resolved_enum_variant_type(span)
+            .map(|ty| Box::new(lower_checked_type(ty))),
+    })
+}
+
+/// Variant selected by a call's callee: `Enum::Variant(..)` by path, or a bare
+/// `Some(..)` when the name is no in-scope symbol and exactly one enum
+/// declares the variant.
+fn callee_enum_variant(func: &ast::Expr, type_env: &TypeEnv) -> Option<(String, String, u32)> {
+    match &func.kind {
+        ast::ExprKind::Path(path) => {
+            if path.segments.len() == 1 {
+                let name = &path.segments[0].name;
+                if type_env.lookup(name).is_some() {
+                    return None;
+                }
+                let (enum_name, discriminant) = enum_index::variant_unique_owner(name)?;
+                return Some((enum_name, name.clone(), discriminant));
+            }
+            enum_constructor(path)
+        }
+        ast::ExprKind::Ident(ident) => {
+            if type_env.lookup(&ident.name).is_some() {
+                return None;
+            }
+            let (enum_name, discriminant) = enum_index::variant_unique_owner(&ident.name)?;
+            Some((enum_name, ident.name.clone(), discriminant))
+        }
+        _ => None,
+    }
+}
+
 /// 降低模式
 fn lower_pattern(
     pat: &ast::pattern::Pattern,
@@ -573,11 +681,25 @@ fn lower_pattern(
     Ok(match &pat.kind {
         ast::pattern::PatternKind::Wildcard => HIRPattern::Wild,
         ast::pattern::PatternKind::Literal(lit) => HIRPattern::Lit(lower_literal(lit)),
-        ast::pattern::PatternKind::Ident(name) => HIRPattern::Var {
-            name: name.name.clone(),
-            symbol: name.symbol,
-            mutability: false,
-        },
+        ast::pattern::PatternKind::Ident(name) => {
+            // A bare variant arm such as `None` matches that variant; only
+            // names that are not variants of the scrutinee's enum bind.
+            if let Some(enum_name) = scrutinee_enum {
+                if let Some(variant) = enum_variant_pattern(enum_name, &name.name, Vec::new()) {
+                    return Ok(variant);
+                }
+            } else if let Some((_, discriminant)) = enum_index::variant_unique_owner(&name.name) {
+                return Ok(HIRPattern::EnumVariant {
+                    discriminant,
+                    fields: Vec::new(),
+                });
+            }
+            HIRPattern::Var {
+                name: name.name.clone(),
+                symbol: name.symbol,
+                mutability: false,
+            }
+        }
         ast::pattern::PatternKind::Path(path) => {
             if path.segments.len() >= 2 {
                 let enum_name = path.segments[0].name.clone();
@@ -638,6 +760,18 @@ fn lower_pattern(
                     enum_variant_pattern(enum_name, &variant_name, fields.clone())
                 {
                     return Ok(variant);
+                }
+            }
+            // Bare `Some(v)` with no scrutinee hint: unique-owner lookup.
+            if path.segments.len() == 1 {
+                if let Some((enum_name, discriminant)) =
+                    enum_index::variant_unique_owner(&variant_name)
+                {
+                    let _ = enum_name;
+                    return Ok(HIRPattern::EnumVariant {
+                        discriminant,
+                        fields,
+                    });
                 }
             }
             HIRPattern::Struct {

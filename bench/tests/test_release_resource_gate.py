@@ -26,6 +26,27 @@ def report(**overrides):
 
 
 class ReleaseResourceGateTests(unittest.TestCase):
+    def test_sgc_command_includes_explicit_runtime_mode_before_subcommand(self):
+        command = GATE.sgc_command(
+            Path("sgc"), "source-development", "check", "scenario.sg"
+        )
+        self.assertEqual(
+            command,
+            [
+                "sgc",
+                "--runtime-mode",
+                "source-development",
+                "check",
+                "scenario.sg",
+            ],
+        )
+
+    def test_sgc_command_preserves_installed_default_when_mode_is_omitted(self):
+        self.assertEqual(
+            GATE.sgc_command(Path("sgc"), None, "--version"),
+            ["sgc", "--version"],
+        )
+
     def test_default_full_build_budget_matches_documented_threshold(self):
         documented = BUDGETS_DOC.read_text(encoding="utf-8")
         match = re.search(

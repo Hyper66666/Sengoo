@@ -226,3 +226,37 @@ def main() -> i64 {
         message
     );
 }
+
+#[test]
+fn option_struct_literal_diagnostic_names_variant_constructors() {
+    let source = r#"
+enum Option<T> { None, Some(T) }
+def main() -> i64 {
+    let value: Option<i64> = Option { is_some: true, value: 1 };
+    0
+}
+"#;
+    let error = compile_to_ir(source).expect_err("Option struct literal should be rejected");
+    let message = error.to_string();
+    assert!(
+        message.contains("Option") && message.contains("Some") && message.contains("None"),
+        "Option diagnostic should name Some/None replacements:\n{message}"
+    );
+}
+
+#[test]
+fn result_struct_literal_diagnostic_names_variant_constructors() {
+    let source = r#"
+enum Result<T, E> { Ok(T), Err(E) }
+def main() -> i64 {
+    let value: Result<i64, i64> = Result { is_ok: true, value: 1, error: 0 };
+    0
+}
+"#;
+    let error = compile_to_ir(source).expect_err("Result struct literal should be rejected");
+    let message = error.to_string();
+    assert!(
+        message.contains("Result") && message.contains("Ok") && message.contains("Err"),
+        "Result diagnostic should name Ok/Err replacements:\n{message}"
+    );
+}

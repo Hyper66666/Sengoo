@@ -1,4 +1,5 @@
 use super::*;
+use crate::mir::enum_defs::EnumDef;
 
 #[derive(Debug, Clone)]
 pub(super) enum TryScope {
@@ -25,13 +26,76 @@ fn result_struct_ty(value_ty: MIRType, err_ty: MIRType) -> MIRType {
 
 fn mir_is_result_or_option(ty: &MIRType) -> bool {
     match ty {
-        MIRType::Struct { name, .. } => {
+        MIRType::Struct { name, .. } | MIRType::Enum { name, .. } => {
             name == "Result"
                 || name == "Option"
                 || name.starts_with("Result_")
                 || name.starts_with("Option_")
         }
         _ => false,
+    }
+}
+
+/// Declaration behind a monomorphised enum instance name such as `Option_i64`.
+///
+/// Instance names are `{enum}_{args}`, so the longest declared name that
+/// prefixes the instance is the owner; an exact hit covers non-generic enums.
+fn enum_def_for_instance<'d>(
+    ctx: &'d LoweringContext<'_>,
+    instance_name: &str,
+) -> Option<&'d EnumDef> {
+    if let Some(def) = ctx.options.enum_defs.get(instance_name) {
+        return Some(def);
+    }
+    ctx.options
+        .enum_defs
+        .iter()
+        .filter(|(name, _)| instance_name.starts_with(&format!("{name}_")))
+        .max_by_key(|(name, _)| name.len())
+        .map(|(_, def)| def)
+}
+
+/// `(success, failure)` discriminants of an `Option`/`Result`-shaped enum.
+///
+/// Resolved from variant names rather than positions: `Result` succeeds on its
+/// first variant and `Option` on its second, so an index would be wrong for one
+/// of them.
+fn try_variant_discriminants(ctx: &LoweringContext<'_>, ty: &MIRType) -> Option<(u32, u32)> {
+    let MIRType::Enum { name, .. } = ty else {
+        return None;
+    };
+    let def = enum_def_for_instance(ctx, name)?;
+    let success = def
+        .variant_discriminant("Ok")
+        .or_else(|| def.variant_discriminant("Some"))?;
+    let failure = def
+        .variant_discriminant("Err")
+        .or_else(|| def.variant_discriminant("None"))?;
+    Some((success, failure))
+}
+
+/// Payload carried by the failure arm of `operand_local`, already known to be on
+/// the failure branch. `None` when the failure variant is payload-free (`None`).
+fn failure_payload(
+    ctx: &mut LoweringContext<'_>,
+    operand_local: Local,
+    operand_ty: &MIRType,
+) -> Option<Local> {
+    match operand_ty {
+        MIRType::Enum { .. } => {
+            let failure = try_variant_discriminants(ctx, operand_ty)?.1;
+            let payload_ty = EnumDef::instance_variant_payload(operand_ty, failure)?;
+            let payload = ctx.add_local(None, LocalKind::Temp, payload_ty);
+            ctx.push_inst(Instruction::ExtractPayload {
+                destination: payload,
+                source: operand_local,
+            });
+            Some(payload)
+        }
+        MIRType::Struct { fields, .. } if fields.iter().any(|(name, _)| name == "error") => {
+            Some(lower_field_expr(ctx, operand_local, "error"))
+        }
+        _ => None,
     }
 }
 
@@ -131,6 +195,26 @@ fn rebuild_failure_for_target(
         return operand_local;
     }
 
+    if matches!(target_ty, MIRType::Enum { .. }) {
+        let Some((_, failure)) = try_variant_discriminants(ctx, target_ty) else {
+            return operand_local;
+        };
+        // `Err(e)` carries the operand's error across; `None` carries nothing.
+        let payload = EnumDef::instance_variant_payload(target_ty, failure)
+            .and_then(|_| failure_payload(ctx, operand_local, operand_ty));
+        let destination = ctx.add_local(None, LocalKind::Temp, target_ty.clone());
+        ctx.push_inst(Instruction::EnumConstruct {
+            destination,
+            discriminant: failure,
+            payload,
+            enum_type: target_ty.clone(),
+        });
+        if let Some(payload) = payload {
+            ctx.mark_drop_local_moved(payload);
+        }
+        return destination;
+    }
+
     let MIRType::Struct {
         name: target_name,
         fields: target_fields,
@@ -210,6 +294,23 @@ fn wrap_success(
     value_local: Local,
     container_ty: &MIRType,
 ) -> Local {
+    if matches!(container_ty, MIRType::Enum { .. }) {
+        let Some((success, _)) = try_variant_discriminants(ctx, container_ty) else {
+            return value_local;
+        };
+        let payload = EnumDef::instance_variant_payload(container_ty, success).map(|_| value_local);
+        let destination = ctx.add_local(None, LocalKind::Temp, container_ty.clone());
+        ctx.push_inst(Instruction::EnumConstruct {
+            destination,
+            discriminant: success,
+            payload,
+            enum_type: container_ty.clone(),
+        });
+        if let Some(payload) = payload {
+            ctx.mark_drop_local_moved(payload);
+        }
+        return destination;
+    }
     match container_ty {
         MIRType::Struct { name, fields, .. } if name == "Option" || name.starts_with("Option_") => {
             let out = ctx.add_local(None, LocalKind::Temp, container_ty.clone());
@@ -249,14 +350,42 @@ fn wrap_success(
 pub(super) fn lower_try_expr(ctx: &mut LoweringContext<'_>, operand: &HIRExpr) -> Local {
     let operand_local = ctx.lower_expr(operand);
     let operand_ty = ctx.get_local_type(operand_local).clone();
-    let flag_field = match &operand_ty {
-        MIRType::Struct { name, .. } if name == "Option" || name.starts_with("Option_") => {
-            "is_some"
+    // Enum operands branch on the discriminant; the legacy struct form still
+    // branches on its `is_ok`/`is_some` flag field.
+    let success_discriminant = try_variant_discriminants(ctx, &operand_ty).map(|(ok, _)| ok);
+    let flag_local = match success_discriminant {
+        Some(success) => {
+            let discr_local = ctx.add_local(None, LocalKind::Temp, MIR_I64);
+            ctx.push_inst(Instruction::Discriminant {
+                destination: discr_local,
+                source: operand_local,
+            });
+            let expected_local = ctx.lower_literal(&HIRLiteral::Int(i64::from(success)));
+            let cond_local = ctx.add_local(None, LocalKind::Temp, MIR_BOOL);
+            ctx.push_inst(Instruction::Binary {
+                destination: cond_local,
+                op: MirBinOp::Eq,
+                left: discr_local,
+                right: expected_local,
+            });
+            cond_local
         }
-        _ => "is_ok",
+        None => {
+            let flag_field = match &operand_ty {
+                MIRType::Struct { name, .. } if name == "Option" || name.starts_with("Option_") => {
+                    "is_some"
+                }
+                _ => "is_ok",
+            };
+            lower_field_expr(ctx, operand_local, flag_field)
+        }
     };
-
-    let flag_local = lower_field_expr(ctx, operand_local, flag_field);
+    if success_discriminant.is_some() {
+        // Both branches transfer the active enum payload: success returns it
+        // to the surrounding expression, while failure rebuilds or forwards
+        // the residual container. The original owner must not run Drop again.
+        ctx.mark_drop_local_moved(operand_local);
+    }
     let cont_block = ctx.new_block();
     let fail_block = ctx.new_block();
 
@@ -291,7 +420,19 @@ pub(super) fn lower_try_expr(ctx: &mut LoweringContext<'_>, operand: &HIRExpr) -
     }
 
     ctx.set_current_block(cont_block);
-    lower_field_expr(ctx, operand_local, "value")
+    match success_discriminant {
+        Some(success) => {
+            let payload_ty =
+                EnumDef::instance_variant_payload(&operand_ty, success).unwrap_or(MIR_UNIT);
+            let payload_local = ctx.add_local(None, LocalKind::Temp, payload_ty);
+            ctx.push_inst(Instruction::ExtractPayload {
+                destination: payload_local,
+                source: operand_local,
+            });
+            payload_local
+        }
+        None => lower_field_expr(ctx, operand_local, "value"),
+    }
 }
 
 pub(super) fn lower_try_block_expr(ctx: &mut LoweringContext<'_>, body: &HIRBody) -> Local {

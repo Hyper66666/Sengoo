@@ -15,17 +15,17 @@ extern "C" {
 
 def io_i64_result(value: i64) -> Result<i64, i64> {
     if value >= 0 {
-        Result { is_ok: true, value: value, error: 0 }
+        Ok(value)
     } else {
-        Result { is_ok: false, value: 0, error: status_from_raw_ffi(value) }
+        Err(status_from_raw_ffi(value))
     }
 }
 
 def io_bool_result(status: i64) -> Result<bool, i64> {
     if status == 0 {
-        Result { is_ok: true, value: true, error: 0 }
+        Ok(true)
     } else {
-        Result { is_ok: false, value: false, error: status_from_raw_ffi(status) }
+        Err(status_from_raw_ffi(status))
     }
 }
 

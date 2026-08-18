@@ -64,3 +64,53 @@ def main() -> i64 {
         msg
     );
 }
+
+fn assert_english(msg: &str) {
+    assert!(
+        !msg.chars()
+            .any(|ch| ('\u{4e00}'..='\u{9fff}').contains(&ch)),
+        "diagnostic must be English, got:\n{msg}"
+    );
+}
+
+#[test]
+fn typeck_diagnostics_are_english_with_stable_wording() {
+    let undefined = compile_to_ir("def main() -> i64 { missing }")
+        .expect_err("undefined variable should fail")
+        .to_string();
+    assert!(
+        undefined.contains("undefined variable: missing"),
+        "{undefined}"
+    );
+    assert_english(&undefined);
+
+    let arity = compile_to_ir(
+        r#"
+def add(a: i64, b: i64) -> i64 { a + b }
+def main() -> i64 { add(1) }
+"#,
+    )
+    .expect_err("argument count mismatch should fail")
+    .to_string();
+    assert!(
+        arity.contains("argument count mismatch: expected 2, found 1"),
+        "{arity}"
+    );
+    assert_english(&arity);
+
+    let method = compile_to_ir(
+        r#"
+def main() -> i64 {
+    let x: i64 = 1;
+    x.nonexistent()
+}
+"#,
+    )
+    .expect_err("unknown method should fail")
+    .to_string();
+    assert!(
+        method.contains("has no method nonexistent") || method.contains("undefined method"),
+        "{method}"
+    );
+    assert_english(&method);
+}

@@ -2772,6 +2772,49 @@ def main() -> i64 {{ 0 }}
     }
 
     #[test]
+    fn json_error_payload_preserves_stable_code_and_matches_embedded_compiler() {
+        let src = r#"
+enum Color { Red, Blue }
+
+def paint(c: Color) -> i64 {
+    match c {
+        Color::Red => 1,
+    }
+}
+"#;
+        let embedded = embedded_compiler_diagnostics(src);
+        assert_eq!(embedded.len(), 1);
+        assert_eq!(
+            embedded[0].code,
+            Some(NumberOrString::String("non-exhaustive-match".to_string()))
+        );
+        assert!(
+            !embedded[0]
+                .message
+                .chars()
+                .any(|ch| ('\u{4e00}'..='\u{9fff}').contains(&ch)),
+            "embedded diagnostics must be English, got: {}",
+            embedded[0].message
+        );
+
+        let payload = r#"{
+            "schema_version": 1,
+            "ok": false,
+            "kind": "compile_error",
+            "stage": "typecheck",
+            "code": "non-exhaustive-match",
+            "message": "[non-exhaustive-match] match is not exhaustive: missing Blue",
+            "input": "match.sg"
+        }"#;
+        let from_json = diagnostics_from_failed_sgc_output(src, payload);
+        assert_eq!(from_json.len(), 1);
+        assert_eq!(from_json[0].code, embedded[0].code);
+        assert_eq!(from_json[0].source.as_deref(), Some("sgc"));
+        assert!(from_json[0].message.contains("non-exhaustive-match"));
+        assert_eq!(from_json[0].severity, embedded[0].severity);
+    }
+
+    #[test]
     fn compiler_diagnostics_fall_back_to_embedded_compiler_when_sgc_output_is_not_json() {
         let src = "def main() -> i64 {\n    let = 1;\n}\n";
         let diagnostics = diagnostics_from_failed_sgc_output(

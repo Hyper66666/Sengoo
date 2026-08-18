@@ -62,18 +62,18 @@ def draw_grid(surface: Surface, cell: i64, color: Color) -> bool {
 }
 
 def main() -> i64 {
-    let boot = sggame_init();
-    if !boot.is_ok {
-        return 1;
+    match sggame_init() {
+        Err(_) => return 1,
+        Ok(_) => {}
     }
 
-    let surface_result = set_mode(640, 480, "sggame snake");
-    if !surface_result.is_ok {
-        sggame_quit();
-        return 1;
-    }
-
-    let surface = surface_result.value;
+    let surface = match set_mode(640, 480, "sggame snake") {
+        Ok(value) => value,
+        Err(_) => {
+            sggame_quit();
+            return 1;
+        }
+    };
     if surface.width == 0 {
         sggame_quit();
         return 1;
@@ -172,8 +172,9 @@ def main() -> i64 {
             still_running
         };
 
-        let cleared = clear(bg);
-        if cleared.is_ok {
+        match clear(bg) {
+            Err(_) => {}
+            Ok(_) => {
             draw_grid(surface, cell, grid_color);
 
             let segment = 0;
@@ -193,6 +194,7 @@ def main() -> i64 {
 
             let _food = rect(food_color, food_rect);
             let _presented = flip();
+        }
         }
 
         head_loop = if hit_wall { head_loop } else { head_after_x };

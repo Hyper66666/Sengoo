@@ -200,6 +200,10 @@ fn jit_codegen_lowers_enum_construction_and_match_without_fallback_comments() {
         r#"
 enum Maybe { Empty, Value(i64) }
 
+def empty() -> Maybe {
+    Maybe::Empty
+}
+
 def main() -> i64 {
     let value = Maybe::Value(42);
     match value {
@@ -234,11 +238,19 @@ def main() -> i64 {
     }
     assert!(ir.contains("switch i64"), "expected enum switch:\n{ir}");
     assert!(ir.contains("phi i64"), "expected match result phi:\n{ir}");
+    assert!(
+        ir.contains("zeroinitializer"),
+        "JIT enum construction must initialize inactive payload storage:\n{ir}"
+    );
 
     let mut native = Codegen::new();
-    native
+    let native_ir = native
         .codegen(&functions)
         .expect("native codegen should still accept the same MIR");
+    assert!(
+        native_ir.contains("zeroinitializer"),
+        "native enum construction must initialize inactive payload storage:\n{native_ir}"
+    );
 }
 
 #[test]

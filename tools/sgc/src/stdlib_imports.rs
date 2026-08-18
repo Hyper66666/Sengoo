@@ -94,9 +94,11 @@ fn source_module_direct_dependencies(module: &str) -> &'static [&'static str] {
         "fmt" => &["strconv", "status"],
         "regex" | "log" | "config" | "hash" | "encoding" | "compress" | "fs" => &["status"],
         "async" => &["status", "result"],
-        // Keep `async` out of net's transitive deps so C-only fallback bundles
-        // that only import std::net do not require async mutex/sleep symbols.
-        "http" | "net" => &["ffi", "status", "string"],
+        "http" => &["ffi", "status", "string"],
+        // Keep the broad async module out of net's transitive surface. The
+        // router future uses its narrow HTTP lifecycle ABI, while C-only
+        // bundles provide weak poll/cancel/drop fallbacks for dispatch links.
+        "net" => &["ffi", "status", "string", "collections"],
         "db" | "lua54" | "proto" => &["ffi"],
         "assert" => &[],
         _ => &[],
@@ -237,7 +239,7 @@ mod tests {
             expand_stdlib_imports_for_source("import std::math;\ndef main() -> i64 { 0 }\n")
                 .expect("math stdlib import should expand");
 
-        assert!(expanded.contains("struct Option"));
+        assert!(expanded.contains("enum Option"));
         assert!(expanded.contains("def STATUS_OVERFLOW()"));
         assert!(expanded.contains("def checked_add(self, rhs: i64) -> Option<i64>"));
         assert!(expanded.contains("def saturating_mul(self, rhs: i64) -> i64"));
@@ -256,7 +258,7 @@ mod tests {
         assert!(expanded.contains("def file_size"));
         assert!(expanded.contains("def file_modified_unix_ms"));
         assert!(expanded.contains("struct Buffer"));
-        assert!(expanded.contains("struct Result"));
+        assert!(expanded.contains("enum Result"));
     }
 
     #[test]
@@ -267,7 +269,7 @@ mod tests {
 
         assert!(expanded.contains("def env_var_copy"));
         assert!(expanded.contains("struct Buffer"));
-        assert!(expanded.contains("struct Result"));
+        assert!(expanded.contains("enum Result"));
     }
 
     #[test]
@@ -320,7 +322,7 @@ mod tests {
         assert!(expanded.contains("def path_join"));
         assert!(expanded.contains("def path_normalize"));
         assert!(expanded.contains("struct Buffer"));
-        assert!(expanded.contains("struct Result"));
+        assert!(expanded.contains("enum Result"));
     }
 
     #[test]
@@ -337,7 +339,7 @@ mod tests {
         assert!(expanded.contains("def process_run"));
         assert!(expanded.contains("def process_run_3"));
         assert!(expanded.contains("struct Buffer"));
-        assert!(expanded.contains("struct Result"));
+        assert!(expanded.contains("enum Result"));
     }
 
     #[test]
@@ -354,7 +356,7 @@ mod tests {
         assert!(expanded.contains("def dir_walk"));
         assert!(expanded.contains("def next(&self, buffer: Buffer) -> Result<i64, i64>"));
         assert!(expanded.contains("struct Buffer"));
-        assert!(expanded.contains("struct Result"));
+        assert!(expanded.contains("enum Result"));
     }
 
     #[test]
@@ -366,7 +368,7 @@ mod tests {
         assert!(expanded.contains("def io_stdin_read"));
         assert!(expanded.contains("def io_stderr_write"));
         assert!(expanded.contains("struct Buffer"));
-        assert!(expanded.contains("struct Result"));
+        assert!(expanded.contains("enum Result"));
     }
 
     #[test]
@@ -403,7 +405,7 @@ mod tests {
         assert!(expanded.contains("def args_len"));
         assert!(expanded.contains("def arg_copy"));
         assert!(expanded.contains("struct Buffer"));
-        assert!(expanded.contains("struct Result"));
+        assert!(expanded.contains("enum Result"));
     }
 
     #[test]
@@ -415,7 +417,7 @@ mod tests {
         assert!(expanded.contains("def strconv_parse_i64"));
         assert!(expanded.contains("def strconv_format_i64"));
         assert!(expanded.contains("struct Buffer"));
-        assert!(expanded.contains("struct Result"));
+        assert!(expanded.contains("enum Result"));
     }
 
     #[test]
@@ -444,7 +446,7 @@ mod tests {
         assert!(expanded.contains("def status_message_copy"));
         assert!(expanded.contains("def status_from_raw_ffi"));
         assert!(expanded.contains("struct Buffer"));
-        assert!(expanded.contains("struct Result"));
+        assert!(expanded.contains("enum Result"));
     }
 
     #[test]
@@ -472,6 +474,6 @@ mod tests {
             "def new_string_from_string(self, value: &String) -> Result<JsonValue, i64>"
         ));
         assert!(expanded.contains("struct Buffer"));
-        assert!(expanded.contains("struct Result"));
+        assert!(expanded.contains("enum Result"));
     }
 }

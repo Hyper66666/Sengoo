@@ -55,21 +55,26 @@ jobs:
           run_loop() {
             label="$1"
             bin="$2"
+            runtime_mode="$3"
+            runtime_args=()
+            if [ -n "$runtime_mode" ]; then
+              runtime_args=(--runtime-mode "$runtime_mode")
+            fi
             echo "== $label ==" | tee -a "$transcript"
             (
               cd "$project"
               export SGPM_SGC="$bin/sgc"
               export SGPM_SGFMT="$bin/sgfmt"
-              "$bin/sgpm" check --locked
-              "$bin/sgpm" test --locked
-              "$bin/sgpm" fmt --check --locked
-              "$bin/sgpm" doc --locked
-              "$bin/sgpm" build --locked
+              "$bin/sgpm" "${runtime_args[@]}" check --locked
+              "$bin/sgpm" "${runtime_args[@]}" test --locked
+              "$bin/sgpm" "${runtime_args[@]}" fmt --check --locked
+              "$bin/sgpm" "${runtime_args[@]}" doc --locked
+              "$bin/sgpm" "${runtime_args[@]}" build --locked
             ) 2>&1 | tee -a "$transcript"
           }
 
-          run_loop "v0.1.0-rc.1" "$RUNNER_TEMP/sengoo-v0.1.0-rc.1/bin"
-          run_loop "current" "$GITHUB_WORKSPACE/target/release"
+          run_loop "v0.1.0-rc.1" "$RUNNER_TEMP/sengoo-v0.1.0-rc.1/bin" ""
+          run_loop "current" "$GITHUB_WORKSPACE/target/release" "source-development"
           cp "$transcript" compatibility-transcript.txt
 
       - name: Upload compatibility transcript

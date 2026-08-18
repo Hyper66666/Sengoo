@@ -12,18 +12,18 @@ struct Regex {
 
 def regex_status_result(value: i64) -> Result<i64, i64> {
     if value >= 0 {
-        Result { is_ok: true, value: value, error: 0 }
+        Ok(value)
     } else {
-        Result { is_ok: false, value: 0, error: status_from_raw_ffi(value) }
+        Err(status_from_raw_ffi(value))
     }
 }
 
 def regex_compile(pattern: &str) -> Result<Regex, i64> {
     let handle = sengoo_regex_compile(sengoo_stdlib_str_ptr(pattern), pattern.len());
     if handle > 0 {
-        Result { is_ok: true, value: Regex { handle: handle }, error: 0 }
+        Ok(Regex { handle: handle })
     } else {
-        Result { is_ok: false, value: Regex { handle: 0 }, error: status_from_raw_ffi(handle) }
+        Err(status_from_raw_ffi(handle))
     }
 }
 
@@ -31,9 +31,9 @@ impl Regex {
     def is_match(self, text: &str) -> Result<bool, i64> {
         let matched = sengoo_regex_is_match(self.handle, sengoo_stdlib_str_ptr(text), text.len());
         if matched >= 0 {
-            Result { is_ok: true, value: matched != 0, error: 0 }
+            Ok(matched != 0)
         } else {
-            Result { is_ok: false, value: false, error: status_from_raw_ffi(matched) }
+            Err(status_from_raw_ffi(matched))
         }
     }
 

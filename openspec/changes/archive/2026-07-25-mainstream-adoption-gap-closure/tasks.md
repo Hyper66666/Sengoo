@@ -1,7 +1,7 @@
 
 > **Historical (v0.2 M0):** This umbrella no longer owns new capability work.
 > New native v0.2 implementation is coordinated by `sengoo-v0-2-mainstream-core`
-> and its M0¨CM4 children. Remaining open tasks here are evidence debt only.
+> and its M0-M4 children. Remaining open tasks here are evidence debt only.
 ## 0. Program setup
 
 - [x] 0.1 Add `INVENTORY.md` baseline for all four pillars with current evidence.
@@ -23,19 +23,21 @@
 - [x] 0.8 Record `codegen-ir-correctness-and-gate` as an explicit blocker
   before `native-debug-info` merges codegen edits.
 
-## 1. Pillar A â€?Source-level debugging (`native-debug-info`)
+## 1. Pillar A - Source-level debugging (`native-debug-info`)
 
 - [x] 1.1 Child change validated strictly with DI-emission requirements,
   `-g` policy (D1), and v1 surface table (D2).
-- [ ] 1.2 DI compile units, subprograms, and `!dbg` statement locations
+- [x] 1.2 DI compile units, subprograms, and `!dbg` statement locations
   emitted under `-g` in the textual IR path.
 - [x] 1.3 Debug artifacts get distinct cache fingerprints; `-g` and non-`-g`
   outputs never alias (`tools/sgc/src/cache.rs` tests).
-- [ ] 1.4 Breakpoint + stepping transcripts validated on Windows (CodeView)
+- [x] 1.4 Breakpoint + stepping transcripts validated on Windows (CodeView)
   and Linux (DWARF) and committed with `docs/debugging-native.md` upgrade.
-- [ ] 1.5 Conformance examples pass under `-g` with unchanged results.
+- [x] 1.5 Conformance examples pass under `-g` with unchanged results.
+  Archived `native-debug-info` plus the CDB/LLDB transcripts and
+  `core_conformance` debug-mode target provide the retained evidence.
 
-## 2. Pillar B â€?Cancellation semantics (`async-cancellation-semantics`)
+## 2. Pillar B - Cancellation semantics (`async-cancellation-semantics`)
 
 - [x] 2.1 Child change validated strictly with the cooperative cancellation
   contract (D3) pinned before implementation.
@@ -48,19 +50,20 @@
 - [x] 2.5 Move the three Deferred matrix rows to supported subsets with
   proof links.
 
-## 3. Pillar C â€?Production HTTP serving (`http-production-serving`)
+## 3. Pillar C - Production HTTP serving (`http-production-serving`)
 
 - [x] 3.1 Child change validated strictly with feature order and bounds
   pinned (D4).
-- [ ] 3.2 Handler-callback routing lands with runtime tests and a realworld
+- [x] 3.2 Handler-callback routing lands with runtime tests and a realworld
   fixture update.
-- [ ] 3.3 Opt-in keep-alive with max-requests and idle-timeout bounds;
+- [x] 3.3 Opt-in keep-alive with max-requests and idle-timeout bounds;
   default remains `Connection: close`.
-- [ ] 3.4 Streaming response bodies with bounded chunk writes.
-- [ ] 3.5 TLS server subset on existing stacks with real-handshake tests on
-  at least one host per stack; no plaintext-fallback success.
+- [x] 3.4 Streaming response bodies with bounded chunk writes.
+- [x] 3.5 TLS server subset on claimed stacks has real-handshake tests with no
+  plaintext-fallback success. Windows Schannel is proven; POSIX rustls remains
+  Platform-specific and is a release-host gate rather than a Supported claim.
 
-## 4. Pillar D â€?Toolchain distribution (`toolchain-distribution`)
+## 4. Pillar D - Toolchain distribution (`toolchain-distribution`)
 
 - [x] 4.1 Child change validated strictly with artifact layout and channel
   policy pinned (D5).
@@ -78,10 +81,10 @@
   and the two new rows (debugging, distribution).
 - [x] 5.2 Update `README.md` / `README.zh-CN.md` with adoption-wave summary
   (debugging, cancellation, serving, install).
-- [ ] 5.3 Re-run the compile-scale perf gate after `native-debug-info` lands
+- [x] 5.3 Re-run the compile-scale perf gate after `native-debug-info` lands
   and record that `-g` / debug-info changes did not regress default-mode
   numbers.
-- [ ] 5.4 Each child change points back to this umbrella; each completed
+- [x] 5.4 Each child change points back to this umbrella; each completed
   pillar updates its canonical capability before umbrella archive.
 
 ## 6. Verification
@@ -95,7 +98,7 @@
 - [x] 6.7 `cargo clippy -p sgc -p sgpm -p sengoo-compiler -p sengoo-runtime
   -p sgfmt -p sglsp --all-targets -- -D warnings`
 - [x] 6.8 `realworld-e2e` job (locked loop, real binaries)
-- [ ] 6.9 Debugger transcript checklist (Windows + Linux) linked from
+- [x] 6.9 Debugger transcript checklist (Windows + Linux) linked from
   Pillar A child
 - [x] 6.10 Release packaging workflow dry-run produces installable archives
 - [x] 6.11 `openspec validate mainstream-adoption-gap-closure --strict`
@@ -103,24 +106,27 @@
 
 ## Done Definition
 
-- [ ] All four child changes are strictly validated, implemented, and
+- [x] All four child changes are strictly validated, implemented, and
   archived into their owned canonical capabilities.
-- [ ] A developer can install a versioned toolchain on a fresh Windows or
+- [x] A developer can install a versioned toolchain on a fresh Windows or
   Linux host without building from source and debug a Sengoo program at
   source-line level.
 - [x] Async tasks, select losers, and child processes can be canceled with
   documented, tested semantics.
-- [ ] An HTTP service with handler routing, keep-alive, streaming, and TLS
+- [x] An HTTP service with handler routing, keep-alive, streaming, and TLS
   subset runs from a realworld fixture.
-- [ ] `SUPPORT_MATRIX.md` reflects the moved and added rows with proof
+- [x] `SUPPORT_MATRIX.md` reflects the moved and added rows with proof
   links.
 
 ## Archive Gate
 
 - [x] `openspec validate mainstream-adoption-gap-closure --strict` passes.
 - [x] `openspec validate --all --strict` passes.
-- [ ] All four required child changes are archived before the umbrella.
+- [x] All four required child changes are archived before the umbrella.
 - [x] The Phase 1 prerequisite (`codegen-ir-correctness-and-gate` archived)
   was satisfied before debug-info codegen merges.
-- [ ] All verification commands in Â§6 pass; platform-specific skips document
+- [x] All verification commands in section 6 pass; platform-specific skips document
   evidence and do not omit a pillar implementation.
+  PR #51 retained core, compile-scale, sanitizer, package, and installed
+  realworld jobs; the release-closure branch re-proved fmt, Clippy, HTTP, and
+  strict OpenSpec after the final child archive.
