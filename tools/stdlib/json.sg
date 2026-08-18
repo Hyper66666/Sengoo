@@ -1,6 +1,8 @@
 extern "C" {
     fn sengoo_json_parse_text(data: i64, len: i64) -> i64;
     fn sengoo_json_parse_buffer(buffer: i64, input_len: i64) -> i64;
+    fn sengoo_json_parse_text_strict(data: i64, len: i64) -> i64;
+    fn sengoo_json_parse_buffer_strict(buffer: i64, input_len: i64) -> i64;
     fn sengoo_json_doc_object_new() -> i64;
     fn sengoo_json_doc_close(handle: i64) -> i64;
     fn sengoo_json_doc_root(handle: i64) -> i64;
@@ -9,12 +11,18 @@ extern "C" {
     fn sengoo_json_doc_new_object(handle: i64) -> i64;
     fn sengoo_json_doc_new_array(handle: i64) -> i64;
     fn sengoo_json_doc_new_string(handle: i64, value: i64) -> i64;
+    fn sengoo_json_doc_new_string_len(handle: i64, value: i64, value_len: i64) -> i64;
+    fn sengoo_json_doc_new_string_from_string(handle: i64, string_handle: i64) -> i64;
     fn sengoo_json_doc_new_bool(handle: i64, value: i64) -> i64;
     fn sengoo_json_doc_new_number(handle: i64, value: f64) -> i64;
     fn sengoo_json_doc_new_null(handle: i64) -> i64;
     fn sengoo_json_value_kind(doc_handle: i64, node_id: i64) -> i64;
     fn sengoo_json_object_has(doc_handle: i64, node_id: i64, key: i64) -> i64;
+    fn sengoo_json_object_has_len(doc_handle: i64, node_id: i64, key: i64, key_len: i64) -> i64;
+    fn sengoo_json_object_len(doc_handle: i64, node_id: i64) -> i64;
+    fn sengoo_json_object_key_copy(doc_handle: i64, node_id: i64, index: i64, buffer: i64) -> i64;
     fn sengoo_json_object_get(doc_handle: i64, node_id: i64, key: i64) -> i64;
+    fn sengoo_json_object_get_len(doc_handle: i64, node_id: i64, key: i64, key_len: i64) -> i64;
     fn sengoo_json_object_set(doc_handle: i64, node_id: i64, key: i64, value_doc_handle: i64, value_node_id: i64) -> i64;
     fn sengoo_json_array_len(doc_handle: i64, node_id: i64) -> i64;
     fn sengoo_json_array_get(doc_handle: i64, node_id: i64, index: i64) -> i64;
@@ -25,6 +33,7 @@ extern "C" {
     fn sengoo_json_number_i64(doc_handle: i64, node_id: i64) -> i64;
     fn sengoo_json_number_f64(doc_handle: i64, node_id: i64) -> f64;
     fn sengoo_json_last_error_code() -> i64;
+    fn sengoo_json_last_error_kind() -> i64;
     fn sengoo_json_last_error_offset() -> i64;
     fn sengoo_json_last_error_copy(buffer: i64) -> i64;
 }
@@ -49,6 +58,12 @@ def JSON_KIND_NUMBER() -> i64 { 2 }
 def JSON_KIND_STRING() -> i64 { 3 }
 def JSON_KIND_ARRAY() -> i64 { 4 }
 def JSON_KIND_OBJECT() -> i64 { 5 }
+
+def JSON_ERROR_KIND_NONE() -> i64 { 0 }
+def JSON_ERROR_KIND_UNCLASSIFIED() -> i64 { 1 }
+def JSON_ERROR_KIND_DUPLICATE_FIELD() -> i64 { 2 }
+def JSON_ERROR_KIND_INVALID_UNICODE() -> i64 { 3 }
+def JSON_ERROR_KIND_TRAILING_BYTES() -> i64 { 4 }
 
 def json_error_or_unknown() -> i64 {
     if sengoo_json_last_error_code() == 0 {
@@ -128,12 +143,24 @@ def json_parse_buffer(buffer: Buffer, input_len: i64) -> Result<JsonDoc, i64> {
     json_doc_result(sengoo_json_parse_buffer(buffer.handle, input_len))
 }
 
+def json_parse_strict(text: &str) -> Result<JsonDoc, i64> {
+    json_doc_result(sengoo_json_parse_text_strict(sengoo_stdlib_str_ptr(text), text.len()))
+}
+
+def json_parse_buffer_strict(buffer: Buffer, input_len: i64) -> Result<JsonDoc, i64> {
+    json_doc_result(sengoo_json_parse_buffer_strict(buffer.handle, input_len))
+}
+
 def json_doc_object() -> Result<JsonDoc, i64> {
     json_doc_result(sengoo_json_doc_object_new())
 }
 
 def json_last_error_code() -> i64 {
     sengoo_json_last_error_code()
+}
+
+def json_last_error_kind() -> i64 {
+    sengoo_json_last_error_kind()
 }
 
 def json_last_error_offset() -> i64 {
@@ -173,6 +200,13 @@ impl JsonDoc {
         json_value_result(self.handle, sengoo_json_doc_new_string(self.handle, sengoo_stdlib_str_ptr(value)))
     }
 
+    def new_string_from_string(self, value: &String) -> Result<JsonValue, i64> {
+        json_value_result(
+            self.handle,
+            sengoo_json_doc_new_string_from_string(self.handle, value.handle)
+        )
+    }
+
     def new_bool(self, value: bool) -> Result<JsonValue, i64> {
         json_value_result(self.handle, sengoo_json_doc_new_bool(self.handle, if value { 1 } else { 0 }))
     }
@@ -208,7 +242,15 @@ impl JsonValue {
     }
 
     def object_has(self, key: &str) -> bool {
-        self.object_has_raw(sengoo_stdlib_str_ptr(key))
+        sengoo_json_object_has_len(self.doc_handle, self.node_id, sengoo_stdlib_str_ptr(key), key.len()) != 0
+    }
+
+    def object_len(self) -> Result<i64, i64> {
+        json_count_result(sengoo_json_object_len(self.doc_handle, self.node_id))
+    }
+
+    def object_key_copy(self, index: i64, buffer: Buffer) -> Result<i64, i64> {
+        json_count_result(sengoo_json_object_key_copy(self.doc_handle, self.node_id, index, buffer.handle))
     }
 
     def object_get_raw(self, key_ptr: i64) -> Result<JsonValue, i64> {
@@ -216,7 +258,10 @@ impl JsonValue {
     }
 
     def object_get(self, key: &str) -> Result<JsonValue, i64> {
-        self.object_get_raw(sengoo_stdlib_str_ptr(key))
+        json_value_result(
+            self.doc_handle,
+            sengoo_json_object_get_len(self.doc_handle, self.node_id, sengoo_stdlib_str_ptr(key), key.len())
+        )
     }
 
     def object_set_raw(self, key_ptr: i64, value: JsonValue) -> Result<bool, i64> {

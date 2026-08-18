@@ -1,0 +1,45 @@
+import std::string;
+
+import senline_facts_to_plan;
+
+def owned(value: &str) -> String {
+    string_from_str(value).unwrap_or(String { handle: 0 });
+}
+
+def identifiers(case_ref: &str) -> SubmitEnvelopeIdentifiersV1 {
+    SubmitEnvelopeIdentifiersV1 { correlation_ref: owned(case_ref), source_account_ref: owned("acct_ref_source_001"), source_device_ref: owned("device_ref_source_001"), recipient_account_ref: owned("acct_ref_recipient_001"), recipient_device_ref: owned("device_ref_recipient_001"), conversation_ref: owned("conversation_ref_001"), envelope_ref: owned("envelope_ref_001") };
+}
+
+def request(evaluation_id: &str, correlation_ref: &str, idempotency_status: i64, recipient_pending_count: i64, recipient_pending_limit: i64, application_envelopes_used: i64, application_envelopes_limit: i64, has_submit_envelope_v2: bool, enqueue_delivery_enabled: bool, ciphertext_length_bytes: i64) -> WorkerRequestV1 {
+    WorkerRequestV1 { schema_version: 1, context: EvaluationContextV1 { contract_version: 1, operation: owned("submit-envelope"), operation_version: 1, evaluation_id: owned(evaluation_id), operation_epoch: 7, worker_generation: 3, execution_mode: owned("fixture"), worker_bundle_id: owned("senline-worker-fixture-v1"), facts_binding: owned("09d0b4fcae5f3026de32cc41f9aa51c15fe9b40e379062c00de984cfffe93302") }, facts: SubmitEnvelopeFactsV1 { contract_version: 1, operation_version: 1, identifiers: identifiers(correlation_ref), source_device_active: true, has_submit_envelope_v2: has_submit_envelope_v2, envelope_protocol_version: 2, ciphertext_length_bytes: ciphertext_length_bytes, idempotency_status: idempotency_status, recipient_pending_count: recipient_pending_count, recipient_pending_limit: recipient_pending_limit, application_envelopes_used: application_envelopes_used, application_envelopes_limit: application_envelopes_limit, ciphertext_limit_bytes: 65536, enqueue_delivery_enabled: enqueue_delivery_enabled } };
+}
+
+def planned(input: WorkerRequestV1) -> SubmitEnvelopePlanV1 {
+    plan_submit_envelope_v1(input, owned("1de09ccafa7e8f182af68e82352e2d4be39496b0"));
+}
+
+def main() -> i64 {
+    if SENLINE_IDEMPOTENCY_NEW() != 0 or SENLINE_IDEMPOTENCY_EXACT_DUPLICATE() != 1 or SENLINE_IDEMPOTENCY_CONFLICT() != 2 { return 10; };
+    if SENLINE_DECISION_STORE_AND_ENQUEUE() != 1 or SENLINE_DECISION_DUPLICATE_NOOP() != 2 or SENLINE_DECISION_REJECT() != 3 { return 11; };
+    if SENLINE_REASON_ACCEPTED_NEW() != 1 or SENLINE_REASON_EXACT_DUPLICATE() != 2 or SENLINE_REASON_IDEMPOTENCY_CONFLICT() != 3 or SENLINE_REASON_RECIPIENT_QUEUE_FULL() != 4 or SENLINE_REASON_APPLICATION_BUDGET_EXHAUSTED() != 5 or SENLINE_REASON_DELIVERY_DISABLED() != 6 { return 12; };
+    let accepted = planned(request("00000000000000000000000000000001", "corr_ref_eligible_001", SENLINE_IDEMPOTENCY_NEW(), 12, 1000, 41, 10000, true, true, 512));
+    if accepted.decision != SENLINE_DECISION_STORE_AND_ENQUEUE() or accepted.reason != SENLINE_REASON_ACCEPTED_NEW() { return 20; };
+    if accepted.schema_version != 1 or accepted.context.contract_version != 1 or not str_eq(accepted.context.operation.as_str(), "submit-envelope") or accepted.context.operation_version != 1 or not str_eq(accepted.context.evaluation_id.as_str(), "00000000000000000000000000000001") or accepted.context.operation_epoch != 7 or accepted.context.worker_generation != 3 or not str_eq(accepted.context.execution_mode.as_str(), "fixture") or not str_eq(accepted.context.worker_bundle_id.as_str(), "senline-worker-fixture-v1") or not str_eq(accepted.context.facts_binding.as_str(), "09d0b4fcae5f3026de32cc41f9aa51c15fe9b40e379062c00de984cfffe93302") { return 21; };
+    if not str_eq(accepted.identifiers.correlation_ref.as_str(), "corr_ref_eligible_001") or not str_eq(accepted.identifiers.source_account_ref.as_str(), "acct_ref_source_001") or not str_eq(accepted.identifiers.source_device_ref.as_str(), "device_ref_source_001") or not str_eq(accepted.identifiers.recipient_account_ref.as_str(), "acct_ref_recipient_001") or not str_eq(accepted.identifiers.recipient_device_ref.as_str(), "device_ref_recipient_001") or not str_eq(accepted.identifiers.conversation_ref.as_str(), "conversation_ref_001") or not str_eq(accepted.identifiers.envelope_ref.as_str(), "envelope_ref_001") or not str_eq(accepted.sengoo_module_revision.as_str(), "1de09ccafa7e8f182af68e82352e2d4be39496b0") { return 22; };
+    let duplicate = planned(request("00000000000000000000000000000002", "corr_ref_duplicate_002", SENLINE_IDEMPOTENCY_EXACT_DUPLICATE(), 1000, 1000, 10000, 10000, false, false, 768));
+    if duplicate.decision != SENLINE_DECISION_DUPLICATE_NOOP() or duplicate.reason != SENLINE_REASON_EXACT_DUPLICATE() { return 30; };
+    let conflict = planned(request("00000000000000000000000000000003", "corr_ref_conflict_003", SENLINE_IDEMPOTENCY_CONFLICT(), 1000, 1000, 10000, 10000, false, false, 1024));
+    if conflict.decision != SENLINE_DECISION_REJECT() or conflict.reason != SENLINE_REASON_IDEMPOTENCY_CONFLICT() { return 40; };
+    let budget = planned(request("00000000000000000000000000000004", "corr_ref_budget_004", SENLINE_IDEMPOTENCY_NEW(), 15, 1000, 10000, 10000, true, true, 1536));
+    if budget.decision != SENLINE_DECISION_REJECT() or budget.reason != SENLINE_REASON_APPLICATION_BUDGET_EXHAUSTED() { return 50; };
+    let queue_full = planned(request("00000000000000000000000000000006", "corr_ref_queue_006", SENLINE_IDEMPOTENCY_NEW(), 1000, 1000, 10000, 10000, false, false, 256));
+    if queue_full.decision != SENLINE_DECISION_REJECT() or queue_full.reason != SENLINE_REASON_RECIPIENT_QUEUE_FULL() { return 60; };
+    let budget_over_disabled = planned(request("00000000000000000000000000000010", "corr_ref_budget_priority_010", SENLINE_IDEMPOTENCY_NEW(), 1, 1000, 10000, 10000, false, false, 256));
+    if budget_over_disabled.decision != SENLINE_DECISION_REJECT() or budget_over_disabled.reason != SENLINE_REASON_APPLICATION_BUDGET_EXHAUSTED() { return 61; };
+    let missing_capability = planned(request("00000000000000000000000000000007", "corr_ref_capability_007", SENLINE_IDEMPOTENCY_NEW(), 1, 1000, 1, 10000, false, true, 256));
+    let missing_flag = planned(request("00000000000000000000000000000008", "corr_ref_flag_008", SENLINE_IDEMPOTENCY_NEW(), 1, 1000, 1, 10000, true, false, 256));
+    if missing_capability.decision != SENLINE_DECISION_REJECT() or missing_capability.reason != SENLINE_REASON_DELIVERY_DISABLED() or missing_flag.decision != SENLINE_DECISION_REJECT() or missing_flag.reason != SENLINE_REASON_DELIVERY_DISABLED() { return 70; };
+    let accepted_with_other_irrelevant_inputs = planned(request("00000000000000000000000000000009", "corr_ref_other_009", SENLINE_IDEMPOTENCY_NEW(), 999, 1000, 9999, 10000, true, true, 65536));
+    if accepted_with_other_irrelevant_inputs.decision != accepted.decision or accepted_with_other_irrelevant_inputs.reason != accepted.reason { return 80; };
+    0;
+}

@@ -22,6 +22,10 @@ extern "C" {
     fn sengoo_ffi_buffer_len(buffer_handle: i64) -> i64;
     fn sengoo_ffi_buffer_capacity(buffer_handle: i64) -> i64;
     fn sengoo_ffi_buffer_used_len(buffer_handle: i64) -> i64;
+    fn sengoo_ffi_buffer_get_u8(buffer_handle: i64, index: i64) -> i64;
+    fn sengoo_ffi_buffer_set_u8(buffer_handle: i64, index: i64, value: i64) -> i64;
+    fn sengoo_ffi_buffer_read_u32_be(buffer_handle: i64, offset: i64) -> i64;
+    fn sengoo_ffi_buffer_write_u32_be(buffer_handle: i64, offset: i64, value: i64) -> i64;
     fn sengoo_ffi_buffer_ptr(buffer_handle: i64) -> i64;
     fn sengoo_ffi_buffer_copy_out(buffer_handle: i64, out_buffer: i64, out_capacity: i64) -> i64;
     fn sengoo_ffi_buffer_copy_in(buffer_handle: i64, src_ptr: i64, src_len: i64) -> i64;
@@ -108,6 +112,8 @@ def ffi_i64_value_result(value: i64) -> Result<i64, i64> {
 def ffi_status_from_raw(code: i64) -> i64 {
     if code == 0 {
         0
+    } else if code <= -1 && code >= -19 {
+        0 - code
     } else if code == -2001 {
         2
     } else if code == -2002 {
@@ -118,6 +124,14 @@ def ffi_status_from_raw(code: i64) -> i64 {
         8
     } else {
         1
+    }
+}
+
+def ffi_bool_result(value: i64) -> Result<bool, i64> {
+    if value >= 0 {
+        Ok(value != 0)
+    } else {
+        Err(ffi_status_from_raw(value))
     }
 }
 
@@ -311,6 +325,22 @@ impl Buffer {
         sengoo_ffi_buffer_used_len(self.handle)
     }
 
+    def get_u8(self, index: i64) -> Result<i64, i64> {
+        ffi_byte_count_result(sengoo_ffi_buffer_get_u8(self.handle, index))
+    }
+
+    def set_u8(self, index: i64, value: i64) -> Result<bool, i64> {
+        ffi_bool_result(sengoo_ffi_buffer_set_u8(self.handle, index, value))
+    }
+
+    def read_u32_be(self, offset: i64) -> Result<i64, i64> {
+        ffi_byte_count_result(sengoo_ffi_buffer_read_u32_be(self.handle, offset))
+    }
+
+    def write_u32_be(self, offset: i64, value: i64) -> Result<bool, i64> {
+        ffi_bool_result(sengoo_ffi_buffer_write_u32_be(self.handle, offset, value))
+    }
+
     def ptr(self) -> i64 {
         sengoo_ffi_buffer_ptr(self.handle)
     }
@@ -380,12 +410,14 @@ impl Buffer {
     }
 
     def free(self) -> bool {
-        sengoo_ffi_buffer_free(self.handle) == 0
+        if self.handle == 0 { true } else { sengoo_ffi_buffer_free(self.handle) == 0 }
     }
 }
 
 impl Drop for Buffer {
     def drop(&mut self) {
-        sengoo_ffi_buffer_free(self.handle);
+        if self.handle != 0 {
+            sengoo_ffi_buffer_free(self.handle);
+        }
     }
 }

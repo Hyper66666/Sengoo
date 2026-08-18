@@ -276,7 +276,7 @@ import std::strconv;
 def stream_handler(request: &mut HttpServerRequest) -> Result<bool, i64> {
     let started = request.begin_stream(200);
     if started.is_err() {
-        Result { is_ok: false, value: false, error: started.error }
+        Err(started.error)
     } else {
         let mut stream = started.value;
         let first = stream.write_raw(sengoo_stdlib_str_ptr("tls-"), 4);

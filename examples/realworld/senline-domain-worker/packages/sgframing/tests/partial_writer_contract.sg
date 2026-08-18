@@ -1,0 +1,52 @@
+import std::ffi;
+
+import std::status;
+
+import sgframing;
+
+def three_byte_writer(payload: Buffer, offset: i64, len: i64) -> Result<i64, i64> {
+    let accepted = if len > 3 { 3; } else { len; };
+    Ok(accepted);
+}
+
+def zero_progress_writer(payload: Buffer, offset: i64, len: i64) -> Result<i64, i64> {
+    Ok(0);
+}
+
+def excessive_writer(payload: Buffer, offset: i64, len: i64) -> Result<i64, i64> {
+    Ok(len + 1);
+}
+
+def failing_writer(payload: Buffer, offset: i64, len: i64) -> Result<i64, i64> {
+    Err(STATUS_TIMEOUT());
+}
+
+def successful_flush() -> Result<bool, i64> {
+    Ok(true);
+}
+
+def failing_flush() -> Result<bool, i64> {
+    Err(STATUS_IO());
+}
+
+def main() -> i64 {
+    let payload = ffi_buffer_from_bytes("abcdefgh").unwrap_or(Buffer { handle: 0 });
+    let partial_writer: fn(Buffer, i64, i64) -> Result<i64, i64> = three_byte_writer;
+    let zero_writer: fn(Buffer, i64, i64) -> Result<i64, i64> = zero_progress_writer;
+    let too_much_writer: fn(Buffer, i64, i64) -> Result<i64, i64> = excessive_writer;
+    let error_writer: fn(Buffer, i64, i64) -> Result<i64, i64> = failing_writer;
+    let good_flusher: fn() -> Result<bool, i64> = successful_flush;
+    let bad_flusher: fn() -> Result<bool, i64> = failing_flush;
+    let complete = frame_write_all_with(payload, 0, 8, partial_writer);
+    let ranged = frame_write_all_with(payload, 2, 4, partial_writer);
+    let zero = frame_write_all_with(payload, 0, 8, zero_writer);
+    let excessive = frame_write_all_with(payload, 0, 8, too_much_writer);
+    let failed = frame_write_all_with(payload, 0, 8, error_writer);
+    let negative = frame_write_all_with(payload, -1, 1, partial_writer);
+    let outside = frame_write_all_with(payload, 7, 2, partial_writer);
+    let framed = frame_write_with(payload, 8, 8, partial_writer, good_flusher);
+    let flush_failed = frame_write_with(payload, 8, 8, partial_writer, bad_flusher);
+    let ok = complete.unwrap_or(-1) == 8 and ranged.unwrap_or(-1) == 4 and zero.is_err() and zero.error == STATUS_IO() and excessive.is_err() and excessive.error == STATUS_IO() and failed.is_err() and failed.error == STATUS_TIMEOUT() and negative.is_err() and negative.error == SGFRAMING_INVALID_PAYLOAD() and outside.is_err() and outside.error == SGFRAMING_INVALID_PAYLOAD() and framed.unwrap_or(-1) == 12 and flush_failed.is_err() and flush_failed.error == STATUS_IO();
+    payload.free();
+    if ok { 0; } else { 1; };
+}

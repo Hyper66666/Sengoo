@@ -1,6 +1,7 @@
 name: core-conformance
 
 on:
+  workflow_dispatch:
   pull_request:
   push:
     branches:
@@ -57,3 +58,570 @@ jobs:
           name: debugger-native-lldb-transcripts
           path: debugger-transcripts/
           if-no-files-found: error
+
+  binary-io-native:
+    name: binary I/O native (${{ matrix.os }})
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 45
+    strategy:
+      fail-fast: false
+      matrix:
+        os:
+          - ubuntu-latest
+          - windows-latest
+    env:
+      LLVM_VERSION: "19"
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: dtolnay/rust-toolchain@master
+        with:
+          toolchain: 1.94.0
+
+      - name: Install pinned LLVM toolchain (Ubuntu)
+        if: runner.os == 'Linux'
+        shell: bash
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y clang-${LLVM_VERSION} lld-${LLVM_VERSION}
+          sudo update-alternatives --install /usr/bin/clang clang /usr/bin/clang-${LLVM_VERSION} 100
+
+      - name: Require clang
+        shell: pwsh
+        run: |
+          $clang = Get-Command clang -ErrorAction Stop
+          & $clang.Source --version
+          if ($LASTEXITCODE -ne 0) {
+            throw "clang probe failed with exit code $LASTEXITCODE"
+          }
+
+      - name: Run compiler binary I/O signature surface
+        run: cargo test --locked -p sengoo-compiler io_module_preserves_binary_buffer_and_pipe_signatures -- --nocapture
+
+      - name: Run sgc binary I/O import surface
+        run: cargo test --locked -p sgc binary_io_import_expands_exact_buffer_and_pipe_surface -- --nocapture
+
+      - name: Run LSP binary I/O completion and signature surface
+        run: cargo test --locked -p sglsp binary_io_import_exposes_completion_and_exact_signatures -- --nocapture
+
+      - name: Run real-sgc stdlib binary I/O wrappers
+        run: cargo test --locked -p sgc stdlib_io_ -- --nocapture --test-threads=1
+
+      - name: Run Buffer byte integration tests
+        run: cargo test --locked -p sgc --test buffer_bytes -- --nocapture --test-threads=1
+
+      - name: Run exact-read native and pipe tests
+        run: cargo test --locked -p sgc --test binary_io_exact_read -- --nocapture --test-threads=1
+
+      - name: Run write-all native and pipe tests
+        run: cargo test --locked -p sgc --test binary_io_write_all -- --nocapture --test-threads=1
+
+  senline-worker-differential:
+    name: Senline worker differential (${{ matrix.os }})
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 90
+    strategy:
+      fail-fast: false
+      matrix:
+        os:
+          - ubuntu-latest
+          - windows-latest
+    env:
+      LLVM_VERSION: "19"
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: dtolnay/rust-toolchain@master
+        with:
+          toolchain: 1.94.0
+
+      - name: Install pinned LLVM toolchain (Ubuntu)
+        if: runner.os == 'Linux'
+        shell: bash
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y clang-${LLVM_VERSION} lld-${LLVM_VERSION}
+          sudo update-alternatives --install /usr/bin/clang clang /usr/bin/clang-${LLVM_VERSION} 100
+
+      - name: Require clang
+        shell: pwsh
+        run: |
+          $clang = Get-Command clang -ErrorAction Stop
+          & $clang.Source --version
+          if ($LASTEXITCODE -ne 0) {
+            throw "clang probe failed with exit code $LASTEXITCODE"
+          }
+
+      - name: Verify corpus metadata and fresh-process determinism
+        run: cargo test --locked -p sgc --test senline_worker_differential -- --nocapture --test-threads=1
+
+      - name: Run 10k reviewed and 100k seeded release corpora
+        run: cargo test --release --locked -p sgc --test senline_worker_differential -- --ignored --nocapture --test-threads=1
+
+      - name: Resource sampler smoke + latency percentiles (task 8.4)
+        run: cargo test --release --locked -p sgc --test senline_worker_resource resource_sampler_smoke_single_worker_with_latency_percentiles -- --nocapture
+
+      - name: Upload platform transcript evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: senline-worker-differential-${{ runner.os }}-${{ runner.arch }}
+          path: |
+            target/senline-differential/*.json
+            target/senline-resource/*smoke*.summary.json
+          if-no-files-found: warn
+
+  senline-installed-packages:
+    name: installed worker/HTTP (${{ matrix.os }})
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 120
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: ubuntu-latest
+            target: x86_64-unknown-linux-gnu
+            artifact: linux-x86_64
+          - os: windows-latest
+            target: x86_64-pc-windows-msvc
+            artifact: windows-x86_64
+    env:
+      LLVM_VERSION: "19"
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: dtolnay/rust-toolchain@master
+        with:
+          toolchain: 1.94.0
+
+      - name: Install pinned LLVM toolchain (Ubuntu)
+        if: runner.os == 'Linux'
+        shell: bash
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y clang-${LLVM_VERSION} lld-${LLVM_VERSION}
+          sudo update-alternatives --install /usr/bin/clang clang /usr/bin/clang-${LLVM_VERSION} 100
+
+      - name: Require clang
+        shell: pwsh
+        run: |
+          $clang = Get-Command clang -ErrorAction Stop
+          & $clang.Source --version
+          if ($LASTEXITCODE -ne 0) {
+            throw "clang probe failed with exit code $LASTEXITCODE"
+          }
+
+      - name: Build release tools
+        shell: pwsh
+        run: cargo build -p sgc -p sgpm -p sgfmt -p sglsp --release
+
+      - name: Package installed toolchain
+        shell: pwsh
+        env:
+          SENGOO_DIST_TARGET: ${{ matrix.target }}
+        run: |
+          $version = "0.1.0-ci"
+          $cargoTarget = Join-Path $env:RUNNER_TEMP "sengoo-cargo-package-${{ matrix.artifact }}"
+          Remove-Item -LiteralPath "target/dist" -Recurse -Force -ErrorAction SilentlyContinue
+          Remove-Item -LiteralPath $cargoTarget -Recurse -Force -ErrorAction SilentlyContinue
+          Remove-Item Env:CARGO_ENCODED_RUSTFLAGS -ErrorAction SilentlyContinue
+          Remove-Item Env:RUSTFLAGS -ErrorAction SilentlyContinue
+          ./scripts/package-toolchain.ps1 `
+            -Version $version `
+            -OutputDir "target/dist" `
+            -CargoTargetDir $cargoTarget `
+            -SmokeEvidence "core-conformance senline-installed ${{ matrix.os }} ${{ github.sha }}"
+
+      - name: Install toolchain outside product workspace
+        shell: pwsh
+        run: |
+          $archiveDir = "target/dist"
+          $latest = (Get-Content (Join-Path $archiveDir "latest-archive.txt") -ErrorAction SilentlyContinue | Select-Object -First 1)
+          if (-not $latest) {
+            $zip = @(Get-ChildItem $archiveDir -File -ErrorAction SilentlyContinue |
+              Where-Object { $_.Name -like '*.zip' -or $_.Name -like '*.tar.gz' } |
+              Select-Object -First 1)
+            if ($zip.Count -eq 0) { throw "missing packaged archive under $archiveDir" }
+            $latest = $zip[0].FullName
+          } elseif (-not [IO.Path]::IsPathRooted($latest)) {
+            $latest = Join-Path $archiveDir $latest
+          }
+          $installDir = Join-Path $env:RUNNER_TEMP "sengoo-install-${{ matrix.artifact }}"
+          Remove-Item -LiteralPath $installDir -Recurse -Force -ErrorAction SilentlyContinue
+          if ($IsWindows -or $PSVersionTable.PSEdition -eq "Desktop") {
+            ./scripts/install.ps1 -Archive $latest -InstallDir $installDir
+          } else {
+            sh scripts/install.sh "$latest" "$installDir"
+          }
+          Write-Host "install_dir=$installDir"
+
+      - name: Fake cargo + installed worker/HTTP dual package loop
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = "Stop"
+          $installDir = Join-Path $env:RUNNER_TEMP "sengoo-install-${{ matrix.artifact }}"
+          $bin = Join-Path $installDir "bin"
+          $suffix = ""
+          if ($IsWindows -or $PSVersionTable.PSEdition -eq "Desktop") {
+            $suffix = ".exe"
+          }
+          $sgc = Join-Path $bin "sgc$suffix"
+          $sgpm = Join-Path $bin "sgpm$suffix"
+          if (-not (Test-Path -LiteralPath $sgc)) { throw "missing installed sgc: $sgc" }
+          if (-not (Test-Path -LiteralPath $sgpm)) { throw "missing installed sgpm: $sgpm" }
+
+          $fakeCargoDir = Join-Path $env:RUNNER_TEMP "fake-cargo-fail"
+          Remove-Item -LiteralPath $fakeCargoDir -Recurse -Force -ErrorAction SilentlyContinue
+          New-Item -ItemType Directory -Force -Path $fakeCargoDir | Out-Null
+          $fakeCargo = Join-Path $fakeCargoDir "cargo$suffix"
+          if ($suffix -eq ".exe") {
+            "@echo off`r`necho fake-cargo: cargo must not be invoked by installed senline package loops 1>&2`r`nexit /b 97`r`n" | Set-Content -LiteralPath $fakeCargo -Encoding ASCII -NoNewline
+          } else {
+            "#!/bin/sh`necho `"fake-cargo: cargo must not be invoked by installed senline package loops`" >&2`nexit 97`n" | Set-Content -LiteralPath $fakeCargo -Encoding UTF8
+            & chmod +x $fakeCargo
+          }
+          # Use the OS path separator; ';' breaks Linux PATH and makes which(sgc)
+          # fall back to checkout target/release/sgc (source-local).
+          $pathSep = [IO.Path]::PathSeparator
+          $env:PATH = "$fakeCargoDir$pathSep$bin$pathSep" + $env:PATH
+          $env:SGPM_SGC = $sgc
+          $env:SGPM_SGFMT = Join-Path $bin "sgfmt$suffix"
+          Remove-Item Env:SENGOO_ROOT -ErrorAction SilentlyContinue
+          Remove-Item Env:SENGOO_STDLIB -ErrorAction SilentlyContinue
+          Remove-Item Env:SENGOO_RUNTIME -ErrorAction SilentlyContinue
+
+          Write-Host "sgc: $(& $sgc --version) path=$sgc"
+          Write-Host "sgpm: $(& $sgpm --version) path=$sgpm"
+          Write-Host "SGPM_SGC=$env:SGPM_SGC"
+
+          Push-Location examples/realworld/senline-domain-worker
+          try {
+            & $sgpm --runtime-mode installed check --locked
+            if ($LASTEXITCODE -ne 0) { throw "worker sgpm installed check --locked failed" }
+            & $sgpm --runtime-mode installed test --locked
+            if ($LASTEXITCODE -ne 0) { throw "worker sgpm installed test --locked failed" }
+            & $sgpm fmt --check --locked
+            if ($LASTEXITCODE -ne 0) { throw "worker sgpm fmt --check --locked failed" }
+            & $sgpm --runtime-mode installed doc --locked
+            if ($LASTEXITCODE -ne 0) { throw "worker sgpm doc --locked failed" }
+            & $sgpm --runtime-mode installed build --locked --release
+            if ($LASTEXITCODE -ne 0) { throw "worker sgpm installed build --locked --release failed" }
+          } finally {
+            Pop-Location
+          }
+
+          Push-Location examples/realworld/senline-http-dogfood
+          try {
+            & $sgpm --runtime-mode installed check --locked
+            if ($LASTEXITCODE -ne 0) { throw "http sgpm installed check --locked failed" }
+            & $sgpm --runtime-mode installed test --locked
+            if ($LASTEXITCODE -ne 0) { throw "http sgpm installed test --locked failed" }
+            & $sgpm fmt --check --locked
+            if ($LASTEXITCODE -ne 0) { throw "http sgpm fmt --check --locked failed" }
+            & $sgpm --runtime-mode installed doc --locked
+            if ($LASTEXITCODE -ne 0) { throw "http sgpm doc --locked failed" }
+            & $sgpm --runtime-mode installed build --locked --release
+            if ($LASTEXITCODE -ne 0) { throw "http sgpm installed build --locked --release failed" }
+          } finally {
+            Pop-Location
+          }
+
+          $pkgRoot = Join-Path $env:RUNNER_TEMP "senline-pkg-${{ matrix.artifact }}"
+          Remove-Item -LiteralPath $pkgRoot -Recurse -Force -ErrorAction SilentlyContinue
+          New-Item -ItemType Directory -Force -Path $pkgRoot | Out-Null
+
+          # Fresh package trees between A/B so dual-build does not silently reuse
+          # a single package output directory. Force worker rebuild between packages
+          # by clearing package-local target and frontend build caches.
+          function Clear-SenlinePackageBuildCaches([string]$PackageRoot) {
+            foreach ($rel in @("target", "src/build", "tests/build")) {
+              $p = Join-Path $PackageRoot $rel
+              if (Test-Path -LiteralPath $p) {
+                Remove-Item -LiteralPath $p -Recurse -Force -ErrorAction SilentlyContinue
+              }
+            }
+            Get-ChildItem -LiteralPath $PackageRoot -Recurse -Directory -Filter build -ErrorAction SilentlyContinue |
+              Where-Object { $_.FullName -match '[\\/]packages[\\/]' } |
+              ForEach-Object {
+                Remove-Item -LiteralPath $_.FullName -Recurse -Force -ErrorAction SilentlyContinue
+              }
+          }
+
+          ./scripts/package-senline-worker.ps1 -SgcPath $sgc -SgpmPath $sgpm -OutputDir (Join-Path $pkgRoot "worker-a")
+          Clear-SenlinePackageBuildCaches "examples/realworld/senline-domain-worker"
+          ./scripts/package-senline-worker.ps1 -SgcPath $sgc -SgpmPath $sgpm -OutputDir (Join-Path $pkgRoot "worker-b")
+          # Fail-closed pin-grade compare (payload + dependency identities). Record
+          # result but continue product probes so functional gates still run when
+          # PE/ELF dual-build identity remains open under task 8.7.
+          $compareFailures = @()
+          try {
+            ./scripts/compare-senline-package-manifests.ps1 `
+              -LeftManifest (Join-Path $pkgRoot "worker-a/worker-manifest.json") `
+              -RightManifest (Join-Path $pkgRoot "worker-b/worker-manifest.json") `
+              -OutputDir (Join-Path $pkgRoot "worker-compare")
+          } catch {
+            $compareFailures += "worker dual-package compare failed: $($_.Exception.Message)"
+            Write-Host "::warning::$($compareFailures[-1])"
+          }
+
+          ./scripts/package-senline-http.ps1 -SgcPath $sgc -SgpmPath $sgpm -OutputDir (Join-Path $pkgRoot "http-a")
+          Clear-SenlinePackageBuildCaches "examples/realworld/senline-http-dogfood"
+          ./scripts/package-senline-http.ps1 -SgcPath $sgc -SgpmPath $sgpm -OutputDir (Join-Path $pkgRoot "http-b")
+          try {
+            ./scripts/compare-senline-package-manifests.ps1 `
+              -LeftManifest (Join-Path $pkgRoot "http-a/http-manifest.json") `
+              -RightManifest (Join-Path $pkgRoot "http-b/http-manifest.json") `
+              -OutputDir (Join-Path $pkgRoot "http-compare")
+          } catch {
+            $compareFailures += "http dual-package compare failed: $($_.Exception.Message)"
+            Write-Host "::warning::$($compareFailures[-1])"
+          }
+
+          # Real parent/child framed worker product loop against packaged binary.
+          $workerExeName = if ($suffix -eq ".exe") { "senline_domain_worker.exe" } else { "senline_domain_worker" }
+          $workerExe = Join-Path $pkgRoot "worker-a/$workerExeName"
+          if (-not (Test-Path -LiteralPath $workerExe)) { throw "missing packaged worker: $workerExe" }
+          $requestPath = "examples/realworld/senline-domain-worker/fixtures/v1/cases/eligible-accept.request.json"
+          $planPath = "examples/realworld/senline-domain-worker/fixtures/v1/cases/eligible-accept.plan.json"
+          $handshakePath = Join-Path $pkgRoot "worker-a/fixtures/v1/handshake/ready.json"
+          $probeDir = Join-Path $pkgRoot "worker-product-probe"
+          New-Item -ItemType Directory -Force -Path $probeDir | Out-Null
+          $reqBytes = [IO.File]::ReadAllBytes((Resolve-Path $requestPath))
+          $frame = New-Object byte[] ($reqBytes.Length + 4)
+          $lenBytes = [BitConverter]::GetBytes([uint32]$reqBytes.Length)
+          if ([BitConverter]::IsLittleEndian) { [Array]::Reverse($lenBytes) }
+          [Array]::Copy($lenBytes, 0, $frame, 0, 4)
+          [Array]::Copy($reqBytes, 0, $frame, 4, $reqBytes.Length)
+          $psi = New-Object System.Diagnostics.ProcessStartInfo
+          $psi.FileName = $workerExe
+          $psi.WorkingDirectory = $probeDir
+          $psi.RedirectStandardInput = $true
+          $psi.RedirectStandardOutput = $true
+          $psi.RedirectStandardError = $true
+          $psi.UseShellExecute = $false
+          $proc = [Diagnostics.Process]::Start($psi)
+          $stdin = $proc.StandardInput.BaseStream
+          $stdout = $proc.StandardOutput.BaseStream
+          function Read-Frame([IO.Stream]$s) {
+            $prefix = New-Object byte[] 4
+            $read = 0
+            while ($read -lt 4) {
+              $n = $s.Read($prefix, $read, 4 - $read)
+              if ($n -le 0) { throw "EOF reading frame prefix" }
+              $read += $n
+            }
+            if ([BitConverter]::IsLittleEndian) { [Array]::Reverse($prefix) }
+            $len = [BitConverter]::ToUInt32($prefix, 0)
+            if ($len -gt 8192) { throw "frame too large: $len" }
+            $payload = New-Object byte[] $len
+            $read = 0
+            while ($read -lt $len) {
+              $n = $s.Read($payload, $read, $len - $read)
+              if ($n -le 0) { throw "EOF reading frame payload" }
+              $read += $n
+            }
+            return $payload
+          }
+          function Bytes-Key([byte[]]$b) {
+            $filtered = New-Object System.Collections.Generic.List[byte]
+            foreach ($x in $b) { if ($x -ne 13) { [void]$filtered.Add($x) } }
+            return [Convert]::ToBase64String($filtered.ToArray())
+          }
+          $gotHandshake = Read-Frame $stdout
+          $wantHandshake = [IO.File]::ReadAllBytes((Resolve-Path $handshakePath))
+          if ((Bytes-Key $gotHandshake) -ne (Bytes-Key $wantHandshake)) {
+            throw "packaged worker handshake mismatch"
+          }
+          $stdin.Write($frame, 0, $frame.Length)
+          $stdin.Flush()
+          $stdin.Close()
+          $gotPlan = Read-Frame $stdout
+          $wantPlan = [IO.File]::ReadAllBytes((Resolve-Path $planPath))
+          if ((Bytes-Key $gotPlan) -ne (Bytes-Key $wantPlan)) {
+            throw "packaged worker plan bytes mismatch eligible-accept fixture"
+          }
+          if (-not $proc.WaitForExit(15000)) {
+            $proc.Kill()
+            throw "packaged worker did not exit after stdin EOF"
+          }
+          if ($proc.ExitCode -ne 0) {
+            throw "packaged worker exit code $($proc.ExitCode)"
+          }
+          Write-Host "packaged worker parent/child framed product loop green"
+
+          # Real localhost HTTP product loop against packaged HTTP dogfood binary.
+          $httpExeName = if ($suffix -eq ".exe") { "senline_http_dogfood.exe" } else { "senline_http_dogfood" }
+          $httpExe = Join-Path $pkgRoot "http-a/$httpExeName"
+          if (-not (Test-Path -LiteralPath $httpExe)) { throw "missing packaged http dogfood: $httpExe" }
+          $httpPsi = New-Object System.Diagnostics.ProcessStartInfo
+          $httpPsi.FileName = $httpExe
+          $httpPsi.WorkingDirectory = (Join-Path $pkgRoot "http-a")
+          $httpPsi.RedirectStandardOutput = $true
+          $httpPsi.RedirectStandardError = $true
+          $httpPsi.UseShellExecute = $false
+          $httpProc = [Diagnostics.Process]::Start($httpPsi)
+          # Async ReadLine so a silent hang cannot block the step forever.
+          $readyTask = $httpProc.StandardOutput.ReadLineAsync()
+          if (-not $readyTask.Wait(20000)) {
+            if (-not $httpProc.HasExited) { $httpProc.Kill() }
+            throw "http dogfood READY timed out"
+          }
+          $readyLine = $readyTask.Result
+          if (-not $readyLine -or $readyLine -notmatch '^READY 127\.0\.0\.1:(\d+)$') {
+            if (-not $httpProc.HasExited) { $httpProc.Kill() }
+            throw "http dogfood READY line missing/invalid: '$readyLine'"
+          }
+          $port = [int]$Matches[1]
+          # Harness requires Content-Type exactly "application/json" (no charset).
+          # Prefer curl for cross-platform exact headers; fall back to WebRequest.
+          $bodyFile = Join-Path $pkgRoot "http-probe-body.json"
+          Copy-Item -LiteralPath (Resolve-Path $requestPath) -Destination $bodyFile -Force
+          $respBodyFile = Join-Path $pkgRoot "http-probe-resp.json"
+          $statusCode = 0
+          $respText = ""
+          $curlExe = $null
+          foreach ($candidate in @("curl.exe", "curl")) {
+            $cmd = Get-Command $candidate -ErrorAction SilentlyContinue
+            if ($cmd -and $cmd.Source -notmatch 'Alias') { $curlExe = $cmd.Source; break }
+          }
+          if ($curlExe) {
+            $curlOut = & $curlExe -sS -o $respBodyFile -w "%{http_code}" `
+              -X POST "http://127.0.0.1:$port/v1/submit-envelope" `
+              -H "Content-Type: application/json" `
+              --data-binary "@$bodyFile"
+            $statusCode = [int]$curlOut
+            if (Test-Path -LiteralPath $respBodyFile) {
+              $respText = [IO.File]::ReadAllText($respBodyFile)
+            }
+          } else {
+            try {
+              $headers = @{ "Content-Type" = "application/json" }
+              $bodyBytes = [IO.File]::ReadAllBytes($bodyFile)
+              $resp = Invoke-WebRequest -Uri "http://127.0.0.1:$port/v1/submit-envelope" `
+                -Method POST -Headers $headers -Body $bodyBytes -TimeoutSec 15 -UseBasicParsing
+              $statusCode = [int]$resp.StatusCode
+              $respText = $resp.Content
+            } catch {
+              if (-not $httpProc.HasExited) { $httpProc.Kill() }
+              throw "localhost HTTP product POST failed: $($_.Exception.Message)"
+            }
+          }
+          if ($statusCode -ne 200) {
+            if (-not $httpProc.HasExited) { $httpProc.Kill() }
+            throw "http dogfood status $statusCode body=$($respText.Substring(0, [Math]::Min(200, $respText.Length)))"
+          }
+          $respJson = $respText | ConvertFrom-Json
+          if ($respJson.kind -ne "plan") {
+            if (-not $httpProc.HasExited) { $httpProc.Kill() }
+            throw "http dogfood did not return plan kind: $($respText.Substring(0, [Math]::Min(200, $respText.Length)))"
+          }
+          # Worker/HTTP plan byte equivalence (LF-normalized): HTTP body must match
+          # the framed worker plan for the same eligible-accept fixture.
+          $httpPlanBytes = [Text.Encoding]::UTF8.GetBytes($respText)
+          if ((Bytes-Key $httpPlanBytes) -ne (Bytes-Key $gotPlan)) {
+            if (-not $httpProc.HasExited) { $httpProc.Kill() }
+            throw "worker/HTTP plan bytes diverge for eligible-accept"
+          }
+          if (-not $httpProc.WaitForExit(15000)) {
+            $httpProc.Kill()
+            throw "http dogfood did not exit after one request"
+          }
+          if ($httpProc.ExitCode -ne 0) {
+            throw "http dogfood exit code $($httpProc.ExitCode) after successful plan response"
+          }
+          # Malformed body must not hang the product loop path (second package probe).
+          $httpPsi2 = New-Object System.Diagnostics.ProcessStartInfo
+          $httpPsi2.FileName = $httpExe
+          $httpPsi2.WorkingDirectory = (Join-Path $pkgRoot "http-a")
+          $httpPsi2.RedirectStandardOutput = $true
+          $httpPsi2.RedirectStandardError = $true
+          $httpPsi2.UseShellExecute = $false
+          $httpProc2 = [Diagnostics.Process]::Start($httpPsi2)
+          $readyTask2 = $httpProc2.StandardOutput.ReadLineAsync()
+          if (-not $readyTask2.Wait(20000)) {
+            if (-not $httpProc2.HasExited) { $httpProc2.Kill() }
+            throw "http dogfood READY timed out on malformed probe"
+          }
+          $ready2 = $readyTask2.Result
+          if (-not $ready2 -or $ready2 -notmatch '^READY 127\.0\.0\.1:(\d+)$') {
+            if (-not $httpProc2.HasExited) { $httpProc2.Kill() }
+            throw "http dogfood READY invalid on malformed probe: '$ready2'"
+          }
+          $port2 = [int]$Matches[1]
+          # Protocol contract: strict JSON errors return HTTP 200 + normalized
+          # protocol error envelope (malformed_json). Transport policy failures
+          # (method/path/header) are 400 — not this probe.
+          $badBody = Join-Path $pkgRoot "http-probe-bad.json"
+          [IO.File]::WriteAllText($badBody, "{not-json")
+          $badResp = Join-Path $pkgRoot "http-probe-bad-resp.txt"
+          if ($curlExe) {
+            $badCode = & $curlExe -sS -o $badResp -w "%{http_code}" `
+              -X POST "http://127.0.0.1:$port2/v1/submit-envelope" `
+              -H "Content-Type: application/json" `
+              --data-binary "@$badBody"
+            if ([int]$badCode -ne 200) {
+              if (-not $httpProc2.HasExited) { $httpProc2.Kill() }
+              throw "malformed JSON must return HTTP 200 protocol error, got $badCode"
+            }
+            $badText = [IO.File]::ReadAllText($badResp)
+            $expectedMalformed = '{"kind":"error","schema_version":1,"scope":"protocol","code":"malformed_json","evaluation_id":null}'
+            $badNorm = $badText.TrimEnd("`r", "`n")
+            if ($badNorm -ne $expectedMalformed) {
+              if (-not $httpProc2.HasExited) { $httpProc2.Kill() }
+              throw "malformed JSON envelope mismatch: '$badText'"
+            }
+          }
+          if (-not $httpProc2.WaitForExit(15000)) {
+            $httpProc2.Kill()
+            throw "http dogfood did not exit after malformed probe"
+          }
+          # Transport policy: wrong method is HTTP 400 (not a protocol-error envelope).
+          $httpPsi3 = New-Object System.Diagnostics.ProcessStartInfo
+          $httpPsi3.FileName = $httpExe
+          $httpPsi3.WorkingDirectory = (Join-Path $pkgRoot "http-a")
+          $httpPsi3.RedirectStandardOutput = $true
+          $httpPsi3.RedirectStandardError = $true
+          $httpPsi3.UseShellExecute = $false
+          $httpProc3 = [Diagnostics.Process]::Start($httpPsi3)
+          $readyTask3 = $httpProc3.StandardOutput.ReadLineAsync()
+          if (-not $readyTask3.Wait(20000)) {
+            if (-not $httpProc3.HasExited) { $httpProc3.Kill() }
+            throw "http dogfood READY timed out on method probe"
+          }
+          $ready3 = $readyTask3.Result
+          if (-not $ready3 -or $ready3 -notmatch '^READY 127\.0\.0\.1:(\d+)$') {
+            if (-not $httpProc3.HasExited) { $httpProc3.Kill() }
+            throw "http dogfood READY invalid on method probe: '$ready3'"
+          }
+          $port3 = [int]$Matches[1]
+          if ($curlExe) {
+            $methodCode = & $curlExe -sS -o (Join-Path $pkgRoot "http-probe-method-resp.txt") -w "%{http_code}" `
+              -X GET "http://127.0.0.1:$port3/v1/submit-envelope"
+            if ([int]$methodCode -ne 400) {
+              if (-not $httpProc3.HasExited) { $httpProc3.Kill() }
+              throw "wrong HTTP method must return 400 transport error, got $methodCode"
+            }
+          }
+          if (-not $httpProc3.WaitForExit(15000)) {
+            $httpProc3.Kill()
+            throw "http dogfood did not exit after method probe"
+          }
+          Write-Host "packaged HTTP localhost product loop green (port=$port, worker/HTTP plan equal, malformed_json@200, GET@400)"
+
+          if ($compareFailures.Count -gt 0) {
+            throw ("pin-grade dual-package compare failed (task 8.7 open until bit-identical): " + ($compareFailures -join "; "))
+          }
+          Write-Host "senline installed worker/HTTP dual package + product loops green on ${{ matrix.os }}"
+
+      - name: Upload package compare evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: senline-installed-packages-${{ matrix.artifact }}
+          path: |
+            ${{ runner.temp }}/senline-pkg-${{ matrix.artifact }}/**/comparison.json
+            ${{ runner.temp }}/senline-pkg-${{ matrix.artifact }}/**/*-manifest.json
+            ${{ runner.temp }}/senline-pkg-${{ matrix.artifact }}/worker-a/**
+            ${{ runner.temp }}/senline-pkg-${{ matrix.artifact }}/http-a/**
+          if-no-files-found: warn
+

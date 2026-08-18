@@ -1,0 +1,182 @@
+import std::json;
+
+import std::ffi;
+
+import std::status;
+
+import std::string;
+
+def SGJSON_MISSING_FIELD() -> i64 {
+    2201;
+}
+
+def SGJSON_UNKNOWN_FIELD() -> i64 {
+    2202;
+}
+
+def SGJSON_WRONG_KIND() -> i64 {
+    2203;
+}
+
+def SGJSON_OUT_OF_RANGE() -> i64 {
+    2204;
+}
+
+def SGJSON_UNKNOWN_ENUM() -> i64 {
+    2205;
+}
+
+def SGJSON_INVALID_STRING() -> i64 {
+    2206;
+}
+
+def SGJSON_UNSORTED_OR_DUPLICATE() -> i64 {
+    2207;
+}
+
+def SGJSON_RUNTIME_FAILURE() -> i64 {
+    2208;
+}
+
+def sgjson_bool_ok(value: bool) -> Result<bool, i64> {
+    Ok(value);
+}
+
+def sgjson_bool_error(code: i64) -> Result<bool, i64> {
+    Err(code);
+}
+
+def sgjson_i64_ok(value: i64) -> Result<i64, i64> {
+    Ok(value);
+}
+
+def sgjson_i64_error(code: i64) -> Result<i64, i64> {
+    Err(code);
+}
+
+def sgjson_string_ok(value: String) -> Result<String, i64> {
+    Ok(value);
+}
+
+def sgjson_string_error(code: i64) -> Result<String, i64> {
+    Err(code);
+}
+
+def sgjson_value_ok(value: JsonValue) -> Result<JsonValue, i64> {
+    Ok(value);
+}
+
+def sgjson_value_error(code: i64) -> Result<JsonValue, i64> {
+    Err(code);
+}
+
+def sgjson_required_value(root: JsonValue, key: &str, expected_kind: i64) -> Result<JsonValue, i64> {
+    let root_kind = root.kind();
+    if root_kind.is_err() { return sgjson_value_error(SGJSON_RUNTIME_FAILURE()); };
+    if root_kind.value != JSON_KIND_OBJECT() { return sgjson_value_error(SGJSON_WRONG_KIND()); };
+    if not root.object_has(key) { return sgjson_value_error(SGJSON_MISSING_FIELD()); };
+    let found = root.object_get(key);
+    if found.is_err() { return sgjson_value_error(SGJSON_RUNTIME_FAILURE()); };
+    let value = found.value;
+    let value_kind = value.kind();
+    if value_kind.is_err() { return sgjson_value_error(SGJSON_RUNTIME_FAILURE()); };
+    if value_kind.value != expected_kind { sgjson_value_error(SGJSON_WRONG_KIND()); } else { sgjson_value_ok(value); };
+}
+
+def sgjson_exact_object_len(root: JsonValue, expected_len: i64) -> Result<bool, i64> {
+    if expected_len < 0 { return sgjson_bool_error(SGJSON_OUT_OF_RANGE()); };
+    let root_kind = root.kind();
+    if root_kind.is_err() { return sgjson_bool_error(SGJSON_RUNTIME_FAILURE()); };
+    if root_kind.value != JSON_KIND_OBJECT() { return sgjson_bool_error(SGJSON_WRONG_KIND()); };
+    let actual = root.object_len();
+    if actual.is_err() { sgjson_bool_error(SGJSON_RUNTIME_FAILURE()); } else if actual.value < expected_len { sgjson_bool_error(SGJSON_MISSING_FIELD()); } else if actual.value > expected_len { sgjson_bool_error(SGJSON_UNKNOWN_FIELD()); } else { sgjson_bool_ok(true); };
+}
+
+def sgjson_exact_object_fields(root: JsonValue, expected_len: i64, max_key_len: i64, allowed: fn(String) -> bool) -> Result<bool, i64> {
+    if max_key_len < 0 { return sgjson_bool_error(SGJSON_OUT_OF_RANGE()); };
+    let exact = sgjson_exact_object_len(root, expected_len);
+    if exact.is_err() { return sgjson_bool_error(exact.error); };
+    if expected_len == 0 { return sgjson_bool_ok(true); };
+    let capacity = if max_key_len == 0 { 1; } else { max_key_len; };
+    let buffer_result = ffi_buffer_new(capacity);
+    if buffer_result.is_err() { return sgjson_bool_error(SGJSON_RUNTIME_FAILURE()); };
+    let buffer = buffer_result.value;
+    let mut index = 0;
+    while index < expected_len { let copied = root.object_key_copy(index, buffer); if copied.is_err() { buffer.free(); if copied.error == STATUS_BUFFER_TOO_SMALL() { return sgjson_bool_error(SGJSON_UNKNOWN_FIELD()); }; return sgjson_bool_error(SGJSON_RUNTIME_FAILURE()); }; if copied.value > max_key_len { buffer.free(); return sgjson_bool_error(SGJSON_UNKNOWN_FIELD()); }; let owned = string_from_buffer(buffer, copied.value); if owned.is_err() { buffer.free(); return sgjson_bool_error(SGJSON_RUNTIME_FAILURE()); }; if not allowed(owned.value) { buffer.free(); return sgjson_bool_error(SGJSON_UNKNOWN_FIELD()); }; index = index + 1; };
+    buffer.free();
+    sgjson_bool_ok(true);
+}
+
+def sgjson_required_object(root: JsonValue, key: &str) -> Result<JsonValue, i64> {
+    sgjson_required_value(root, key, JSON_KIND_OBJECT());
+}
+
+def sgjson_required_array(root: JsonValue, key: &str) -> Result<JsonValue, i64> {
+    sgjson_required_value(root, key, JSON_KIND_ARRAY());
+}
+
+def sgjson_required_string(root: JsonValue, key: &str) -> Result<String, i64> {
+    let value = sgjson_required_value(root, key, JSON_KIND_STRING());
+    if value.is_err() { return sgjson_string_error(value.error); };
+    let text = value.value.string_value();
+    if text.is_err() { sgjson_string_error(SGJSON_RUNTIME_FAILURE()); } else { sgjson_string_ok(text.value); };
+}
+
+def sgjson_required_i64(root: JsonValue, key: &str, min_value: i64, max_value: i64) -> Result<i64, i64> {
+    if min_value > max_value { return sgjson_i64_error(SGJSON_OUT_OF_RANGE()); };
+    let value = sgjson_required_value(root, key, JSON_KIND_NUMBER());
+    if value.is_err() { return sgjson_i64_error(value.error); };
+    let number = value.value.number_i64();
+    if number.is_err() { sgjson_i64_error(SGJSON_WRONG_KIND()); } else if number.value < min_value or number.value > max_value { sgjson_i64_error(SGJSON_OUT_OF_RANGE()); } else { sgjson_i64_ok(number.value); };
+}
+
+def sgjson_required_bool(root: JsonValue, key: &str) -> Result<bool, i64> {
+    let value = sgjson_required_value(root, key, JSON_KIND_BOOL());
+    if value.is_err() { return sgjson_bool_error(value.error); };
+    let boolean = value.value.bool_value();
+    if boolean.is_err() { sgjson_bool_error(SGJSON_RUNTIME_FAILURE()); } else { sgjson_bool_ok(boolean.value); };
+}
+
+def sgjson_required_enum3(root: JsonValue, key: &str, first: &str, second: &str, third: &str) -> Result<bool, i64> {
+    let value = sgjson_required_string(root, key);
+    if value.is_err() { return sgjson_bool_error(value.error); };
+    let text = value.value;
+    if str_eq(text.as_str(), first) or str_eq(text.as_str(), second) or str_eq(text.as_str(), third) { sgjson_bool_ok(true); } else { sgjson_bool_error(SGJSON_UNKNOWN_ENUM()); };
+}
+
+def sgjson_string_is_ascii_bounded(value: &String, min_len: i64, max_len: i64) -> bool {
+    let len = value.len();
+    if min_len < 0 or min_len > max_len or len < min_len or len > max_len { return false; };
+    let bytes = value.bytes();
+    let mut index = 0;
+    let mut valid = true;
+    while index < len { let byte = bytes.next().unwrap_or(-1); if byte < 0 or byte > 127 { valid = false; }; index = index + 1; };
+    bytes.free();
+    valid;
+}
+
+def sgjson_required_lower_hex(root: JsonValue, key: &str, exact_len: i64) -> Result<bool, i64> {
+    let value = sgjson_required_string(root, key);
+    if value.is_err() { return sgjson_bool_error(value.error); };
+    let text = value.value;
+    if exact_len < 0 or text.len() != exact_len { return sgjson_bool_error(SGJSON_INVALID_STRING()); };
+    let bytes = text.bytes();
+    let mut index = 0;
+    let mut valid = true;
+    while index < exact_len { let byte = bytes.next().unwrap_or(-1); if not ((byte >= 48 and byte <= 57) or (byte >= 97 and byte <= 102)) { valid = false; }; index = index + 1; };
+    bytes.free();
+    if valid { sgjson_bool_ok(true); } else { sgjson_bool_error(SGJSON_INVALID_STRING()); };
+}
+
+def sgjson_required_sorted_unique_string_array(root: JsonValue, key: &str, min_len: i64, max_len: i64) -> Result<bool, i64> {
+    if min_len < 0 or min_len > max_len { return sgjson_bool_error(SGJSON_OUT_OF_RANGE()); };
+    let value = sgjson_required_value(root, key, JSON_KIND_ARRAY());
+    if value.is_err() { return sgjson_bool_error(value.error); };
+    let array = value.value;
+    let count = array.array_len();
+    if count.is_err() { return sgjson_bool_error(SGJSON_RUNTIME_FAILURE()); };
+    if count.value < min_len or count.value > max_len { return sgjson_bool_error(SGJSON_OUT_OF_RANGE()); };
+    let mut index = 0;
+    while index < count.value { let current = array.array_get(index); if current.is_err() { return sgjson_bool_error(SGJSON_RUNTIME_FAILURE()); }; let current_kind = current.value.kind(); if current_kind.is_err() { return sgjson_bool_error(SGJSON_RUNTIME_FAILURE()); }; if current_kind.value != JSON_KIND_STRING() { return sgjson_bool_error(SGJSON_WRONG_KIND()); }; let current_text = current.value.string_value(); if current_text.is_err() { return sgjson_bool_error(SGJSON_RUNTIME_FAILURE()); }; if index + 1 < count.value { let next = array.array_get(index + 1); if next.is_err() { return sgjson_bool_error(SGJSON_RUNTIME_FAILURE()); }; let next_kind = next.value.kind(); if next_kind.is_err() { return sgjson_bool_error(SGJSON_RUNTIME_FAILURE()); }; if next_kind.value != JSON_KIND_STRING() { return sgjson_bool_error(SGJSON_WRONG_KIND()); }; let next_text = next.value.string_value(); if next_text.is_err() { return sgjson_bool_error(SGJSON_RUNTIME_FAILURE()); }; if current_text.value.compare(next_text.value) >= 0 { return sgjson_bool_error(SGJSON_UNSORTED_OR_DUPLICATE()); }; }; index = index + 1; };
+    sgjson_bool_ok(true);
+}

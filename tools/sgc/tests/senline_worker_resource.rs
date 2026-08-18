@@ -1,0 +1,1508 @@
+//! Single-worker resource soak and latency sampler (tasks 8.3 / 8.4).
+//!
+//! Methodology: `docs/senline-dogfood-resource-methodology.md`.
+//! Does **not** claim Senline admission, sandbox, or production timing.
+
+mod common;
+
+use common::source_sgc_command;
+use serde_json::Value;
+use sha2::{Digest, Sha256};
+use std::fs;
+use std::io::{Read, Write};
+use std::path::{Path, PathBuf};
+use std::process::{Child, Command, Stdio};
+use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
+
+const PLANNER_FIXTURE_REVISION: &str = "1de09ccafa7e8f182af68e82352e2d4be39496b0";
+const FIXED_SEED: u64 = 0x6a09_e667_f3bc_c909;
+const WARMUP_CASES: u64 = 256;
+const SAMPLE_EVERY: u64 = 100;
+const INPUT_MAX_BYTES: usize = 32 * 1024;
+const OUTPUT_MAX_BYTES: usize = 8 * 1024;
+const JSON_SAFE_INTEGER_MAX: u64 = 9_007_199_254_740_991;
+
+/// CI / default smoke: short single-worker run that exercises the sampler.
+const SMOKE_COUNT: u64 = 1_024;
+/// Investigation window covering the historical single-worker stall near 44_086.
+const INVESTIGATION_COUNT: u64 = 45_000;
+/// Task 8.3 full soak target (ignored by default).
+const SOAK_COUNT: u64 = 1_000_000;
+
+fn workspace_root() -> PathBuf {
+    PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+        .parent()
+        .and_then(Path::parent)
+        .expect("sgc crate should live under tools/sgc")
+        .to_path_buf()
+}
+
+fn worker_root() -> PathBuf {
+    workspace_root().join("examples/realworld/senline-domain-worker")
+}
+
+fn fixture_root() -> PathBuf {
+    worker_root().join("fixtures/v1")
+}
+
+fn evidence_root() -> PathBuf {
+    let path = workspace_root().join("target/senline-resource");
+    fs::create_dir_all(&path).expect("create resource evidence directory");
+    path
+}
+
+fn normalize_fixture_bytes(bytes: impl AsRef<[u8]>) -> Vec<u8> {
+    bytes
+        .as_ref()
+        .iter()
+        .copied()
+        .filter(|byte| *byte != b'\r')
+        .collect()
+}
+
+fn sha256_hex(bytes: impl AsRef<[u8]>) -> String {
+    format!("{:x}", Sha256::digest(bytes.as_ref()))
+}
+
+struct WorkerTempDir {
+    path: PathBuf,
+}
+
+impl WorkerTempDir {
+    fn new(label: &str) -> Self {
+        let stamp = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .expect("system clock")
+            .as_millis();
+        let path = std::env::temp_dir().join(format!("senline-resource-{label}-{stamp}"));
+        fs::create_dir_all(&path).expect("create worker temp dir");
+        Self { path }
+    }
+}
+
+impl Drop for WorkerTempDir {
+    fn drop(&mut self) {
+        let _ = fs::remove_dir_all(&self.path);
+    }
+}
+
+fn worker_module_map(worker: &Path) -> std::ffi::OsString {
+    std::env::join_paths([
+        format!(
+            "senline_domain_worker={}",
+            worker.join("src/lib.sg").display()
+        ),
+        format!(
+            "senline_build_identity={}",
+            worker
+                .join("packages/senline-build-identity/src/lib.sg")
+                .display()
+        ),
+        format!(
+            "senline_facts_to_plan={}",
+            worker
+                .join("packages/senline-facts-to-plan/src/lib.sg")
+                .display()
+        ),
+        format!(
+            "sgframing={}",
+            worker.join("packages/sgframing/src/lib.sg").display()
+        ),
+        format!(
+            "sgjson_contract={}",
+            worker.join("packages/sgjson-contract/src/lib.sg").display()
+        ),
+    ])
+    .expect("encode resource worker module map")
+}
+
+fn build_worker(root: &WorkerTempDir) -> PathBuf {
+    let worker = worker_root();
+    let executable = root.path.join(if cfg!(windows) {
+        "senline-domain-worker-resource.exe"
+    } else {
+        "senline-domain-worker-resource"
+    });
+    let output = source_sgc_command()
+        .arg("build")
+        .arg(worker.join("src/main.sg"))
+        .arg("--output")
+        .arg(&executable)
+        .args(["-O", "3", "--force-rebuild"])
+        .current_dir(&worker)
+        .env("SENGOO_MODULE_MAP", worker_module_map(&worker))
+        .output()
+        .expect("build resource worker");
+    assert!(
+        output.status.success(),
+        "resource worker build failed\nstdout:\n{}\nstderr:\n{}",
+        String::from_utf8_lossy(&output.stdout),
+        String::from_utf8_lossy(&output.stderr)
+    );
+    executable
+}
+
+fn write_frame(writer: &mut impl Write, payload: &[u8]) -> Result<(), String> {
+    let len = u32::try_from(payload.len()).map_err(|_| "payload length exceeds u32".to_owned())?;
+    writer
+        .write_all(&len.to_be_bytes())
+        .and_then(|()| writer.write_all(payload))
+        .map_err(|error| format!("write worker frame: {error}"))
+}
+
+fn read_frame(reader: &mut impl Read, max_len: usize) -> Result<Vec<u8>, String> {
+    let mut prefix = [0_u8; 4];
+    reader
+        .read_exact(&mut prefix)
+        .map_err(|error| format!("read worker frame prefix: {error}"))?;
+    let len = u32::from_be_bytes(prefix) as usize;
+    if len == 0 || len > max_len {
+        return Err(format!(
+            "worker frame length {len} is outside 1..={max_len}"
+        ));
+    }
+    let mut payload = vec![0_u8; len];
+    reader
+        .read_exact(&mut payload)
+        .map_err(|error| format!("read worker frame payload: {error}"))?;
+    Ok(payload)
+}
+
+fn ascii_ref(domain: u64, index: u64, len: usize) -> String {
+    const ALPHABET: &[u8] = b"abcdefghijklmnopqrstuvwxyz0123456789_-";
+    let mut state = domain ^ index.rotate_left(17) ^ 0xa409_3822_299f_31d0;
+    let mut value = String::with_capacity(len);
+    for _ in 0..len {
+        state ^= state << 13;
+        state ^= state >> 7;
+        state ^= state << 17;
+        value.push(ALPHABET[(state as usize) % ALPHABET.len()] as char);
+    }
+    value
+}
+
+fn evaluation_id(high: u64, low: u64) -> String {
+    format!("{high:016x}{low:016x}")
+}
+
+fn append_u32(bytes: &mut Vec<u8>, value: u32) {
+    bytes.extend_from_slice(&value.to_be_bytes());
+}
+
+fn append_string(bytes: &mut Vec<u8>, value: &str) {
+    append_u32(
+        bytes,
+        u32::try_from(value.len()).expect("contract string length fits u32"),
+    );
+    bytes.extend_from_slice(value.as_bytes());
+}
+
+fn append_string_array(bytes: &mut Vec<u8>, values: &[&str]) {
+    append_u32(
+        bytes,
+        u32::try_from(values.len()).expect("contract array length fits u32"),
+    );
+    for value in values {
+        append_string(bytes, value);
+    }
+}
+
+struct CaseFields {
+    evaluation_id: String,
+    operation_epoch: u64,
+    worker_generation: u64,
+    execution_mode: &'static str,
+    worker_bundle_id: String,
+    identifiers: [String; 7],
+    has_submit_envelope_v2: bool,
+    ciphertext_length_bytes: u32,
+    idempotency_status: &'static str,
+    recipient_pending_count: u32,
+    recipient_pending_limit: u32,
+    application_envelopes_used: u32,
+    application_envelopes_limit: u32,
+    ciphertext_limit_bytes: u32,
+    enqueue_delivery_enabled: bool,
+}
+
+fn facts_binding(case: &CaseFields) -> String {
+    let mut bytes = b"senline.submit-envelope.binding.v1\0".to_vec();
+    append_u32(&mut bytes, 1);
+    append_string(&mut bytes, "submit-envelope");
+    append_u32(&mut bytes, 1);
+    append_string(&mut bytes, &case.evaluation_id);
+    bytes.extend_from_slice(&case.operation_epoch.to_be_bytes());
+    bytes.extend_from_slice(&case.worker_generation.to_be_bytes());
+    append_string(&mut bytes, case.execution_mode);
+    append_string(&mut bytes, &case.worker_bundle_id);
+    append_u32(&mut bytes, 1);
+    append_u32(&mut bytes, 1);
+    for identifier in &case.identifiers {
+        append_string(&mut bytes, identifier);
+    }
+    append_string(&mut bytes, "active");
+    let capabilities = if case.has_submit_envelope_v2 {
+        ["submit_envelope_v2"].as_slice()
+    } else {
+        [].as_slice()
+    };
+    append_string_array(&mut bytes, capabilities);
+    append_u32(&mut bytes, 2);
+    append_u32(&mut bytes, case.ciphertext_length_bytes);
+    append_string(&mut bytes, case.idempotency_status);
+    append_u32(&mut bytes, case.recipient_pending_count);
+    append_u32(&mut bytes, case.recipient_pending_limit);
+    append_u32(&mut bytes, case.application_envelopes_used);
+    append_u32(&mut bytes, case.application_envelopes_limit);
+    append_u32(&mut bytes, case.ciphertext_limit_bytes);
+    let flags = if case.enqueue_delivery_enabled {
+        ["enqueue_delivery"].as_slice()
+    } else {
+        [].as_slice()
+    };
+    append_string_array(&mut bytes, flags);
+    sha256_hex(bytes)
+}
+
+/// Reviewed-boundary case generator (same contract as differential corpus).
+fn reviewed_boundary_request(index: u64) -> Vec<u8> {
+    const MODES: [&str; 4] = ["fixture", "shadow", "guarded-development", "internal-alpha"];
+    let variant = index / 6;
+    let reference_len = if index.is_multiple_of(2) { 1 } else { 128 };
+    let (ciphertext_length_bytes, ciphertext_limit_bytes) = match variant % 4 {
+        0 => (0, 0),
+        1 => (1, 1),
+        2 => (u32::MAX, u32::MAX),
+        _ => (1, u32::MAX),
+    };
+    let relation = variant % 3;
+    let relation_values = match relation {
+        0 => (0_u32, 1_u32),
+        1 => (1, 1),
+        _ => (2, 1),
+    };
+    let mut case = CaseFields {
+        evaluation_id: evaluation_id(index, index ^ 0xbb67_ae85_84ca_a73b),
+        operation_epoch: [0, 1, JSON_SAFE_INTEGER_MAX][(variant % 3) as usize],
+        worker_generation: [JSON_SAFE_INTEGER_MAX, 0, 1][(variant % 3) as usize],
+        execution_mode: MODES[(index % MODES.len() as u64) as usize],
+        worker_bundle_id: ascii_ref(8, index, reference_len),
+        identifiers: [
+            ascii_ref(1, index, reference_len),
+            ascii_ref(2, index, reference_len),
+            ascii_ref(3, index, reference_len),
+            ascii_ref(4, index, reference_len),
+            ascii_ref(5, index, reference_len),
+            ascii_ref(6, index, reference_len),
+            ascii_ref(7, index, reference_len),
+        ],
+        has_submit_envelope_v2: variant.is_multiple_of(2),
+        ciphertext_length_bytes,
+        idempotency_status: "new",
+        recipient_pending_count: relation_values.0,
+        recipient_pending_limit: relation_values.1,
+        application_envelopes_used: relation_values.0,
+        application_envelopes_limit: relation_values.1,
+        ciphertext_limit_bytes,
+        enqueue_delivery_enabled: variant % 4 < 2,
+    };
+    match index % 6 {
+        0 => {
+            case.recipient_pending_count = 0;
+            case.recipient_pending_limit = 1;
+            case.application_envelopes_used = 0;
+            case.application_envelopes_limit = 1;
+            case.has_submit_envelope_v2 = true;
+            case.enqueue_delivery_enabled = true;
+        }
+        1 => case.idempotency_status = "exact_duplicate",
+        2 => case.idempotency_status = "conflict",
+        3 => {
+            case.recipient_pending_count = if variant.is_multiple_of(2) { 1 } else { 2 };
+            case.recipient_pending_limit = 1;
+        }
+        4 => {
+            case.recipient_pending_count = 0;
+            case.recipient_pending_limit = 1;
+            case.application_envelopes_used = if variant.is_multiple_of(2) { 1 } else { 2 };
+            case.application_envelopes_limit = 1;
+        }
+        _ => {
+            case.recipient_pending_count = 0;
+            case.recipient_pending_limit = 1;
+            case.application_envelopes_used = 0;
+            case.application_envelopes_limit = 1;
+            if variant.is_multiple_of(2) {
+                case.has_submit_envelope_v2 = false;
+                case.enqueue_delivery_enabled = true;
+            } else {
+                case.has_submit_envelope_v2 = true;
+                case.enqueue_delivery_enabled = false;
+            }
+        }
+    }
+    let capabilities: Vec<&str> = if case.has_submit_envelope_v2 {
+        vec!["submit_envelope_v2"]
+    } else {
+        Vec::new()
+    };
+    let feature_flags: Vec<&str> = if case.enqueue_delivery_enabled {
+        vec!["enqueue_delivery"]
+    } else {
+        Vec::new()
+    };
+    let request = serde_json::json!({
+        "kind": "evaluation",
+        "schema_version": 1,
+        "context": {
+            "contract_version": 1,
+            "operation": "submit-envelope",
+            "operation_version": 1,
+            "evaluation_id": case.evaluation_id,
+            "operation_epoch": case.operation_epoch,
+            "worker_generation": case.worker_generation,
+            "execution_mode": case.execution_mode,
+            "worker_bundle_id": case.worker_bundle_id,
+            "facts_binding": facts_binding(&case),
+        },
+        "facts": {
+            "contract_version": 1,
+            "operation_version": 1,
+            "identifiers": {
+                "correlation_ref": case.identifiers[0],
+                "source_account_ref": case.identifiers[1],
+                "source_device_ref": case.identifiers[2],
+                "recipient_account_ref": case.identifiers[3],
+                "recipient_device_ref": case.identifiers[4],
+                "conversation_ref": case.identifiers[5],
+                "envelope_ref": case.identifiers[6],
+            },
+            "source_device_status": "active",
+            "source_device_capabilities": capabilities,
+            "envelope_protocol_version": 2,
+            "ciphertext_length_bytes": case.ciphertext_length_bytes,
+            "idempotency_status": case.idempotency_status,
+            "recipient_pending_count": case.recipient_pending_count,
+            "recipient_pending_limit": case.recipient_pending_limit,
+            "application_envelopes_used": case.application_envelopes_used,
+            "application_envelopes_limit": case.application_envelopes_limit,
+            "ciphertext_limit_bytes": case.ciphertext_limit_bytes,
+            "feature_flags": feature_flags,
+        }
+    });
+    let bytes = serde_json::to_vec(&request).expect("serialize resource request");
+    assert!(bytes.len() <= INPUT_MAX_BYTES, "resource request oversized");
+    bytes
+}
+
+/// Same reviewed-boundary shape with an explicit operation_version (both context
+/// and facts). Used to exercise the unsupported-version error path that previously
+/// leaked owned request Strings under path-insensitive move tracking.
+fn reviewed_boundary_request_with_operation_version(index: u64, operation_version: u32) -> Vec<u8> {
+    let mut request: serde_json::Value = serde_json::from_slice(&reviewed_boundary_request(index))
+        .expect("reparse boundary request");
+    request["context"]["operation_version"] = serde_json::json!(operation_version);
+    request["facts"]["operation_version"] = serde_json::json!(operation_version);
+    let bytes = serde_json::to_vec(&request).expect("serialize unsupported-version request");
+    assert!(
+        bytes.len() <= INPUT_MAX_BYTES,
+        "unsupported-version request oversized"
+    );
+    bytes
+}
+
+/// Independent Rust oracle for reviewed-boundary cases (mirrors differential).
+fn boundary_case_fields(index: u64) -> CaseFields {
+    const MODES: [&str; 4] = ["fixture", "shadow", "guarded-development", "internal-alpha"];
+    let variant = index / 6;
+    let reference_len = if index.is_multiple_of(2) { 1 } else { 128 };
+    let (ciphertext_length_bytes, ciphertext_limit_bytes) = match variant % 4 {
+        0 => (0, 0),
+        1 => (1, 1),
+        2 => (u32::MAX, u32::MAX),
+        _ => (1, u32::MAX),
+    };
+    let relation = variant % 3;
+    let relation_values = match relation {
+        0 => (0_u32, 1_u32),
+        1 => (1, 1),
+        _ => (2, 1),
+    };
+    let mut case = CaseFields {
+        evaluation_id: evaluation_id(index, index ^ 0xbb67_ae85_84ca_a73b),
+        operation_epoch: [0, 1, JSON_SAFE_INTEGER_MAX][(variant % 3) as usize],
+        worker_generation: [JSON_SAFE_INTEGER_MAX, 0, 1][(variant % 3) as usize],
+        execution_mode: MODES[(index % MODES.len() as u64) as usize],
+        worker_bundle_id: ascii_ref(8, index, reference_len),
+        identifiers: [
+            ascii_ref(1, index, reference_len),
+            ascii_ref(2, index, reference_len),
+            ascii_ref(3, index, reference_len),
+            ascii_ref(4, index, reference_len),
+            ascii_ref(5, index, reference_len),
+            ascii_ref(6, index, reference_len),
+            ascii_ref(7, index, reference_len),
+        ],
+        has_submit_envelope_v2: variant.is_multiple_of(2),
+        ciphertext_length_bytes,
+        idempotency_status: "new",
+        recipient_pending_count: relation_values.0,
+        recipient_pending_limit: relation_values.1,
+        application_envelopes_used: relation_values.0,
+        application_envelopes_limit: relation_values.1,
+        ciphertext_limit_bytes,
+        enqueue_delivery_enabled: variant % 4 < 2,
+    };
+    match index % 6 {
+        0 => {
+            case.recipient_pending_count = 0;
+            case.recipient_pending_limit = 1;
+            case.application_envelopes_used = 0;
+            case.application_envelopes_limit = 1;
+            case.has_submit_envelope_v2 = true;
+            case.enqueue_delivery_enabled = true;
+        }
+        1 => case.idempotency_status = "exact_duplicate",
+        2 => case.idempotency_status = "conflict",
+        3 => {
+            case.recipient_pending_count = if variant.is_multiple_of(2) { 1 } else { 2 };
+            case.recipient_pending_limit = 1;
+        }
+        4 => {
+            case.recipient_pending_count = 0;
+            case.recipient_pending_limit = 1;
+            case.application_envelopes_used = if variant.is_multiple_of(2) { 1 } else { 2 };
+            case.application_envelopes_limit = 1;
+        }
+        _ => {
+            case.recipient_pending_count = 0;
+            case.recipient_pending_limit = 1;
+            case.application_envelopes_used = 0;
+            case.application_envelopes_limit = 1;
+            if variant.is_multiple_of(2) {
+                case.has_submit_envelope_v2 = false;
+                case.enqueue_delivery_enabled = true;
+            } else {
+                case.has_submit_envelope_v2 = true;
+                case.enqueue_delivery_enabled = false;
+            }
+        }
+    }
+    case
+}
+
+fn oracle_decision_reason(case: &CaseFields) -> (&'static str, &'static str) {
+    if case.idempotency_status == "exact_duplicate" {
+        return ("duplicate_noop", "exact_duplicate");
+    }
+    if case.idempotency_status == "conflict" {
+        return ("reject", "idempotency_conflict");
+    }
+    if case.recipient_pending_count >= case.recipient_pending_limit {
+        return ("reject", "recipient_queue_full");
+    }
+    if case.application_envelopes_used >= case.application_envelopes_limit {
+        return ("reject", "application_budget_exhausted");
+    }
+    if !case.has_submit_envelope_v2 || !case.enqueue_delivery_enabled {
+        return ("reject", "delivery_disabled");
+    }
+    ("store_and_enqueue", "accepted_new")
+}
+
+#[derive(Clone, Copy)]
+enum ResponseExpectation {
+    /// kind=plan with decision/reason from the independent Rust oracle.
+    ReviewedBoundaryPlan,
+    /// kind=error with a fixed protocol/evaluation code.
+    ProtocolError { code: &'static str },
+}
+
+fn classify_response(
+    index: u64,
+    response: &[u8],
+    expectation: ResponseExpectation,
+) -> Result<ResponseClass, String> {
+    let value: Value = serde_json::from_slice(response)
+        .map_err(|error| format!("case {index} malformed JSON response: {error}"))?;
+    // Empty objects / non-contract shapes must not count as success.
+    if !value.is_object() || value.as_object().is_some_and(|o| o.is_empty()) {
+        return Err(format!(
+            "case {index} response is empty or non-object JSON (not a plan/error envelope)"
+        ));
+    }
+    let kind = value
+        .get("kind")
+        .and_then(Value::as_str)
+        .ok_or_else(|| format!("case {index} response missing kind"))?;
+    match expectation {
+        ResponseExpectation::ReviewedBoundaryPlan => {
+            if kind != "plan" {
+                return Err(format!(
+                    "case {index} expected kind=plan, got kind={kind:?} body={}",
+                    String::from_utf8_lossy(response)
+                ));
+            }
+            let case = boundary_case_fields(index);
+            let (want_decision, want_reason) = oracle_decision_reason(&case);
+            let decision = value.get("decision").and_then(Value::as_str).unwrap_or("");
+            let reason = value.get("reason").and_then(Value::as_str).unwrap_or("");
+            if decision != want_decision || reason != want_reason {
+                return Err(format!(
+                    "case {index} oracle mismatch: got decision={decision:?} reason={reason:?}, want decision={want_decision:?} reason={want_reason:?}"
+                ));
+            }
+            let eval = value
+                .pointer("/context/evaluation_id")
+                .and_then(Value::as_str)
+                .unwrap_or("");
+            if eval != case.evaluation_id {
+                return Err(format!(
+                    "case {index} evaluation_id mismatch: got {eval:?} want {:?}",
+                    case.evaluation_id
+                ));
+            }
+            let rev = value
+                .get("sengoo_module_revision")
+                .and_then(Value::as_str)
+                .unwrap_or("");
+            if rev != PLANNER_FIXTURE_REVISION {
+                return Err(format!(
+                    "case {index} sengoo_module_revision mismatch: got {rev:?} want {PLANNER_FIXTURE_REVISION}"
+                ));
+            }
+            if decision == "store_and_enqueue" || decision == "duplicate_noop" {
+                Ok(ResponseClass::PlanAccept)
+            } else {
+                Ok(ResponseClass::PlanReject)
+            }
+        }
+        ResponseExpectation::ProtocolError { code } => {
+            if kind != "error" {
+                return Err(format!(
+                    "case {index} expected kind=error code={code}, got kind={kind:?}"
+                ));
+            }
+            let got = value.get("code").and_then(Value::as_str).unwrap_or("");
+            if got != code {
+                return Err(format!(
+                    "case {index} expected error code={code}, got {got:?}"
+                ));
+            }
+            Ok(ResponseClass::ProtocolError)
+        }
+    }
+}
+
+#[derive(Clone, Copy)]
+enum ResponseClass {
+    PlanAccept,
+    PlanReject,
+    ProtocolError,
+}
+
+fn run_resource_corpus_with_requests<F>(
+    executable: &Path,
+    count: u64,
+    timeout: Duration,
+    mut request_for_index: F,
+    expectation: ResponseExpectation,
+) -> ResourceOutcome
+where
+    F: FnMut(u64) -> Vec<u8>,
+{
+    let per_request_timeout = Duration::from_secs(5);
+    let mut child = Command::new(executable)
+        .stdin(Stdio::piped())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped())
+        .spawn()
+        .expect("spawn resource worker");
+    let pid = child.id();
+    let mut stdin = child.stdin.take().expect("worker stdin");
+    let stdout = child.stdout.take().expect("worker stdout");
+    let mut stderr = child.stderr.take().expect("worker stderr");
+    let stderr_reader = std::thread::spawn(move || {
+        let mut bytes = Vec::new();
+        let _ = stderr.read_to_end(&mut bytes);
+        bytes
+    });
+    let (response_tx, response_rx) = std::sync::mpsc::sync_channel::<Result<Vec<u8>, String>>(0);
+    let reader = std::thread::spawn(move || {
+        let mut stdout = stdout;
+        loop {
+            match read_frame(&mut stdout, OUTPUT_MAX_BYTES) {
+                Ok(frame) => {
+                    if response_tx.send(Ok(frame)).is_err() {
+                        break;
+                    }
+                }
+                Err(error) => {
+                    let _ = response_tx.send(Err(error));
+                    break;
+                }
+            }
+        }
+    });
+
+    let fixture_handshake = normalize_fixture_bytes(
+        fs::read(fixture_root().join("handshake/ready.json")).expect("read frozen handshake"),
+    );
+    let mut failures = Vec::new();
+    match response_rx.recv_timeout(per_request_timeout) {
+        Ok(Ok(handshake)) if normalize_fixture_bytes(&handshake) == fixture_handshake => {}
+        Ok(Ok(_)) => failures.push("worker handshake differs from frozen fixture".to_owned()),
+        Ok(Err(error)) => failures.push(format!("worker handshake failed: {error}")),
+        Err(_) => failures.push("worker handshake timed out".to_owned()),
+    }
+
+    let started = Instant::now();
+    let mut samples = Vec::new();
+    let mut latency_us = Vec::with_capacity(count.saturating_sub(WARMUP_CASES) as usize);
+    let mut plan_ok = 0_u64;
+    let mut plan_reject_or_error = 0_u64;
+    let mut window_start = Instant::now();
+    let mut window_cases = 0_u64;
+    let mut completed = 0_u64;
+    let mut worker_exited_early = false;
+    let mut process_count_samples: Vec<u32> = Vec::new();
+    if let Some(n) = sample_worker_process_tree_count(pid) {
+        process_count_samples.push(n);
+    }
+
+    if failures.is_empty() {
+        for index in 0..count {
+            // Fail closed if the single worker child disappeared mid-soak.
+            match child.try_wait() {
+                Ok(Some(status)) => {
+                    failures.push(format!(
+                        "worker process exited early after case {completed}/{count}: {status}"
+                    ));
+                    worker_exited_early = true;
+                    break;
+                }
+                Ok(None) => {}
+                Err(error) => {
+                    failures.push(format!("worker process poll failed: {error}"));
+                    break;
+                }
+            }
+            // Sample process tree periodically (and on the last case).
+            if index == 0 || (index + 1) % SAMPLE_EVERY == 0 || index + 1 == count {
+                if let Some(n) = sample_worker_process_tree_count(pid) {
+                    process_count_samples.push(n);
+                    if n > 1 {
+                        failures.push(format!(
+                            "case {}: worker process tree count {n} exceeds single-worker bound (worker + unexpected children)",
+                            index + 1
+                        ));
+                        break;
+                    }
+                } else if !worker_exited_early {
+                    failures.push(format!(
+                        "case {}: failed to sample worker process tree count for pid {pid}",
+                        index + 1
+                    ));
+                    break;
+                }
+            }
+            if started.elapsed() > timeout {
+                failures.push(format!(
+                    "watchdog exceeded after case {index}/{} ({:?})",
+                    count,
+                    started.elapsed()
+                ));
+                break;
+            }
+            let request = request_for_index(index);
+            let req_started = Instant::now();
+            if let Err(error) = write_frame(&mut stdin, &request) {
+                failures.push(format!("case {index} write failed: {error}"));
+                break;
+            }
+            let response = match response_rx.recv_timeout(per_request_timeout) {
+                Ok(Ok(response)) => response,
+                Ok(Err(error)) => {
+                    failures.push(format!("case {index} read failed: {error}"));
+                    break;
+                }
+                Err(_) => {
+                    failures.push(format!(
+                        "case {index} response timed out after {per_request_timeout:?} (possible single-worker spin/hang)"
+                    ));
+                    break;
+                }
+            };
+            let latency = req_started.elapsed();
+            match classify_response(index, &response, expectation) {
+                Ok(ResponseClass::PlanAccept) => plan_ok += 1,
+                Ok(ResponseClass::PlanReject) | Ok(ResponseClass::ProtocolError) => {
+                    plan_reject_or_error += 1
+                }
+                Err(error) => {
+                    failures.push(error);
+                    break;
+                }
+            }
+            completed = index + 1;
+            if index >= WARMUP_CASES {
+                latency_us.push(latency.as_micros() as u64);
+            }
+
+            window_cases += 1;
+            if index == 0 || (index + 1) % SAMPLE_EVERY == 0 || index + 1 == count {
+                let window_secs = window_start.elapsed().as_secs_f64().max(1e-9);
+                let cps = window_cases as f64 / window_secs;
+                let mem = sample_worker_memory_bytes(pid);
+                let handles = sample_worker_handle_count(pid);
+                if mem.is_none() || handles.is_none() {
+                    failures.push(format!(
+                        "case {} resource sample missing mem={mem:?} handles={handles:?} (cannot green-gate without metrics)",
+                        index + 1
+                    ));
+                    break;
+                }
+                samples.push(SamplePoint {
+                    case_index: index + 1,
+                    elapsed_ms: started.elapsed().as_millis() as u64,
+                    memory_bytes: mem,
+                    handle_count: handles,
+                    cases_per_second_window: cps,
+                });
+                if (index + 1) % 1_000 == 0 {
+                    println!(
+                        "senline-resource progress case={} elapsed_ms={} cps_window={:.1} mem={:?} handles={:?}",
+                        index + 1,
+                        started.elapsed().as_millis(),
+                        cps,
+                        mem,
+                        handles
+                    );
+                }
+                window_start = Instant::now();
+                window_cases = 0;
+            }
+        }
+    }
+
+    // Measured max of (worker + children) across samples — never hardcode 1.
+    let process_count = process_count_samples.iter().copied().max().unwrap_or(0);
+    let process_count_ok = !worker_exited_early
+        && completed == count
+        && process_count == 1
+        && !process_count_samples.is_empty();
+
+    // Kill the worker *before* joining stdout/stderr readers. Joining first
+    // deadlocks the soak watchdog when the worker hangs with pipes still open.
+    drop(stdin);
+    drop(response_rx);
+    let _ = finish_child(&mut child, Duration::from_secs(2));
+    // After kill/exit, OS closes pipes so readers observe EOF and return.
+    // Bound the joins so a stuck pipe still cannot hang the harness forever.
+    let join_deadline = Instant::now() + Duration::from_secs(5);
+    loop {
+        if reader.is_finished() && stderr_reader.is_finished() {
+            break;
+        }
+        if Instant::now() >= join_deadline {
+            break;
+        }
+        std::thread::sleep(Duration::from_millis(20));
+    }
+    if reader.is_finished() {
+        let _ = reader.join();
+    } // else: drop detaches; prefer hang-free soak over perfect cleanup
+    if stderr_reader.is_finished() {
+        let _ = stderr_reader.join();
+    }
+
+    ResourceOutcome {
+        cases_requested: count,
+        cases_completed: completed,
+        warm_up: WARMUP_CASES,
+        elapsed: started.elapsed(),
+        samples,
+        latency_us,
+        plan_ok,
+        plan_reject_or_error,
+        process_count,
+        process_count_ok,
+        failures,
+    }
+}
+
+fn percentile_us(sorted_us: &[u64], pct: f64) -> u64 {
+    if sorted_us.is_empty() {
+        return 0;
+    }
+    let rank = ((pct / 100.0) * (sorted_us.len() as f64 - 1.0)).round() as usize;
+    sorted_us[rank.min(sorted_us.len() - 1)]
+}
+
+#[cfg(target_os = "linux")]
+fn sample_worker_memory_bytes(pid: u32) -> Option<u64> {
+    let status = fs::read_to_string(format!("/proc/{pid}/status")).ok()?;
+    for line in status.lines() {
+        if let Some(rest) = line.strip_prefix("VmRSS:") {
+            let kb: u64 = rest.split_whitespace().next()?.parse().ok()?;
+            return Some(kb.saturating_mul(1024));
+        }
+    }
+    None
+}
+
+#[cfg(target_os = "linux")]
+fn sample_worker_handle_count(pid: u32) -> Option<u64> {
+    let dir = fs::read_dir(format!("/proc/{pid}/fd")).ok()?;
+    Some(dir.count() as u64)
+}
+
+#[cfg(windows)]
+mod win_sample {
+    // Win32 FFI type spellings match the SDK headers (HANDLE/BOOL/DWORD).
+    #![allow(clippy::upper_case_acronyms)]
+    use std::mem::{size_of, MaybeUninit};
+    use std::os::raw::c_void;
+
+    type HANDLE = *mut c_void;
+    type BOOL = i32;
+    type DWORD = u32;
+    type SizeT = usize;
+
+    const PROCESS_QUERY_INFORMATION: DWORD = 0x0400;
+    const PROCESS_VM_READ: DWORD = 0x0010;
+
+    #[repr(C)]
+    struct ProcessMemoryCountersEx {
+        cb: DWORD,
+        page_fault_count: DWORD,
+        peak_working_set_size: SizeT,
+        working_set_size: SizeT,
+        quota_peak_paged_pool_usage: SizeT,
+        quota_paged_pool_usage: SizeT,
+        quota_peak_non_paged_pool_usage: SizeT,
+        quota_non_paged_pool_usage: SizeT,
+        pagefile_usage: SizeT,
+        peak_pagefile_usage: SizeT,
+        private_usage: SizeT,
+    }
+
+    #[link(name = "kernel32")]
+    extern "system" {
+        fn OpenProcess(access: DWORD, inherit: BOOL, process_id: DWORD) -> HANDLE;
+        fn CloseHandle(handle: HANDLE) -> BOOL;
+        fn GetProcessHandleCount(process: HANDLE, handle_count: *mut DWORD) -> BOOL;
+    }
+
+    #[link(name = "psapi")]
+    extern "system" {
+        fn GetProcessMemoryInfo(
+            process: HANDLE,
+            counters: *mut ProcessMemoryCountersEx,
+            cb: DWORD,
+        ) -> BOOL;
+    }
+
+    /// Private bytes (PrivateUsage). Prefer this for long-session growth.
+    pub(super) fn private_bytes(pid: u32) -> Option<u64> {
+        unsafe {
+            let handle = OpenProcess(PROCESS_QUERY_INFORMATION | PROCESS_VM_READ, 0, pid);
+            if handle.is_null() {
+                return None;
+            }
+            let mut counters = MaybeUninit::<ProcessMemoryCountersEx>::zeroed();
+            let counters_ptr = counters.as_mut_ptr();
+            (*counters_ptr).cb = size_of::<ProcessMemoryCountersEx>() as DWORD;
+            let ok = GetProcessMemoryInfo(
+                handle,
+                counters_ptr,
+                size_of::<ProcessMemoryCountersEx>() as DWORD,
+            );
+            CloseHandle(handle);
+            if ok == 0 {
+                return None;
+            }
+            Some(counters.assume_init().private_usage as u64)
+        }
+    }
+
+    pub(super) fn process_tree_count(root_pid: u32) -> Option<u32> {
+        // Toolhelp snapshot of all processes; count root + children with PPID==root.
+        #[repr(C)]
+        struct ProcessEntry32W {
+            dw_size: DWORD,
+            cnt_usage: DWORD,
+            th32_process_id: DWORD,
+            th32_default_heap_id: usize,
+            th32_module_id: DWORD,
+            cnt_threads: DWORD,
+            th32_parent_process_id: DWORD,
+            pc_pri_class_base: i32,
+            dw_flags: DWORD,
+            sz_exe_file: [u16; 260],
+        }
+        const TH32CS_SNAPPROCESS: DWORD = 0x0000_0002;
+        #[link(name = "kernel32")]
+        extern "system" {
+            fn CreateToolhelp32Snapshot(flags: DWORD, process_id: DWORD) -> HANDLE;
+            fn Process32FirstW(snapshot: HANDLE, entry: *mut ProcessEntry32W) -> BOOL;
+            fn Process32NextW(snapshot: HANDLE, entry: *mut ProcessEntry32W) -> BOOL;
+        }
+        unsafe {
+            let snap = CreateToolhelp32Snapshot(TH32CS_SNAPPROCESS, 0);
+            if snap.is_null() || snap == (-1isize as HANDLE) {
+                return None;
+            }
+            let mut entry = std::mem::zeroed::<ProcessEntry32W>();
+            entry.dw_size = size_of::<ProcessEntry32W>() as DWORD;
+            let mut count = 0u32;
+            let mut root_seen = false;
+            if Process32FirstW(snap, &mut entry) != 0 {
+                loop {
+                    if entry.th32_process_id == root_pid {
+                        root_seen = true;
+                        count = count.saturating_add(1);
+                    } else if entry.th32_parent_process_id == root_pid {
+                        count = count.saturating_add(1);
+                    }
+                    if Process32NextW(snap, &mut entry) == 0 {
+                        break;
+                    }
+                }
+            }
+            CloseHandle(snap);
+            if !root_seen {
+                return None;
+            }
+            Some(count.max(1))
+        }
+    }
+
+    pub(super) fn handle_count(pid: u32) -> Option<u64> {
+        unsafe {
+            let handle = OpenProcess(PROCESS_QUERY_INFORMATION, 0, pid);
+            if handle.is_null() {
+                return None;
+            }
+            let mut count: DWORD = 0;
+            let ok = GetProcessHandleCount(handle, &mut count);
+            CloseHandle(handle);
+            if ok == 0 {
+                return None;
+            }
+            Some(u64::from(count))
+        }
+    }
+}
+
+#[cfg(windows)]
+fn sample_worker_memory_bytes(pid: u32) -> Option<u64> {
+    // PrivateUsage (commit private bytes). Documented metric name is
+    // `private_bytes` — not WorkingSetSize/Private Working Set.
+    win_sample::private_bytes(pid)
+}
+
+#[cfg(windows)]
+fn sample_worker_handle_count(pid: u32) -> Option<u64> {
+    win_sample::handle_count(pid)
+}
+
+/// Count the worker process plus any live child processes (PPID == worker).
+/// Used so process_count is measured, not hardcoded.
+#[cfg(windows)]
+fn sample_worker_process_tree_count(pid: u32) -> Option<u32> {
+    win_sample::process_tree_count(pid)
+}
+
+#[cfg(target_os = "linux")]
+fn sample_worker_process_tree_count(pid: u32) -> Option<u32> {
+    // Confirm the worker pid is still alive.
+    fs::read_to_string(format!("/proc/{pid}/status")).ok()?;
+    let mut count = 1u32;
+    let Ok(entries) = fs::read_dir("/proc") else {
+        return Some(count);
+    };
+    for entry in entries.flatten() {
+        let name = entry.file_name();
+        let name = name.to_string_lossy();
+        if !name.chars().all(|c| c.is_ascii_digit()) {
+            continue;
+        }
+        let child_pid: u32 = match name.parse() {
+            Ok(v) if v != pid => v,
+            _ => continue,
+        };
+        let Ok(stat) = fs::read_to_string(format!("/proc/{child_pid}/stat")) else {
+            continue;
+        };
+        // /proc/pid/stat: pid (comm) state ppid ... — comm may contain ')'.
+        let Some(rparen) = stat.rfind(')') else {
+            continue;
+        };
+        let after = stat[rparen + 1..].trim_start();
+        let mut parts = after.split_whitespace();
+        let _state = parts.next();
+        if let Some(ppid) = parts.next().and_then(|s| s.parse::<u32>().ok()) {
+            if ppid == pid {
+                count = count.saturating_add(1);
+            }
+        }
+    }
+    Some(count)
+}
+
+#[cfg(not(any(windows, target_os = "linux")))]
+fn sample_worker_process_tree_count(_pid: u32) -> Option<u32> {
+    None
+}
+
+#[cfg(not(any(windows, target_os = "linux")))]
+fn sample_worker_memory_bytes(_pid: u32) -> Option<u64> {
+    None
+}
+
+#[cfg(not(any(windows, target_os = "linux")))]
+fn sample_worker_handle_count(_pid: u32) -> Option<u64> {
+    None
+}
+
+#[derive(Clone)]
+struct SamplePoint {
+    case_index: u64,
+    elapsed_ms: u64,
+    memory_bytes: Option<u64>,
+    handle_count: Option<u64>,
+    cases_per_second_window: f64,
+}
+
+struct ResourceOutcome {
+    cases_requested: u64,
+    cases_completed: u64,
+    warm_up: u64,
+    elapsed: Duration,
+    samples: Vec<SamplePoint>,
+    latency_us: Vec<u64>,
+    plan_ok: u64,
+    plan_reject_or_error: u64,
+    process_count: u32,
+    process_count_ok: bool,
+    failures: Vec<String>,
+}
+
+fn run_resource_corpus(executable: &Path, count: u64, timeout: Duration) -> ResourceOutcome {
+    run_resource_corpus_with_requests(
+        executable,
+        count,
+        timeout,
+        reviewed_boundary_request,
+        ResponseExpectation::ReviewedBoundaryPlan,
+    )
+}
+
+fn finish_child(child: &mut Child, grace: Duration) -> std::io::Result<std::process::ExitStatus> {
+    let started = Instant::now();
+    loop {
+        match child.try_wait()? {
+            Some(status) => return Ok(status),
+            None if started.elapsed() > grace => {
+                let _ = child.kill();
+                return child.wait();
+            }
+            None => std::thread::sleep(Duration::from_millis(20)),
+        }
+    }
+}
+
+fn post_warmup_memory_samples(samples: &[SamplePoint], warm_up: u64) -> Vec<&SamplePoint> {
+    samples
+        .iter()
+        .filter(|s| s.case_index > warm_up && s.memory_bytes.is_some())
+        .collect()
+}
+
+/// Endpoint slope: (last - first) / cases. Kept for comparison with prior digests.
+fn memory_growth_bytes_per_case(samples: &[SamplePoint], warm_up: u64) -> Option<f64> {
+    let post = post_warmup_memory_samples(samples, warm_up);
+    if post.len() < 2 {
+        return None;
+    }
+    let first = post.first().unwrap();
+    let last = post.last().unwrap();
+    let cases = last.case_index.saturating_sub(first.case_index) as f64;
+    if cases <= 0.0 {
+        return None;
+    }
+    let delta = last.memory_bytes.unwrap() as i64 - first.memory_bytes.unwrap() as i64;
+    Some(delta as f64 / cases)
+}
+
+/// Ordinary least-squares slope of memory_bytes vs case_index after warm-up.
+fn memory_regression_slope_bytes_per_case(samples: &[SamplePoint], warm_up: u64) -> Option<f64> {
+    let post = post_warmup_memory_samples(samples, warm_up);
+    if post.len() < 3 {
+        return None;
+    }
+    let n = post.len() as f64;
+    let mut sum_x = 0.0;
+    let mut sum_y = 0.0;
+    let mut sum_xx = 0.0;
+    let mut sum_xy = 0.0;
+    for s in &post {
+        let x = s.case_index as f64;
+        let y = s.memory_bytes.unwrap() as f64;
+        sum_x += x;
+        sum_y += y;
+        sum_xx += x * x;
+        sum_xy += x * y;
+    }
+    let denom = n * sum_xx - sum_x * sum_x;
+    if denom.abs() < f64::EPSILON {
+        return None;
+    }
+    Some((n * sum_xy - sum_x * sum_y) / denom)
+}
+
+/// Max memory increase over any contiguous ~10k-case sample window after warm-up.
+fn max_memory_window_delta_bytes(
+    samples: &[SamplePoint],
+    warm_up: u64,
+    window_cases: u64,
+) -> Option<i64> {
+    let post = post_warmup_memory_samples(samples, warm_up);
+    if post.len() < 2 {
+        return None;
+    }
+    let mut max_delta: i64 = i64::MIN;
+    for (i, start) in post.iter().enumerate() {
+        let start_cases = start.case_index;
+        let start_mem = start.memory_bytes.unwrap() as i64;
+        for end in post.iter().skip(i + 1) {
+            let span = end.case_index.saturating_sub(start_cases);
+            if span >= window_cases {
+                let delta = end.memory_bytes.unwrap() as i64 - start_mem;
+                max_delta = max_delta.max(delta);
+                break;
+            }
+        }
+    }
+    if max_delta == i64::MIN {
+        // Fall back to full-window delta when the series is shorter than window_cases.
+        let first = post.first().unwrap().memory_bytes.unwrap() as i64;
+        let last = post.last().unwrap().memory_bytes.unwrap() as i64;
+        return Some(last - first);
+    }
+    Some(max_delta)
+}
+
+fn handle_plateau_ok(samples: &[SamplePoint], warm_up: u64, slack: u64) -> Option<bool> {
+    let post: Vec<_> = samples
+        .iter()
+        .filter(|s| s.case_index > warm_up && s.handle_count.is_some())
+        .collect();
+    if post.is_empty() {
+        return None;
+    }
+    let warm_max = samples
+        .iter()
+        .filter(|s| s.case_index <= warm_up.max(1) && s.handle_count.is_some())
+        .map(|s| s.handle_count.unwrap())
+        .max()
+        .unwrap_or_else(|| post[0].handle_count.unwrap());
+    let post_max = post.iter().map(|s| s.handle_count.unwrap()).max().unwrap();
+    Some(post_max <= warm_max.saturating_add(slack))
+}
+
+fn write_evidence(label: &str, outcome: &ResourceOutcome) -> PathBuf {
+    let mut latency = outcome.latency_us.clone();
+    latency.sort_unstable();
+    let p50 = percentile_us(&latency, 50.0);
+    let p95 = percentile_us(&latency, 95.0);
+    let p99 = percentile_us(&latency, 99.0);
+    let mean = if latency.is_empty() {
+        0.0
+    } else {
+        latency.iter().sum::<u64>() as f64 / latency.len() as f64
+    };
+    let growth = memory_growth_bytes_per_case(&outcome.samples, outcome.warm_up);
+    let regression = memory_regression_slope_bytes_per_case(&outcome.samples, outcome.warm_up);
+    let window_delta = max_memory_window_delta_bytes(&outcome.samples, outcome.warm_up, 10_000);
+    let handles_ok = handle_plateau_ok(&outcome.samples, outcome.warm_up, 16);
+    let stamp = SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .expect("clock")
+        .as_secs();
+    let stem = format!(
+        "soak-{}-{}-{}-{stamp}",
+        label,
+        std::env::consts::OS,
+        std::env::consts::ARCH
+    );
+    let path = evidence_root().join(format!("{stem}.summary.json"));
+    let jsonl_path = evidence_root().join(format!("{stem}.jsonl"));
+    // Full sample series for offline regression / 10k-window review (gitignored).
+    {
+        let mut jsonl = String::new();
+        for s in &outcome.samples {
+            let line = serde_json::json!({
+                "case_index": s.case_index,
+                "elapsed_ms": s.elapsed_ms,
+                "memory_bytes": s.memory_bytes,
+                "handle_count": s.handle_count,
+                "cases_per_second_window": s.cases_per_second_window
+            });
+            jsonl.push_str(&line.to_string());
+            jsonl.push('\n');
+        }
+        fs::write(&jsonl_path, jsonl).expect("write resource JSONL series");
+    }
+    let metric = if cfg!(windows) {
+        "private_bytes" // PROCESS_MEMORY_COUNTERS_EX.PrivateUsage
+    } else {
+        "rss_bytes"
+    };
+    let all_samples_present = outcome
+        .samples
+        .iter()
+        .all(|s| s.memory_bytes.is_some() && s.handle_count.is_some());
+    let response_accounted = outcome.plan_ok + outcome.plan_reject_or_error;
+    let summary = serde_json::json!({
+        "schema_version": 2,
+        "label": label,
+        "platform": std::env::consts::OS,
+        "architecture": std::env::consts::ARCH,
+        "fixed_seed_hex": format!("0x{FIXED_SEED:016x}"),
+        "planner_contract_fixture_revision": PLANNER_FIXTURE_REVISION,
+        "cases_requested": outcome.cases_requested,
+        "cases_completed": outcome.cases_completed,
+        "warm_up_cases": outcome.warm_up,
+        "elapsed_ms": outcome.elapsed.as_millis() as u64,
+        "plan_ok": outcome.plan_ok,
+        "plan_reject_or_error": outcome.plan_reject_or_error,
+        "failure_count": outcome.failures.len(),
+        "failures": outcome.failures,
+        "process_count": outcome.process_count,
+        "jsonl_series": jsonl_path.file_name().and_then(|s| s.to_str()),
+        "oracle": {
+            "kind": "independent_rust_boundary_or_protocol_error",
+            "notes": "Empty JSON / non-plan envelopes fail; reviewed-boundary cases require decision/reason match"
+        },
+        "latency_post_warmup": {
+            "sample_count": latency.len(),
+            "mean_us": mean,
+            "p50_us": p50,
+            "p95_us": p95,
+            "p99_us": p99,
+            "notes": "request-write-complete to response-frame-complete wall time; not Senline admission/sandbox timing"
+        },
+        "memory": {
+            "metric": metric,
+            "metric_notes": if cfg!(windows) {
+                "Windows PrivateUsage (private bytes), not WorkingSetSize"
+            } else {
+                "Linux VmRSS"
+            },
+            "post_warmup_endpoint_growth_bytes_per_case": growth,
+            "post_warmup_regression_slope_bytes_per_case": regression,
+            "max_10k_window_delta_bytes": window_delta,
+            "sample_count": outcome.samples.len(),
+            "all_samples_present": all_samples_present,
+            "samples_tail": outcome.samples.iter().rev().take(5).map(|s| serde_json::json!({
+                "case_index": s.case_index,
+                "elapsed_ms": s.elapsed_ms,
+                "memory_bytes": s.memory_bytes,
+                "handle_count": s.handle_count,
+                "cases_per_second_window": s.cases_per_second_window
+            })).collect::<Vec<_>>(),
+        },
+        "handles": {
+            "plateau_slack": 16,
+            "within_plateau": handles_ok,
+        },
+        "gates": {
+            "default_growth_bound_bytes_per_case": 1024.0,
+            "endpoint_growth_within_default_bound": growth.map(|g| g < 1024.0),
+            "regression_slope_within_default_bound": regression.map(|g| g < 1024.0),
+            "max_10k_window_delta_bytes_bound": 32 * 1024 * 1024,
+            "max_10k_window_within_bound": window_delta.map(|d| d < 32 * 1024 * 1024),
+            "handles_within_plateau": handles_ok,
+            "process_count_is_one": outcome.process_count == 1 && outcome.process_count_ok,
+            "all_samples_present": all_samples_present,
+            "completed_all_requested": outcome.cases_completed == outcome.cases_requested,
+            "response_count_matches_completed": response_accounted == outcome.cases_completed,
+            "zero_failures": outcome.failures.is_empty(),
+            // Keep legacy key for older consumers.
+            "growth_within_default_bound": growth.map(|g| g < 1024.0),
+            "post_warmup_growth_bytes_per_case": growth,
+        }
+    });
+    fs::write(
+        &path,
+        serde_json::to_vec_pretty(&summary).expect("serialize resource summary"),
+    )
+    .expect("write resource summary");
+    path
+}
+
+fn assert_resource_outcome(outcome: &ResourceOutcome, label: &str) {
+    let path = write_evidence(label, outcome);
+    println!(
+        "senline-resource label={label} cases_requested={} cases_completed={} elapsed_ms={} failures={} evidence={}",
+        outcome.cases_requested,
+        outcome.cases_completed,
+        outcome.elapsed.as_millis(),
+        outcome.failures.len(),
+        path.display()
+    );
+    if !outcome.latency_us.is_empty() {
+        let mut latency = outcome.latency_us.clone();
+        latency.sort_unstable();
+        println!(
+            "senline-latency p50_us={} p95_us={} p99_us={} samples={}",
+            percentile_us(&latency, 50.0),
+            percentile_us(&latency, 95.0),
+            percentile_us(&latency, 99.0),
+            latency.len()
+        );
+    }
+    assert!(
+        outcome.failures.is_empty(),
+        "{label} resource run failures: {:?}",
+        outcome.failures
+    );
+    assert_eq!(
+        outcome.cases_completed, outcome.cases_requested,
+        "{label} did not complete all requested cases"
+    );
+    assert_eq!(
+        outcome.plan_ok + outcome.plan_reject_or_error,
+        outcome.cases_completed,
+        "{label} response accounting: plan_ok + reject/error must equal cases_completed"
+    );
+    assert!(
+        outcome.process_count == 1 && outcome.process_count_ok,
+        "{label} process_count gate failed: count={} ok={}",
+        outcome.process_count,
+        outcome.process_count_ok
+    );
+    assert!(
+        !outcome.samples.is_empty(),
+        "{label} resource sampler produced no memory/throughput samples"
+    );
+    assert!(
+        outcome
+            .samples
+            .iter()
+            .all(|s| s.memory_bytes.is_some() && s.handle_count.is_some()),
+        "{label} one or more samples missing memory/handle metrics; cannot skip gates"
+    );
+    let slope = memory_regression_slope_bytes_per_case(&outcome.samples, outcome.warm_up)
+        .unwrap_or_else(|| {
+            panic!("{label} missing OLS regression slope (need >=3 post-warm-up samples)")
+        });
+    assert!(
+        slope < 1024.0,
+        "{label} post-warm-up regression slope {slope} B/case exceeds 1 KiB/case bound"
+    );
+    let delta = max_memory_window_delta_bytes(&outcome.samples, outcome.warm_up, 10_000)
+        .unwrap_or_else(|| panic!("{label} missing 10k-window memory delta"));
+    assert!(
+        delta < 32 * 1024 * 1024,
+        "{label} max ~10k-case memory window delta {delta} bytes exceeds +32 MiB"
+    );
+    let handles_ok = handle_plateau_ok(&outcome.samples, outcome.warm_up, 16)
+        .unwrap_or_else(|| panic!("{label} missing handle plateau samples"));
+    assert!(
+        handles_ok,
+        "{label} handle/FD count climbed past warm-up max + 16 plateau"
+    );
+}
+
+#[test]
+fn resource_sampler_smoke_single_worker_with_latency_percentiles() {
+    let root = WorkerTempDir::new("smoke");
+    let executable = build_worker(&root);
+    let outcome = run_resource_corpus(&executable, SMOKE_COUNT, Duration::from_secs(180));
+    assert_resource_outcome(&outcome, "smoke-1k");
+    assert!(
+        outcome.latency_us.len() as u64 >= SMOKE_COUNT.saturating_sub(WARMUP_CASES),
+        "post-warm-up latency samples missing"
+    );
+    assert!(
+        outcome.plan_ok + outcome.plan_reject_or_error == SMOKE_COUNT,
+        "smoke must oracle-match every response"
+    );
+}
+
+/// Regression: operation_version=99 previously leaked owned request Strings
+/// because the unsupported branch borrowed evaluation_id while the accept
+/// branch moved the whole request (path-insensitive moved set).
+#[test]
+fn resource_unsupported_operation_version_path_does_not_grow_memory() {
+    let root = WorkerTempDir::new("unsupported-opver");
+    let executable = build_worker(&root);
+    const COUNT: u64 = 2_048;
+    let outcome = run_resource_corpus_with_requests(
+        executable.as_path(),
+        COUNT,
+        Duration::from_secs(180),
+        |index| reviewed_boundary_request_with_operation_version(index, 99),
+        ResponseExpectation::ProtocolError {
+            code: "unsupported_operation_version",
+        },
+    );
+    assert_resource_outcome(&outcome, "unsupported-opver-2k");
+    assert_eq!(
+        outcome.plan_reject_or_error, COUNT,
+        "every case must take the unsupported-operation-version error path"
+    );
+    assert_eq!(outcome.plan_ok, 0, "unsupported path must not emit plan");
+    let growth = memory_growth_bytes_per_case(&outcome.samples, WARMUP_CASES)
+        .expect("post-warm-up memory samples");
+    println!("senline-resource unsupported-opver growth_bytes_per_case={growth}");
+    assert!(
+        growth < 1024.0,
+        "unsupported-version path growth {growth} B/case exceeds 1 KiB/case bound"
+    );
+}
+
+#[test]
+#[ignore = "single-worker investigation covering historical case ~44086; run with --ignored"]
+fn resource_single_worker_investigation_50k() {
+    let root = WorkerTempDir::new("investigate-45k");
+    let executable = build_worker(&root);
+    // Historical pre-fix observation stalled near case 44086 / multi-minute
+    // growth. After lambda String Drop glue, this window must complete cleanly.
+    let outcome = run_resource_corpus(&executable, INVESTIGATION_COUNT, Duration::from_secs(900));
+    assert_resource_outcome(&outcome, "investigate-45k");
+    let growth = memory_growth_bytes_per_case(&outcome.samples, WARMUP_CASES)
+        .expect("post-warm-up memory samples");
+    println!("senline-resource post-warmup growth_bytes_per_case={growth}");
+    assert!(
+        growth < 1024.0,
+        "post-warm-up private-working-set growth {growth} B/case exceeds 1 KiB/case bound"
+    );
+    assert_eq!(
+        outcome.cases_completed, INVESTIGATION_COUNT,
+        "investigation must complete every reviewed-boundary case"
+    );
+    assert_eq!(
+        outcome.plan_ok + outcome.plan_reject_or_error,
+        INVESTIGATION_COUNT,
+        "investigation must oracle-match every response"
+    );
+}
+
+#[test]
+#[ignore = "task 8.3 full 1M single-worker soak; run with --ignored on a reference host"]
+fn resource_single_worker_soak_1m() {
+    let root = WorkerTempDir::new("soak-1m");
+    let executable = build_worker(&root);
+    let outcome = run_resource_corpus(&executable, SOAK_COUNT, Duration::from_secs(6 * 3600));
+    assert_resource_outcome(&outcome, "soak-1m");
+    let growth = memory_growth_bytes_per_case(&outcome.samples, WARMUP_CASES)
+        .expect("need post-warm-up memory samples for soak gate");
+    assert!(
+        growth < 1024.0,
+        "post-warm-up memory growth {growth} B/case exceeds 1 KiB/case default bound"
+    );
+}

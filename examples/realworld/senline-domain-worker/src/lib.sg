@@ -1,0 +1,383 @@
+import std::ffi;
+
+import std::json;
+
+import std::string;
+
+import senline_build_identity;
+
+import senline_facts_to_plan;
+
+import sgframing;
+
+import sgjson_contract;
+
+struct WorkerEncodedFrameV1 {
+    payload: Buffer,
+    len: i64,
+}
+
+def worker_contract_version() -> i64 {
+    senline_contract_version();
+}
+
+def worker_operation_version_supported(version: i64) -> bool {
+    senline_operation_version_supported(version);
+}
+
+def worker_input_length_supported(len: i64) -> bool {
+    frame_validate_length(len, 32768).is_ok();
+}
+
+def worker_output_length_supported(len: i64) -> bool {
+    frame_validate_length(len, 8192).is_ok();
+}
+
+def worker_module_revision_v1() -> &str {
+    "1de09ccafa7e8f182af68e82352e2d4be39496b0";
+}
+
+def worker_handshake_payload_v1() -> &str {
+    senline_build_handshake_payload();
+}
+
+def worker_string_error(code: i64) -> Result<String, i64> {
+    Err(code);
+}
+
+def worker_i64_ok(value: i64) -> Result<i64, i64> {
+    Ok(value);
+}
+
+def worker_i64_error(code: i64) -> Result<i64, i64> {
+    Err(code);
+}
+
+def worker_bool_ok(value: bool) -> Result<bool, i64> {
+    Ok(value);
+}
+
+def worker_bool_error(code: i64) -> Result<bool, i64> {
+    Err(code);
+}
+
+def worker_context_error(code: i64) -> Result<EvaluationContextV1, i64> {
+    Err(code);
+}
+
+def worker_identifiers_error(code: i64) -> Result<SubmitEnvelopeIdentifiersV1, i64> {
+    Err(code);
+}
+
+def worker_facts_error(code: i64) -> Result<SubmitEnvelopeFactsV1, i64> {
+    Err(code);
+}
+
+def worker_request_error(code: i64) -> Result<WorkerRequestV1, i64> {
+    Err(code);
+}
+
+def worker_encoded_error(code: i64) -> Result<WorkerEncodedFrameV1, i64> {
+    Err(code);
+}
+
+def worker_required_ascii(root: JsonValue, key: &str) -> Result<String, i64> {
+    let value = sgjson_required_string(root, key);
+    if value.is_err() { return worker_string_error(value.error); };
+    if sgjson_string_is_ascii_bounded(&value.value, 1, 128) { value; } else { worker_string_error(SGJSON_INVALID_STRING()); };
+}
+
+def worker_required_literal(root: JsonValue, key: &str, expected: &str) -> Result<String, i64> {
+    let checked = worker_required_ascii(root, key);
+    if checked.is_err() { return worker_string_error(checked.error); };
+    if not str_eq(checked.value.as_str(), expected) { return worker_string_error(SGJSON_UNKNOWN_ENUM()); };
+// Reuse the validated string; a second extract would allocate another owned handle.
+    checked;
+}
+
+def worker_required_lower_hex_string(root: JsonValue, key: &str, exact_len: i64) -> Result<String, i64> {
+    let valid = sgjson_required_lower_hex(root, key, exact_len);
+    if valid.is_err() { return worker_string_error(valid.error); };
+    sgjson_required_string(root, key);
+}
+
+def worker_required_singleton_flag(root: JsonValue, key: &str, allowed: &str) -> Result<bool, i64> {
+    let valid = sgjson_required_sorted_unique_string_array(root, key, 0, 1);
+    if valid.is_err() { return worker_bool_error(valid.error); };
+    let array = sgjson_required_array(root, key);
+    if array.is_err() { return worker_bool_error(array.error); };
+    let count = array.value.array_len();
+    if count.is_err() { return worker_bool_error(SGJSON_RUNTIME_FAILURE()); };
+    if count.value == 0 { return worker_bool_ok(false); };
+    let item = array.value.array_get(0);
+    if item.is_err() { return worker_bool_error(SGJSON_RUNTIME_FAILURE()); };
+    let text = item.value.string_value();
+    if text.is_err() { return worker_bool_error(SGJSON_RUNTIME_FAILURE()); };
+    if str_eq(text.value.as_str(), allowed) { worker_bool_ok(true); } else { worker_bool_error(SGJSON_UNKNOWN_ENUM()); };
+}
+
+def worker_required_idempotency(root: JsonValue) -> Result<i64, i64> {
+    let valid = sgjson_required_enum3(root, "idempotency_status", "new", "exact_duplicate", "conflict");
+    if valid.is_err() { return worker_i64_error(valid.error); };
+    let value = sgjson_required_string(root, "idempotency_status");
+    if value.is_err() { return worker_i64_error(value.error); };
+    if str_eq(value.value.as_str(), "new") { worker_i64_ok(SENLINE_IDEMPOTENCY_NEW()); } else if str_eq(value.value.as_str(), "exact_duplicate") { worker_i64_ok(SENLINE_IDEMPOTENCY_EXACT_DUPLICATE()); } else if str_eq(value.value.as_str(), "conflict") { worker_i64_ok(SENLINE_IDEMPOTENCY_CONFLICT()); } else { worker_i64_error(SGJSON_UNKNOWN_ENUM()); };
+}
+
+// Borrowed: by-value String params skip auto-Drop for legacy handle ABI, so a
+// by-value mode check would leak one owned string per successful evaluation.
+def worker_validate_execution_mode(value: &str) -> bool {
+    str_eq(value, "fixture") or str_eq(value, "shadow") or str_eq(value, "guarded-development") or str_eq(value, "internal-alpha");
+}
+
+def worker_decode_context_v1(root: JsonValue) -> Result<EvaluationContextV1, i64> {
+    let allows_context_field: fn(String) -> bool = |key| str_eq(key.as_str(), "contract_version") or str_eq(key.as_str(), "operation") or str_eq(key.as_str(), "operation_version") or str_eq(key.as_str(), "evaluation_id") or str_eq(key.as_str(), "operation_epoch") or str_eq(key.as_str(), "worker_generation") or str_eq(key.as_str(), "execution_mode") or str_eq(key.as_str(), "worker_bundle_id") or str_eq(key.as_str(), "facts_binding");
+    let exact = sgjson_exact_object_fields(root, 9, 64, allows_context_field);
+    if exact.is_err() { return worker_context_error(exact.error); };
+    let contract_version = sgjson_required_i64(root, "contract_version", 1, 1);
+    if contract_version.is_err() { return worker_context_error(contract_version.error); };
+    let operation = worker_required_literal(root, "operation", "submit-envelope");
+    if operation.is_err() { return worker_context_error(operation.error); };
+    let operation_version = sgjson_required_i64(root, "operation_version", 0, 4294967295);
+    if operation_version.is_err() { return worker_context_error(operation_version.error); };
+    let evaluation_id = worker_required_lower_hex_string(root, "evaluation_id", 32);
+    if evaluation_id.is_err() { return worker_context_error(evaluation_id.error); };
+    let operation_epoch = sgjson_required_i64(root, "operation_epoch", 0, 9007199254740991);
+    if operation_epoch.is_err() { return worker_context_error(operation_epoch.error); };
+    let worker_generation = sgjson_required_i64(root, "worker_generation", 0, 9007199254740991);
+    if worker_generation.is_err() { return worker_context_error(worker_generation.error); };
+    let execution_mode = worker_required_ascii(root, "execution_mode");
+    if execution_mode.is_err() { return worker_context_error(execution_mode.error); };
+    if not worker_validate_execution_mode(execution_mode.value.as_str()) { return worker_context_error(SGJSON_UNKNOWN_ENUM()); };
+    let worker_bundle_id = worker_required_ascii(root, "worker_bundle_id");
+    if worker_bundle_id.is_err() { return worker_context_error(worker_bundle_id.error); };
+    let facts_binding = worker_required_lower_hex_string(root, "facts_binding", 64);
+    if facts_binding.is_err() { return worker_context_error(facts_binding.error); };
+    Ok(EvaluationContextV1 { contract_version: contract_version.value, operation: operation.value, operation_version: operation_version.value, evaluation_id: evaluation_id.value, operation_epoch: operation_epoch.value, worker_generation: worker_generation.value, execution_mode: execution_mode.value, worker_bundle_id: worker_bundle_id.value, facts_binding: facts_binding.value });
+}
+
+def worker_decode_identifiers_v1(root: JsonValue) -> Result<SubmitEnvelopeIdentifiersV1, i64> {
+    let allows_identifiers_field: fn(String) -> bool = |key| str_eq(key.as_str(), "correlation_ref") or str_eq(key.as_str(), "source_account_ref") or str_eq(key.as_str(), "source_device_ref") or str_eq(key.as_str(), "recipient_account_ref") or str_eq(key.as_str(), "recipient_device_ref") or str_eq(key.as_str(), "conversation_ref") or str_eq(key.as_str(), "envelope_ref");
+    let exact = sgjson_exact_object_fields(root, 7, 64, allows_identifiers_field);
+    if exact.is_err() { return worker_identifiers_error(exact.error); };
+    let correlation_ref = worker_required_ascii(root, "correlation_ref");
+    if correlation_ref.is_err() { return worker_identifiers_error(correlation_ref.error); };
+    let source_account_ref = worker_required_ascii(root, "source_account_ref");
+    if source_account_ref.is_err() { return worker_identifiers_error(source_account_ref.error); };
+    let source_device_ref = worker_required_ascii(root, "source_device_ref");
+    if source_device_ref.is_err() { return worker_identifiers_error(source_device_ref.error); };
+    let recipient_account_ref = worker_required_ascii(root, "recipient_account_ref");
+    if recipient_account_ref.is_err() { return worker_identifiers_error(recipient_account_ref.error); };
+    let recipient_device_ref = worker_required_ascii(root, "recipient_device_ref");
+    if recipient_device_ref.is_err() { return worker_identifiers_error(recipient_device_ref.error); };
+    let conversation_ref = worker_required_ascii(root, "conversation_ref");
+    if conversation_ref.is_err() { return worker_identifiers_error(conversation_ref.error); };
+    let envelope_ref = worker_required_ascii(root, "envelope_ref");
+    if envelope_ref.is_err() { return worker_identifiers_error(envelope_ref.error); };
+    Ok(SubmitEnvelopeIdentifiersV1 { correlation_ref: correlation_ref.value, source_account_ref: source_account_ref.value, source_device_ref: source_device_ref.value, recipient_account_ref: recipient_account_ref.value, recipient_device_ref: recipient_device_ref.value, conversation_ref: conversation_ref.value, envelope_ref: envelope_ref.value });
+}
+
+def worker_decode_facts_v1(root: JsonValue) -> Result<SubmitEnvelopeFactsV1, i64> {
+    let allows_facts_field: fn(String) -> bool = |key| str_eq(key.as_str(), "contract_version") or str_eq(key.as_str(), "operation_version") or str_eq(key.as_str(), "identifiers") or str_eq(key.as_str(), "source_device_status") or str_eq(key.as_str(), "source_device_capabilities") or str_eq(key.as_str(), "envelope_protocol_version") or str_eq(key.as_str(), "ciphertext_length_bytes") or str_eq(key.as_str(), "idempotency_status") or str_eq(key.as_str(), "recipient_pending_count") or str_eq(key.as_str(), "recipient_pending_limit") or str_eq(key.as_str(), "application_envelopes_used") or str_eq(key.as_str(), "application_envelopes_limit") or str_eq(key.as_str(), "ciphertext_limit_bytes") or str_eq(key.as_str(), "feature_flags");
+    let exact = sgjson_exact_object_fields(root, 14, 64, allows_facts_field);
+    if exact.is_err() { return worker_facts_error(exact.error); };
+    let contract_version = sgjson_required_i64(root, "contract_version", 1, 1);
+    if contract_version.is_err() { return worker_facts_error(contract_version.error); };
+    let operation_version = sgjson_required_i64(root, "operation_version", 0, 4294967295);
+    if operation_version.is_err() { return worker_facts_error(operation_version.error); };
+    let identifiers_value = sgjson_required_object(root, "identifiers");
+    if identifiers_value.is_err() { return worker_facts_error(identifiers_value.error); };
+    let identifiers = worker_decode_identifiers_v1(identifiers_value.value);
+    if identifiers.is_err() { return worker_facts_error(identifiers.error); };
+    let source_status = worker_required_literal(root, "source_device_status", "active");
+    if source_status.is_err() { return worker_facts_error(source_status.error); };
+    let capability = worker_required_singleton_flag(root, "source_device_capabilities", "submit_envelope_v2");
+    if capability.is_err() { return worker_facts_error(capability.error); };
+    let envelope_protocol_version = sgjson_required_i64(root, "envelope_protocol_version", 2, 2);
+    if envelope_protocol_version.is_err() { return worker_facts_error(envelope_protocol_version.error); };
+    let ciphertext_length_bytes = sgjson_required_i64(root, "ciphertext_length_bytes", 0, 4294967295);
+    if ciphertext_length_bytes.is_err() { return worker_facts_error(ciphertext_length_bytes.error); };
+    let idempotency_status = worker_required_idempotency(root);
+    if idempotency_status.is_err() { return worker_facts_error(idempotency_status.error); };
+    let recipient_pending_count = sgjson_required_i64(root, "recipient_pending_count", 0, 4294967295);
+    if recipient_pending_count.is_err() { return worker_facts_error(recipient_pending_count.error); };
+    let recipient_pending_limit = sgjson_required_i64(root, "recipient_pending_limit", 0, 4294967295);
+    if recipient_pending_limit.is_err() { return worker_facts_error(recipient_pending_limit.error); };
+    let application_envelopes_used = sgjson_required_i64(root, "application_envelopes_used", 0, 4294967295);
+    if application_envelopes_used.is_err() { return worker_facts_error(application_envelopes_used.error); };
+    let application_envelopes_limit = sgjson_required_i64(root, "application_envelopes_limit", 0, 4294967295);
+    if application_envelopes_limit.is_err() { return worker_facts_error(application_envelopes_limit.error); };
+    let ciphertext_limit_bytes = sgjson_required_i64(root, "ciphertext_limit_bytes", 0, 4294967295);
+    if ciphertext_limit_bytes.is_err() { return worker_facts_error(ciphertext_limit_bytes.error); };
+    if ciphertext_length_bytes.value > ciphertext_limit_bytes.value { return worker_facts_error(SGJSON_OUT_OF_RANGE()); };
+    let feature = worker_required_singleton_flag(root, "feature_flags", "enqueue_delivery");
+    if feature.is_err() { return worker_facts_error(feature.error); };
+    Ok(SubmitEnvelopeFactsV1 { contract_version: contract_version.value, operation_version: operation_version.value, identifiers: identifiers.value, source_device_active: true, has_submit_envelope_v2: capability.value, envelope_protocol_version: envelope_protocol_version.value, ciphertext_length_bytes: ciphertext_length_bytes.value, idempotency_status: idempotency_status.value, recipient_pending_count: recipient_pending_count.value, recipient_pending_limit: recipient_pending_limit.value, application_envelopes_used: application_envelopes_used.value, application_envelopes_limit: application_envelopes_limit.value, ciphertext_limit_bytes: ciphertext_limit_bytes.value, enqueue_delivery_enabled: feature.value });
+}
+
+def worker_decode_request_v1(root: JsonValue) -> Result<WorkerRequestV1, i64> {
+    let allows_request_field: fn(String) -> bool = |key| str_eq(key.as_str(), "kind") or str_eq(key.as_str(), "schema_version") or str_eq(key.as_str(), "context") or str_eq(key.as_str(), "facts");
+    let exact = sgjson_exact_object_fields(root, 4, 64, allows_request_field);
+    if exact.is_err() { return worker_request_error(exact.error); };
+    let kind = worker_required_literal(root, "kind", "evaluation");
+    if kind.is_err() { return worker_request_error(kind.error); };
+    let schema_version = sgjson_required_i64(root, "schema_version", 1, 1);
+    if schema_version.is_err() { return worker_request_error(schema_version.error); };
+    let context_value = sgjson_required_object(root, "context");
+    if context_value.is_err() { return worker_request_error(context_value.error); };
+    let facts_value = sgjson_required_object(root, "facts");
+    if facts_value.is_err() { return worker_request_error(facts_value.error); };
+    let context = worker_decode_context_v1(context_value.value);
+    if context.is_err() { return worker_request_error(context.error); };
+    let facts = worker_decode_facts_v1(facts_value.value);
+    if facts.is_err() { return worker_request_error(facts.error); };
+    if context.value.contract_version != facts.value.contract_version or context.value.operation_version != facts.value.operation_version { return worker_request_error(SGJSON_OUT_OF_RANGE()); };
+    Ok(WorkerRequestV1 { schema_version: schema_version.value, context: context.value, facts: facts.value });
+}
+
+def worker_validate_request_envelope_v1(root: JsonValue) -> Result<bool, i64> {
+    let decoded = worker_decode_request_v1(root);
+    if decoded.is_err() { return Err(decoded.error); };
+    if not worker_operation_version_supported(decoded.value.context.operation_version) { Err(SGJSON_OUT_OF_RANGE()); } else { Ok(true); };
+}
+
+def worker_encode_protocol_error_v1(code: &str) -> Result<WorkerEncodedFrameV1, i64> {
+    let doc_result = json_doc_object();
+    if doc_result.is_err() { return worker_encoded_error(doc_result.error); };
+    let doc = doc_result.value;
+    let root = doc.root();
+    root.object_set("kind", doc.new_string("error")?)?;
+    root.object_set("schema_version", doc.new_number(1.0)?)?;
+    root.object_set("scope", doc.new_string("protocol")?)?;
+    root.object_set("code", doc.new_string(code)?)?;
+    root.object_set("evaluation_id", doc.new_null()?)?;
+    let output = ffi_buffer_new(8192)?;
+    let serialized = doc.serialize(output)?;
+    if serialized <= 0 or serialized >= 8192 { return worker_encoded_error(SGFRAMING_LIMIT_EXCEEDED()); };
+    let newline = output.set_u8(serialized, 10);
+    if newline.is_err() { return worker_encoded_error(newline.error); };
+    Ok(WorkerEncodedFrameV1 { payload: output, len: serialized + 1 });
+}
+
+def worker_encode_malformed_json_error_v1() -> Result<WorkerEncodedFrameV1, i64> {
+    worker_encode_protocol_error_v1("malformed_json");
+}
+
+def worker_encode_schema_error_v1(code: i64) -> Result<WorkerEncodedFrameV1, i64> {
+    if code == SGJSON_UNKNOWN_FIELD() { worker_encode_protocol_error_v1("unknown_field"); } else if code == SGJSON_UNKNOWN_ENUM() { worker_encode_protocol_error_v1("unknown_enum"); } else { worker_encode_malformed_json_error_v1(); };
+}
+
+def worker_encode_parser_error_v1(kind: i64) -> Result<WorkerEncodedFrameV1, i64> {
+    if kind == JSON_ERROR_KIND_DUPLICATE_FIELD() { worker_encode_protocol_error_v1("duplicate_field"); } else if kind == JSON_ERROR_KIND_INVALID_UNICODE() { worker_encode_protocol_error_v1("invalid_unicode"); } else if kind == JSON_ERROR_KIND_TRAILING_BYTES() { worker_encode_protocol_error_v1("trailing_bytes"); } else { worker_encode_malformed_json_error_v1(); };
+}
+
+def worker_encode_unsupported_operation_error_v1(evaluation_id: &String) -> Result<WorkerEncodedFrameV1, i64> {
+    let doc_result = json_doc_object();
+    if doc_result.is_err() { return worker_encoded_error(doc_result.error); };
+    let doc = doc_result.value;
+    let root = doc.root();
+    root.object_set("kind", doc.new_string("error")?)?;
+    root.object_set("schema_version", doc.new_number(1.0)?)?;
+    root.object_set("scope", doc.new_string("evaluation")?)?;
+    root.object_set("code", doc.new_string("unsupported_operation_version")?)?;
+    root.object_set("evaluation_id", doc.new_string_from_string(evaluation_id)?)?;
+    let output = ffi_buffer_new(8192)?;
+    let serialized = doc.serialize(output)?;
+    if serialized <= 0 or serialized >= 8192 { return worker_encoded_error(SGFRAMING_LIMIT_EXCEEDED()); };
+    let newline = output.set_u8(serialized, 10);
+    if newline.is_err() { return worker_encoded_error(newline.error); };
+    Ok(WorkerEncodedFrameV1 { payload: output, len: serialized + 1 });
+}
+
+def worker_encode_plan_v1(plan: SubmitEnvelopePlanV1) -> Result<WorkerEncodedFrameV1, i64> {
+    let doc_result = json_doc_object();
+    if doc_result.is_err() { return worker_encoded_error(doc_result.error); };
+    let doc = doc_result.value;
+    let root = doc.root();
+    root.object_set("kind", doc.new_string("plan")?)?;
+    root.object_set("schema_version", doc.new_number(plan.schema_version as f64)?)?;
+    let context = doc.new_object()?;
+    context.object_set("contract_version", doc.new_number(plan.context.contract_version as f64)?)?;
+    context.object_set("operation", doc.new_string_from_string(&plan.context.operation)?)?;
+    context.object_set("operation_version", doc.new_number(plan.context.operation_version as f64)?)?;
+    context.object_set("evaluation_id", doc.new_string_from_string(&plan.context.evaluation_id)?)?;
+    context.object_set("operation_epoch", doc.new_number(plan.context.operation_epoch as f64)?)?;
+    context.object_set("worker_generation", doc.new_number(plan.context.worker_generation as f64)?)?;
+    context.object_set("execution_mode", doc.new_string_from_string(&plan.context.execution_mode)?)?;
+    context.object_set("worker_bundle_id", doc.new_string_from_string(&plan.context.worker_bundle_id)?)?;
+    context.object_set("facts_binding", doc.new_string_from_string(&plan.context.facts_binding)?)?;
+    root.object_set("context", context)?;
+    let identifiers = doc.new_object()?;
+    identifiers.object_set("correlation_ref", doc.new_string_from_string(&plan.identifiers.correlation_ref)?)?;
+    identifiers.object_set("source_account_ref", doc.new_string_from_string(&plan.identifiers.source_account_ref)?)?;
+    identifiers.object_set("source_device_ref", doc.new_string_from_string(&plan.identifiers.source_device_ref)?)?;
+    identifiers.object_set("recipient_account_ref", doc.new_string_from_string(&plan.identifiers.recipient_account_ref)?)?;
+    identifiers.object_set("recipient_device_ref", doc.new_string_from_string(&plan.identifiers.recipient_device_ref)?)?;
+    identifiers.object_set("conversation_ref", doc.new_string_from_string(&plan.identifiers.conversation_ref)?)?;
+    identifiers.object_set("envelope_ref", doc.new_string_from_string(&plan.identifiers.envelope_ref)?)?;
+    root.object_set("identifiers", identifiers)?;
+    root.object_set("decision", doc.new_string(senline_decision_name(plan.decision))?)?;
+    root.object_set("reason", doc.new_string(senline_reason_name(plan.reason))?)?;
+    root.object_set("sengoo_module_revision", doc.new_string_from_string(&plan.sengoo_module_revision)?)?;
+    let output = ffi_buffer_new(8192)?;
+    let serialized = doc.serialize(output)?;
+    if serialized <= 0 or serialized >= 8192 { return worker_encoded_error(SGFRAMING_LIMIT_EXCEEDED()); };
+    let newline = output.set_u8(serialized, 10);
+    if newline.is_err() { return worker_encoded_error(newline.error); };
+    Ok(WorkerEncodedFrameV1 { payload: output, len: serialized + 1 });
+}
+
+// Owns `request` end-to-end on the unsupported path so nested Strings Drop.
+// Avoid if/else where only one branch moves `request`: path-insensitive moved
+// tracking would skip Drop on the borrow-only branch and leak every evaluation.
+def worker_reject_unsupported_operation_v1(request: WorkerRequestV1) -> Result<WorkerEncodedFrameV1, i64> {
+    worker_encode_unsupported_operation_error_v1(&request.context.evaluation_id);
+}
+
+def worker_accept_decoded_request_v1(request: WorkerRequestV1) -> Result<WorkerEncodedFrameV1, i64> {
+    let revision = string_from_str(worker_module_revision_v1());
+    if revision.is_err() { return worker_encoded_error(revision.error); };
+    worker_encode_plan_v1(plan_submit_envelope_v1(request, revision.value));
+}
+
+def worker_process_decoded_request_v1(request: WorkerRequestV1) -> Result<WorkerEncodedFrameV1, i64> {
+    if not worker_operation_version_supported(request.context.operation_version) { worker_reject_unsupported_operation_v1(request); } else { worker_accept_decoded_request_v1(request); };
+}
+
+def worker_process_payload_v1(payload: Buffer, len: i64) -> Result<WorkerEncodedFrameV1, i64> {
+    let parsed = json_parse_buffer_strict(payload, len);
+    if parsed.is_err() { let parser_error_kind = json_last_error_kind(); return worker_encode_parser_error_v1(parser_error_kind); };
+    let input_doc = parsed.value;
+    let decoded = worker_decode_request_v1(input_doc.root());
+    if decoded.is_err() { return worker_encode_schema_error_v1(decoded.error); };
+    worker_process_decoded_request_v1(decoded.value);
+}
+
+def worker_frame_error_exit(code: i64) -> i64 {
+    if code == SGFRAMING_ZERO_LENGTH() { 41; } else if code == SGFRAMING_LIMIT_EXCEEDED() { 42; } else if code == SGFRAMING_TRUNCATED() { 43; } else { 44; };
+}
+
+def worker_request_error_exit(code: i64) -> i64 {
+    if code >= 2201 and code <= 2208 { 60 + code - 2200; } else if code >= 1 and code <= 19 { 80 + code; } else { 99; };
+}
+
+def worker_run_stdio_v1_with_frame_writer(frame_writer: fn(Buffer, i64, i64) -> Result<i64, i64>) -> i64 {
+    let handshake = ffi_buffer_from_bytes(worker_handshake_payload_v1());
+    if handshake.is_err() { return 31; };
+    let handshake_payload = handshake.value;
+    let handshake_len = handshake_payload.used_len();
+    let handshake_written = frame_writer(handshake_payload, handshake_len, 8192);
+    handshake_payload.free();
+    if handshake_written.is_err() or handshake_written.value != handshake_len + 4 { return 32; };
+    while true { let read = frame_read_stdin(32768); if read.is_err() { return worker_frame_error_exit(read.error); }; let frame = read.value; if frame.eof { return 0; }; let input_payload = frame.payload; let response = worker_process_payload_v1(input_payload, frame.len); input_payload.free(); if response.is_err() { return worker_request_error_exit(response.error); }; let encoded = response.value; let output_payload = encoded.payload; let written = frame_writer(output_payload, encoded.len, 8192); output_payload.free(); if written.is_err() or written.value != encoded.len + 4 { return 52; }; };
+    0;
+}
+
+def worker_default_frame_writer(payload: Buffer, len: i64, max_len: i64) -> Result<i64, i64> {
+    frame_write_stdout(payload, len, max_len);
+}
+
+def worker_run_stdio_v1() -> i64 {
+    let writer: fn(Buffer, i64, i64) -> Result<i64, i64> = worker_default_frame_writer;
+    worker_run_stdio_v1_with_frame_writer(writer);
+}

@@ -1,0 +1,151 @@
+import std::ffi;
+
+import std::json;
+
+import std::net;
+
+import std::status;
+
+import std::string;
+
+import senline_domain_worker;
+
+def senline_http_header_limit() -> i64 {
+    4096;
+}
+
+def senline_http_body_limit() -> i64 {
+    32768;
+}
+
+def senline_http_output_limit() -> i64 {
+    8192;
+}
+
+def senline_http_request_timeout_ms() -> i64 {
+    5000;
+}
+
+def senline_http_max_requests_per_process() -> i64 {
+    1;
+}
+
+def senline_http_max_pending_requests() -> i64 {
+    1;
+}
+
+def senline_http_bind_forbidden_status() -> i64 {
+    2601;
+}
+
+def senline_http_transport_status() -> i64 {
+    2602;
+}
+
+def senline_http_bind_allowed(host: &str, port: i64) -> bool {
+    str_eq(host, "127.0.0.1") and port == 0;
+}
+
+def senline_http_method_allowed(method: &str) -> bool {
+    str_eq(method, "POST");
+}
+
+def senline_http_path_allowed(path: &str, query: &str) -> bool {
+    str_eq(path, "/v1/submit-envelope") and query.len() == 0;
+}
+
+def senline_http_version_allowed(version: &str) -> bool {
+    str_eq(version, "HTTP/1.1");
+}
+
+def senline_http_content_type_allowed(content_type: &str) -> bool {
+    str_eq(content_type, "application/json");
+}
+
+def senline_http_transfer_encoding_allowed(present: bool) -> bool {
+    not present;
+}
+
+def senline_http_header_length_supported(len: i64) -> bool {
+    len >= 0 and len <= senline_http_header_limit();
+}
+
+def senline_http_body_length_supported(len: i64) -> bool {
+    len > 0 and len <= senline_http_body_limit();
+}
+
+def senline_http_server_error(code: i64) -> Result<HttpServer, i64> {
+    Err(code);
+}
+
+def senline_http_bind(host: &str, port: i64) -> Result<HttpServer, i64> {
+    if not senline_http_bind_allowed(host, port) { return senline_http_server_error(senline_http_bind_forbidden_status()); };
+    let bound = http_server_bind(host, port);
+    if bound.is_err() { return senline_http_server_error(bound.error); };
+    let server = bound.value;
+    let limits = server.set_limits(senline_http_header_limit(), senline_http_body_limit());
+    if limits.is_err() { server.close(); senline_http_server_error(limits.error); } else { Ok(server); };
+}
+
+def senline_http_request_supported(request: HttpServerRequest) -> bool {
+    let method = request.method_string();
+    if method.is_err() { return false; };
+    if not senline_http_method_allowed(method.value.as_str()) { return false; };
+    let path = request.path_string();
+    if path.is_err() { return false; };
+    let query = request.query_string();
+    if query.is_err() { return false; };
+    if not senline_http_path_allowed(path.value.as_str(), query.value.as_str()) { return false; };
+    let version = request.version_string();
+    if version.is_err() { return false; };
+    if not senline_http_version_allowed(version.value.as_str()) { return false; };
+    let content_type = request.header_string("Content-Type");
+    if content_type.is_err() { return false; };
+    if not senline_http_content_type_allowed(content_type.value.as_str()) { return false; };
+    let transfer_encoding = request.header_len("Transfer-Encoding");
+    if not senline_http_transfer_encoding_allowed(transfer_encoding.is_ok()) { return false; };
+    if transfer_encoding.error != STATUS_NOT_FOUND() { return false; };
+    let body_len = request.body_len();
+    if body_len.is_err() { return false; };
+    senline_http_body_length_supported(body_len.value);
+}
+
+def senline_http_process_payload(payload: Buffer, len: i64) -> Result<WorkerEncodedFrameV1, i64> {
+    let response = worker_process_payload_v1(payload, len);
+    if response.is_err() { return response; };
+    let parsed = json_parse_buffer_strict(payload, len);
+    if parsed.is_err() { return response; };
+    let decoded = worker_decode_request_v1(parsed.value.root());
+    if decoded.is_err() { return response; };
+    if str_eq(decoded.value.context.execution_mode.as_str(), "fixture") { return response; };
+    let rejected_output = response.value.payload;
+    rejected_output.free();
+    worker_encode_protocol_error_v1("unknown_enum");
+}
+
+def senline_http_answer_internal_error(request: HttpServerRequest) -> bool {
+    request.respond(500, "senline_http_internal_error").unwrap_or(false);
+}
+
+def senline_http_handle_request(request: HttpServerRequest) -> bool {
+    if not senline_http_request_supported(request) { return request.respond(400, "senline_http_bad_request").unwrap_or(false); };
+    let body_len_result = request.body_len();
+    if body_len_result.is_err() { return senline_http_answer_internal_error(request); };
+    let body_len = body_len_result.value;
+    let input_result = ffi_buffer_new(body_len);
+    if input_result.is_err() { return senline_http_answer_internal_error(request); };
+    let input = input_result.value;
+    let copied = request.body_copy(input);
+    if copied.is_err() { input.free(); return senline_http_answer_internal_error(request); };
+    if copied.value != body_len { input.free(); return senline_http_answer_internal_error(request); };
+    let encoded_result = senline_http_process_payload(input, body_len);
+    input.free();
+    if encoded_result.is_err() { return senline_http_answer_internal_error(request); };
+    let encoded = encoded_result.value;
+    let output = encoded.payload;
+    if encoded.len <= 0 or encoded.len > senline_http_output_limit() { output.free(); return senline_http_answer_internal_error(request); };
+    let body = string_from_buffer(output, encoded.len);
+    output.free();
+    if body.is_err() { return senline_http_answer_internal_error(request); };
+    request.respond_with_content_type(200, "application/json", body.value.as_str()).unwrap_or(false);
+}

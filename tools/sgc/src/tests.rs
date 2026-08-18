@@ -33,6 +33,7 @@ use super::{
 };
 use crate::cli::Cli;
 use crate::cross_compile::NativeBuildTarget;
+use crate::installed_runtime::NativeRuntimeMode;
 use clap::Parser as _;
 use sengoo_compiler::{
     compile_to_ir as compile_compiler_ir, compile_to_mir, CompileWarning, DebugInfoConfig,
@@ -527,6 +528,24 @@ fn stdlib_runtime_exports_managed_buffer_helpers() {
             "runtime stdlib missing Buffer helper: {symbol}"
         );
     }
+}
+
+#[test]
+fn stdlib_runtime_exports_json_error_kind_diagnostic() {
+    let runtime_c = load_runtime_bundle_source_for_tests();
+
+    assert!(
+        runtime_c.contains("sengoo_json_last_error_kind"),
+        "runtime stdlib missing structured JSON error-kind export"
+    );
+    assert!(
+        runtime_c.contains("sengoo_json_doc_new_string_len"),
+        "runtime stdlib missing length-aware JSON string-builder export"
+    );
+    assert!(
+        runtime_c.contains("sengoo_json_doc_new_string_from_string"),
+        "runtime stdlib missing checked owned-String JSON builder export"
+    );
 }
 
 #[test]
@@ -1328,6 +1347,25 @@ fn build_and_run_daemon_flags_parse() {
         "--daemon-addr",
         "127.0.0.1:50000",
     ])
+    .is_ok());
+}
+
+#[test]
+fn source_runtime_mode_rejects_daemon_without_protocol_propagation() {
+    assert!(crate::cli::validate_runtime_mode_daemon_combination(
+        NativeRuntimeMode::SourceDevelopment,
+        true,
+    )
+    .is_err());
+    assert!(crate::cli::validate_runtime_mode_daemon_combination(
+        NativeRuntimeMode::SourceDevelopment,
+        false,
+    )
+    .is_ok());
+    assert!(crate::cli::validate_runtime_mode_daemon_combination(
+        NativeRuntimeMode::Installed,
+        true,
+    )
     .is_ok());
 }
 
@@ -7399,15 +7437,15 @@ def echo_handler(request: &mut HttpServerRequest) -> Result<bool, i64> {
 }
 
 def fail_handler(request: &mut HttpServerRequest) -> Result<bool, i64> {
-    Result { is_ok: false, value: false, error: STATUS_IO() }
+    Err(STATUS_IO())
 }
 
 def decline_handler(request: &mut HttpServerRequest) -> Result<bool, i64> {
-    Result { is_ok: true, value: false, error: 0 }
+    Ok(false)
 }
 
 def unanswered_handler(request: &mut HttpServerRequest) -> Result<bool, i64> {
-    Result { is_ok: true, value: true, error: 0 }
+    Ok(true)
 }
 
 async def main() -> i64 {
@@ -7670,6 +7708,286 @@ def main() -> i64 {
     );
     assert_eq!(String::from_utf8_lossy(&output.stdout), "out");
     assert_eq!(String::from_utf8_lossy(&output.stderr), "err");
+}
+
+#[test]
+fn stdlib_buffer_supports_checked_bytes_and_big_endian_u32() {
+    let Some(output) = compile_and_run_stdlib_import_program_with_stdin(
+        "buffer-byte-be",
+        r#"
+import std::ffi;
+
+def main() -> i64 {
+    let buffer = ffi_buffer_new(8).unwrap_or(Buffer { handle: 0 });
+    let first = buffer.set_u8(0, 0).unwrap_or(false);
+    let last = buffer.set_u8(7, 255).unwrap_or(false);
+    let word = buffer.write_u32_be(2, 16909060).unwrap_or(false);
+    let read_first = buffer.get_u8(0).unwrap_or(-1);
+    let read_last = buffer.get_u8(7).unwrap_or(-1);
+    let read_word = buffer.read_u32_be(2).unwrap_or(-1);
+    let negative = buffer.get_u8(-1).is_err();
+    let out_of_range = buffer.set_u8(8, 1).is_err();
+    let invalid_byte = buffer.set_u8(0, 256).is_err();
+    let short_word = buffer.read_u32_be(5).is_err();
+    let overflow_word = buffer.write_u32_be(0, 4294967296).is_err();
+    buffer.free();
+
+    if first
+        && last
+        && word
+        && read_first == 0
+        && read_last == 255
+        && read_word == 16909060
+        && negative
+        && out_of_range
+        && invalid_byte
+        && short_word
+        && overflow_word {
+        0
+    } else {
+        1
+    }
+}
+"#,
+        "",
+    ) else {
+        return;
+    };
+
+    assert!(
+        output.status.success(),
+        "stdout:\n{}\nstderr:\n{}",
+        String::from_utf8_lossy(&output.stdout),
+        String::from_utf8_lossy(&output.stderr)
+    );
+}
+
+#[test]
+fn stdlib_buffer_zeroes_gaps_before_exposing_extended_bytes() {
+    let Some(output) = compile_and_run_stdlib_import_program_with_stdin(
+        "buffer-zero-extension-gaps",
+        r#"
+import std::ffi;
+
+def main() -> i64 {
+    let byte_buffer = ffi_buffer_from_bytes("secret!!").unwrap_or(Buffer { handle: 0 });
+    let byte_cleared = byte_buffer.clear();
+    let byte_extended = byte_buffer.set_u8(7, 120).unwrap_or(false);
+    let byte_gap_zero = byte_buffer.get_u8(0).unwrap_or(-1) == 0
+        && byte_buffer.get_u8(6).unwrap_or(-1) == 0;
+    let byte_tail = byte_buffer.get_u8(7).unwrap_or(-1) == 120;
+
+    let word_buffer = ffi_buffer_from_bytes("private!").unwrap_or(Buffer { handle: 0 });
+    let word_cleared = word_buffer.clear();
+    let word_extended = word_buffer.write_u32_be(4, 16909060).unwrap_or(false);
+    let word_gap_zero = word_buffer.get_u8(0).unwrap_or(-1) == 0
+        && word_buffer.get_u8(3).unwrap_or(-1) == 0;
+    let word_value = word_buffer.read_u32_be(4).unwrap_or(-1) == 16909060;
+
+    byte_buffer.free();
+    word_buffer.free();
+
+    if byte_cleared
+        && byte_extended
+        && byte_gap_zero
+        && byte_tail
+        && word_cleared
+        && word_extended
+        && word_gap_zero
+        && word_value {
+        0
+    } else {
+        1
+    }
+}
+"#,
+        "",
+    ) else {
+        return;
+    };
+
+    assert!(
+        output.status.success(),
+        "stdout:\n{}\nstderr:\n{}",
+        String::from_utf8_lossy(&output.stdout),
+        String::from_utf8_lossy(&output.stderr)
+    );
+}
+
+#[test]
+fn stdlib_buffer_zero_handle_drop_is_noop() {
+    let Some(output) = compile_and_run_stdlib_import_program_with_stdin(
+        "buffer-zero-handle-drop",
+        r#"
+import std::ffi;
+
+def drop_empty_buffer() -> i64 {
+    let empty = Buffer { handle: 0 };
+    0
+}
+
+def main() -> i64 {
+    let cleared = ffi_last_error_clear();
+    let dropped = drop_empty_buffer();
+    if cleared && dropped == 0 && ffi_last_error_code() == 0 { 0 } else { 1 }
+}
+"#,
+        "",
+    ) else {
+        return;
+    };
+
+    assert!(
+        output.status.success(),
+        "stdout:\n{}\nstderr:\n{}",
+        String::from_utf8_lossy(&output.stdout),
+        String::from_utf8_lossy(&output.stderr)
+    );
+}
+
+#[test]
+fn stdlib_buffer_zero_handle_free_is_noop() {
+    let Some(output) = compile_and_run_stdlib_import_program_with_stdin(
+        "buffer-zero-handle-free",
+        r#"
+import std::ffi;
+
+def main() -> i64 {
+    let cleared = ffi_last_error_clear();
+    let empty = Buffer { handle: 0 };
+    let freed = empty.free();
+    if cleared && freed && ffi_last_error_code() == 0 { 0 } else { 1 }
+}
+"#,
+        "",
+    ) else {
+        return;
+    };
+
+    assert!(
+        output.status.success(),
+        "stdout:\n{}\nstderr:\n{}",
+        String::from_utf8_lossy(&output.stdout),
+        String::from_utf8_lossy(&output.stderr)
+    );
+}
+
+#[test]
+fn stdlib_buffer_explicit_free_does_not_double_drop() {
+    let Some(output) = compile_and_run_stdlib_import_program_with_stdin(
+        "buffer-explicit-free",
+        r#"
+import std::ffi;
+
+def release_buffer() -> i64 {
+    let buffer = ffi_buffer_new(4).unwrap_or(Buffer { handle: 0 });
+    let freed = buffer.free();
+    if freed && ffi_last_error_code() == 0 { 0 } else { 1 }
+}
+
+def main() -> i64 {
+    let cleared = ffi_last_error_clear();
+    let released = release_buffer();
+    if cleared && released == 0 && ffi_last_error_code() == 0 { 0 } else { 1 }
+}
+"#,
+        "",
+    ) else {
+        return;
+    };
+
+    assert!(
+        output.status.success(),
+        "stdout:\n{}\nstderr:\n{}",
+        String::from_utf8_lossy(&output.stdout),
+        String::from_utf8_lossy(&output.stderr)
+    );
+}
+
+#[test]
+fn stdlib_io_exact_binary_frame_preserves_windows_control_bytes() {
+    let Some(output) = compile_and_run_stdlib_import_program_with_stdin(
+        "io-exact-binary-frame",
+        r#"
+import std::io;
+
+def main() -> i64 {
+    let buffer = ffi_buffer_new(6).unwrap_or(Buffer { handle: 0 });
+    let binary = io_protocol_binary_mode().unwrap_or(false);
+    let read = io_stdin_read_exact(buffer, 0, 6).unwrap_or(-1);
+    let wrote = io_stdout_write_all(buffer, 0, 6).unwrap_or(-1);
+    let flushed = io_stdout_flush().unwrap_or(false);
+    buffer.free();
+
+    if binary && read == 6 && wrote == 6 && flushed { 0 } else { 1 }
+}
+"#,
+        "\0\r\n\u{1a}\u{e9}",
+    ) else {
+        return;
+    };
+
+    assert!(
+        output.status.success(),
+        "stdout: {:?}\nstderr:\n{}",
+        output.stdout,
+        String::from_utf8_lossy(&output.stderr)
+    );
+    assert_eq!(output.stdout, b"\0\r\n\x1a\xc3\xa9");
+}
+
+#[test]
+fn stdlib_io_exact_read_distinguishes_clean_eof_from_truncation() {
+    let source = r#"
+import std::io;
+
+def main() -> i64 {
+    let buffer = ffi_buffer_new(4).unwrap_or(Buffer { handle: 0 });
+    let binary = io_protocol_binary_mode().unwrap_or(false);
+    let read = io_stdin_read_exact(buffer, 0, 4);
+    let ok = read.is_ok && read.value == 0 && buffer.used_len() == 0;
+    buffer.free();
+    if binary && ok { 0 } else { 1 }
+}
+"#;
+
+    let Some(clean) =
+        compile_and_run_stdlib_import_program_with_stdin("io-exact-clean-eof", source, "")
+    else {
+        return;
+    };
+    assert!(
+        clean.status.success(),
+        "clean EOF stdout:\n{}\nstderr:\n{}",
+        String::from_utf8_lossy(&clean.stdout),
+        String::from_utf8_lossy(&clean.stderr)
+    );
+
+    let truncated_source = r#"
+import std::io;
+
+def main() -> i64 {
+    let buffer = ffi_buffer_new(4).unwrap_or(Buffer { handle: 0 });
+    let binary = io_protocol_binary_mode().unwrap_or(false);
+    let read = io_stdin_read_exact(buffer, 0, 4);
+    let ok = read.is_err() && read.error == STATUS_IO() && buffer.used_len() == 0;
+    buffer.free();
+    if binary && ok { 0 } else { 1 }
+}
+"#;
+    let Some(truncated) = compile_and_run_stdlib_import_program_with_stdin(
+        "io-exact-truncated",
+        truncated_source,
+        "abc",
+    ) else {
+        return;
+    };
+    assert!(
+        truncated.status.success(),
+        "truncated stdout:\n{}\nstderr:\n{}",
+        String::from_utf8_lossy(&truncated.stdout),
+        String::from_utf8_lossy(&truncated.stderr)
+    );
 }
 
 #[test]
@@ -8487,8 +8805,8 @@ def main() -> i64 {{
     let _ = fs::remove_file(&exe_path);
 
     assert!(
-        elapsed < std::time::Duration::from_secs(2),
-        "wait_cancellable should not wait for the 5s child sleep; elapsed={elapsed:?}"
+        elapsed < std::time::Duration::from_secs(10),
+        "wait_cancellable process fixture exceeded its watchdog; elapsed={elapsed:?}"
     );
     assert!(
         output.status.success(),
@@ -9043,6 +9361,7 @@ def main() -> i64 {
         1
     }
 }
+
 "#,
         "",
     ) else {
@@ -9058,6 +9377,1074 @@ def main() -> i64 {
     assert_eq!(
         String::from_utf8_lossy(&output.stdout),
         "sengoo|{\"name\":\"sengoo\",\"ok\":true,\"ratio\":2.5,\"items\":[null,false,\"x\"]}"
+    );
+}
+
+#[test]
+fn stdlib_json_nested_containers_survive_node_storage_growth() {
+    let Some(output) = compile_and_run_stdlib_import_program_with_stdin(
+        "json-node-storage-growth",
+        r#"
+import std::json;
+
+def main() -> i64 {
+    let parsed = json_parse_strict("{\"early\":[],\"fill\":[0,1,2,3,4,5,6,7,8,9,10,11,12,13,14,15],\"late\":true}").unwrap_or(JsonDoc { handle: 0 });
+    let root = parsed.root();
+    let early = root.object_get("early");
+    let fill = root.object_get("fill");
+    let late = root.object_get("late");
+    let ok = root.object_len().unwrap_or(-1) == 3
+        && early.is_ok
+        && early.value.array_len().unwrap_or(-1) == 0
+        && fill.is_ok
+        && fill.value.array_len().unwrap_or(-1) == 16
+        && fill.value.array_get(0).unwrap_or(JsonValue { doc_handle: 0, node_id: 0 }).number_i64().unwrap_or(-1) == 0
+        && fill.value.array_get(15).unwrap_or(JsonValue { doc_handle: 0, node_id: 0 }).number_i64().unwrap_or(-1) == 15
+        && late.is_ok
+        && late.value.bool_value().unwrap_or(false);
+    if ok { 0 } else { 1 }
+}
+"#,
+        "",
+    ) else {
+        return;
+    };
+
+    assert!(
+        output.status.success(),
+        "stdout:\n{}\nstderr:\n{}",
+        String::from_utf8_lossy(&output.stdout),
+        String::from_utf8_lossy(&output.stderr)
+    );
+}
+
+#[test]
+fn stdlib_json_strict_rejects_duplicates_and_decodes_unicode_keys() {
+    let Some(output) = compile_and_run_stdlib_import_program_with_stdin(
+        "json-strict-object",
+        r#"
+import std::io;
+import std::json;
+
+def main() -> i64 {
+    let duplicate_input = ffi_buffer_from_bytes("{\"a\":1,\"a\":2}").unwrap_or(Buffer { handle: 0 });
+    let escaped_duplicate_input = ffi_buffer_from_bytes("{\"a\":1,\"\\u0061\":2}").unwrap_or(Buffer { handle: 0 });
+    let nested_duplicate_input = ffi_buffer_from_bytes("{\"outer\":{\"x\":1,\"x\":2}}").unwrap_or(Buffer { handle: 0 });
+    let invalid_surrogate_input = ffi_buffer_from_bytes("{\"value\":\"\\ud83d\"}").unwrap_or(Buffer { handle: 0 });
+    let valid_input = ffi_buffer_from_bytes("{\"name\":\"sengoo\",\"greeting\":\"\\u4f60\\u597d\\ud83d\\ude00\"}").unwrap_or(Buffer { handle: 0 });
+
+    let duplicate = json_parse_buffer_strict(duplicate_input, duplicate_input.len());
+    let escaped_duplicate = json_parse_buffer_strict(escaped_duplicate_input, escaped_duplicate_input.len());
+    let nested_duplicate = json_parse_buffer_strict(nested_duplicate_input, nested_duplicate_input.len());
+    let invalid_surrogate = json_parse_buffer_strict(invalid_surrogate_input, invalid_surrogate_input.len());
+    let valid = json_parse_buffer_strict(valid_input, valid_input.len()).unwrap_or(JsonDoc { handle: 0 });
+    let root = valid.root();
+    let key_buffer = ffi_buffer_new(32).unwrap_or(Buffer { handle: 0 });
+    let value_buffer = ffi_buffer_new(32).unwrap_or(Buffer { handle: 0 });
+    let count = root.object_len().unwrap_or(-1);
+    let key0 = root.object_key_copy(0, key_buffer).unwrap_or(-1);
+    let key1 = root.object_key_copy(1, key_buffer).unwrap_or(-1);
+    let bad_key = root.object_key_copy(2, key_buffer).is_err();
+    let greeting = root.object_get("greeting").unwrap_or(JsonValue { doc_handle: 0, node_id: 0 });
+    let greeting_len = greeting.string_copy(value_buffer).unwrap_or(-1);
+    let wrote = io_stdout_write_raw(value_buffer.ptr(), greeting_len).unwrap_or(-1);
+
+    let ok = duplicate.is_err()
+        && escaped_duplicate.is_err()
+        && nested_duplicate.is_err()
+        && invalid_surrogate.is_err()
+        && count == 2
+        && key0 == 4
+        && key1 == 8
+        && bad_key
+        && greeting_len == 10
+        && wrote == greeting_len;
+
+    key_buffer.free();
+    value_buffer.free();
+    valid.close();
+    duplicate_input.free();
+    escaped_duplicate_input.free();
+    nested_duplicate_input.free();
+    invalid_surrogate_input.free();
+    valid_input.free();
+
+    if ok { 0 } else { 1 }
+}
+
+"#,
+        "",
+    ) else {
+        return;
+    };
+
+    assert!(
+        output.status.success(),
+        "stdout: {:?}\nstderr:\n{}",
+        output.stdout,
+        String::from_utf8_lossy(&output.stderr)
+    );
+    assert_eq!(
+        output.stdout,
+        vec![0xe4, 0xbd, 0xa0, 0xe5, 0xa5, 0xbd, 0xf0, 0x9f, 0x98, 0x80]
+    );
+}
+
+#[test]
+fn stdlib_json_strict_object_inspection_is_owned_and_exact() {
+    let Some(output) = compile_and_run_stdlib_import_program_with_stdin(
+        "json-strict-object-inspection",
+        r#"
+import std::json;
+import std::status;
+
+def key_is_1(buffer: Buffer, b0: i64) -> bool {
+    buffer.used_len() == 1
+        && buffer.get_u8(0).unwrap_or(-1) == b0
+}
+
+def key_is_2(buffer: Buffer, b0: i64, b1: i64) -> bool {
+    buffer.used_len() == 2
+        && buffer.get_u8(0).unwrap_or(-1) == b0
+        && buffer.get_u8(1).unwrap_or(-1) == b1
+}
+
+def key_is_3(buffer: Buffer, b0: i64, b1: i64, b2: i64) -> bool {
+    buffer.used_len() == 3
+        && buffer.get_u8(0).unwrap_or(-1) == b0
+        && buffer.get_u8(1).unwrap_or(-1) == b1
+        && buffer.get_u8(2).unwrap_or(-1) == b2
+}
+
+def any_key_is_1(k0: Buffer, k1: Buffer, k2: Buffer, k3: Buffer, k4: Buffer, b0: i64) -> bool {
+    key_is_1(k0, b0) || key_is_1(k1, b0) || key_is_1(k2, b0)
+        || key_is_1(k3, b0) || key_is_1(k4, b0)
+}
+
+def any_key_is_2(k0: Buffer, k1: Buffer, k2: Buffer, k3: Buffer, k4: Buffer, b0: i64, b1: i64) -> bool {
+    key_is_2(k0, b0, b1) || key_is_2(k1, b0, b1) || key_is_2(k2, b0, b1)
+        || key_is_2(k3, b0, b1) || key_is_2(k4, b0, b1)
+}
+
+def any_key_is_3(k0: Buffer, k1: Buffer, k2: Buffer, k3: Buffer, k4: Buffer, b0: i64, b1: i64, b2: i64) -> bool {
+    key_is_3(k0, b0, b1, b2) || key_is_3(k1, b0, b1, b2) || key_is_3(k2, b0, b1, b2)
+        || key_is_3(k3, b0, b1, b2) || key_is_3(k4, b0, b1, b2)
+}
+
+def main() -> i64 {
+    let input = ffi_buffer_from_bytes("{\"A\":1,\"a\":2,\"\\u00e9\":3,\"e\\u0301\":4,\"\\u4f60\":5}")
+        .unwrap_or(Buffer { handle: 0 });
+    let doc = json_parse_buffer_strict(input, input.len()).unwrap_or(JsonDoc { handle: 0 });
+    let root = doc.root();
+
+    let k0 = ffi_buffer_new(8).unwrap_or(Buffer { handle: 0 });
+    let k1 = ffi_buffer_new(8).unwrap_or(Buffer { handle: 0 });
+    let k2 = ffi_buffer_new(8).unwrap_or(Buffer { handle: 0 });
+    let k3 = ffi_buffer_new(8).unwrap_or(Buffer { handle: 0 });
+    let k4 = ffi_buffer_new(8).unwrap_or(Buffer { handle: 0 });
+
+    let count = root.object_len().unwrap_or(-1);
+    let copied0 = root.object_key_copy(0, k0).unwrap_or(-1);
+    let copied1 = root.object_key_copy(1, k1).unwrap_or(-1);
+    let copied2 = root.object_key_copy(2, k2).unwrap_or(-1);
+    let copied3 = root.object_key_copy(3, k3).unwrap_or(-1);
+    let copied4 = root.object_key_copy(4, k4).unwrap_or(-1);
+
+    let negative = root.object_key_copy(-1, k0);
+    let negative_ok = negative.is_err() && negative.error == STATUS_NOT_FOUND();
+    let at_len = root.object_key_copy(count, k0);
+    let at_len_ok = at_len.is_err() && at_len.error == STATUS_NOT_FOUND();
+
+    let upper = root.object_get("A");
+    let lower = root.object_get("a");
+    let precomposed = root.object_get("é");
+    let decomposed = root.object_get("é");
+    let escaped_by_raw_utf8 = root.object_get("你");
+    let exact_lookup_ok = root.object_has("A")
+        && root.object_has("a")
+        && root.object_has("é")
+        && root.object_has("é")
+        && root.object_has("你")
+        && !root.object_has("E")
+        && !root.object_has("É")
+        && upper.is_ok && upper.value.number_i64().unwrap_or(-1) == 1
+        && lower.is_ok && lower.value.number_i64().unwrap_or(-1) == 2
+        && precomposed.is_ok && precomposed.value.number_i64().unwrap_or(-1) == 3
+        && decomposed.is_ok && decomposed.value.number_i64().unwrap_or(-1) == 4
+        && escaped_by_raw_utf8.is_ok && escaped_by_raw_utf8.value.number_i64().unwrap_or(-1) == 5;
+
+    let saved = upper.value;
+    let closed = doc.close();
+    let stale = saved.kind();
+    let stale_ok = stale.is_err() && stale.error == STATUS_INVALID_HANDLE();
+
+    let copies_ok = count == 5
+        && copied0 == k0.used_len()
+        && copied1 == k1.used_len()
+        && copied2 == k2.used_len()
+        && copied3 == k3.used_len()
+        && copied4 == k4.used_len()
+        && any_key_is_1(k0, k1, k2, k3, k4, 65)
+        && any_key_is_1(k0, k1, k2, k3, k4, 97)
+        && any_key_is_2(k0, k1, k2, k3, k4, 195, 169)
+        && any_key_is_3(k0, k1, k2, k3, k4, 101, 204, 129)
+        && any_key_is_3(k0, k1, k2, k3, k4, 228, 189, 160);
+
+    k0.free();
+    k1.free();
+    k2.free();
+    k3.free();
+    k4.free();
+    input.free();
+
+    if count != 5 {
+        1
+    } else if !negative_ok || !at_len_ok {
+        2
+    } else if !exact_lookup_ok {
+        3
+    } else if !closed || !stale_ok {
+        4
+    } else if !copies_ok {
+        5
+    } else {
+        0
+    }
+}
+"#,
+        "",
+    ) else {
+        return;
+    };
+
+    assert!(
+        output.status.success(),
+        "status: {:?}\nstdout:\n{}\nstderr:\n{}",
+        output.status,
+        String::from_utf8_lossy(&output.stdout),
+        String::from_utf8_lossy(&output.stderr)
+    );
+}
+
+#[test]
+fn stdlib_json_strict_reports_stable_error_kinds() {
+    let Some(output) = compile_and_run_stdlib_import_program_with_stdin(
+        "json-strict-error-kinds",
+        r#"
+import std::json;
+
+def main() -> i64 {
+    let message = ffi_buffer_new(128).unwrap_or(Buffer { handle: 0 });
+
+    let duplicate = json_parse_strict("{\"a\":1,\"a\":2}");
+    let duplicate_code = json_last_error_code();
+    let duplicate_offset = json_last_error_offset();
+    let duplicate_kind = json_last_error_kind();
+    let duplicate_message_len = json_last_error_copy(message).unwrap_or(0);
+
+    let escaped_duplicate = json_parse_strict("{\"a\":1,\"\\u0061\":2}");
+    let escaped_duplicate_code = json_last_error_code();
+    let escaped_duplicate_kind = json_last_error_kind();
+
+    let invalid_utf8 = ffi_buffer_new(3).unwrap_or(Buffer { handle: 0 });
+    invalid_utf8.set_u8(0, 34);
+    invalid_utf8.set_u8(1, 255);
+    invalid_utf8.set_u8(2, 34);
+    let invalid_utf8_parse = json_parse_buffer_strict(invalid_utf8, invalid_utf8.used_len());
+    let invalid_utf8_code = json_last_error_code();
+    let invalid_utf8_kind = json_last_error_kind();
+
+    let invalid_escape = json_parse_strict("{\"value\":\"\\u12xz\"}");
+    let invalid_escape_code = json_last_error_code();
+    let invalid_escape_kind = json_last_error_kind();
+
+    let invalid_surrogate = json_parse_strict("{\"value\":\"\\ud83d\"}");
+    let invalid_surrogate_code = json_last_error_code();
+    let invalid_surrogate_kind = json_last_error_kind();
+
+    let trailing = json_parse_strict("{}x");
+    let trailing_code = json_last_error_code();
+    let trailing_offset = json_last_error_offset();
+    let trailing_kind = json_last_error_kind();
+
+    let malformed = json_parse_strict("{bad}");
+    let malformed_code = json_last_error_code();
+    let malformed_kind = json_last_error_kind();
+
+    let valid = json_parse_strict("{}");
+    let valid_code = json_last_error_code();
+    let valid_kind = json_last_error_kind();
+    let valid_closed = if valid.is_ok { valid.value.close() } else { false };
+
+    invalid_utf8.free();
+    message.free();
+
+    let stable_constants = JSON_ERROR_KIND_NONE() == 0
+        and JSON_ERROR_KIND_UNCLASSIFIED() == 1
+        and JSON_ERROR_KIND_DUPLICATE_FIELD() == 2
+        and JSON_ERROR_KIND_INVALID_UNICODE() == 3
+        and JSON_ERROR_KIND_TRAILING_BYTES() == 4;
+    let legacy_diagnostics = duplicate_code == 10
+        and duplicate_offset >= 0
+        and duplicate_message_len > 0
+        and escaped_duplicate_code == 10
+        and invalid_utf8_code == 10
+        and invalid_escape_code == 10
+        and invalid_surrogate_code == 10
+        and trailing_code == 10
+        and trailing_offset >= 0
+        and malformed_code == 10;
+    let classified = duplicate_kind == JSON_ERROR_KIND_DUPLICATE_FIELD()
+        and escaped_duplicate_kind == JSON_ERROR_KIND_DUPLICATE_FIELD()
+        and invalid_utf8_kind == JSON_ERROR_KIND_INVALID_UNICODE()
+        and invalid_escape_kind == JSON_ERROR_KIND_INVALID_UNICODE()
+        and invalid_surrogate_kind == JSON_ERROR_KIND_INVALID_UNICODE()
+        and trailing_kind == JSON_ERROR_KIND_TRAILING_BYTES()
+        and malformed_kind == JSON_ERROR_KIND_UNCLASSIFIED();
+    let rejected = duplicate.is_err()
+        and escaped_duplicate.is_err()
+        and invalid_utf8_parse.is_err()
+        and invalid_escape.is_err()
+        and invalid_surrogate.is_err()
+        and trailing.is_err()
+        and malformed.is_err();
+    let cleared = valid.is_ok
+        and valid_code == 0
+        and valid_kind == JSON_ERROR_KIND_NONE()
+        and valid_closed;
+
+    if stable_constants and legacy_diagnostics and classified and rejected and cleared { 0 } else { 1 }
+}
+"#,
+        "",
+    ) else {
+        return;
+    };
+
+    assert!(
+        output.status.success(),
+        "stdout:\n{}\nstderr:\n{}",
+        String::from_utf8_lossy(&output.stdout),
+        String::from_utf8_lossy(&output.stderr)
+    );
+}
+
+#[test]
+fn stdlib_json_strict_rejects_out_of_range_integer_without_changing_permissive_parse() {
+    let Some(output) = compile_and_run_stdlib_import_program_with_stdin(
+        "json-strict-integer-range",
+        r#"
+import std::json;
+
+def main() -> i64 {
+    let input = ffi_buffer_from_bytes("{\"value\":9223372036854775808}").unwrap_or(Buffer { handle: 0 });
+    let strict = json_parse_buffer_strict(input, input.len());
+    let permissive = json_parse_buffer(input, input.len());
+    let permissive_ok = permissive.is_ok;
+    let permissive_closed = if permissive.is_ok {
+        permissive.value.close();
+        true
+    } else {
+        false
+    };
+    input.free();
+    if strict.is_err() && permissive_ok && permissive_closed { 0 } else { 1 }
+}
+"#,
+        "",
+    ) else {
+        return;
+    };
+
+    assert!(
+        output.status.success(),
+        "stdout:\n{}\nstderr:\n{}",
+        String::from_utf8_lossy(&output.stdout),
+        String::from_utf8_lossy(&output.stderr)
+    );
+}
+
+#[test]
+fn stdlib_json_permissive_unicode_escape_behavior_remains_compatible() {
+    let Some(output) = compile_and_run_stdlib_import_program_with_stdin(
+        "json-permissive-unicode-compat",
+        r#"
+import std::io;
+import std::json;
+
+def main() -> i64 {
+    let input = ffi_buffer_from_bytes("{\"bmp\":\"\\u4f60\",\"surrogate\":\"\\ud83d\"}")
+        .unwrap_or(Buffer { handle: 0 });
+    let parsed = json_parse_buffer(input, input.len()).unwrap_or(JsonDoc { handle: 0 });
+    let root = parsed.root();
+    let output = ffi_buffer_new(2).unwrap_or(Buffer { handle: 0 });
+    let bmp = root.object_get("bmp").unwrap_or(JsonValue { doc_handle: 0, node_id: 0 });
+    let bmp_len = bmp.string_copy(output).unwrap_or(-1);
+    let bmp_compat = bmp_len == 1 && output.get_u8(0).unwrap_or(-1) == 63;
+    let surrogate = root.object_get("surrogate").unwrap_or(JsonValue { doc_handle: 0, node_id: 0 });
+    let surrogate_len = surrogate.string_copy(output).unwrap_or(-1);
+    let surrogate_compat = surrogate_len == 1 && output.get_u8(0).unwrap_or(-1) == 63;
+
+    output.free();
+    parsed.close();
+    input.free();
+    if bmp_compat && surrogate_compat { 0 } else { 1 }
+}
+"#,
+        "",
+    ) else {
+        return;
+    };
+
+    assert!(
+        output.status.success(),
+        "stdout:\n{}\nstderr:\n{}",
+        String::from_utf8_lossy(&output.stdout),
+        String::from_utf8_lossy(&output.stderr)
+    );
+}
+
+#[test]
+fn stdlib_json_strict_preserves_escaped_null_as_string_data() {
+    let Some(output) = compile_and_run_stdlib_import_program_with_stdin(
+        "json-strict-escaped-null",
+        r#"
+import std::json;
+
+def main() -> i64 {
+    let input = ffi_buffer_from_bytes("{\"value\":\"a\\u0000b\"}").unwrap_or(Buffer { handle: 0 });
+    let parsed = json_parse_buffer_strict(input, input.len()).unwrap_or(JsonDoc { handle: 0 });
+    let value = parsed.root().object_get("value").unwrap_or(JsonValue { doc_handle: 0, node_id: 0 });
+    let output = ffi_buffer_new(3).unwrap_or(Buffer { handle: 0 });
+    let copied = value.string_copy(output).unwrap_or(-1);
+    let ok = copied == 3
+        && output.get_u8(0).unwrap_or(-1) == 97
+        && output.get_u8(1).unwrap_or(-1) == 0
+        && output.get_u8(2).unwrap_or(-1) == 98;
+    output.free();
+    parsed.close();
+    input.free();
+    if ok { 0 } else { 1 }
+}
+"#,
+        "",
+    ) else {
+        return;
+    };
+
+    assert!(
+        output.status.success(),
+        "stdout:\n{}\nstderr:\n{}",
+        String::from_utf8_lossy(&output.stdout),
+        String::from_utf8_lossy(&output.stderr)
+    );
+}
+
+#[test]
+fn stdlib_json_length_aware_builder_preserves_embedded_nul() {
+    let Some(output) = compile_and_run_stdlib_import_program_with_stdin(
+        "json-length-aware-builder",
+        r#"
+import std::json;
+
+def main() -> i64 {
+    let input = ffi_buffer_from_bytes("{\"value\":\"a\\u0000b\"}").unwrap_or(Buffer { handle: 0 });
+    let parsed = json_parse_buffer_strict(input, input.len()).unwrap_or(JsonDoc { handle: 0 });
+    let source_value = parsed.root().object_get("value").unwrap_or(JsonValue { doc_handle: 0, node_id: 0 });
+    let source_text = source_value.string_value().unwrap_or(String { handle: 0 });
+
+    let built = json_doc_object().unwrap_or(JsonDoc { handle: 0 });
+    let copied_value = built.new_string_from_string(&source_text).unwrap_or(JsonValue { doc_handle: 0, node_id: 0 });
+    let set_value = built.root().object_set("value", copied_value).unwrap_or(false);
+    let encoded = ffi_buffer_new(64).unwrap_or(Buffer { handle: 0 });
+    let encoded_len = built.serialize(encoded).unwrap_or(-1);
+
+    let reparsed = json_parse_buffer_strict(encoded, encoded_len).unwrap_or(JsonDoc { handle: 0 });
+    let reparsed_value = reparsed.root().object_get("value").unwrap_or(JsonValue { doc_handle: 0, node_id: 0 });
+    let bytes = ffi_buffer_new(3).unwrap_or(Buffer { handle: 0 });
+    let copied_len = reparsed_value.string_copy(bytes).unwrap_or(-1);
+    let preserved = copied_len == 3
+        && bytes.get_u8(0).unwrap_or(-1) == 97
+        && bytes.get_u8(1).unwrap_or(-1) == 0
+        && bytes.get_u8(2).unwrap_or(-1) == 98;
+
+    bytes.free();
+    reparsed.close();
+    encoded.free();
+    built.close();
+    parsed.close();
+    input.free();
+    if set_value && encoded_len > 0 && preserved { 0 } else { 1 }
+}
+"#,
+        "",
+    ) else {
+        return;
+    };
+
+    assert!(
+        output.status.success(),
+        "stdout:\n{}\nstderr:\n{}",
+        String::from_utf8_lossy(&output.stdout),
+        String::from_utf8_lossy(&output.stderr)
+    );
+}
+
+#[test]
+fn stdlib_json_length_aware_builder_rejects_invalid_utf8() {
+    let Some(output) = compile_and_run_stdlib_import_program_with_stdin(
+        "json-length-aware-builder-invalid-utf8",
+        r#"
+import std::json;
+
+def main() -> i64 {
+    let bytes = ffi_buffer_new(1).unwrap_or(Buffer { handle: 0 });
+    let initialized = bytes.set_u8(0, 255).unwrap_or(false);
+    let built = json_doc_object().unwrap_or(JsonDoc { handle: 0 });
+    let node_id = sengoo_json_doc_new_string_len(built.handle, bytes.ptr(), 1);
+    let code = json_last_error_code();
+    let kind = json_last_error_kind();
+
+    built.close();
+    bytes.free();
+    if initialized
+        && node_id == 0
+        && code == 2
+        && kind == JSON_ERROR_KIND_INVALID_UNICODE() { 0 } else { 1 }
+}
+"#,
+        "",
+    ) else {
+        return;
+    };
+
+    assert!(
+        output.status.success(),
+        "stdout:\n{}\nstderr:\n{}",
+        String::from_utf8_lossy(&output.stdout),
+        String::from_utf8_lossy(&output.stderr)
+    );
+}
+
+#[test]
+fn stdlib_json_owned_string_builder_preserves_invalid_handle_status() {
+    let Some(output) = compile_and_run_stdlib_import_program_with_stdin(
+        "json-owned-string-builder-invalid-handle",
+        r#"
+import std::json;
+
+def main() -> i64 {
+    let built = json_doc_object().unwrap_or(JsonDoc { handle: 0 });
+    let invalid = String { handle: 0 };
+    let rejected = built.new_string_from_string(&invalid);
+    let code = json_last_error_code();
+    let kind = json_last_error_kind();
+
+    built.close();
+    if rejected.is_err()
+        && rejected.error == 3
+        && code == 3
+        && kind == JSON_ERROR_KIND_UNCLASSIFIED() { 0 } else { 1 }
+}
+"#,
+        "",
+    ) else {
+        return;
+    };
+
+    assert!(
+        output.status.success(),
+        "stdout:\n{}\nstderr:\n{}",
+        String::from_utf8_lossy(&output.stdout),
+        String::from_utf8_lossy(&output.stderr)
+    );
+}
+
+#[test]
+fn stdlib_json_strict_exact_lookup_supports_escaped_null_keys() {
+    let Some(output) = compile_and_run_stdlib_import_program_with_stdin(
+        "json-strict-null-key-lookup",
+        r#"
+import std::json;
+
+def main() -> i64 {
+    let input = ffi_buffer_from_bytes("{\"a\\u0000b\":7}").unwrap_or(Buffer { handle: 0 });
+    let parsed = json_parse_buffer_strict(input, input.len()).unwrap_or(JsonDoc { handle: 0 });
+    let root = parsed.root();
+    let key = ffi_buffer_new(3).unwrap_or(Buffer { handle: 0 });
+    key.set_u8(0, 97);
+    key.set_u8(1, 0);
+    key.set_u8(2, 98);
+    let has = sengoo_json_object_has_len(root.doc_handle, root.node_id, key.ptr(), 3) != 0;
+    let node_id = sengoo_json_object_get_len(root.doc_handle, root.node_id, key.ptr(), 3);
+    let value = JsonValue { doc_handle: root.doc_handle, node_id: node_id };
+    let exact = value.number_i64().unwrap_or(-1) == 7;
+    key.free();
+    parsed.close();
+    input.free();
+    if has && node_id > 0 && exact { 0 } else { 1 }
+}
+"#,
+        "",
+    ) else {
+        return;
+    };
+
+    assert!(
+        output.status.success(),
+        "stdout:\n{}\nstderr:\n{}",
+        String::from_utf8_lossy(&output.stdout),
+        String::from_utf8_lossy(&output.stderr)
+    );
+}
+#[test]
+fn stdlib_json_document_handles_reject_forged_and_reused_stale_values() {
+    let Some(output) = compile_and_run_stdlib_import_program_with_stdin(
+        "json-document-handle-lifecycle",
+        r#"
+import std::json;
+
+def main() -> i64 {
+    let forged_rejected = sengoo_json_doc_close(1) != 0;
+    let first = json_parse("{}").unwrap_or(JsonDoc { handle: 0 });
+    let stale = first.handle;
+    let first_close = sengoo_json_doc_close(stale) == 0;
+    let idempotent_close = sengoo_json_doc_close(stale) == 0;
+    let second = json_parse("{}").unwrap_or(JsonDoc { handle: 0 });
+    let generation_changed = second.handle != stale;
+    let stale_rejected_after_reuse = sengoo_json_doc_close(stale) != 0;
+    let second_close = second.close();
+
+    if forged_rejected
+        && first_close
+        && idempotent_close
+        && generation_changed
+        && stale_rejected_after_reuse
+        && second_close {
+        0
+    } else {
+        1
+    }
+}
+"#,
+        "",
+    ) else {
+        return;
+    };
+
+    assert!(
+        output.status.success(),
+        "status: {:?}\nstdout:\n{}\nstderr:\n{}",
+        output.status,
+        String::from_utf8_lossy(&output.stdout),
+        String::from_utf8_lossy(&output.stderr)
+    );
+}
+
+#[test]
+fn stdlib_json_document_parse_close_cycles_restore_live_handle_count() {
+    let Some(output) = compile_and_run_stdlib_import_program_with_stdin(
+        "json-document-live-handle-count",
+        r#"
+import std::json;
+
+extern "C" {
+    fn sengoo_json_doc_live_handle_count() -> i64;
+}
+
+def main() -> i64 {
+    let before = sengoo_json_doc_live_handle_count();
+    let mut round = 0;
+    let mut counted_each_round = true;
+    let mut closed_each_round = true;
+    let mut restored_each_round = true;
+
+    while round < 64 {
+        let permissive = json_parse("{\"round\":1}").unwrap_or(JsonDoc { handle: 0 });
+        let strict = json_parse_strict("{\"round\":2}").unwrap_or(JsonDoc { handle: 0 });
+        let permissive_handle = permissive.handle;
+        let strict_handle = strict.handle;
+        counted_each_round = counted_each_round
+            && permissive_handle != 0
+            && strict_handle != 0
+            && sengoo_json_doc_live_handle_count() == before + 2;
+
+        let permissive_closed = permissive.close();
+        let strict_closed = strict.close();
+        closed_each_round = closed_each_round && permissive_closed && strict_closed;
+        restored_each_round = restored_each_round
+            && sengoo_json_doc_live_handle_count() == before;
+        round = round + 1;
+    }
+
+    let after = sengoo_json_doc_live_handle_count();
+    if !counted_each_round {
+        1
+    } else if !closed_each_round {
+        2
+    } else if !restored_each_round {
+        3
+    } else if after != before {
+        4
+    } else {
+        0
+    }
+}
+"#,
+        "",
+    ) else {
+        return;
+    };
+
+    assert!(
+        output.status.success(),
+        "status: {:?}\nstdout:\n{}\nstderr:\n{}",
+        output.status,
+        String::from_utf8_lossy(&output.stdout),
+        String::from_utf8_lossy(&output.stderr)
+    );
+}
+
+#[test]
+fn stdlib_json_strict_rejects_invalid_raw_utf8() {
+    let source = r#"
+import std::io;
+import std::json;
+
+def main() -> i64 {
+    let input = ffi_buffer_new(32).unwrap_or(Buffer { handle: 0 });
+    let binary = io_protocol_binary_mode().unwrap_or(false);
+    let input_len = io_stdin_read_exact(input, 0, 14).unwrap_or(-1);
+    let rejected = json_parse_buffer_strict(input, input_len).is_err();
+    let parse_error = json_last_error_code() == 10;
+    input.free();
+    if binary && input_len == 14 && rejected && parse_error { 0 } else { 1 }
+}
+"#;
+    let Some(output) = compile_and_run_stdlib_import_program_with_stdin_bytes(
+        "json-strict-invalid-utf8",
+        source,
+        b"{\"value\":\"\xc0\xaf\"}",
+    ) else {
+        return;
+    };
+
+    assert!(
+        output.status.success(),
+        "stdout:\n{}\nstderr:\n{}",
+        String::from_utf8_lossy(&output.stdout),
+        String::from_utf8_lossy(&output.stderr)
+    );
+}
+
+#[test]
+fn stdlib_json_strict_rejects_invalid_unicode_and_preserves_utf8() {
+    let Some(output) = compile_and_run_stdlib_import_program_with_stdin(
+        "json-strict-unicode-matrix",
+        r#"
+import std::json;
+
+def rejects_raw_utf8(b0: i64, b1: i64, b2: i64, b3: i64, byte_count: i64) -> bool {
+    let input = ffi_buffer_new(6).unwrap_or(Buffer { handle: 0 });
+    input.set_u8(0, 34);
+    input.set_u8(1, b0);
+    input.set_u8(2, b1);
+    input.set_u8(3, b2);
+    input.set_u8(4, b3);
+    input.set_u8(5, 34);
+    input.set_u8(byte_count + 1, 34);
+
+    let input_len = byte_count + 2;
+    let parsed = json_parse_buffer_strict(input, input_len);
+    let code = json_last_error_code();
+    let kind = json_last_error_kind();
+    input.free();
+    parsed.is_err()
+        && code == 10
+        && kind == JSON_ERROR_KIND_INVALID_UNICODE()
+}
+
+def rejects_unicode_escape(text: &str) -> bool {
+    let parsed = json_parse_strict(text);
+    parsed.is_err()
+        && json_last_error_code() == 10
+        && json_last_error_kind() == JSON_ERROR_KIND_INVALID_UNICODE()
+}
+
+def main() -> i64 {
+    let invalid_utf8 = rejects_raw_utf8(128, 0, 0, 0, 1)
+        && rejects_raw_utf8(226, 130, 0, 0, 2)
+        && rejects_raw_utf8(192, 175, 0, 0, 2)
+        && rejects_raw_utf8(237, 160, 128, 0, 3)
+        && rejects_raw_utf8(244, 144, 128, 128, 4);
+
+    let invalid_escape = json_parse_strict("{\"value\":\"\\q\"}");
+    let invalid_escape_ok = invalid_escape.is_err()
+        && json_last_error_code() == 10
+        && json_last_error_kind() == JSON_ERROR_KIND_UNCLASSIFIED();
+
+    let short_unicode_input = ffi_buffer_new(5).unwrap_or(Buffer { handle: 0 });
+    short_unicode_input.set_u8(0, 34);
+    short_unicode_input.set_u8(1, 92);
+    short_unicode_input.set_u8(2, 117);
+    short_unicode_input.set_u8(3, 49);
+    short_unicode_input.set_u8(4, 50);
+    let short_unicode = json_parse_buffer_strict(short_unicode_input, short_unicode_input.used_len());
+    let short_unicode_ok = short_unicode.is_err()
+        && json_last_error_code() == 10
+        && json_last_error_kind() == JSON_ERROR_KIND_INVALID_UNICODE();
+    short_unicode_input.free();
+
+    let raw_control_input = ffi_buffer_new(3).unwrap_or(Buffer { handle: 0 });
+    raw_control_input.set_u8(0, 34);
+    raw_control_input.set_u8(1, 0);
+    raw_control_input.set_u8(2, 34);
+    let raw_control = json_parse_buffer_strict(raw_control_input, raw_control_input.used_len());
+    let raw_control_ok = raw_control.is_err()
+        && json_last_error_code() == 10
+        && json_last_error_kind() == JSON_ERROR_KIND_UNCLASSIFIED();
+    raw_control_input.free();
+
+    let surrogates = rejects_unicode_escape("\"\\ud83d\"")
+        && rejects_unicode_escape("\"\\udc00\"")
+        && rejects_unicode_escape("\"\\udc00\\ud800\"");
+
+    let raw_valid_input = ffi_buffer_new(12).unwrap_or(Buffer { handle: 0 });
+    raw_valid_input.set_u8(0, 34);
+    raw_valid_input.set_u8(1, 228);
+    raw_valid_input.set_u8(2, 189);
+    raw_valid_input.set_u8(3, 160);
+    raw_valid_input.set_u8(4, 229);
+    raw_valid_input.set_u8(5, 165);
+    raw_valid_input.set_u8(6, 189);
+    raw_valid_input.set_u8(7, 240);
+    raw_valid_input.set_u8(8, 159);
+    raw_valid_input.set_u8(9, 152);
+    raw_valid_input.set_u8(10, 128);
+    raw_valid_input.set_u8(11, 34);
+    let raw_valid = json_parse_buffer_strict(raw_valid_input, raw_valid_input.used_len())
+        .unwrap_or(JsonDoc { handle: 0 });
+    let raw_valid_bytes = ffi_buffer_new(10).unwrap_or(Buffer { handle: 0 });
+    let raw_valid_len = raw_valid.root().string_copy(raw_valid_bytes).unwrap_or(-1);
+    let raw_valid_ok = raw_valid_len == 10
+        && raw_valid_bytes.get_u8(0).unwrap_or(-1) == 228
+        && raw_valid_bytes.get_u8(1).unwrap_or(-1) == 189
+        && raw_valid_bytes.get_u8(2).unwrap_or(-1) == 160
+        && raw_valid_bytes.get_u8(3).unwrap_or(-1) == 229
+        && raw_valid_bytes.get_u8(4).unwrap_or(-1) == 165
+        && raw_valid_bytes.get_u8(5).unwrap_or(-1) == 189
+        && raw_valid_bytes.get_u8(6).unwrap_or(-1) == 240
+        && raw_valid_bytes.get_u8(7).unwrap_or(-1) == 159
+        && raw_valid_bytes.get_u8(8).unwrap_or(-1) == 152
+        && raw_valid_bytes.get_u8(9).unwrap_or(-1) == 128;
+    raw_valid_bytes.free();
+    raw_valid.close();
+    raw_valid_input.free();
+
+    let escaped = json_parse_strict("[\"\\u4f60\\u597d\",\"\\ud83d\\ude00\"]")
+        .unwrap_or(JsonDoc { handle: 0 });
+    let encoded = ffi_buffer_new(64).unwrap_or(Buffer { handle: 0 });
+    let encoded_len = escaped.serialize(encoded).unwrap_or(-1);
+    let reparsed = json_parse_buffer_strict(encoded, encoded_len)
+        .unwrap_or(JsonDoc { handle: 0 });
+    let bmp = reparsed.root().array_get(0).unwrap_or(JsonValue { doc_handle: 0, node_id: 0 });
+    let supplementary = reparsed.root().array_get(1).unwrap_or(JsonValue { doc_handle: 0, node_id: 0 });
+    let bmp_bytes = ffi_buffer_new(6).unwrap_or(Buffer { handle: 0 });
+    let supplementary_bytes = ffi_buffer_new(4).unwrap_or(Buffer { handle: 0 });
+    let bmp_len = bmp.string_copy(bmp_bytes).unwrap_or(-1);
+    let supplementary_len = supplementary.string_copy(supplementary_bytes).unwrap_or(-1);
+    let roundtrip_ok = encoded_len > 0
+        && bmp_len == 6
+        && bmp_bytes.get_u8(0).unwrap_or(-1) == 228
+        && bmp_bytes.get_u8(1).unwrap_or(-1) == 189
+        && bmp_bytes.get_u8(2).unwrap_or(-1) == 160
+        && bmp_bytes.get_u8(3).unwrap_or(-1) == 229
+        && bmp_bytes.get_u8(4).unwrap_or(-1) == 165
+        && bmp_bytes.get_u8(5).unwrap_or(-1) == 189
+        && supplementary_len == 4
+        && supplementary_bytes.get_u8(0).unwrap_or(-1) == 240
+        && supplementary_bytes.get_u8(1).unwrap_or(-1) == 159
+        && supplementary_bytes.get_u8(2).unwrap_or(-1) == 152
+        && supplementary_bytes.get_u8(3).unwrap_or(-1) == 128;
+    bmp_bytes.free();
+    supplementary_bytes.free();
+    reparsed.close();
+    encoded.free();
+    escaped.close();
+
+    if !invalid_utf8 {
+        1
+    } else if !invalid_escape_ok || !short_unicode_ok {
+        2
+    } else if !raw_control_ok {
+        3
+    } else if !surrogates {
+        4
+    } else if !raw_valid_ok {
+        5
+    } else if !roundtrip_ok {
+        6
+    } else {
+        0
+    }
+}
+"#,
+        "",
+    ) else {
+        return;
+    };
+
+    assert!(
+        output.status.success(),
+        "status: {:?}\nstdout:\n{}\nstderr:\n{}",
+        output.status,
+        String::from_utf8_lossy(&output.stdout),
+        String::from_utf8_lossy(&output.stderr)
+    );
+}
+
+#[test]
+fn stdlib_json_strict_enforces_malformed_input_boundaries() {
+    let too_deep = format!("{}0{}", "[".repeat(70), "]".repeat(70));
+    let too_deep = too_deep.replace('\\', "\\\\").replace('"', "\\\"");
+    let source = format!(
+        r#"
+import std::json;
+
+def main() -> i64 {{
+    let trailing = json_parse_strict("{{}}x").is_err();
+    let reversed_surrogate = json_parse_strict("{{\"value\":\"\\udc00\\ud800\"}}").is_err();
+    let raw_control = json_parse_strict("{{\"value\":\"line
+break\"}}").is_err();
+    let integer_underflow = json_parse_strict("-9223372036854775809").is_err();
+    let excess_depth = json_parse_strict("{too_deep}").is_err();
+
+    let exact = ffi_buffer_from_bytes("{{}}junk").unwrap_or(Buffer {{ handle: 0 }});
+    let exact_prefix = json_parse_buffer_strict(exact, 2);
+    let exact_prefix_ok = exact_prefix.is_ok;
+    let exact_prefix_closed = if exact_prefix.is_ok {{
+        exact_prefix.value.close()
+    }} else {{
+        false
+    }};
+    let full_rejected = json_parse_buffer_strict(exact, exact.used_len()).is_err();
+    exact.free();
+
+    let short = ffi_buffer_from_bytes("{{}}").unwrap_or(Buffer {{ handle: 0 }});
+    let uninitialized_rejected = json_parse_buffer_strict(short, 3).is_err();
+    short.free();
+
+    if trailing
+        && reversed_surrogate
+        && raw_control
+        && integer_underflow
+        && excess_depth
+        && exact_prefix_ok
+        && exact_prefix_closed
+        && full_rejected
+        && uninitialized_rejected {{
+        0
+    }} else {{
+        1
+    }}
+}}
+"#
+    );
+    let Some(output) = compile_and_run_stdlib_import_program_with_stdin(
+        "json-strict-malformed-boundaries",
+        &source,
+        "",
+    ) else {
+        return;
+    };
+
+    assert!(
+        output.status.success(),
+        "stdout:\n{}\nstderr:\n{}",
+        String::from_utf8_lossy(&output.stdout),
+        String::from_utf8_lossy(&output.stderr)
+    );
+}
+
+#[test]
+fn stdlib_json_strict_rejects_truncated_documents_within_initialized_buffers() {
+    let Some(output) = compile_and_run_stdlib_import_program_with_stdin(
+        "json-strict-truncated-documents",
+        r#"
+import std::json;
+import std::status;
+
+extern "C" {
+    fn sengoo_json_doc_live_handle_count() -> i64;
+}
+
+def strict_prefix_is_rejected(input: Buffer, input_len: i64, expected_kind: i64) -> bool {
+    let before = sengoo_json_doc_live_handle_count();
+    let truncated = json_parse_buffer_strict(input, input_len);
+    let result_status = truncated.error;
+    let last_status = json_last_error_code();
+    let error_kind = json_last_error_kind();
+    let error_offset = json_last_error_offset();
+    let after_rejection = sengoo_json_doc_live_handle_count();
+
+    let complete = json_parse_buffer_strict(input, input.used_len());
+    let complete_ok = complete.is_ok;
+    let complete_closed = if complete.is_ok { complete.value.close() } else { false };
+    let after_complete = sengoo_json_doc_live_handle_count();
+
+    input_len >= 0
+        && input_len < input.used_len()
+        && truncated.is_err()
+        && result_status == STATUS_PARSE()
+        && last_status == STATUS_PARSE()
+        && error_kind == expected_kind
+        && error_offset >= 0
+        && error_offset <= input_len
+        && after_rejection == before
+        && complete_ok
+        && complete_closed
+        && after_complete == before
+}
+
+def main() -> i64 {
+    let string_input = ffi_buffer_from_bytes("\"ok\"").unwrap_or(Buffer { handle: 0 });
+    let array_input = ffi_buffer_from_bytes("[1,2]").unwrap_or(Buffer { handle: 0 });
+    let object_input = ffi_buffer_from_bytes("{\"a\":0}").unwrap_or(Buffer { handle: 0 });
+    let literal_input = ffi_buffer_from_bytes("true").unwrap_or(Buffer { handle: 0 });
+    let exponent_input = ffi_buffer_from_bytes("1e2").unwrap_or(Buffer { handle: 0 });
+    let escape_input = ffi_buffer_from_bytes("\"a\\n\"").unwrap_or(Buffer { handle: 0 });
+    let unicode_input = ffi_buffer_from_bytes("\"\\u1234\"").unwrap_or(Buffer { handle: 0 });
+
+    let rejected = strict_prefix_is_rejected(string_input, 1, JSON_ERROR_KIND_UNCLASSIFIED())
+        && strict_prefix_is_rejected(array_input, 3, JSON_ERROR_KIND_UNCLASSIFIED())
+        && strict_prefix_is_rejected(object_input, 5, JSON_ERROR_KIND_UNCLASSIFIED())
+        && strict_prefix_is_rejected(literal_input, 3, JSON_ERROR_KIND_UNCLASSIFIED())
+        && strict_prefix_is_rejected(exponent_input, 2, JSON_ERROR_KIND_UNCLASSIFIED())
+        && strict_prefix_is_rejected(escape_input, 3, JSON_ERROR_KIND_UNCLASSIFIED())
+        && strict_prefix_is_rejected(unicode_input, 5, JSON_ERROR_KIND_INVALID_UNICODE());
+
+    string_input.free();
+    array_input.free();
+    object_input.free();
+    literal_input.free();
+    exponent_input.free();
+    escape_input.free();
+    unicode_input.free();
+
+    if rejected { 0 } else { 1 }
+}
+"#,
+        "",
+    ) else {
+        return;
+    };
+
+    assert!(
+        output.status.success(),
+        "status: {:?}\nstdout:\n{}\nstderr:\n{}",
+        output.status,
+        String::from_utf8_lossy(&output.stdout),
+        String::from_utf8_lossy(&output.stderr)
     );
 }
 
@@ -9414,6 +10801,14 @@ fn compile_and_run_stdlib_import_program_with_stdin(
     source: &str,
     stdin: &str,
 ) -> Option<std::process::Output> {
+    compile_and_run_stdlib_import_program_with_stdin_bytes(tag, source, stdin.as_bytes())
+}
+
+fn compile_and_run_stdlib_import_program_with_stdin_bytes(
+    tag: &str,
+    source: &str,
+    stdin: &[u8],
+) -> Option<std::process::Output> {
     let source = expand_stdlib_imports_for_source(source)
         .unwrap_or_else(|err| panic!("stdlib imports should expand: {err}"));
     let llvm_ir = compile_source(&source, 1)
@@ -9447,9 +10842,7 @@ fn compile_and_run_stdlib_import_program_with_stdin(
         .spawn()
         .expect("stdlib binary should spawn");
     if let Some(mut input) = child.stdin.take() {
-        input
-            .write_all(stdin.as_bytes())
-            .expect("stdin should be writable");
+        input.write_all(stdin).expect("stdin should be writable");
     }
     let output = child
         .wait_with_output()

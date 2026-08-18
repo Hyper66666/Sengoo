@@ -1,5 +1,6 @@
 ﻿extern "C" {
     fn sengoo_stdlib_str_ptr(value: &str) -> i64;
+    fn sengoo_string_from_bytes_copy(bytes_ptr: i64, len: i64) -> i64;
     fn sengoo_ffi_buffer_commit_used_len(buffer_handle: i64, used_len: i64) -> i64;
     fn sengoo_net_last_error() -> i64;
     fn sengoo_net_clear_error();
@@ -503,6 +504,15 @@ def http_request_buffer_copy_result(buffer: Buffer, copied: i64) -> Result<i64, 
     }
 }
 
+def http_request_owned_string_from_buffer(buffer: Buffer, len: i64) -> Result<String, i64> {
+    let raw = sengoo_string_from_bytes_copy(buffer.ptr(), len);
+    if raw >= 0 {
+        Ok(String { handle: raw })
+    } else {
+        Err(0 - raw)
+    }
+}
+
 impl HttpServerRequest {
     def method_len(self) -> Result<i64, i64> {
         http_request_i64_result(sengoo_http_request_method_len(self.handle))
@@ -523,7 +533,7 @@ impl HttpServerRequest {
                 Ok(buffer) => {
                     let copied = sengoo_http_request_method_copy(self.handle, buffer.ptr(), buffer.len());
                     if copied >= 0 {
-                        let owned = string_from_bytes_raw(buffer.ptr(), copied);
+                        let owned = http_request_owned_string_from_buffer(buffer, copied);
                         buffer.free();
                         owned
                     } else {
@@ -555,7 +565,7 @@ impl HttpServerRequest {
                 Ok(buffer) => {
                     let copied = sengoo_http_request_path_copy(self.handle, buffer.ptr(), buffer.len());
                     if copied >= 0 {
-                        let owned = string_from_bytes_raw(buffer.ptr(), copied);
+                        let owned = http_request_owned_string_from_buffer(buffer, copied);
                         buffer.free();
                         owned
                     } else {
@@ -587,7 +597,7 @@ impl HttpServerRequest {
                 Ok(buffer) => {
                     let copied = sengoo_http_request_query_copy(self.handle, buffer.ptr(), buffer.len());
                     if copied >= 0 {
-                        let owned = string_from_bytes_raw(buffer.ptr(), copied);
+                        let owned = http_request_owned_string_from_buffer(buffer, copied);
                         buffer.free();
                         owned
                     } else {
@@ -619,7 +629,7 @@ impl HttpServerRequest {
                 Ok(buffer) => {
                     let copied = sengoo_http_request_version_copy(self.handle, buffer.ptr(), buffer.len());
                     if copied >= 0 {
-                        let owned = string_from_bytes_raw(buffer.ptr(), copied);
+                        let owned = http_request_owned_string_from_buffer(buffer, copied);
                         buffer.free();
                         owned
                     } else {
@@ -669,7 +679,7 @@ impl HttpServerRequest {
                 Ok(buffer) => {
                     let copied = sengoo_http_request_header_copy(self.handle, sengoo_stdlib_str_ptr(name), buffer.ptr(), buffer.len());
                     if copied >= 0 {
-                        let owned = string_from_bytes_raw(buffer.ptr(), copied);
+                        let owned = http_request_owned_string_from_buffer(buffer, copied);
                         buffer.free();
                         owned
                     } else {

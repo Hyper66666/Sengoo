@@ -1,0 +1,25 @@
+import std::json;
+
+import sgjson_contract;
+
+def main() -> i64 {
+    let doc = json_parse_strict("{\"ascii\":\"worker\",\"bool\":\"true\",\"fraction\":1.5,\"hex_bad\":\"0g1f\",\"hex_short\":\"0af\",\"hex_upper\":\"0A1f\",\"integer\":10,\"mode\":\"NEW\",\"unicode\":\"\\u00e9\"}").unwrap_or(JsonDoc { handle: 0 });
+    let root = doc.root();
+    let wrong_bool = sgjson_required_bool(root, "bool");
+    let fractional = sgjson_required_i64(root, "fraction", 0, 10);
+    let bounded = sgjson_required_i64(root, "integer", 10, 10).unwrap_or(-1);
+    let out_of_range = sgjson_required_i64(root, "integer", 0, 9);
+    let invalid_range = sgjson_required_i64(root, "integer", 11, 10);
+    let unknown_enum = sgjson_required_enum3(root, "mode", "new", "exact_duplicate", "conflict");
+    let ascii = sgjson_required_string(root, "ascii").unwrap_or(String { handle: 0 });
+    let ascii_again = sgjson_required_string(root, "ascii").unwrap_or(String { handle: 0 });
+    let unicode = sgjson_required_string(root, "unicode").unwrap_or(String { handle: 0 });
+    let ascii_ok = sgjson_string_is_ascii_bounded(&ascii, 1, 6);
+    let ascii_too_long = sgjson_string_is_ascii_bounded(&ascii_again, 1, 5);
+    let unicode_rejected = sgjson_string_is_ascii_bounded(&unicode, 1, 4);
+    let upper_hex = sgjson_required_lower_hex(root, "hex_upper", 4);
+    let bad_hex = sgjson_required_lower_hex(root, "hex_bad", 4);
+    let short_hex = sgjson_required_lower_hex(root, "hex_short", 4);
+    let ok = wrong_bool.is_err() and wrong_bool.error == SGJSON_WRONG_KIND() and fractional.is_err() and fractional.error == SGJSON_WRONG_KIND() and bounded == 10 and out_of_range.is_err() and out_of_range.error == SGJSON_OUT_OF_RANGE() and invalid_range.is_err() and invalid_range.error == SGJSON_OUT_OF_RANGE() and unknown_enum.is_err() and unknown_enum.error == SGJSON_UNKNOWN_ENUM() and ascii_ok and ascii.len() == 6 and not ascii_too_long and not unicode_rejected and unicode.len() == 2 and upper_hex.is_err() and upper_hex.error == SGJSON_INVALID_STRING() and bad_hex.is_err() and bad_hex.error == SGJSON_INVALID_STRING() and short_hex.is_err() and short_hex.error == SGJSON_INVALID_STRING();
+    if ok { 0; } else { 1; };
+}

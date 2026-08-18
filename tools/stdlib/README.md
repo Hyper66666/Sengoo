@@ -221,9 +221,22 @@ as exact `i64` when representable.
 
 Builders create object, array, string, number, bool, and null values inside a
 document. `JsonDoc.serialize(buffer)` writes compact valid JSON, and
-`JsonDoc.close()` releases runtime-owned handles. Parser diagnostics are
-available through `json_last_error_code()`, `json_last_error_offset()`, and
-`json_last_error_copy(buffer)`. The current runtime enforces conservative
+`JsonDoc.close()` releases runtime-owned handles. `JsonDoc.new_string(&str)`
+retains its C-string-compatible behavior; decoded or dynamic owned strings
+that may contain `U+0000` use `JsonDoc.new_string_from_string(&String)`, which
+copies the owned string's explicit byte length, validates its handle and UTF-8,
+and accepts at most 1 MiB per string. Parser diagnostics are
+available through `json_last_error_code()`, `json_last_error_kind()`,
+`json_last_error_offset()`, and `json_last_error_copy(buffer)`. Stable error
+kinds are `JSON_ERROR_KIND_NONE()` (`0`),
+`JSON_ERROR_KIND_UNCLASSIFIED()` (`1`),
+`JSON_ERROR_KIND_DUPLICATE_FIELD()` (`2`),
+`JSON_ERROR_KIND_INVALID_UNICODE()` (`3`), and
+`JSON_ERROR_KIND_TRAILING_BYTES()` (`4`). The code, kind, offset, and message
+describe only the most recent JSON operation and must be copied before another
+JSON call. Messages are human diagnostics and must not be parsed for program
+control flow. Existing callers may continue to use the stable status code,
+offset, and message APIs unchanged. The current runtime enforces conservative
 limits of 1 MiB input bytes, 64 nesting levels, and 4096 nodes; failed parses
 return no closeable partial document handle.
 

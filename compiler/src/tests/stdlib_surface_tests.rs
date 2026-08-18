@@ -1295,6 +1295,47 @@ def main() -> i64 {
 }
 
 #[test]
+fn io_module_preserves_binary_buffer_and_pipe_signatures() {
+    let ir = compile_with_stdlib_modules(
+        &["option.sg", "result.sg", "ffi.sg", "status.sg", "io.sg"],
+        r#"
+def main() -> i64 {
+    let input = ffi_buffer_new(4).unwrap_or(Buffer { handle: 0 });
+    let output = ffi_buffer_new(4).unwrap_or(Buffer { handle: 0 });
+    let initialized = output.set_u8(0, 0).unwrap_or(false)
+        && output.write_u32_be(0, 16909060).unwrap_or(false);
+    let first = output.get_u8(0).unwrap_or(-1);
+    let word = output.read_u32_be(0).unwrap_or(-1);
+    let binary = io_protocol_binary_mode().unwrap_or(false);
+    let read = io_stdin_read_exact(input, 0, 4).unwrap_or(0);
+    let wrote = io_stdout_write_all(output, 0, 4).unwrap_or(0);
+
+    if initialized && first == 1 && word == 16909060 && binary && read == 4 && wrote == 4 {
+        0
+    } else {
+        1
+    }
+}
+"#,
+    );
+
+    for signature in [
+        "declare i64 @sengoo_ffi_buffer_get_u8(i64, i64)",
+        "declare i64 @sengoo_ffi_buffer_set_u8(i64, i64, i64)",
+        "declare i64 @sengoo_ffi_buffer_read_u32_be(i64, i64)",
+        "declare i64 @sengoo_ffi_buffer_write_u32_be(i64, i64, i64)",
+        "declare i64 @sengoo_io_protocol_binary_mode()",
+        "declare i64 @sengoo_io_stdin_read_exact(i64, i64, i64)",
+        "declare i64 @sengoo_io_stdout_write_all(i64, i64, i64)",
+    ] {
+        assert!(
+            ir.contains(signature),
+            "missing binary-I/O ABI signature `{signature}`\n{ir}"
+        );
+    }
+}
+
+#[test]
 fn args_module_imports_argument_helpers_and_emits_opt_in_entry_wrapper() {
     let ir = compile_with_stdlib_modules(
         &["option.sg", "result.sg", "ffi.sg", "status.sg", "args.sg"],

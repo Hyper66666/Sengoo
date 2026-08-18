@@ -1,0 +1,41 @@
+import std::ffi;
+
+import std::json;
+
+import sgjson_contract;
+
+def main() -> i64 {
+    let input = ffi_buffer_from_bytes("{\"caps\":[\"a\",\"b\"],\"count\":3,\"hex\":\"0a1f\",\"mode\":\"new\",\"name\":\"worker\",\"ok\":true}").unwrap_or(Buffer { handle: 0 });
+    let unsorted_input = ffi_buffer_from_bytes("{\"caps\":[\"b\",\"a\"]}").unwrap_or(Buffer { handle: 0 });
+    let duplicate_input = ffi_buffer_from_bytes("{\"caps\":[\"a\",\"a\"]}").unwrap_or(Buffer { handle: 0 });
+    let unknown_input = ffi_buffer_from_bytes("{\"name\":\"worker\",\"extra\":1}").unwrap_or(Buffer { handle: 0 });
+    let doc = json_parse_buffer_strict(input, input.len()).unwrap_or(JsonDoc { handle: 0 });
+    let unsorted_doc = json_parse_buffer_strict(unsorted_input, unsorted_input.len()).unwrap_or(JsonDoc { handle: 0 });
+    let duplicate_doc = json_parse_buffer_strict(duplicate_input, duplicate_input.len()).unwrap_or(JsonDoc { handle: 0 });
+    let unknown_doc = json_parse_buffer_strict(unknown_input, unknown_input.len()).unwrap_or(JsonDoc { handle: 0 });
+    let root = doc.root();
+    let exact = sgjson_exact_object_len(root, 6).unwrap_or(false);
+    let name = sgjson_required_string(root, "name").unwrap_or(String { handle: 0 });
+    let count = sgjson_required_i64(root, "count", 0, 10).unwrap_or(-1);
+    let enabled = sgjson_required_bool(root, "ok").unwrap_or(false);
+    let mode = sgjson_required_enum3(root, "mode", "new", "exact_duplicate", "conflict");
+    let ascii = sgjson_string_is_ascii_bounded(&name, 1, 32);
+    let lower_hex = sgjson_required_lower_hex(root, "hex", 4).unwrap_or(false);
+    let sorted = sgjson_required_sorted_unique_string_array(root, "caps", 1, 4).unwrap_or(false);
+    let missing = sgjson_required_string(root, "missing");
+    let wrong_kind = sgjson_required_string(root, "count");
+    let out_of_range = sgjson_required_i64(root, "count", 4, 10);
+    let unknown = sgjson_exact_object_len(unknown_doc.root(), 1);
+    let unsorted = sgjson_required_sorted_unique_string_array(unsorted_doc.root(), "caps", 1, 4);
+    let duplicate = sgjson_required_sorted_unique_string_array(duplicate_doc.root(), "caps", 1, 4);
+    let ok = exact and count == 3 and enabled and mode.is_ok and ascii and lower_hex and sorted and missing.is_err() and missing.error == SGJSON_MISSING_FIELD() and wrong_kind.is_err() and wrong_kind.error == SGJSON_WRONG_KIND() and out_of_range.is_err() and out_of_range.error == SGJSON_OUT_OF_RANGE() and unknown.is_err() and unknown.error == SGJSON_UNKNOWN_FIELD() and unsorted.is_err() and unsorted.error == SGJSON_UNSORTED_OR_DUPLICATE() and duplicate.is_err() and duplicate.error == SGJSON_UNSORTED_OR_DUPLICATE();
+    doc.close();
+    unsorted_doc.close();
+    duplicate_doc.close();
+    unknown_doc.close();
+    input.free();
+    unsorted_input.free();
+    duplicate_input.free();
+    unknown_input.free();
+    if ok { 0; } else { 1; };
+}

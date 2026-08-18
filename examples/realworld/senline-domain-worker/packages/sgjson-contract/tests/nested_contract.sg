@@ -1,0 +1,15 @@
+import std::json;
+
+import sgjson_contract;
+
+def main() -> i64 {
+    let doc = json_parse_strict("{\"array\":[],\"object\":{},\"wrong\":true}").unwrap_or(JsonDoc { handle: 0 });
+    let root = doc.root();
+    let object = sgjson_required_object(root, "object");
+    let array = sgjson_required_array(root, "array");
+    let wrong_object = sgjson_required_object(root, "wrong");
+    let wrong_array = sgjson_required_array(root, "wrong");
+    let missing = sgjson_required_object(root, "missing");
+    let ok = object.is_ok() and array.is_ok() and wrong_object.is_err() and wrong_object.error == SGJSON_WRONG_KIND() and wrong_array.is_err() and wrong_array.error == SGJSON_WRONG_KIND() and missing.is_err() and missing.error == SGJSON_MISSING_FIELD();
+    if ok { 0; } else { 1; };
+}

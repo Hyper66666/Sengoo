@@ -1,0 +1,11 @@
+import std::json;
+
+import sgjson_contract;
+
+def main() -> i64 {
+    let doc = json_parse_strict("{\"name\":\"worker\"}").unwrap_or(JsonDoc { handle: 0 });
+    let stale_root = doc.root();
+    let closed = doc.close();
+    let result = sgjson_required_string(stale_root, "name");
+    if closed and result.is_err() and result.error == SGJSON_RUNTIME_FAILURE() { 0; } else { 1; };
+}

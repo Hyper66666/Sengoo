@@ -1,0 +1,27 @@
+import std::ffi;
+
+import std::io;
+
+import std::strconv;
+
+import senline_http_dogfood;
+
+async def main() -> i64 {
+    let bound = senline_http_bind("127.0.0.1", 0);
+    if bound.is_err() { return 20; };
+    let server = bound.value;
+    let port = server.local_port();
+    if port.is_err() { server.close(); return 21; };
+    let port_buffer_result = ffi_buffer_new(16);
+    if port_buffer_result.is_err() { server.close(); return 22; };
+    let port_buffer = port_buffer_result.value;
+    let port_len = strconv_format_i64(port.value, port_buffer);
+    if port_len.is_err() { port_buffer.free(); server.close(); return 23; };
+    io_stdout_write("READY 127.0.0.1:");
+    io_stdout_write_raw(port_buffer.ptr(), port_len.value);
+    io_stdout_write("\n");
+    io_stdout_flush();
+    port_buffer.free();
+    let outcome = await server.next_request_async(senline_http_request_timeout_ms());
+    if not outcome.is_ok { let timed_out = outcome.error == STATUS_TIMEOUT(); server.close(); if timed_out { 0; } else { 24; }; } else { let answered = senline_http_handle_request(outcome.value); let closed = server.close(); if answered and closed { 0; } else { 25; }; };
+}

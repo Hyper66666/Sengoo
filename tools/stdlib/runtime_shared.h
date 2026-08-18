@@ -6,6 +6,20 @@
 
 #define SENGOO_RUNTIME_ABI_VERSION 1
 #define SENGOO_COLLECTIONS_ABI_VERSION 1
+#define SENGOO_RUNTIME_HANDLE_GENERATION_MAX UINT32_C(0x7fffffff)
+
+/* Keep generated handles positive and retire a slot before generation reuse. */
+static inline uint32_t sengoo_runtime_next_handle_generation(uint32_t current) {
+    return current < SENGOO_RUNTIME_HANDLE_GENERATION_MAX ? current + 1 : 0;
+}
+
+static inline long long sengoo_runtime_encode_handle(uint32_t generation, size_t index) {
+    if (generation == 0 || generation > SENGOO_RUNTIME_HANDLE_GENERATION_MAX || index >= UINT32_MAX) {
+        return 0;
+    }
+    uint64_t encoded = ((uint64_t)generation << 32) | (uint64_t)(index + 1);
+    return (long long)encoded;
+}
 
 enum {
     SENGOO_RUNTIME_MAX_BUFFER_BYTES = 64 * 1024 * 1024,
@@ -38,11 +52,57 @@ enum {
     SENGOO_STATUS_INVALID_UTF8 = 20
 };
 
+enum {
+    SENGOO_JSON_ERROR_KIND_NONE = 0,
+    SENGOO_JSON_ERROR_KIND_UNCLASSIFIED = 1,
+    SENGOO_JSON_ERROR_KIND_DUPLICATE_FIELD = 2,
+    SENGOO_JSON_ERROR_KIND_INVALID_UNICODE = 3,
+    SENGOO_JSON_ERROR_KIND_TRAILING_BYTES = 4
+};
+
 typedef struct {
     unsigned char* bytes;
     size_t capacity;
     size_t used_len;
 } SengooFfiBuffer;
+
+/* Internal native-I/O seam. This is not part of the Sengoo stdlib surface. */
+typedef struct {
+    size_t count;
+    int eof;
+    int error;
+} SengooRuntimeReadResult;
+
+typedef SengooRuntimeReadResult (*SengooRuntimeReadFn)(
+    void* context,
+    unsigned char* destination,
+    size_t capacity
+);
+
+long long sengoo_runtime_read_exact(
+    SengooRuntimeReadFn read_fn,
+    void* context,
+    unsigned char* destination,
+    size_t expected
+);
+
+typedef struct {
+    size_t count;
+    int error;
+} SengooRuntimeWriteResult;
+
+typedef SengooRuntimeWriteResult (*SengooRuntimeWriteFn)(
+    void* context,
+    const unsigned char* source,
+    size_t capacity
+);
+
+long long sengoo_runtime_write_all(
+    SengooRuntimeWriteFn write_fn,
+    void* context,
+    const unsigned char* source,
+    size_t expected
+);
 
 typedef void (*SengooMoveFn)(void* destination, void* source);
 typedef void (*SengooDropFn)(void* value);

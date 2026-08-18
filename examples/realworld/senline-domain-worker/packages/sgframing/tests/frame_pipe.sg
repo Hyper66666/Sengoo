@@ -1,0 +1,24 @@
+import std::ffi;
+
+import sgframing;
+
+def frame_test_exit(code: i64) -> i64 {
+    if code == SGFRAMING_ZERO_LENGTH() { 21; } else if code == SGFRAMING_LIMIT_EXCEEDED() { 22; } else if code == SGFRAMING_INVALID_PREFIX() { 23; } else if code == SGFRAMING_TRUNCATED() { 24; } else if code == SGFRAMING_INVALID_PAYLOAD() { 25; } else { 29; };
+}
+
+def frame_test_run_once() -> i64 {
+    let read = frame_read_stdin(64);
+    if read.is_err() { return frame_test_exit(read.error); };
+    let frame = read.value;
+    if frame.eof { return 0; };
+    let len = frame.len;
+    let wrote = frame_write_stdout(frame.payload, len, 64);
+    if wrote.is_err() { return frame_test_exit(wrote.error); };
+    if wrote.value == len + 4 { 0; } else { 30; };
+}
+
+def main() -> i64 {
+    let cleared = ffi_last_error_clear();
+    let status = frame_test_run_once();
+    if not cleared { 31; } else if status == 0 and ffi_last_error_code() != 0 { 32; } else { status; };
+}

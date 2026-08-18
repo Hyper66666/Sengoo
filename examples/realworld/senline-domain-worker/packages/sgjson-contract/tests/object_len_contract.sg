@@ -1,0 +1,9 @@
+import std::json;
+
+import sgjson_contract;
+
+def main() -> i64 {
+    let doc = json_parse_strict("{\"name\":\"worker\"}").unwrap_or(JsonDoc { handle: 0 });
+    let invalid_expected_len = sgjson_exact_object_len(doc.root(), -1);
+    if invalid_expected_len.is_err() and invalid_expected_len.error == SGJSON_OUT_OF_RANGE() { 0; } else { 1; };
+}

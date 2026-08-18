@@ -1,0 +1,143 @@
+import std::ffi;
+
+import std::io;
+
+import std::status;
+
+struct FrameRead {
+    eof: bool,
+    len: i64,
+    payload: Buffer,
+}
+
+def SGFRAMING_ZERO_LENGTH() -> i64 {
+    2101;
+}
+
+def SGFRAMING_LIMIT_EXCEEDED() -> i64 {
+    2102;
+}
+
+def SGFRAMING_INVALID_PREFIX() -> i64 {
+    2103;
+}
+
+def SGFRAMING_TRUNCATED() -> i64 {
+    2104;
+}
+
+def SGFRAMING_INVALID_PAYLOAD() -> i64 {
+    2105;
+}
+
+def frame_bool_ok(value: bool) -> Result<bool, i64> {
+    Ok(value);
+}
+
+def frame_bool_error(code: i64) -> Result<bool, i64> {
+    Err(code);
+}
+
+def frame_i64_ok(value: i64) -> Result<i64, i64> {
+    Ok(value);
+}
+
+def frame_i64_error(code: i64) -> Result<i64, i64> {
+    Err(code);
+}
+
+def frame_read_ok(eof: bool, len: i64, payload: Buffer) -> Result<FrameRead, i64> {
+    Ok(FrameRead { eof: eof, len: len, payload: payload });
+}
+
+def frame_read_error(code: i64) -> Result<FrameRead, i64> {
+    Err(code);
+}
+
+def frame_validate_length(len: i64, max_len: i64) -> Result<i64, i64> {
+    if len == 0 { frame_i64_error(SGFRAMING_ZERO_LENGTH()); } else if len < 0 or max_len <= 0 or len > max_len or len > 4294967295 { frame_i64_error(SGFRAMING_LIMIT_EXCEEDED()); } else { frame_i64_ok(len); };
+}
+
+def frame_prefix_encode(prefix: Buffer, len: i64, max_len: i64) -> Result<bool, i64> {
+    let valid = frame_validate_length(len, max_len);
+    if valid.is_err() { return frame_bool_error(valid.error); };
+    if prefix.len() < 4 { return frame_bool_error(SGFRAMING_INVALID_PREFIX()); };
+    let wrote = prefix.write_u32_be(0, len);
+    if wrote.is_err() { frame_bool_error(SGFRAMING_INVALID_PREFIX()); } else { frame_bool_ok(true); };
+}
+
+def frame_prefix_decode(prefix: Buffer, max_len: i64) -> Result<i64, i64> {
+    if prefix.len() < 4 or prefix.used_len() < 4 { return frame_i64_error(SGFRAMING_INVALID_PREFIX()); };
+    let decoded = prefix.read_u32_be(0);
+    if decoded.is_err() { frame_i64_error(SGFRAMING_INVALID_PREFIX()); } else { frame_validate_length(decoded.value, max_len); };
+}
+
+def frame_init_stdio_binary() -> Result<bool, i64> {
+    io_protocol_binary_mode();
+}
+
+def frame_read_stdin(max_len: i64) -> Result<FrameRead, i64> {
+    if max_len <= 0 or max_len > 4294967295 { return frame_read_error(SGFRAMING_LIMIT_EXCEEDED()); };
+    let binary = frame_init_stdio_binary();
+    if binary.is_err() { return frame_read_error(binary.error); };
+    let prefix_result = ffi_buffer_new(4);
+    if prefix_result.is_err() { return frame_read_error(prefix_result.error); };
+    let prefix = prefix_result.value;
+    let prefix_read = io_stdin_read_exact(prefix, 0, 4);
+    if prefix_read.is_err() { prefix.free(); return frame_read_error(SGFRAMING_TRUNCATED()); };
+    if prefix_read.value == 0 { prefix.free(); return frame_read_ok(true, 0, Buffer { handle: 0 }); };
+    if prefix_read.value != 4 { prefix.free(); return frame_read_error(SGFRAMING_TRUNCATED()); };
+    let decoded = frame_prefix_decode(prefix, max_len);
+    prefix.free();
+    if decoded.is_err() { return frame_read_error(decoded.error); };
+    let payload_result = ffi_buffer_new(decoded.value);
+    if payload_result.is_err() { return frame_read_error(payload_result.error); };
+    let payload = payload_result.value;
+    let payload_read = io_stdin_read_exact(payload, 0, decoded.value);
+    if payload_read.is_err() or payload_read.value != decoded.value { payload.free(); return frame_read_error(SGFRAMING_TRUNCATED()); };
+    frame_read_ok(false, decoded.value, payload);
+}
+
+def frame_write_all_with(payload: Buffer, offset: i64, len: i64, writer: fn(Buffer, i64, i64) -> Result<i64, i64>) -> Result<i64, i64> {
+    if offset < 0 or len < 0 { return frame_i64_error(SGFRAMING_INVALID_PAYLOAD()); };
+    let used_len = payload.used_len();
+    if offset > used_len or len > used_len - offset { return frame_i64_error(SGFRAMING_INVALID_PAYLOAD()); };
+    let mut written = 0;
+    while written < len { let remaining = len - written; let step = writer(payload, offset + written, remaining); if step.is_err() { return frame_i64_error(step.error); }; if step.value <= 0 or step.value > remaining { return frame_i64_error(STATUS_IO()); }; written = written + step.value; };
+    frame_i64_ok(written);
+}
+
+def frame_write_with(payload: Buffer, len: i64, max_len: i64, writer: fn(Buffer, i64, i64) -> Result<i64, i64>, flusher: fn() -> Result<bool, i64>) -> Result<i64, i64> {
+    let valid = frame_validate_length(len, max_len);
+    if valid.is_err() { return frame_i64_error(valid.error); };
+    if payload.used_len() < len { return frame_i64_error(SGFRAMING_INVALID_PAYLOAD()); };
+    let binary = frame_init_stdio_binary();
+    if binary.is_err() { return frame_i64_error(binary.error); };
+    let prefix_result = ffi_buffer_new(4);
+    if prefix_result.is_err() { return frame_i64_error(prefix_result.error); };
+    let prefix = prefix_result.value;
+    let encoded = frame_prefix_encode(prefix, len, max_len);
+    if encoded.is_err() { prefix.free(); return frame_i64_error(encoded.error); };
+    let prefix_write = frame_write_all_with(prefix, 0, 4, writer);
+    prefix.free();
+    if prefix_write.is_err() or prefix_write.value != 4 { return frame_i64_error(STATUS_IO()); };
+    let payload_write = frame_write_all_with(payload, 0, len, writer);
+    if payload_write.is_err() or payload_write.value != len { return frame_i64_error(STATUS_IO()); };
+    let flushed = flusher();
+    if flushed.is_err() { return frame_i64_error(flushed.error); };
+    frame_i64_ok(len + 4);
+}
+
+def frame_stdout_write(payload: Buffer, offset: i64, len: i64) -> Result<i64, i64> {
+    io_stdout_write_all(payload, offset, len);
+}
+
+def frame_stdout_flush() -> Result<bool, i64> {
+    io_stdout_flush();
+}
+
+def frame_write_stdout(payload: Buffer, len: i64, max_len: i64) -> Result<i64, i64> {
+    let writer: fn(Buffer, i64, i64) -> Result<i64, i64> = frame_stdout_write;
+    let flusher: fn() -> Result<bool, i64> = frame_stdout_flush;
+    frame_write_with(payload, len, max_len, writer, flusher);
+}

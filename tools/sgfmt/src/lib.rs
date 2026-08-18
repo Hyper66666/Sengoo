@@ -704,14 +704,238 @@ fn escape_char(value: char) -> String {
     }
 }
 
+/// Comment captured from original source so AST round-trips can reinject it.
+#[derive(Debug, Clone, PartialEq, Eq)]
+struct SourceComment {
+    /// Full comment text including `//` / `/*` / `*/` delimiters (no trailing `\n`).
+    text: String,
+    /// Non-comment code on the same line before a trailing `//` comment (trimmed).
+    /// Empty when the comment occupies the whole line (or is a block comment).
+    leading_code: String,
+    /// Next non-empty non-comment source line (trimmed) after a full-line/block
+    /// comment. Used as an insertion anchor in the formatted output.
+    following_code: Option<String>,
+}
+
+/// Extract line and block comments while respecting string/char literals.
+fn extract_source_comments(source: &str) -> Vec<SourceComment> {
+    let bytes = source.as_bytes();
+    let mut comments = Vec::new();
+    let mut i = 0usize;
+    let mut line_start = 0usize;
+    // Stack of (comment_start, line_start_at_comment)
+    while i < bytes.len() {
+        let ch = bytes[i] as char;
+        // Strings (regular + multiline """ ... """)
+        if ch == '"' {
+            if bytes.get(i..i + 3) == Some(b"\"\"\"") {
+                i += 3;
+                while i + 2 < bytes.len() && bytes.get(i..i + 3) != Some(b"\"\"\"") {
+                    i += 1;
+                }
+                i = (i + 3).min(bytes.len());
+                continue;
+            }
+            i += 1;
+            while i < bytes.len() {
+                match bytes[i] as char {
+                    '\\' if i + 1 < bytes.len() => i += 2,
+                    '"' => {
+                        i += 1;
+                        break;
+                    }
+                    _ => i += 1,
+                }
+            }
+            continue;
+        }
+        // Char literals
+        if ch == '\'' {
+            i += 1;
+            while i < bytes.len() {
+                match bytes[i] as char {
+                    '\\' if i + 1 < bytes.len() => i += 2,
+                    '\'' => {
+                        i += 1;
+                        break;
+                    }
+                    _ => i += 1,
+                }
+            }
+            continue;
+        }
+        // Line comment
+        if ch == '/' && bytes.get(i + 1) == Some(&b'/') {
+            let comment_start = i;
+            let this_line_start = line_start;
+            i += 2;
+            while i < bytes.len() && bytes[i] != b'\n' {
+                i += 1;
+            }
+            let text = source[comment_start..i].to_string();
+            let leading =
+                normalize_code_anchor(source[this_line_start..comment_start].trim());
+            let following = if leading.is_empty() {
+                next_code_line(source, i)
+            } else {
+                None
+            };
+            comments.push(SourceComment {
+                text,
+                leading_code: leading,
+                following_code: following,
+            });
+            // leave i at newline (or EOF) so outer loop advances line_start
+            if i < bytes.len() && bytes[i] == b'\n' {
+                i += 1;
+                line_start = i;
+            }
+            continue;
+        }
+        // Block comment
+        if ch == '/' && bytes.get(i + 1) == Some(&b'*') {
+            let comment_start = i;
+            let this_line_start = line_start;
+            i += 2;
+            while i + 1 < bytes.len() && !(bytes[i] == b'*' && bytes[i + 1] == b'/') {
+                if bytes[i] == b'\n' {
+                    line_start = i + 1;
+                }
+                i += 1;
+            }
+            if i + 1 < bytes.len() {
+                i += 2; // consume */
+            }
+            let text = source[comment_start..i].to_string();
+            let leading =
+                normalize_code_anchor(source[this_line_start..comment_start].trim());
+            let following = if leading.is_empty() {
+                next_code_line(source, i)
+            } else {
+                None
+            };
+            comments.push(SourceComment {
+                text,
+                leading_code: leading,
+                following_code: following,
+            });
+            continue;
+        }
+        if ch == '\n' {
+            i += 1;
+            line_start = i;
+            continue;
+        }
+        i += 1;
+    }
+    comments
+}
+
+fn normalize_code_anchor(code: &str) -> String {
+    code.trim()
+        .trim_end_matches(';')
+        .trim()
+        .to_string()
+}
+
+fn next_code_line(source: &str, from: usize) -> Option<String> {
+    let rest = &source[from.min(source.len())..];
+    for line in rest.lines() {
+        let trimmed = line.trim();
+        if trimmed.is_empty() {
+            continue;
+        }
+        if trimmed.starts_with("//") || trimmed.starts_with("/*") {
+            continue;
+        }
+        // Strip trailing line comment for a stable anchor.
+        let code = match trimmed.find("//") {
+            Some(idx) => trimmed[..idx].trim(),
+            None => trimmed,
+        };
+        let anchor = normalize_code_anchor(code);
+        if !anchor.is_empty() {
+            return Some(anchor);
+        }
+    }
+    None
+}
+
+fn reinject_source_comments(formatted: &str, comments: &[SourceComment]) -> String {
+    if comments.is_empty() {
+        return formatted.to_string();
+    }
+    let mut lines: Vec<String> = formatted.lines().map(str::to_string).collect();
+    // Track which formatted line indices already received a trailing comment.
+    let mut used_trailing = vec![false; lines.len()];
+
+    for comment in comments {
+        if !comment.leading_code.is_empty() {
+            // Trailing line comment: attach to the first matching code line.
+            if let Some(idx) = lines.iter().enumerate().position(|(idx, line)| {
+                !used_trailing[idx]
+                    && normalize_code_anchor(line.trim()) == comment.leading_code
+            }) {
+                if !lines[idx].contains(&comment.text) {
+                    // Preserve single-space before // comments.
+                    let base = lines[idx].trim_end().to_string();
+                    lines[idx] = format!("{base} {}", comment.text.trim_start());
+                    used_trailing[idx] = true;
+                }
+                continue;
+            }
+            // Fallback: append as a free-standing line at end if no anchor found.
+            lines.push(comment.text.clone());
+            continue;
+        }
+
+        // Full-line or block comment: insert before the following code anchor.
+        if let Some(anchor) = &comment.following_code {
+            if let Some(idx) = lines.iter().position(|line| {
+                let key = normalize_code_anchor(line.trim());
+                key == *anchor || key.starts_with(anchor.as_str())
+            }) {
+                // Avoid duplicating if already present immediately above.
+                let already = idx > 0 && lines[idx - 1].trim() == comment.text.trim();
+                if !already {
+                    lines.insert(idx, comment.text.clone());
+                    used_trailing.insert(idx, false);
+                }
+                continue;
+            }
+        }
+        // Leading / trailing file comments with no anchor: keep at top then bottom.
+        if comment.following_code.is_none() {
+            // Prefer end of file for trailing orphan comments.
+            if !lines
+                .last()
+                .is_some_and(|l| l.trim() == comment.text.trim())
+            {
+                lines.push(comment.text.clone());
+            }
+        } else {
+            lines.insert(0, comment.text.clone());
+            used_trailing.insert(0, false);
+        }
+    }
+
+    let mut out = lines.join("\n");
+    if formatted.ends_with('\n') && !out.ends_with('\n') {
+        out.push('\n');
+    }
+    out
+}
+
 pub fn format_source(source: &str, options: &FormatOptions) -> Result<String> {
+    let comments = extract_source_comments(source);
     let program = SgParser::parse(source).into_diagnostic()?;
     let formatter = Formatter::new(options.clone());
     let formatted = formatter.format_program(&program);
+    let with_comments = reinject_source_comments(&formatted, &comments);
 
     // Safety net: never emit syntactically invalid source.
-    SgParser::parse(&formatted).into_diagnostic()?;
-    Ok(formatted)
+    SgParser::parse(&with_comments).into_diagnostic()?;
+    Ok(with_comments)
 }
 
 #[cfg(test)]
@@ -754,6 +978,57 @@ mod tests {
         let first = format_test_source(src, FormatOptions::default());
         let second = format_test_source(&first, FormatOptions::default());
         assert_eq!(first, second);
+    }
+
+    #[test]
+    fn preserves_line_and_block_comments_through_format() {
+        // RED regression: AST round-trip previously dropped all comments because
+        // the lexer skips them (TokenKind logos skip) and the formatter rebuilds
+        // source from a comment-free AST.
+        let src = r#"// leading ownership note
+def main() -> i64 {
+    // body: by-value String params skip auto-Drop
+    return 0  // trailing
+}
+/* block: owns request end-to-end on unsupported path */
+"#;
+        let formatted = format_test_source(src, FormatOptions::default());
+        assert!(
+            formatted.contains("// leading ownership note"),
+            "leading comment lost:\n{formatted}"
+        );
+        assert!(
+            formatted.contains("// body: by-value String params skip auto-Drop"),
+            "body comment lost:\n{formatted}"
+        );
+        assert!(
+            formatted.contains("// trailing"),
+            "trailing comment lost:\n{formatted}"
+        );
+        assert!(
+            formatted.contains("/* block: owns request end-to-end on unsupported path */"),
+            "block comment lost:\n{formatted}"
+        );
+        // Idempotent with comments present.
+        let second = format_test_source(&formatted, FormatOptions::default());
+        assert_eq!(formatted, second);
+    }
+
+    #[test]
+    fn does_not_treat_comment_markers_inside_strings_as_comments() {
+        let src = r#"def main() -> i64 {
+    let s = "// not a comment";
+    let t = "/* also not */";
+    0
+}
+"#;
+        let formatted = format_test_source(src, FormatOptions::default());
+        assert!(formatted.contains("\"// not a comment\"") || formatted.contains("// not a comment"));
+        // No free-standing comment lines invented from string contents.
+        assert!(
+            !formatted.lines().any(|l| l.trim() == "// not a comment"),
+            "string content must not become a real comment:\n{formatted}"
+        );
     }
 
     #[test]

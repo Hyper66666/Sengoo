@@ -1,0 +1,24 @@
+import std::json;
+
+import std::string;
+
+import sgjson_contract;
+
+def main() -> i64 {
+    let allows_worker_field: fn(String) -> bool = |key| str_eq(key.as_str(), "name") or str_eq(key.as_str(), "ok");
+    let valid = json_parse_strict("{\"name\":\"worker\",\"ok\":true}").unwrap_or(JsonDoc { handle: 0 });
+    let substituted = json_parse_strict("{\"extra\":true,\"name\":\"worker\"}").unwrap_or(JsonDoc { handle: 0 });
+    let missing = json_parse_strict("{\"name\":\"worker\"}").unwrap_or(JsonDoc { handle: 0 });
+    let unknown = json_parse_strict("{\"extra\":1,\"name\":\"worker\",\"ok\":true}").unwrap_or(JsonDoc { handle: 0 });
+    let overlong = json_parse_strict("{\"long\":true,\"name\":\"worker\"}").unwrap_or(JsonDoc { handle: 0 });
+    let wrong_root = json_parse_strict("[]").unwrap_or(JsonDoc { handle: 0 });
+    let exact = sgjson_exact_object_fields(valid.root(), 2, 8, allows_worker_field);
+    let substituted_fields = sgjson_exact_object_fields(substituted.root(), 2, 8, allows_worker_field);
+    let missing_fields = sgjson_exact_object_fields(missing.root(), 2, 8, allows_worker_field);
+    let unknown_fields = sgjson_exact_object_fields(unknown.root(), 2, 8, allows_worker_field);
+    let overlong_key = sgjson_exact_object_fields(overlong.root(), 2, 3, allows_worker_field);
+    let invalid_key_limit = sgjson_exact_object_fields(valid.root(), 2, -1, allows_worker_field);
+    let wrong_kind = sgjson_exact_object_fields(wrong_root.root(), 0, 8, allows_worker_field);
+    let ok = exact.is_ok() and substituted_fields.is_err() and substituted_fields.error == SGJSON_UNKNOWN_FIELD() and missing_fields.is_err() and missing_fields.error == SGJSON_MISSING_FIELD() and unknown_fields.is_err() and unknown_fields.error == SGJSON_UNKNOWN_FIELD() and overlong_key.is_err() and overlong_key.error == SGJSON_UNKNOWN_FIELD() and invalid_key_limit.is_err() and invalid_key_limit.error == SGJSON_OUT_OF_RANGE() and wrong_kind.is_err() and wrong_kind.error == SGJSON_WRONG_KIND();
+    if ok { 0; } else { 1; };
+}

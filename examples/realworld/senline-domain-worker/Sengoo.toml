@@ -1,0 +1,17 @@
+[package]
+name = "senline_domain_worker"
+version = "0.1.0"
+edition = "2026"
+description = "Bounded framed Senline domain planner worker dogfooding Sengoo."
+
+[bin]
+path = "src/main.sg"
+
+[lib]
+path = "src/lib.sg"
+
+[dependencies]
+senline_build_identity = { path = "packages/senline-build-identity" }
+sgframing = { path = "packages/sgframing" }
+sgjson_contract = { path = "packages/sgjson-contract" }
+senline_facts_to_plan = { path = "packages/senline-facts-to-plan" }

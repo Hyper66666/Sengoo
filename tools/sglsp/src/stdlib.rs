@@ -510,6 +510,40 @@ import std::status;
     }
 
     #[test]
+    fn stdlib_json_error_kind_surface_has_symbols_signatures_and_definition() {
+        let content = "import std::json;\n";
+
+        assert_symbols_for_content(
+            content,
+            &[
+                "JSON_ERROR_KIND_NONE",
+                "JSON_ERROR_KIND_UNCLASSIFIED",
+                "JSON_ERROR_KIND_DUPLICATE_FIELD",
+                "JSON_ERROR_KIND_INVALID_UNICODE",
+                "JSON_ERROR_KIND_TRAILING_BYTES",
+                "json_last_error_kind",
+                "new_string_from_string",
+            ],
+        );
+        assert_signatures_for_content(
+            content,
+            &[
+                "def JSON_ERROR_KIND_DUPLICATE_FIELD() -> i64",
+                "def JSON_ERROR_KIND_INVALID_UNICODE() -> i64",
+                "def JSON_ERROR_KIND_TRAILING_BYTES() -> i64",
+                "def json_last_error_kind() -> i64",
+                "def new_string_from_string(self, value: &String) -> Result<JsonValue, i64> [impl JsonDoc]",
+            ],
+        );
+
+        let location = stdlib_definition_for_content(content, "json_last_error_kind")
+            .expect("JSON error-kind wrapper should resolve into std::json");
+        assert_eq!(location.uri.scheme(), "sengoo-stdlib");
+        assert!(location.uri.as_str().ends_with("/json.sg"));
+        assert!(location.range.start.line > 0);
+    }
+
+    #[test]
     fn stdlib_signatures_follow_imported_modules() {
         let signatures = stdlib_signatures_for_content("import std::option;\n");
         let labels = signatures
@@ -520,6 +554,37 @@ import std::status;
         assert!(labels.contains(&"def option_some<T>(value: T) -> Option<T>"));
         assert!(labels
             .contains(&"def result_ok_with<T, E>(value: T, error_placeholder: E) -> Result<T, E>"));
+    }
+
+    #[test]
+    fn binary_io_import_exposes_completion_and_exact_signatures() {
+        let content = "import std::io;\n";
+
+        assert_symbols_for_content(
+            content,
+            &[
+                "Buffer",
+                "get_u8",
+                "set_u8",
+                "read_u32_be",
+                "write_u32_be",
+                "io_protocol_binary_mode",
+                "io_stdin_read_exact",
+                "io_stdout_write_all",
+            ],
+        );
+        assert_signatures_for_content(
+            content,
+            &[
+                "def get_u8(self, index: i64) -> Result<i64, i64> [impl Buffer]",
+                "def set_u8(self, index: i64, value: i64) -> Result<bool, i64> [impl Buffer]",
+                "def read_u32_be(self, offset: i64) -> Result<i64, i64> [impl Buffer]",
+                "def write_u32_be(self, offset: i64, value: i64) -> Result<bool, i64> [impl Buffer]",
+                "def io_protocol_binary_mode() -> Result<bool, i64>",
+                "def io_stdin_read_exact(buffer: Buffer, offset: i64, len: i64) -> Result<i64, i64>",
+                "def io_stdout_write_all(buffer: Buffer, offset: i64, len: i64) -> Result<i64, i64>",
+            ],
+        );
     }
 
     #[test]

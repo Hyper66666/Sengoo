@@ -1,0 +1,42 @@
+{
+  "schema_version": 1,
+  "reference_kind": "independent_rust_oracle",
+  "reference_scope": "linked_to_frozen_rust_fixtures_not_senline_production_reference",
+  "frozen_fixture_metadata_sha256": "a2a503f3ba0ef02d47019c8178d1442ec5d0ef0c0f44ac3441469873d28055e3",
+  "planner_contract_fixture_revision": "1de09ccafa7e8f182af68e82352e2d4be39496b0",
+  "generator": {
+    "name": "senline-worker-differential-v1",
+    "version": 1,
+    "algorithm": "reviewed-boundary-v1 plus SplitMix64",
+    "fixed_seed_hex": "0x6a09e667f3bcc909"
+  },
+  "corpora": {
+    "determinism": {
+      "count": 512,
+      "fresh_processes": 2,
+      "transcript_sha256": "bd6acd82479bd6219cbf8e96601313e79f01bb518cee5a98f137be3e40f9729c"
+    },
+    "reviewed_boundary": {
+      "count": 10000,
+      "transcript_sha256": "a32f445f38e4810bc3eab9f2744ed337f48e2f5fa18521a9b05002c42126dd0b"
+    },
+    "seeded_eligible": {
+      "count": 100000,
+      "fresh_processes": 8,
+      "cases_per_process": 12500,
+      "transcript_sha256": "16aebd9ec476d602c9c0d0082ee9e25a87c520c333d6dd3afeb314f8c39ea128"
+    }
+  },
+  "coverage": {
+    "decisions": ["store_and_enqueue", "duplicate_noop", "reject"],
+    "reasons": ["accepted_new", "exact_duplicate", "idempotency_conflict", "recipient_queue_full", "application_budget_exhausted", "delivery_disabled"],
+    "queue_boundaries": ["below", "equal", "above"],
+    "application_boundaries": ["below", "equal", "above"],
+    "capability_states": [false, true],
+    "feature_flag_states": [false, true],
+    "execution_modes": ["fixture", "shadow", "guarded-development", "internal-alpha"],
+    "opaque_ascii_ref_lengths": [1, 128],
+    "numeric_boundaries": [0, 1, 4294967295, 9007199254740991]
+  },
+  "ci_targets": ["x86_64-pc-windows-msvc", "x86_64-unknown-linux-gnu"]
+}

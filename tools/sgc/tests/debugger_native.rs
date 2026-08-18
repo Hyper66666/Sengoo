@@ -1,3 +1,6 @@
+mod common;
+
+use common::source_sgc_command;
 use std::fs;
 use std::path::{Path, PathBuf};
 use std::process::{Command, Output};
@@ -141,16 +144,6 @@ impl Drop for TempProject {
     fn drop(&mut self) {
         let _ = fs::remove_dir_all(&self.root);
     }
-}
-
-fn sgc() -> PathBuf {
-    PathBuf::from(env!("CARGO_BIN_EXE_sgc"))
-}
-
-fn source_sgc() -> Command {
-    let mut command = Command::new(sgc());
-    command.args(["--runtime-mode", "source-development"]);
-    command
 }
 
 fn host_debugger() -> Option<(DebuggerFlavor, &'static str)> {
@@ -888,7 +881,7 @@ fn native_debugger_breaks_steps_and_reads_local() {
     let source = project.source_path();
     fs::write(&source, PROBE_SOURCE).expect("write debugger probe source");
 
-    let build = source_sgc()
+    let build = source_sgc_command()
         .arg("build")
         .arg(&source)
         .args(["-O", "0", "--debug-info", "--force-rebuild"])
@@ -948,7 +941,7 @@ fn composite_probe_builds_for_native_debugging() {
     let source = project.composite_source_path();
     fs::write(&source, COMPOSITE_PROBE_SOURCE).expect("write composite debugger probe source");
 
-    let check = source_sgc()
+    let check = source_sgc_command()
         .arg("check")
         .arg(&source)
         .output()
@@ -977,7 +970,7 @@ fn native_lldb_steps_and_inspects_composite_surfaces() {
     let source = project.composite_source_path();
     fs::write(&source, COMPOSITE_PROBE_SOURCE).expect("write composite debugger probe source");
 
-    let build = source_sgc()
+    let build = source_sgc_command()
         .arg("build")
         .arg(&source)
         .args(["-O", "0", "--debug-info", "--force-rebuild"])
@@ -1023,7 +1016,7 @@ fn debug_build_cache_recovery_recreates_the_pdb() {
     let source = project.source_path();
     fs::write(&source, PROBE_SOURCE).expect("write debugger cache-recovery probe source");
 
-    let initial = source_sgc()
+    let initial = source_sgc_command()
         .arg("build")
         .arg(&source)
         .args(["-O", "0", "--debug-info", "--force-rebuild"])
@@ -1041,7 +1034,7 @@ fn debug_build_cache_recovery_recreates_the_pdb() {
     fs::remove_file(&executable).expect("remove cached debug executable");
     fs::remove_file(&pdb).expect("remove cached debug PDB");
 
-    let recovered = source_sgc()
+    let recovered = source_sgc_command()
         .arg("build")
         .arg(&source)
         .args(["-O", "0", "--debug-info"])
