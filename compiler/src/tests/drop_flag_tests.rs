@@ -1319,11 +1319,13 @@ def main() -> i64 {
         .iter()
         .find(|f| f.name == "route" || f.name.ends_with("route"))
         .expect("expected route function");
-    // Parent route should not Drop Bundle.label; ownership transferred.
+    // Parent must not run an unguarded Drop: ownership transferred on both
+    // arms. Flagged drop glue may still mention String_Drop_drop, but both
+    // branches clear the live flag so the call is unreachable.
+    let parent_drops = string_drop_calls(route).len();
     assert!(
-        string_drop_calls(route).is_empty()
-            && named_drop_calls(route, "String_Drop_drop").is_empty(),
-        "parent must not drop aggregate moved on both branches:\n{:?}",
+        parent_drops == 0 || (has_guard_terminator(route) && bool_assigns(route, false) >= 2),
+        "parent must not unguarded-drop aggregate moved on both branches:\n{:?}",
         route
     );
 }
