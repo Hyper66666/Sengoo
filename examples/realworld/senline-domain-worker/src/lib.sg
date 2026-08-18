@@ -42,43 +42,43 @@ def worker_handshake_payload_v1() -> &str {
 }
 
 def worker_string_error(code: i64) -> Result<String, i64> {
-    Result { is_ok: false, value: String { handle: 0 }, error: code };
+    Err(code);
 }
 
 def worker_i64_ok(value: i64) -> Result<i64, i64> {
-    Result { is_ok: true, value: value, error: 0 };
+    Ok(value);
 }
 
 def worker_i64_error(code: i64) -> Result<i64, i64> {
-    Result { is_ok: false, value: 0, error: code };
+    Err(code);
 }
 
 def worker_bool_ok(value: bool) -> Result<bool, i64> {
-    Result { is_ok: true, value: value, error: 0 };
+    Ok(value);
 }
 
 def worker_bool_error(code: i64) -> Result<bool, i64> {
-    Result { is_ok: false, value: false, error: code };
+    Err(code);
 }
 
 def worker_context_error(code: i64) -> Result<EvaluationContextV1, i64> {
-    Result { is_ok: false, value: senline_empty_evaluation_context_v1(), error: code };
+    Err(code);
 }
 
 def worker_identifiers_error(code: i64) -> Result<SubmitEnvelopeIdentifiersV1, i64> {
-    Result { is_ok: false, value: senline_empty_submit_envelope_identifiers_v1(), error: code };
+    Err(code);
 }
 
 def worker_facts_error(code: i64) -> Result<SubmitEnvelopeFactsV1, i64> {
-    Result { is_ok: false, value: senline_empty_submit_envelope_facts_v1(), error: code };
+    Err(code);
 }
 
 def worker_request_error(code: i64) -> Result<WorkerRequestV1, i64> {
-    Result { is_ok: false, value: senline_empty_worker_request_v1(), error: code };
+    Err(code);
 }
 
 def worker_encoded_error(code: i64) -> Result<WorkerEncodedFrameV1, i64> {
-    Result { is_ok: false, value: WorkerEncodedFrameV1 { payload: Buffer { handle: 0 }, len: 0 }, error: code };
+    Err(code);
 }
 
 def worker_required_ascii(root: JsonValue, key: &str) -> Result<String, i64> {
@@ -153,7 +153,7 @@ def worker_decode_context_v1(root: JsonValue) -> Result<EvaluationContextV1, i64
     if worker_bundle_id.is_err() { return worker_context_error(worker_bundle_id.error); };
     let facts_binding = worker_required_lower_hex_string(root, "facts_binding", 64);
     if facts_binding.is_err() { return worker_context_error(facts_binding.error); };
-    Result { is_ok: true, value: EvaluationContextV1 { contract_version: contract_version.value, operation: operation.value, operation_version: operation_version.value, evaluation_id: evaluation_id.value, operation_epoch: operation_epoch.value, worker_generation: worker_generation.value, execution_mode: execution_mode.value, worker_bundle_id: worker_bundle_id.value, facts_binding: facts_binding.value }, error: 0 };
+    Ok(EvaluationContextV1 { contract_version: contract_version.value, operation: operation.value, operation_version: operation_version.value, evaluation_id: evaluation_id.value, operation_epoch: operation_epoch.value, worker_generation: worker_generation.value, execution_mode: execution_mode.value, worker_bundle_id: worker_bundle_id.value, facts_binding: facts_binding.value });
 }
 
 def worker_decode_identifiers_v1(root: JsonValue) -> Result<SubmitEnvelopeIdentifiersV1, i64> {
@@ -174,7 +174,7 @@ def worker_decode_identifiers_v1(root: JsonValue) -> Result<SubmitEnvelopeIdenti
     if conversation_ref.is_err() { return worker_identifiers_error(conversation_ref.error); };
     let envelope_ref = worker_required_ascii(root, "envelope_ref");
     if envelope_ref.is_err() { return worker_identifiers_error(envelope_ref.error); };
-    Result { is_ok: true, value: SubmitEnvelopeIdentifiersV1 { correlation_ref: correlation_ref.value, source_account_ref: source_account_ref.value, source_device_ref: source_device_ref.value, recipient_account_ref: recipient_account_ref.value, recipient_device_ref: recipient_device_ref.value, conversation_ref: conversation_ref.value, envelope_ref: envelope_ref.value }, error: 0 };
+    Ok(SubmitEnvelopeIdentifiersV1 { correlation_ref: correlation_ref.value, source_account_ref: source_account_ref.value, source_device_ref: source_device_ref.value, recipient_account_ref: recipient_account_ref.value, recipient_device_ref: recipient_device_ref.value, conversation_ref: conversation_ref.value, envelope_ref: envelope_ref.value });
 }
 
 def worker_decode_facts_v1(root: JsonValue) -> Result<SubmitEnvelopeFactsV1, i64> {
@@ -212,7 +212,7 @@ def worker_decode_facts_v1(root: JsonValue) -> Result<SubmitEnvelopeFactsV1, i64
     if ciphertext_length_bytes.value > ciphertext_limit_bytes.value { return worker_facts_error(SGJSON_OUT_OF_RANGE()); };
     let feature = worker_required_singleton_flag(root, "feature_flags", "enqueue_delivery");
     if feature.is_err() { return worker_facts_error(feature.error); };
-    Result { is_ok: true, value: SubmitEnvelopeFactsV1 { contract_version: contract_version.value, operation_version: operation_version.value, identifiers: identifiers.value, source_device_active: true, has_submit_envelope_v2: capability.value, envelope_protocol_version: envelope_protocol_version.value, ciphertext_length_bytes: ciphertext_length_bytes.value, idempotency_status: idempotency_status.value, recipient_pending_count: recipient_pending_count.value, recipient_pending_limit: recipient_pending_limit.value, application_envelopes_used: application_envelopes_used.value, application_envelopes_limit: application_envelopes_limit.value, ciphertext_limit_bytes: ciphertext_limit_bytes.value, enqueue_delivery_enabled: feature.value }, error: 0 };
+    Ok(SubmitEnvelopeFactsV1 { contract_version: contract_version.value, operation_version: operation_version.value, identifiers: identifiers.value, source_device_active: true, has_submit_envelope_v2: capability.value, envelope_protocol_version: envelope_protocol_version.value, ciphertext_length_bytes: ciphertext_length_bytes.value, idempotency_status: idempotency_status.value, recipient_pending_count: recipient_pending_count.value, recipient_pending_limit: recipient_pending_limit.value, application_envelopes_used: application_envelopes_used.value, application_envelopes_limit: application_envelopes_limit.value, ciphertext_limit_bytes: ciphertext_limit_bytes.value, enqueue_delivery_enabled: feature.value });
 }
 
 def worker_decode_request_v1(root: JsonValue) -> Result<WorkerRequestV1, i64> {
@@ -232,13 +232,13 @@ def worker_decode_request_v1(root: JsonValue) -> Result<WorkerRequestV1, i64> {
     let facts = worker_decode_facts_v1(facts_value.value);
     if facts.is_err() { return worker_request_error(facts.error); };
     if context.value.contract_version != facts.value.contract_version or context.value.operation_version != facts.value.operation_version { return worker_request_error(SGJSON_OUT_OF_RANGE()); };
-    Result { is_ok: true, value: WorkerRequestV1 { schema_version: schema_version.value, context: context.value, facts: facts.value }, error: 0 };
+    Ok(WorkerRequestV1 { schema_version: schema_version.value, context: context.value, facts: facts.value });
 }
 
 def worker_validate_request_envelope_v1(root: JsonValue) -> Result<bool, i64> {
     let decoded = worker_decode_request_v1(root);
-    if decoded.is_err() { return Result { is_ok: false, value: false, error: decoded.error }; };
-    if not worker_operation_version_supported(decoded.value.context.operation_version) { Result { is_ok: false, value: false, error: SGJSON_OUT_OF_RANGE() }; } else { Result { is_ok: true, value: true, error: 0 }; };
+    if decoded.is_err() { return Err(decoded.error); };
+    if not worker_operation_version_supported(decoded.value.context.operation_version) { Err(SGJSON_OUT_OF_RANGE()); } else { Ok(true); };
 }
 
 def worker_encode_protocol_error_v1(code: &str) -> Result<WorkerEncodedFrameV1, i64> {
@@ -256,7 +256,7 @@ def worker_encode_protocol_error_v1(code: &str) -> Result<WorkerEncodedFrameV1, 
     if serialized <= 0 or serialized >= 8192 { return worker_encoded_error(SGFRAMING_LIMIT_EXCEEDED()); };
     let newline = output.set_u8(serialized, 10);
     if newline.is_err() { return worker_encoded_error(newline.error); };
-    Result { is_ok: true, value: WorkerEncodedFrameV1 { payload: output, len: serialized + 1 }, error: 0 };
+    Ok(WorkerEncodedFrameV1 { payload: output, len: serialized + 1 });
 }
 
 def worker_encode_malformed_json_error_v1() -> Result<WorkerEncodedFrameV1, i64> {
@@ -286,7 +286,7 @@ def worker_encode_unsupported_operation_error_v1(evaluation_id: &String) -> Resu
     if serialized <= 0 or serialized >= 8192 { return worker_encoded_error(SGFRAMING_LIMIT_EXCEEDED()); };
     let newline = output.set_u8(serialized, 10);
     if newline.is_err() { return worker_encoded_error(newline.error); };
-    Result { is_ok: true, value: WorkerEncodedFrameV1 { payload: output, len: serialized + 1 }, error: 0 };
+    Ok(WorkerEncodedFrameV1 { payload: output, len: serialized + 1 });
 }
 
 def worker_encode_plan_v1(plan: SubmitEnvelopePlanV1) -> Result<WorkerEncodedFrameV1, i64> {
@@ -324,7 +324,7 @@ def worker_encode_plan_v1(plan: SubmitEnvelopePlanV1) -> Result<WorkerEncodedFra
     if serialized <= 0 or serialized >= 8192 { return worker_encoded_error(SGFRAMING_LIMIT_EXCEEDED()); };
     let newline = output.set_u8(serialized, 10);
     if newline.is_err() { return worker_encoded_error(newline.error); };
-    Result { is_ok: true, value: WorkerEncodedFrameV1 { payload: output, len: serialized + 1 }, error: 0 };
+    Ok(WorkerEncodedFrameV1 { payload: output, len: serialized + 1 });
 }
 
 // Owns `request` end-to-end on the unsupported path so nested Strings Drop.

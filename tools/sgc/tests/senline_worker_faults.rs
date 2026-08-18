@@ -1152,7 +1152,7 @@ import sgframing;
 def bad_handshake_writer(payload: Buffer, len: i64, max_len: i64) -> Result<i64, i64> {
     // Ignore the real handshake buffer and emit a wrong payload frame.
     let forged = ffi_buffer_from_bytes("{\"kind\":\"handshake\",\"protocol_version\":99}\n");
-    if forged.is_err() { return Result { is_ok: false, value: 0, error: forged.error }; };
+    if forged.is_err() { return Err(forged.error); };
     let buf = forged.value;
     let used = buf.used_len();
     let written = frame_write_stdout(buf, used, max_len);

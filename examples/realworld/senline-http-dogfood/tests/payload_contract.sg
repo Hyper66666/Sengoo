@@ -8,11 +8,11 @@ import senline_http_dogfood;
 
 def http_payload_body(payload: &str) -> Result<String, i64> {
     let input_result = ffi_buffer_from_bytes(payload);
-    if input_result.is_err() { return Result { is_ok: false, value: String { handle: 0 }, error: input_result.error }; };
+    if input_result.is_err() { return Err(input_result.error); };
     let input = input_result.value;
     let response = senline_http_process_payload(input, payload.len());
     input.free();
-    if response.is_err() { return Result { is_ok: false, value: String { handle: 0 }, error: response.error }; };
+    if response.is_err() { return Err(response.error); };
     let encoded = response.value;
     let output = encoded.payload;
     let body = string_from_buffer(output, encoded.len);
@@ -22,11 +22,11 @@ def http_payload_body(payload: &str) -> Result<String, i64> {
 
 def worker_payload_body(payload: &str) -> Result<String, i64> {
     let input_result = ffi_buffer_from_bytes(payload);
-    if input_result.is_err() { return Result { is_ok: false, value: String { handle: 0 }, error: input_result.error }; };
+    if input_result.is_err() { return Err(input_result.error); };
     let input = input_result.value;
     let response = worker_process_payload_v1(input, payload.len());
     input.free();
-    if response.is_err() { return Result { is_ok: false, value: String { handle: 0 }, error: response.error }; };
+    if response.is_err() { return Err(response.error); };
     let encoded = response.value;
     let output = encoded.payload;
     let body = string_from_buffer(output, encoded.len);

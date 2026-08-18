@@ -39,35 +39,35 @@ def SGJSON_RUNTIME_FAILURE() -> i64 {
 }
 
 def sgjson_bool_ok(value: bool) -> Result<bool, i64> {
-    Result { is_ok: true, value: value, error: 0 };
+    Ok(value);
 }
 
 def sgjson_bool_error(code: i64) -> Result<bool, i64> {
-    Result { is_ok: false, value: false, error: code };
+    Err(code);
 }
 
 def sgjson_i64_ok(value: i64) -> Result<i64, i64> {
-    Result { is_ok: true, value: value, error: 0 };
+    Ok(value);
 }
 
 def sgjson_i64_error(code: i64) -> Result<i64, i64> {
-    Result { is_ok: false, value: 0, error: code };
+    Err(code);
 }
 
 def sgjson_string_ok(value: String) -> Result<String, i64> {
-    Result { is_ok: true, value: value, error: 0 };
+    Ok(value);
 }
 
 def sgjson_string_error(code: i64) -> Result<String, i64> {
-    Result { is_ok: false, value: String { handle: 0 }, error: code };
+    Err(code);
 }
 
 def sgjson_value_ok(value: JsonValue) -> Result<JsonValue, i64> {
-    Result { is_ok: true, value: value, error: 0 };
+    Ok(value);
 }
 
 def sgjson_value_error(code: i64) -> Result<JsonValue, i64> {
-    Result { is_ok: false, value: JsonValue { doc_handle: 0, node_id: 0 }, error: code };
+    Err(code);
 }
 
 def sgjson_required_value(root: JsonValue, key: &str, expected_kind: i64) -> Result<JsonValue, i64> {

@@ -75,7 +75,7 @@ def senline_http_body_length_supported(len: i64) -> bool {
 }
 
 def senline_http_server_error(code: i64) -> Result<HttpServer, i64> {
-    Result { is_ok: false, value: HttpServer { handle: 0 }, error: code };
+    Err(code);
 }
 
 def senline_http_bind(host: &str, port: i64) -> Result<HttpServer, i64> {
@@ -84,7 +84,7 @@ def senline_http_bind(host: &str, port: i64) -> Result<HttpServer, i64> {
     if bound.is_err() { return senline_http_server_error(bound.error); };
     let server = bound.value;
     let limits = server.set_limits(senline_http_header_limit(), senline_http_body_limit());
-    if limits.is_err() { server.close(); senline_http_server_error(limits.error); } else { Result { is_ok: true, value: server, error: 0 }; };
+    if limits.is_err() { server.close(); senline_http_server_error(limits.error); } else { Ok(server); };
 }
 
 def senline_http_request_supported(request: HttpServerRequest) -> bool {

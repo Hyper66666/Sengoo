@@ -6,27 +6,27 @@ import sgframing;
 
 def three_byte_writer(payload: Buffer, offset: i64, len: i64) -> Result<i64, i64> {
     let accepted = if len > 3 { 3; } else { len; };
-    Result { is_ok: true, value: accepted, error: 0 };
+    Ok(accepted);
 }
 
 def zero_progress_writer(payload: Buffer, offset: i64, len: i64) -> Result<i64, i64> {
-    Result { is_ok: true, value: 0, error: 0 };
+    Ok(0);
 }
 
 def excessive_writer(payload: Buffer, offset: i64, len: i64) -> Result<i64, i64> {
-    Result { is_ok: true, value: len + 1, error: 0 };
+    Ok(len + 1);
 }
 
 def failing_writer(payload: Buffer, offset: i64, len: i64) -> Result<i64, i64> {
-    Result { is_ok: false, value: 0, error: STATUS_TIMEOUT() };
+    Err(STATUS_TIMEOUT());
 }
 
 def successful_flush() -> Result<bool, i64> {
-    Result { is_ok: true, value: true, error: 0 };
+    Ok(true);
 }
 
 def failing_flush() -> Result<bool, i64> {
-    Result { is_ok: false, value: false, error: STATUS_IO() };
+    Err(STATUS_IO());
 }
 
 def main() -> i64 {

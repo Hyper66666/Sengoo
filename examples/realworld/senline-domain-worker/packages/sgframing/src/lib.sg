@@ -31,27 +31,27 @@ def SGFRAMING_INVALID_PAYLOAD() -> i64 {
 }
 
 def frame_bool_ok(value: bool) -> Result<bool, i64> {
-    Result { is_ok: true, value: value, error: 0 };
+    Ok(value);
 }
 
 def frame_bool_error(code: i64) -> Result<bool, i64> {
-    Result { is_ok: false, value: false, error: code };
+    Err(code);
 }
 
 def frame_i64_ok(value: i64) -> Result<i64, i64> {
-    Result { is_ok: true, value: value, error: 0 };
+    Ok(value);
 }
 
 def frame_i64_error(code: i64) -> Result<i64, i64> {
-    Result { is_ok: false, value: 0, error: code };
+    Err(code);
 }
 
 def frame_read_ok(eof: bool, len: i64, payload: Buffer) -> Result<FrameRead, i64> {
-    Result { is_ok: true, value: FrameRead { eof: eof, len: len, payload: payload }, error: 0 };
+    Ok(FrameRead { eof: eof, len: len, payload: payload });
 }
 
 def frame_read_error(code: i64) -> Result<FrameRead, i64> {
-    Result { is_ok: false, value: FrameRead { eof: false, len: 0, payload: Buffer { handle: 0 } }, error: code };
+    Err(code);
 }
 
 def frame_validate_length(len: i64, max_len: i64) -> Result<i64, i64> {

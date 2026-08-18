@@ -7437,15 +7437,15 @@ def echo_handler(request: &mut HttpServerRequest) -> Result<bool, i64> {
 }
 
 def fail_handler(request: &mut HttpServerRequest) -> Result<bool, i64> {
-    Result { is_ok: false, value: false, error: STATUS_IO() }
+    Err(STATUS_IO())
 }
 
 def decline_handler(request: &mut HttpServerRequest) -> Result<bool, i64> {
-    Result { is_ok: true, value: false, error: 0 }
+    Ok(false)
 }
 
 def unanswered_handler(request: &mut HttpServerRequest) -> Result<bool, i64> {
-    Result { is_ok: true, value: true, error: 0 }
+    Ok(true)
 }
 
 async def main() -> i64 {
