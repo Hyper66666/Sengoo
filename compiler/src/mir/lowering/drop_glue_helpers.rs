@@ -436,15 +436,22 @@ impl<'a> LoweringContext<'a> {
                 local,
                 field_path: Vec::new(),
                 drop_func,
+                live_flag: None,
+                initialized_block: None,
             });
         } else {
             let ty = self.get_local_type(local).clone();
             self.collect_field_drop_bindings(local, &ty, &mut Vec::new(), &mut bindings);
         }
-        for binding in bindings {
+        for mut binding in bindings {
             if !self.drop_bindings.iter().any(|existing| {
                 existing.local == binding.local && existing.field_path == binding.field_path
             }) {
+                binding.initialized_block = Some(if binding.local.kind == LocalKind::Param {
+                    self.mir_fn.start_block
+                } else {
+                    self.current_block()
+                });
                 self.drop_bindings.push(binding);
             }
         }
