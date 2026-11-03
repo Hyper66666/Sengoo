@@ -1,0 +1,339 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>DWG NO. SG-001 — Sengoo 编译型系统语言</title>
+  <meta name="description" content="Sengoo 工程图纸：LLVM 原生后端 · 增量编译 · 借用检查 · Python 互操作 · 异步运行时" />
+  <meta name="theme-color" content="#FCFEFF" />
+  <link rel="icon" type="image/png" href="assets/img/sengoo-mark.png" />
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link href="https://fonts.googleapis.com/css2?family=Press+Start+2P&family=DotGothic16&family=JetBrains+Mono:wght@400;500;700&display=swap" rel="stylesheet" />
+  <link rel="stylesheet" href="assets/css/blueprint.css" />
+</head>
+<body>
+
+  <!-- 制图标尺：左侧深度规 -->
+  <div class="draft-ruler" aria-hidden="true">
+    <span class="ruler-label">DEPTH</span>
+    <div class="ruler-ticks"><div class="ruler-cursor" id="rulerCursor"></div></div>
+    <span class="ruler-readout" id="rulerReadout">0.0 m</span>
+  </div>
+
+  <!-- 图框顶栏 -->
+  <header class="frame-top">
+    <span class="frame-no">DWG NO. SG-001</span>
+    <nav class="frame-nav">
+      <a href="#machine">总装图</a>
+      <a href="#bom">零件表</a>
+      <a href="#tolerance">公差</a>
+      <a href="#cutsheet">剪切图</a>
+      <a href="#fasteners">紧固件</a>
+      <a href="#assembly">装配</a>
+    </nav>
+    <span class="frame-scale">SCALE 1:1 · PIXEL</span>
+  </header>
+
+  <main class="sheet">
+
+    <!-- ═══════ PLATE 01 · 总装图（HERO） ═══════ -->
+    <section class="plate" id="machine">
+      <header class="plate-head">
+        <span class="plate-no">PLATE 01</span>
+        <h1 class="plate-title">SENGOO 语言总装图</h1>
+        <button class="fold-btn" data-fold>▾ FOLD</button>
+      </header>
+
+      <div class="plate-body">
+        <div class="assembly-view">
+          <!-- 像素编译器机器 -->
+          <div class="machine-stage">
+            <div class="dim dim-h" data-text="297"><i></i></div>
+            <div class="machine">
+              <div class="steam s1"></div>
+              <div class="steam s2"></div>
+              <div class="steam s3"></div>
+              <div class="pipe-stack"></div>
+              <div class="cube">
+                <div class="face-top"></div>
+                <div class="face-front"><span>SGC</span></div>
+                <div class="face-side"></div>
+              </div>
+              <div class="gear g1"></div>
+              <div class="gear g2"></div>
+              <div class="conveyor"><div class="cargo-pixel"></div></div>
+              <div class="base"></div>
+            </div>
+            <div class="dim dim-v" data-text="210"><i></i></div>
+
+            <!-- 引出线标注 -->
+            <div class="callout co-1"><i class="leader"></i><span>① LEXER / PARSER<br><em>logos · AST</em></span></div>
+            <div class="callout co-2"><i class="leader"></i><span>② BORROW GUARD<br><em>NLL · 零运行时</em></span></div>
+            <div class="callout co-3"><i class="leader"></i><span>③ LLVM IR<br><em>clang 15+ 链接</em></span></div>
+            <div class="callout co-4"><i class="leader"></i><span>④ INCREMENTAL<br><em>33ms · 96% ↓</em></span></div>
+          </div>
+
+          <!-- 规格铭牌 -->
+          <div class="nameplate">
+            <div class="np-row"><b>NAME</b><span>SENGOO COMPILER</span></div>
+            <div class="np-row"><b>REV</b><span>0.1.0-rc.1</span></div>
+            <div class="np-row"><b>TYPE</b><span>NATIVE / LLVM</span></div>
+            <div class="np-row"><b>MAT'L</b><span>RUST WORKSPACE</span></div>
+            <div class="np-row"><b>MASS</b><span>0 RUNTIME DEPS</span></div>
+            <img class="np-logo" src="assets/img/sengoo-mark.png" alt="Sengoo" width="44" height="44" />
+            <a class="np-cta" href="#assembly">→ 按图装配</a>
+            <a class="np-cta ghost" href="https://github.com/Hyper66666/Sengoo" target="_blank" rel="noopener">GITHUB ↗</a>
+          </div>
+        </div>
+
+        <p class="plate-note">
+          注：编译型系统语言。HIR → MIR 降低管线为静态检查、异步帧生成与原生代码生成保留清晰分层；
+          全部阶段本机完成，无云端依赖。
+        </p>
+        <span class="stamp stamp-rev">REV rc.1</span>
+      </div>
+    </section>
+
+    <!-- ═══════ PLATE 02 · 零件清单 ═══════ -->
+    <section class="plate" id="bom">
+      <header class="plate-head">
+        <span class="plate-no">PLATE 02</span>
+        <h2 class="plate-title">核心零件清单 · BILL OF MATERIALS</h2>
+        <button class="fold-btn" data-fold>▾ FOLD</button>
+      </header>
+
+      <div class="plate-body">
+        <table class="bom-table">
+          <thead>
+            <tr><th>POS</th><th>PART NO.</th><th>DESCRIPTION / 说明</th><th>QTY</th><th>REV</th></tr>
+          </thead>
+          <tbody>
+            <tr><td>①</td><td>SG-001</td><td><b>LLVM 原生后端</b> — 文本 IR → clang 优化链接，不绑 inkwell / llvm-sys</td><td>1</td><td>A</td></tr>
+            <tr><td>②</td><td>SG-002</td><td><b>增量编译引擎</b> — AST 编辑分类，签名不变即跳过，缩减 96%</td><td>1</td><td>A</td></tr>
+            <tr><td>③</td><td>SG-003</td><td><b>借用检查器</b> — NLL 规则，可变 ⊕ 不可变互斥，编译期拦截</td><td>1</td><td>A</td></tr>
+            <tr><td>④</td><td>SG-004</td><td><b>Python 互操作桥</b> — CPython FFI 层，热路径渐进替换</td><td>1</td><td>B</td></tr>
+            <tr><td>⑤</td><td>SG-005</td><td><b>异步运行时</b> — async def / spawn / select / timeout 一等语法</td><td>1</td><td>B</td></tr>
+            <tr><td>⑥</td><td>SG-006</td><td><b>非侵入反射</b> — sidecar 元数据按需生成，未用零开销</td><td>1</td><td>B</td></tr>
+          </tbody>
+        </table>
+        <p class="plate-note">注：全部零件已在编译器主线装配并通关测试，非图纸预留孔位。</p>
+      </div>
+    </section>
+
+    <!-- ═══════ PLATE 03 · 公差与验收 ═══════ -->
+    <section class="plate" id="tolerance">
+      <header class="plate-head">
+        <span class="plate-no">PLATE 03</span>
+        <h2 class="plate-title">公差规格与验收记录</h2>
+        <button class="fold-btn" data-fold>▾ FOLD</button>
+      </header>
+
+      <div class="plate-body">
+        <table class="tol-table">
+          <thead>
+            <tr><th>检验项</th><th>规格要求</th><th>实测值</th><th>判定</th></tr>
+          </thead>
+          <tbody>
+            <tr><td>全量编译 1000k LOC</td><td>≤ 2000 ms</td><td>1828 ms</td><td class="pass">✔ PASS</td></tr>
+            <tr><td>增量重编 100k LOC</td><td>≤ 50 ms</td><td>33 ms</td><td class="pass">✔ PASS</td></tr>
+            <tr><td>增量缩减率</td><td>≥ 90 %</td><td>96 %</td><td class="pass">✔ PASS</td></tr>
+            <tr><td>热路径 vs Python</td><td>≥ 30 ×</td><td>50.9 ×</td><td class="pass">✔ PASS</td></tr>
+            <tr><td>运行时 p50 延迟</td><td>≈ C++ 级</td><td>8.92 ms</td><td class="pass">✔ PASS</td></tr>
+          </tbody>
+        </table>
+
+        <div class="ref-drawing">
+          <span class="ref-label">参考图 · 四语言 1000k LOC 对比（ms）：</span>
+          <div class="ref-bars">
+            <div class="ref-bar" style="--w:8%"><b>SENGOO</b><i></i><em>1828</em></div>
+            <div class="ref-bar" style="--w:20%"><b>C++</b><i></i><em>4884</em></div>
+            <div class="ref-bar" style="--w:34%"><b>PYTHON*</b><i></i><em>8283</em></div>
+            <div class="ref-bar" style="--w:100%"><b>RUST</b><i></i><em>54642</em></div>
+          </div>
+          <span class="ref-note">* Python 为字节码编译。条带长度 ∝ 耗时。</span>
+        </div>
+        <span class="stamp stamp-qa">QA PASS</span>
+      </div>
+    </section>
+
+    <!-- ═══════ PLATE 04 · 剪切图纸（代码） ═══════ -->
+    <section class="plate" id="cutsheet">
+      <header class="plate-head">
+        <span class="plate-no">PLATE 04</span>
+        <h2 class="plate-title">语法剪切图 · CUT SHEETS</h2>
+        <button class="fold-btn" data-fold>▾ FOLD</button>
+      </header>
+
+      <div class="plate-body">
+        <p class="cut-hint">✂ 沿虚线剪下即可粘贴到你的项目里。</p>
+        <div class="cut-grid">
+          <figure class="cut-sheet">
+            <figcaption><span>✂ CS-01</span> struct.sg</figcaption>
+            <pre><code><span class="kw">struct</span> Vec2 { x: <span class="ty">f64</span>, y: <span class="ty">f64</span> }
+
+<span class="kw">impl</span> Vec2 {
+    <span class="kw">def</span> <span class="fn">length</span>(self) -> <span class="ty">f64</span> {
+        (self.x * self.x + self.y * self.y).sqrt()
+    }
+}</code></pre>
+          </figure>
+          <figure class="cut-sheet">
+            <figcaption><span>✂ CS-02</span> async.sg</figcaption>
+            <pre><code><span class="kw">async def</span> <span class="fn">main</span>() -> <span class="ty">i64</span> {
+    <span class="kw">let</span> a = spawn(fetch(<span class="str">"/users"</span>));
+    <span class="kw">let</span> b = spawn(fetch(<span class="str">"/orders"</span>));
+    <span class="kw">let</span> (u, o) = <span class="kw">await</span> join(a, b);
+    print(u.len() + o.len())
+}</code></pre>
+          </figure>
+          <figure class="cut-sheet">
+            <figcaption><span>✂ CS-03</span> match.sg</figcaption>
+            <pre><code><span class="kw">match</span> json.get(<span class="str">"mode"</span>) {
+    <span class="ty">Some</span>(v) <span class="kw">if</span> v == <span class="str">"strict"</span> => strict(json),
+    <span class="ty">Some</span>(_) => default_of(json),
+    <span class="ty">None</span>    => err(missing(<span class="str">"mode"</span>)),
+}</code></pre>
+          </figure>
+          <figure class="cut-sheet">
+            <figcaption><span>✂ CS-04</span> contract.sg</figcaption>
+            <pre><code><span class="kw">def</span> <span class="fn">divide</span>(a: <span class="ty">i64</span>, b: <span class="ty">i64</span>) -> <span class="ty">i64</span>
+<span class="kw">requires</span> b != 0
+<span class="kw">ensures</span> result * b == a
+{ a / b }  <span class="cmt">// --contract-checks on</span></code></pre>
+          </figure>
+        </div>
+      </div>
+    </section>
+
+    <!-- ═══════ PLATE 05 · 紧固件与标准件 ═══════ -->
+    <section class="plate" id="fasteners">
+      <header class="plate-head">
+        <span class="plate-no">PLATE 05</span>
+        <h2 class="plate-title">紧固件选型 · 工具链</h2>
+        <button class="fold-btn" data-fold>▾ FOLD</button>
+      </header>
+
+      <div class="plate-body">
+        <div class="fastener-row">
+          <div class="fastener">
+            <div class="f-icon f-bolt"></div>
+            <b>sgc</b><i>HEX BOLT M12</i>
+            <p>编译器 CLI。check / build / run / doc / bench，拧紧力矩 -O 0~3。</p>
+          </div>
+          <div class="fastener">
+            <div class="f-icon f-nut"></div>
+            <b>sgpm</b><i>FLANGE NUT</i>
+            <p>包管理器。path / git / registry 依赖、workspace、lockfile 防松。</p>
+          </div>
+          <div class="fastener">
+            <div class="f-icon f-washer"></div>
+            <b>sgfmt</b><i>LOCK WASHER</i>
+            <p>格式化。CI --check 模式，防止风格松动。</p>
+          </div>
+          <div class="fastener">
+            <div class="f-icon f-pin"></div>
+            <b>sglsp</b><i>DOWEL PIN</i>
+            <p>Language Server。诊断、补全、跳转定义，定位 VS Code。</p>
+          </div>
+        </div>
+
+        <div class="parts-bin">
+          <span class="bin-label">STD:: 标准件料盒 · 15 PCS</span>
+          <div class="bin-grid">
+            <span>collections</span><span>string</span><span>json</span><span>io</span><span>file</span>
+            <span>process</span><span>math</span><span>error</span><span>strconv</span><span>path</span>
+            <span>env</span><span>net</span><span>db</span><span>ffi</span><span>reflect</span>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <!-- ═══════ PLATE 06 · 装配工序 ═══════ -->
+    <section class="plate" id="assembly">
+      <header class="plate-head">
+        <span class="plate-no">PLATE 06</span>
+        <h2 class="plate-title">装配工序卡 · ASSEMBLY</h2>
+        <button class="fold-btn" data-fold>▾ FOLD</button>
+      </header>
+
+      <div class="plate-body">
+        <ol class="assembly-steps">
+          <li>
+            <span class="step-no">工步 1</span>
+            <div class="step-body">
+              <p>构建工具链（release 档，LTO 开）</p>
+              <code>cargo build --release</code>
+            </div>
+          </li>
+          <li>
+            <span class="step-no">工步 2</span>
+            <div class="step-body">
+              <p>创建项目骨架</p>
+              <code>sgpm new hello && cd hello</code>
+            </div>
+          </li>
+          <li>
+            <span class="step-no">工步 3</span>
+            <div class="step-body">
+              <p>编译并运行，验证装配</p>
+              <code>sgpm run</code>
+            </div>
+          </li>
+          <li>
+            <span class="step-no">工步 4</span>
+            <div class="step-body">
+              <p>单文件直接试车（优化档 -O 2）</p>
+              <code>sgc run examples/01_hello.sg -O 2</code>
+            </div>
+          </li>
+        </ol>
+        <div class="assembly-cta">
+          <a class="np-cta" href="https://github.com/Hyper66666/Sengoo" target="_blank" rel="noopener">→ 领取图纸原件（GitHub）</a>
+          <a class="np-cta ghost" href="https://sengoo.dev" target="_blank" rel="noopener">sengoo.dev ↗</a>
+        </div>
+      </div>
+    </section>
+
+    <!-- ═══════ 标题栏（制图签名） ═══════ -->
+    <footer class="title-block">
+      <div class="tb-cell tb-logo">
+        <img src="assets/img/sengoo-mark.png" alt="" width="30" height="30" />
+        <b>SENGOO</b>
+      </div>
+      <div class="tb-cell"><i>PROJECT</i><b>COMPILED SYSTEMS LANGUAGE</b></div>
+      <div class="tb-cell"><i>DRAWN</i><b>SENGOO TEAM</b></div>
+      <div class="tb-cell"><i>CHECKED</i><b>CI PIPELINE</b></div>
+      <div class="tb-cell"><i>APPROVED</i><b>MIT LICENSE</b></div>
+      <div class="tb-cell"><i>DATE</i><b>2026-07</b></div>
+      <div class="tb-cell"><i>SCALE</i><b>1:1</b></div>
+      <div class="tb-cell"><i>SHEET</i><b>1 OF 1</b></div>
+    </footer>
+  </main>
+
+  <script>
+    // 制图标尺：滚动深度规
+    const cursor = document.getElementById('rulerCursor');
+    const readout = document.getElementById('rulerReadout');
+    const ticks = document.querySelector('.ruler-ticks');
+    const updateRuler = () => {
+      const h = document.documentElement.scrollHeight - innerHeight;
+      const p = h > 0 ? scrollY / h : 0;
+      cursor.style.top = (p * (ticks.clientHeight - 12)) + 'px';
+      readout.textContent = (p * 3.2).toFixed(1) + ' m';
+    };
+    addEventListener('scroll', updateRuler, { passive: true });
+    addEventListener('resize', updateRuler);
+    updateRuler();
+
+    // 图纸折叠交互
+    document.querySelectorAll('[data-fold]').forEach(btn => {
+      btn.addEventListener('click', () => {
+        const plate = btn.closest('.plate');
+        plate.classList.toggle('folded');
+        btn.textContent = plate.classList.contains('folded') ? '▸ UNFOLD' : '▾ FOLD';
+      });
+    });
+  </script>
+</body>
+</html>

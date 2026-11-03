@@ -1,0 +1,358 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Sengoo — Technical Quarterly</title>
+  <meta name="description" content="Sengoo compiler & runtime architecture · A technical quarterly" />
+  <link rel="icon" href="assets/img/sengoo-mark.png" />
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link href="https://fonts.googleapis.com/css2?family=Libre+Baskerville:ital,wght@0,400;0,700;1,400&family=Courier+Prime:wght@400;700&family=Cormorant+Garamond:wght@600;700&display=swap" rel="stylesheet" />
+  <link rel="stylesheet" href="assets/css/zine.css" />
+</head>
+<body>
+
+  <!-- 卷首页边空白栏 -->
+  <aside class="margin-note" aria-hidden="true">
+    <div class="mn-line"></div>
+    <nav class="mn-links">
+      <a href="#lead" title="首页">首页</a>
+      <a href="#arch" title="架构">架构</a>
+      <a href="#bench" title="性能">性能</a>
+      <a href="#syntax" title="语法">语法</a>
+      <a href="#toolchain" title="工具链">工具链</a>
+      <a href="#start" title="起步">起步</a>
+    </nav>
+  </aside>
+
+  <!-- ═══════ 首页 (LEAD) ═══════ -->
+  <article class="page lead" id="lead">
+    <!-- 顶部期刊信息栏 -->
+    <header class="pub-header">
+      <span class="pub-title">TECHNICAL QUARTERLY</span>
+      <span class="pub-issue">VOL. 0.1.0-rc.1 / JULY 2026</span>
+      <span class="pub-price">SENGOO ENGINEERING GROUP</span>
+    </header>
+
+    <!-- 主标题区：大字报风格 -->
+    <div class="headline-block">
+      <span class="tagline">● COMPILATION ENGINEERING ● MEMORY SAFETY ● NATIVE EXECUTION ●</span>
+      <h1><em>编译型语言</em><br/>的<span class="drop-cap">工</span><span class="drop-cap2">程</span>化路径</h1>
+      <p class="standfirst">
+        LLVM 后端 × AST 增量缓存 × NLL 借用检查器<br/>
+        — 一台无需云端依赖的本机编译机器
+      </p>
+      <p class="dateline"><strong>Dateline</strong> d:\Sengoo | Runtime: 0 deps | Backend: LLVM IR → clang</p>
+    </div>
+
+    <!-- 图文混排区：左文右图，但图片偏移出框 -->
+    <div class="story-body">
+      <div class="copy">
+        <p>这是一门自研编译型系统语言的工程纪实。它不追求玩具演示，而是实打实的编译器流水线：词法分析（logos）→AST 解析（chumsky）→HIR 降低→类型检查→借用规则校验→MIR 降低→LLVM IR 文本输出 → clang 优化链接 → 原生二进制。</p>
+        <p>核心指标：10 万行项目增量重编 <strong>33 ms</strong>（比全量快 96%），100 万行全量 1.8 s，热路径 vs Python 50.9×。运行时延迟 p50 ≈ C++级。全部阶段本机完成，没有云端调用。</p>
+        <figure class="portrait off-r">
+          <img src="assets/img/sengoo-logo-transparent.png" alt="" width="160" height="160" />
+          <figcaption class="caption left-align">[图 1] Sengoo 语言标识。蓝色渐变 S 形标志象征数据流与编译流水线。</figcaption>
+        </figure>
+        <blockquote class="pullquote right-align">“不是 roadmap 上的占位符。”</blockquote>
+        <p>编译管线对异步帧生成、静态检查、代码生成都留出清晰分层。这层边界不是为了优雅而优雅，而是为了工程师可以改得动——比如禁用缓存开关 (--low-memory)、打开契约守卫 (--contract-checks)、按需反射 (--reflect=auto)。</p>
+        <p>语言设计上，刻意模仿了日常脚本的易读性：def main() -> i64、let mut x = ...、async def / spawn / select / timeout、match...{ Some(v)=>..., None=>... }、struct Point { x:f64, y:f64 }、函数契约 requires/ensures。没有花哨语法糖，但每一步都在 HIR/MIR/Typeck里有对应处理。</p>
+      </div>
+      <div class="sidebar">
+        <dl class="spec-list">
+          <dt>REAR</dt>
+          <dd>LLVM IR Text → clang 15+</dd>
+          <dt>LANG</dt>
+          <dd>Lexical (logos) · Syntactic (chumsky)</dd>
+          <dt>TYPECHK</dt>
+          <dd>HIR/MIR Type Inference</dd>
+          <dt>BORROW</dt>
+          <dd>NLL Scope-Based Rules</dd>
+          <dt>ASYNC</dt>
+          <dd>Frame-Lowering to State Machine</dd>
+          <dt>REFLECT</dt>
+          <dd>Sidebar JSON Metadata (Auto)</dd>
+          <dt>RUNTIME</dt>
+          <dd>Zero Native Deps</dd>
+          <dt>MAT'L</dt>
+          <dd>Cargo Workspace (Rust)</dd>
+        </dl>
+      </div>
+    </div>
+  </article>
+
+  <!-- ═══════ 第 2 页 (ARCHITECTURE) ═══════ -->
+  <article class="page arch" id="arch">
+    <span class="page-num">2</span>
+    <span class="fold-marker">↷</span>
+    <h2>架构拆解：一台编译机器</h2>
+    <p class="section-intro">六个已通关关卡。每一关都是编译器主线里跑通的路径。</p>
+
+    <div class="split-layout">
+      <div class="text-flow">
+        <ol class="steps">
+          <li>
+            <span class="step-id">01</span>
+            <div class="step-content">
+              <h3>LLVM 原生后端</h3>
+              <p>文本 LLVM IR → clang 优化链接。不绑 inkwell/llvm-sys，构建链干净透明。release 档启用 LTO，codegen-units=1。</p>
+              <ul class="checklist">
+                <li>✓ HIR→MIR 降低为静态检查预留空间</li>
+                <li>✓ Frame lowering 支持 async 状态机</li>
+                <li>✓ 无运行时依赖；零 RUST 库在最终 exe 中</li>
+              </ul>
+            </div>
+          </li>
+          <li>
+            <span class="step-id">02</span>
+            <div class="step-content">
+              <h3>增量编译引擎</h3>
+              <p>AST 编辑分类：noop / impl_only / interface_change。签名不变则跳过 LEXER→MIR，仅重新执行 typeck/codegen/link。</p>
+              <ul class="checklist">
+                <li>✓ 10k LOC: 372 ms | 100k LOC: 418 ms | 1M LOC: 1.83 s</li>
+                <li>✓ 增量后 33ms，缩减率 96%</li>
+              </ul>
+            </div>
+          </li>
+          <li>
+            <span class="step-id">03</span>
+            <div class="step-content">
+              <h3>借用检查器</h3>
+              <p>NLL 风格借用规则，可变与不可变借用互斥，编译期拦截数据竞争。</p>
+              <pre class="codebox"><code>mut v = Vec::new(); // mutable borrow starts
+borrow(&v);         // error: immutable borrow after mutable
+v.push(1);          // not reached
+// NB: borrow checker runs before codegen</code></pre>
+            </div>
+          </li>
+        </ol>
+      </div>
+
+      <aside class="side-illustration">
+        <div class="flow-diagram">
+          <div class="node" data-step="lexer">Lexer</div>
+          <div class="arrow">↓</div>
+          <div class="node" data-step="ast">AST</div>
+          <div class="arrow">↓</div>
+          <div class="node" data-step="hir">HIR</div>
+          <div class="arrow">↓</div>
+          <div class="node highlight" data-step="typeck">Typeck/Borrow</div>
+          <div class="arrow">↓</div>
+          <div class="node" data-step="mir">MIR</div>
+          <div class="arrow">↓</div>
+          <div class="node" data-step="llvm">LLVM IR</div>
+          <div class="arrow">↓</div>
+          <div class="node final" data-step="exe">Exe</div>
+        </div>
+      </aside>
+    </div>
+
+    <figure class="chart wide">
+      <table class="bar-table">
+        <caption>1000k LOC Full Compile (ms)</caption>
+        <tr><th>Lang</th><th>Time (ms)</th></tr>
+        <tr><td><b>Sengoo</b></td><td><b>1828</b></td></tr>
+        <tr><td>C++</td><td>4884</td></tr>
+        <tr><td>PYTHON*</td><td>8283</td></tr>
+        <tr><td>Rust</td><td>54642</td></tr>
+      </table>
+      <p class="footnote">*Python for bytecode compile. Lower is better.</p>
+    </figure>
+  </article>
+
+  <!-- ═══════ 第 3 页 (BENCHMARK) ═══════ -->
+  <article class="page bench" id="bench">
+    <span class="page-num">3</span>
+    <span class="stamp-qa">QA PASS</span>
+    <h2>性能验收记录</h2>
+
+    <div class="test-log">
+      <p class="run-info">Environment: Local Machine x64 | Condition: Fairness profile enabled (C++ PCH, Rust incremental)</p>
+
+      <ol class="tests">
+        <li>
+          <div class="test-case">
+            <span class="tc-name">Hot-path Risk Scoring</span>
+            <span class="tc-result">50.9×</span>
+          </div>
+          <p class="test-desc">Runtime p50 avg: Sengoo 25.2 ms vs Python 1285 ms. Hot-path speed ratio: 50.93x faster than Python baseline.</p>
+        </li>
+        <li>
+          <div class="test-case">
+            <span class="tc-name">Reflection Ergonomics</span>
+            <span class="tc-result">28 LOC vs 55 LOC</span>
+          </div>
+          <p class="test-desc">Auto reflection rule file: 28 lines. Manual registry entries: C++ needs 2 extra rules.</p>
+        </li>
+        <li>
+          <div class="test-case">
+            <span class="tc-name">Incremental After Edit</span>
+            <span class="tc-result">33.71 ms</span>
+          </div>
+          <p class="test-desc">Loop body change scenario. Reduction vs full rebuild: 95.99%.</p>
+        </li>
+        <li>
+          <div class="test-case">
+            <span class="tc-name">Compile Peak Memory (RSS)</span>
+            <span class="tc-result">≈ C++ class</span>
+          </div>
+          <p class="test-desc">10k LOC: Sengoo 18.88 MB | 100k LOC: 140.18 MB | 1M LOC: 1367.99 MB.</p>
+        </li>
+      </ol>
+
+      <aside class="caliper">
+        <svg viewBox="0 0 200 60" aria-label="Performance gauge">
+          <path d="M 10 50 A 40 40 0 0 1 190 50" fill="none" stroke="#E05656" stroke-width="14" stroke-dasharray="251 251"/>
+          <path id="gauge-fill" d="M 10 50 A 40 40 0 0 1 190 50" fill="none" stroke="#4A9DD9" stroke-width="14" stroke-dasharray="0 251" stroke-linecap="round"/>
+          <text x="100" y="35" text-anchor="middle" font-family="Courier Prime, monospace" font-size="12" fill="#142B3A">P50</text>
+          <text x="100" y="50" text-anchor="middle" font-family="Courier Prime, monospace" font-size="16" font-weight="bold" fill="#142B3A">8.92 ms</text>
+        </svg>
+        <p class="caliper-note">Compare: C++ ~8.55 ms</p>
+      </aside>
+    </div>
+  </article>
+
+  <!-- ═══════ 第 4 页 (SYNTAX) ═══════ -->
+  <article class="page syntax" id="syntax">
+    <span class="page-num">4</span>
+    <h2>语法摘录 · Syntax Samples</h2>
+    <p class="editorial-note">这些片段被粘贴到 realworld/fixtures 目录下的 smoke 测试中，确保语法可编译、链接、运行。</p>
+
+    <div class="columns">
+      <div class="col-left">
+        <div class="codecard">
+          <span class="code-title">Vec2 struct.impl</span>
+          <pre><code><span class="kw">struct</span> Vec2 { x: <span class="ty">f64</span>, y: <span class="ty">f64</span> }
+
+<span class="kw">impl</span> Vec2 {
+    <span class="kw">def</span> <span class="fn">length</span>(self) -> <span class="ty">f64</span> {
+        (self.x * self.x + self.y * self.y).sqrt()
+    }
+}</code></pre>
+        </div>
+        <div class="codecard">
+          <span class="code-title">Async task join</span>
+          <pre><code><span class="kw">async def</span> <span class="fn">main</span>() -> <span class="ty">i64</span> {
+    <span class="kw">let</span> a = spawn(fetch(<span class="str">"/users"</span>));
+    <span class="kw">let</span> b = spawn(fetch(<span class="str">"/orders"</span>));
+    <span class="kw">let</span> (u, o) = <span class="kw">await</span> join(a, b);
+    print(u.len() + o.len())
+}</code></pre>
+        </div>
+      </div>
+      <div class="col-right">
+        <div class="codecard">
+          <span class="code-title">Match with guard</span>
+          <pre><code><span class="kw">match</span> json.get(<span class="str">"mode"</span>) {
+    <span class="ty">Some</span>(v) <span class="kw">if</span> v == <span class="str">"strict"</span> => strict(json),
+    <span class="ty">Some</span>(_) => default_of(json),
+    <span class="ty">None</span>    => err(missing(<span class="str">"mode"</span>)),
+}</code></pre>
+        </div>
+        <div class="codecard">
+          <span class="code-title">Function contract</span>
+          <pre><code><span class="kw">def</span> <span class="fn">divide</span>(a: <span class="ty">i64</span>, b: <span class="ty">i64</span>) -> <span class="ty">i64</span>
+<span class="kw">requires</span> b != 0
+<span class="kw">ensures</span> result * b == a
+{ a / b }</code></pre>
+        </div>
+      </div>
+    </div>
+
+    <aside class="handwritten-notes">
+      <p class="handnote">注：语法目标是“别人写的模块，5 分钟读懂”。保留结构体、枚举、Lambda、模式匹配、函数契约、后缀 ? 传播等必要要素。</p>
+    </aside>
+  </article>
+
+  <!-- ═══════ 第 5 页 (TOOLCHAIN) ═══════ -->
+  <article class="page toolchain" id="toolchain">
+    <span class="page-num">5</span>
+    <h2>工具链选型 · Toolchain</h2>
+    <p class="section-intro">四件装备共享同一份 AST 内核。</p>
+
+    <div class="toolbox">
+      <div class="tool-item">
+        <span class="tool-icon">⚒️</span>
+        <h3>sgc</h3>
+        <p class="tool-desc">编译器 CLI — check / build / run / doc / bench。支持 -O 0~3，--low-memory，--reflect auto/on/off。</p>
+      </div>
+      <div class="tool-item">
+        <span class="tool-icon">🔧</span>
+        <h3>sgpm</h3>
+        <p class="tool-desc">包管理器 — Sengoo.toml manifest，path/git/registry 依赖，workspace，lockfile generation/update/check。</p>
+      </div>
+      <div class="tool-item">
+        <span class="tool-icon">✂️</span>
+        <h3>sgfmt</h3>
+        <p class="tool-desc">格式化 — CI --check 模式防止风格松动，提交前自动对齐。</p>
+      </div>
+      <div class="tool-item">
+        <span class="tool-icon">🧭</span>
+        <h3>sglsp</h3>
+        <p class="tool-desc">Language Server — 诊断、补全、跳转定义，对接 VS Code 扩展。</p>
+      </div>
+    </div>
+
+    <div class="std-kit">
+      <p class="kit-label">Standard Library Modules (15):</p>
+      <div class="tag-cloud">collections string json io file process math error strconv path env net db ffi reflect</div>
+    </div>
+  </article>
+
+  <!-- ═══════ 结尾（START） ═══════ -->
+  <article class="page start" id="start">
+    <span class="page-num">6</span>
+    <h2>装配工序卡 · Assembly Steps</h2>
+
+    <div class="assembly-steps">
+      <div class="step-card">
+        <span class="step-badge">工步 1</span>
+        <p class="step-title">构建工具链（release 档）</p>
+        <pre><code>cargo build --release</code></pre>
+      </div>
+      <div class="step-card">
+        <span class="step-badge">工步 2</span>
+        <p class="step-title">创建项目骨架</p>
+        <pre><code>sgpm new hello && cd hello</code></pre>
+      </div>
+      <div class="step-card">
+        <span class="step-badge">工步 3</span>
+        <p class="step-title">编译并运行</p>
+        <pre><code>sgpm run</code></pre>
+      </div>
+      <div class="step-card">
+        <span class="step-badge">工步 4</span>
+        <p class="step-title">单文件试车（-O 2）</p>
+        <pre><code>sgc run examples/01_hello.sg -O 2</code></pre>
+      </div>
+    </div>
+
+    <footer class="epilogue">
+      <address class="signature">DRAWN BY: SENGOO TEAM<br/>CHECKED: CI PIPELINE<br/>APPROVED: MIT LICENSE<br/><small>© 2026 SEENGUO ENGINEERING GROUP — THANK YOU FOR READING</small></address>
+      <aside class="links">
+        <a href="https://github.com/Hyper66666/Sengoo" target="_blank" rel="noopener">GitHub Repository ↗</a>
+        <a href="https://sengoo.dev" target="_blank" rel="noopener">Official Site ↗</a>
+      </aside>
+    </footer>
+  </article>
+
+  <script>
+    // 页码条跟随滚动
+    const pageNums = document.querySelectorAll('.page-num');
+    const onScroll = () => {
+      let top = innerHeight * 0.15;
+      pageNums.forEach((el, i) => {
+        const rect = el.getBoundingClientRect();
+        if (rect.top < top && rect.bottom > top) {
+          // 高亮当前页码数字
+          pageNums.forEach(p => p.style.opacity = '0.2');
+          el.style.opacity = '1';
+        }
+      });
+    };
+    addEventListener('scroll', onScroll, { passive: true });
+    onScroll();
+  </script>
+</body>
+</html>

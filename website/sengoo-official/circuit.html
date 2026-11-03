@@ -1,0 +1,365 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>SENGOO SILICON — A Compiled System Language</title>
+  <meta name="description" content="Sengoo compiler & runtime · LLVM backend · Incremental compilation · Borrow checking" />
+  <link rel="icon" href="assets/img/sengoo-mark.png" />
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link href="https://fonts.googleapis.com/css2?family=Press+Start+2P&family=DotGothic16&family=JetBrains+Mono:wght@400;700&display=swap" rel="stylesheet" />
+  <link rel="stylesheet" href="assets/css/circuit.css" />
+</head>
+<body>
+
+  <!-- 顶部芯片顶栏 -->
+  <header class="chip-topbar">
+    <span class="chip-brand">SENGOO</span>
+    <nav class="chip-nav">
+      <a href="#core" title="核心">CORE</a>
+      <a href="#benchmarks" title="性能">BENCHMARKS</a>
+      <a href="#spec" title="规格">SPEC</a>
+      <a href="#toolchain" title="工具链">TOOLCHAIN</a>
+      <a href="#assembly" title="装配">ASSEMBLY</a>
+    </nav>
+    <span class="chip-status" id="statusIndicator"><i></i> LIVE BUILD</span>
+  </header>
+
+  <main class="board">
+
+    <!-- ═══════ 核心组件区域 (CPU) ═══════ -->
+    <section class="component-area cpu-die" id="core">
+
+      <!-- 主芯片块 -->
+      <div class="cpu-die-block">
+        <div class="die-label">SENGOO v0.1.0-rc.1</div>
+        <div class="die-logo">
+          <img src="assets/img/sengoo-logo-transparent.png" alt="" width="180" height="180" />
+        </div>
+
+        <!-- 电路引脚 -->
+        <div class="pins pins-t"></div>
+        <div class="pins pins-b"></div>
+        <div class="pins pins-l"></div>
+        <div class="pins pins-r"></div>
+
+        <!-- 内部微架构方块 -->
+        <div class="microblocks">
+          <div class="block b-lexer" data-name="LEXER">Lexer/Parser<br><em>logos·chumsky</em></div>
+          <div class="block b-typeck highlight" data-name="TYPECHK">Typeck/Borrow<br><em>NLL rules</em></div>
+          <div class="block b-hir" data-name="HIR">HIR→MIR<br><em>lowering</em></div>
+          <div class="block b-llvm" data-name="LLVM">LLVM IR<br><em>codegen</em></div>
+          <div class="block b-link" data-name="LINK">Link/Exe<br><em>clang</em></div>
+        </div>
+      </div>
+
+      <!-- 电路图说明 -->
+      <aside class="circuit-notes">
+        <h3 class="note-title">DATA FLOW DIAGRAM</h3>
+        <p>编译流程如电流通过芯片：源代码 → LEXER → TYPECK → HIR → LLVM → EXE。每个阶段点亮对应区块。</p>
+        <ul class="flow-steps">
+          <li><span class="flow-dot"></span>.sg source</li>
+          <li><span class="arrow">↓</span></li>
+          <li><span class="flow-dot active">TOK</span></li>
+          <li><span class="arrow">↓</span></li>
+          <li><span class="flow-dot">AST/HIR</span></li>
+          <li><span class="arrow">↓</span></li>
+          <li><span class="flow-dot">MIR/LLVM</span></li>
+          <li><span class="arrow">↓</span></li>
+          <li><span class="flow-dot final">EXE</span></li>
+        </ul>
+      </aside>
+    </section>
+
+    <!-- ═══════ 性能指标区 (IC) ═══════ -->
+    <section class="component-area ic-chip" id="benchmarks">
+      <h2 class="section-title">INTEGRATED CIRCUIT</h2>
+      <p class="section-intro">每颗晶体管都是实测数据。性能规格已验证。</p>
+
+      <div class="chip-grid">
+        <div class="metric-gate" data-metric="compile-full">
+          <span class="gate-label">FULL BUILD (1M LOC)</span>
+          <span class="gate-value">1828 ms</span>
+          <span class="gate-note">vs C++ 4884ms · Rust 54642ms</span>
+          <div class="gate-bar full"><span style="--w:90%"></span></div>
+        </div>
+
+        <div class="metric-gate" data-metric="compile-incr">
+          <span class="gate-label">INCREMENTAL (after edit)</span>
+          <span class="gate-value">33 ms</span>
+          <span class="gate-note">96% reduction from full build</span>
+          <div class="gate-bar success"><span style="--w:95%"></span></div>
+        </div>
+
+        <div class="metric-gate" data-metric="hotpath">
+          <span class="gate-label">HOT-PATH SPEEDUP</span>
+          <span class="gate-value">50.9×</span>
+          <span class="gate-note">vs Python baseline (p50 latency)</span>
+          <div class="gate-bar peak"><span style="--w:85%"></span></div>
+        </div>
+
+        <div class="metric-gate" data-metric="runtime">
+          <span class="gate-label">RUNTIME p50</span>
+          <span class="gate-value">8.92 ms</span>
+          <span class="gate-note">≈ C++ class performance</span>
+          <div class="gate-bar ok"><span style="--w:80%"></span></div>
+        </div>
+      </div>
+
+      <!-- 示波器波形显示 -->
+      <div class="oscilloscope">
+        <canvas id="waveform"></canvas>
+        <div class="osc-label">
+          <span class="osc-param">CH1: COMPILATION TIME</span>
+          <span class="osc-param">SCALE: 2s/div</span>
+          <span class="osc-unit">ms</span>
+        </div>
+      </div>
+    </section>
+
+    <!-- ═══════ 指令集规格区 (DSP) ═══════ -->
+    <section class="component-area dsp-core" id="spec">
+      <h2 class="section-title">DIGITAL SIGNAL PROCESSOR</h2>
+      <p class="section-intro">语言特性 = DSP 指令集。每条语法都有硬件映射。</p>
+
+      <div class="dsp-layout">
+        <div class="dsp-registers">
+          <table class="reg-table">
+            <caption><strong>REGISTER FILE</strong></caption>
+            <tr><td>I64</td><td>Integer (i64/i32)</td></tr>
+            <tr><td>F64/F32</td><td>Float (f64/f32)</td></tr>
+            <tr><td>BOOL</td><td>Boolean (true/false)</td></tr>
+            <tr><td>REF T</td><td>Immutable reference</td></tr>
+            <tr><td>MUT REF T</td><td>Mutable reference</td></tr>
+            <tr><td>&lt;async&gt;</td><td>Async function context</td></tr>
+            <tr><td>SPAWN ID</td><td>Task handle</td></tr>
+            <tr><td>JSON</td><td>Structured data</td></tr>
+          </table>
+        </div>
+
+        <div class="dsp-instructions">
+          <table class="inst-table">
+            <caption><strong>ASSEMBLY MNEMONICS</strong></caption>
+            <tr><td>DEF</td><td>Function definition</td></tr>
+            <tr><td>SPAN / AWAIT</td><td>Async task spawn/join</td></tr>
+            <tr><td>MATCH</td><td>Pattern matching with guards</td></tr>
+            <tr><td>STRUCT</td><td>Composite type definition</td></tr>
+            <tr><td>REQUIRES</td><td>Precondition assertion</td></tr>
+            <tr><td>ENSURES</td><td>Postcondition verification</td></tr>
+            <tr><td>IMPL</td><td>Method dispatch table</td></tr>
+            <tr><td>RETURN ?</td><td>Early return propagation</td></tr>
+          </table>
+        </div>
+
+        <div class="dsp-features">
+          <div class="feature-badge" data-fid="noreqs">✓ NO RUNTIME DEPENDENCIES</div>
+          <div class="feature-badge" data-fid="zeroalloc">✓ ZERO ALLOCATION IN HOT PATH</div>
+          <div class="feature-badge" data-fid="incr">✓ AST-BASED INCREMENTAL CACHE</div>
+          <div class="feature-badge" data-fid="reflect">✓ NON-INVASIVE REFLECTION</div>
+          <div class="feature-badge" data-fid="nll">✓ BORROW CHECKING WITH NLL</div>
+        </div>
+      </div>
+    </section>
+
+    <!-- ═══════ 工具链模块 (GPU) ═══════ -->
+    <section class="component-area gpu-core" id="toolchain">
+      <h2 class="section-title">GRAPHICS CORE</h2>
+      <p class="section-intro">四单元共享同一份 AST 内核。</p>
+
+      <div class="gpu-units">
+        <div class="gpu-unit">
+          <div class="unit-icon">⚒️</div>
+          <div class="unit-name">SGC</div>
+          <p class="unit-desc">Compiler CLI — check/build/run/doc/bench</p>
+          <ul class="unit-feats">
+            <li>-O 0~3 optimization levels</li>
+            <li>--low-memory profile</li>
+            <li>--contract-checks on/off</li>
+          </ul>
+        </div>
+        <div class="gpu-unit">
+          <div class="unit-icon">🔧</div>
+          <div class="unit-name">SGPM</div>
+          <p class="unit-desc">Package manager — workspace + lockfile</p>
+          <ul class="unit-feats">
+            <li>Sengoo.toml manifest</li>
+            <li>path/git/registry dependencies</li>
+            <li>auto update/check</li>
+          </ul>
+        </div>
+        <div class="gpu-unit">
+          <div class="unit-icon">✂️</div>
+          <div class="unit-name">SGFMT</div>
+          <p class="unit-desc">Formatter — CI --check mode</p>
+          <ul class="unit-feats">
+            <li>Automatic alignment</li>
+            <li>Commit hook ready</li>
+            <li>Deterministic output</li>
+          </ul>
+        </div>
+        <div class="gpu-unit">
+          <div class="unit-icon">🧭</div>
+          <div class="unit-name">SGLSP</div>
+          <p class="unit-desc">Language server — diagnostics/completion</p>
+          <ul class="unit-feats">
+            <li>VS Code integration</li>
+            <li>Go to definition</li>
+            <li>Hover documentation</li>
+          </ul>
+        </div>
+      </div>
+
+      <!-- 标准库模块地图 -->
+      <div class="module-map">
+        <div class="mm-header">STANDARD LIBRARY MAP</div>
+        <div class="mm-grid">
+          <span class="module-pin">collections</span>
+          <span class="module-pin">string</span>
+          <span class="module-pin">json</span>
+          <span class="module-pin">io</span>
+          <span class="module-pin">file</span>
+          <span class="module-pin">process</span>
+          <span class="module-pin">math</span>
+          <span class="module-pin">error</span>
+          <span class="module-pin">strconv</span>
+          <span class="module-pin">path</span>
+          <span class="module-pin">env</span>
+          <span class="module-pin">net</span>
+          <span class="module-pin">db</span>
+          <span class="module-pin">ffi</span>
+          <span class="module-pin">reflect</span>
+        </div>
+      </div>
+    </section>
+
+    <!-- ═══════ 装配区 (MEMORY) ═══════ -->
+    <section class="component-area memory-controller" id="assembly">
+      <h2 class="section-title">MEMORY CONTROLLER</h2>
+      <p class="section-intro">装配工序卡。四步完成部署。</p>
+
+      <div class="memory-cards">
+        <div class="mem-card">
+          <span class="mem-tag">STEP 1</span>
+          <h3>Build Toolchain (release)</h3>
+          <pre><code>cargo build --release</code></pre>
+          <span class="mem-note">LTO enabled | codegen-units=1</span>
+        </div>
+        <div class="mem-card">
+          <span class="mem-tag">STEP 2</span>
+          <h3>Create Project Skeleton</h3>
+          <pre><code>sgpm new hello && cd hello</code></pre>
+          <span class="mem-note">Sengoo.toml manifest generated</span>
+        </div>
+        <div class="mem-card">
+          <span class="mem-tag">STEP 3</span>
+          <h3>Compile and Run</h3>
+          <pre><code>sgpm run</code></pre>
+          <span class="mem-note">Builds and executes main entry</span>
+        </div>
+        <div class="mem-card">
+          <span class="mem-tag">STEP 4</span>
+          <h3>Single File Test Drive (-O 2)</h3>
+          <pre><code>sgc run examples/01_hello.sg -O 2</code></pre>
+          <span class="mem-note">Direct execution without project</span>
+        </div>
+      </div>
+
+      <!-- 右下角签名块 -->
+      <footer class="silicon-sig">
+        <address class="sig-text">
+          FABRICATED BY SENGOO ENGINEERING GROUP<br/>
+          PROCESSED ON RUST TOOLCHAIN<br/>
+          CERTIFIED CI PASS • MIT LICENSE<br/>
+          <small>© 2026 SENGUO • MADE FROM PURE CODE</small>
+        </address>
+        <a class="sig-btn" href="https://github.com/Hyper66666/Sengoo" target="_blank">GITHUB ↗</a>
+      </footer>
+    </section>
+
+  </main>
+
+  <!-- 右侧状态指示条 -->
+  <aside class="side-stats">
+    <div class="stat-item">
+      <span class="stat-label">BUILD STATUS</span>
+      <span class="stat-value green">PASS</span>
+    </div>
+    <div class="stat-item">
+      <span class="stat-label">COMMIT</span>
+      <span class="stat-value mono">v0.1.0-rc.1</span>
+    </div>
+    <div class="stat-item">
+      <span class="stat-label">DATE</span>
+      <span class="stat-value date">2026-07</span>
+    </div>
+  </aside>
+
+  <script>
+    // 数据流动画：模拟电流通过芯片
+    const blocks = document.querySelectorAll('.microblocks .block');
+    const flowDots = document.querySelectorAll('.flow-steps .flow-dot');
+
+    function pulseBlock(idx) {
+      blocks.forEach((b, i) => b.classList.toggle('active', i === idx));
+      if (flowDots[idx]) flowDots[idx].classList.add('active');
+      setTimeout(() => {
+        if (flowDots[idx]) flowDots[idx].classList.remove('active');
+      }, 1200);
+    }
+
+    setInterval(() => {
+      const indices = [0, 1, 2, 3, 4];
+      let step = 0;
+      setInterval(() => {
+        pulseBlock(indices[step]);
+        step = (step + 1) % indices.length;
+      }, 1000);
+    }, 8000);
+
+    // 示波器波形渲染
+    const canvas = document.getElementById('waveform');
+    if (canvas) {
+      const ctx = canvas.getContext('2d');
+      let phase = 0;
+
+      const renderWave = () => {
+        const w = canvas.width = canvas.offsetWidth;
+        const h = canvas.height = canvas.offsetHeight;
+        ctx.clearRect(0, 0, w, h);
+
+        // Grid lines
+        ctx.strokeStyle = 'rgba(74,157,217,0.15)';
+        ctx.lineWidth = 1;
+        for (let x = 0; x < w; x += 50) {
+          ctx.beginPath();
+          ctx.moveTo(x, 0);
+          ctx.lineTo(x, h);
+          ctx.stroke();
+        }
+        for (let y = 0; y < h; y += 50) {
+          ctx.beginPath();
+          ctx.moveTo(0, y);
+          ctx.lineTo(w, y);
+          ctx.stroke();
+        }
+
+        // Waveform
+        ctx.strokeStyle = '#4A9DD9';
+        ctx.lineWidth = 2;
+        ctx.beginPath();
+        for (let x = 0; x < w; x++) {
+          const y = h/2 + Math.sin((x + phase) * 0.05) * 30 * Math.sin((x + phase) * 0.01) * (phase % 100 > 50 ? 1 : 0);
+          x === 0 ? ctx.moveTo(x, y) : ctx.lineTo(x, y);
+        }
+        ctx.stroke();
+
+        phase += 2;
+        requestAnimationFrame(renderWave);
+      };
+
+      renderWave();
+    }
+  </script>
+</body>
+</html>
