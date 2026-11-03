@@ -60,6 +60,7 @@ impl<'a> LoweringContext<'a> {
             drop_scope_markers: Vec::new(),
             moved_drop_locals: HashSet::new(),
             moved_drop_fields: HashSet::new(),
+            exit_drop_bindings: HashMap::new(),
         }
     }
 

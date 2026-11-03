@@ -1,0 +1,71 @@
+import sgdata;
+
+import std::assert;
+
+import std::fs;
+
+extern "C" {
+    fn sgdata_live_handles() -> i64;
+    fn sengoo_string_live_handle_count() -> i64;
+    fn sengoo_buffer_live_handle_count() -> i64;
+    fn sgdata_write_text(path: i64, bytes: i64, length: i64) -> i64;
+}
+
+def exercise_data() -> Result<i64, i64> {
+    let csv = csv_parse("name,note\r\n世界,\"line 1\nline \"\"2\"\"\"\r\n")?;
+    assert_eq_i64(csv.rows(), 2, "data.sg", 14);
+    assert_eq_i64(csv.columns(), 2, "data.sg", 15);
+    let note = csv.field(1, 1)?;
+    assert_eq_str(note.as_str(), "line 1\nline \"2\"", "data.sg", 17);
+    let encoded = csv.serialize()?;
+    let again = csv_parse(encoded.as_str())?;
+    assert_eq_i64(again.rows(), 2, "data.sg", 20);
+    assert_true(csv_parse("a,b\nc").is_err(), "data.sg", 21);
+    assert_true(csv_parse("\"unterminated").is_err(), "data.sg", 22);
+    let mut built = csv_new(2)?;
+    built.push_field("comma,field")?;
+    built.push_field("quote\"")?;
+    let output = built.serialize()?;
+    let parsed = csv_parse(output.as_str())?;
+    assert_eq_i64(parsed.rows(), 1, "data.sg", 28);
+    let document = json_doc_object()?;
+    let large = document.new_i64(9007199254740993)?;
+    document.root().object_set("exact", large)?;
+    let max = document.new_i64(9223372036854775807)?;
+    document.root().object_set("max", max)?;
+    let min = document.new_i64(-9223372036854775807 - 1)?;
+    document.root().object_set("min", min)?;
+    let json = document.serialize_string()?;
+    let roundtrip = json_parse(json.as_str())?;
+    assert_eq_i64(json_field_i64(&roundtrip, "exact")?, 9007199254740993, "data.sg", 38);
+    assert_eq_i64(json_field_i64(&roundtrip, "max")?, 9223372036854775807, "data.sg", 39);
+    assert_eq_i64(json_field_i64(&roundtrip, "min")?, -9223372036854775807 - 1, "data.sg", 40);
+    text_write("sgdata-test.txt", "你好\n")?;
+    let text = text_read("sgdata-test.txt", 7)?;
+    assert_eq_str(text.as_str(), "你好\n", "data.sg", 43);
+    assert_true(text_read("sgdata-test.txt", 2).is_err(), "data.sg", 44);
+    fs_remove_file("sgdata-test.txt")?;
+    let mut binary = ffi_buffer_new(3)?;
+    binary.push_u8(97)?;
+    binary.push_u8(0)?;
+    binary.push_u8(98)?;
+    assert_eq_i64(sgdata_write_text(sengoo_stdlib_str_ptr("sgdata-nul-test.txt"), binary.ptr(), binary.used_len()), 0, "data.sg", 51);
+    let nul = text_read("sgdata-nul-test.txt", 3);
+    assert_eq_i64(nul.error, 10, "data.sg", 53);
+    assert_true(nul.is_err(), "data.sg", 54);
+    assert_true(csv_read("sgdata-nul-test.txt", 3).is_err(), "data.sg", 55);
+    assert_true(json_read("sgdata-nul-test.txt", 3).is_err(), "data.sg", 56);
+    fs_remove_file("sgdata-nul-test.txt")?;
+    Result { is_ok: true, value: 0, error: 0 };
+}
+
+def main() -> i64 {
+    let baseline = sengoo_string_live_handle_count();
+    let buffer_baseline = sengoo_buffer_live_handle_count();
+    let result = exercise_data();
+    assert_true(result.is_ok(), "data.sg", 52);
+    assert_eq_i64(sgdata_live_handles(), 0, "data.sg", 53);
+    assert_eq_i64(sengoo_string_live_handle_count(), baseline, "data.sg", 54);
+    assert_eq_i64(sengoo_buffer_live_handle_count(), buffer_baseline, "data.sg", 75);
+    0;
+}

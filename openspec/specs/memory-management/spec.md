@@ -1,7 +1,7 @@
-﻿# memory-management Specification
+# memory-management Specification
 
 ## Purpose
-TBD - created by archiving change automatic-memory-management. Update Purpose after archive.
+Specify deterministic ownership and Drop behavior, move checking, local borrow validity, partial moves, and opt-in shared ownership while preserving explicit-release compatibility.
 ## Requirements
 ### Requirement: Owning values SHALL be released automatically at end of scope
 

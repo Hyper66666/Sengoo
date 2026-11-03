@@ -1,0 +1,88 @@
+import sgsqlite;
+
+import std::assert;
+
+extern "C" {
+    fn sgsqlite_live_connections() -> i64;
+    fn sgsqlite_live_statements() -> i64;
+    fn sgsqlite_live_transactions() -> i64;
+    fn sengoo_string_live_handle_count() -> i64;
+    fn sengoo_buffer_live_handle_count() -> i64;
+}
+
+def insert_rollback(database: &SqliteDb) -> Result<i64, i64> {
+    let transaction = database.transaction()?;
+    transaction.exec("INSERT INTO items VALUES(2, 'rolled back')")?;
+    Result { is_ok: true, value: 0, error: 0 };
+}
+
+def insert_failure(database: &SqliteDb) -> Result<i64, i64> {
+    let transaction = database.transaction()?;
+    transaction.exec("INSERT INTO items VALUES(3, 'before error')")?;
+    transaction.exec("INSERT INTO items VALUES(1, 'duplicate')")?;
+    Result { is_ok: true, value: 0, error: 0 };
+}
+
+def detached_statement() -> Result<SqliteStmt, i64> {
+    let database = sqlite_open(":memory:")?;
+    database.prepare("SELECT 'retained connection'");
+}
+
+def exercise_sqlite() -> Result<i64, i64> {
+    let database = sqlite_open(":memory:")?;
+    database.exec("CREATE TABLE items(id INTEGER PRIMARY KEY, name TEXT)")?;
+    let mut insert = database.prepare("INSERT INTO items VALUES(?, ?)")?;
+    insert.bind_i64(1, 9007199254740993)?;
+    insert.bind_text(2, "世界'; DROP TABLE items; --")?;
+    assert_false(insert.step()?, "sqlite.sg", 37);
+    let mut query = database.prepare("SELECT id, name FROM items")?;
+    assert_true(query.step()?, "sqlite.sg", 39);
+    assert_eq_i64(query.integer(0)?, 9007199254740993, "sqlite.sg", 40);
+    let name = query.text(1)?;
+    assert_false(query.step()?, "sqlite.sg", 42);
+    assert_eq_str(name.as_str(), "世界'; DROP TABLE items; --", "sqlite.sg", 43);
+    insert_rollback(&database)?;
+    let mut transaction = database.transaction()?;
+    assert_true(database.exec("DELETE FROM items").is_err(), "sqlite.sg", 46);
+    assert_true(database.transaction().is_err(), "sqlite.sg", 47);
+    transaction.exec("INSERT INTO items VALUES(1, 'committed')")?;
+    transaction.commit()?;
+    assert_true(insert_failure(&database).is_err(), "sqlite.sg", 50);
+    let mut count = database.prepare("SELECT count(*) FROM items")?;
+    assert_true(count.step()?, "sqlite.sg", 52);
+    assert_eq_i64(count.integer(0)?, 2, "sqlite.sg", 53);
+    let mut detached = detached_statement()?;
+    assert_true(detached.step()?, "sqlite.sg", 55);
+    let retained = detached.text(0)?;
+    assert_eq_str(retained.as_str(), "retained connection", "sqlite.sg", 57);
+    let payload = ffi_buffer_new(3)?;
+    payload.push_u8(0)?;
+    payload.push_u8(255)?;
+    payload.push_u8(42)?;
+    let mut values = database.prepare("SELECT ?, ?, ?")?;
+    values.bind_blob(1, &payload)?;
+    values.bind_f64(2, 1.25)?;
+    values.bind_null(3)?;
+    assert_true(values.step()?, "sqlite.sg", 66);
+    let copied = values.blob(0)?;
+    assert_eq_i64(copied.used_len(), 3, "sqlite.sg", 68);
+    assert_false(copied.is_utf8(), "sqlite.sg", 69);
+    assert_eq_f64(values.number(1)?, 1.25, "sqlite.sg", 70);
+    assert_true(values.is_null(2)?, "sqlite.sg", 71);
+    values.reset()?;
+    assert_eq_i64(copied.used_len(), 3, "sqlite.sg", 73);
+    Result { is_ok: true, value: 0, error: 0 };
+}
+
+def main() -> i64 {
+    let baseline = sengoo_string_live_handle_count();
+    let buffer_baseline = sengoo_buffer_live_handle_count();
+    let result = exercise_sqlite();
+    assert_true(result.is_ok(), "sqlite.sg", 81);
+    assert_eq_i64(sgsqlite_live_connections(), 0, "sqlite.sg", 82);
+    assert_eq_i64(sgsqlite_live_statements(), 0, "sqlite.sg", 83);
+    assert_eq_i64(sgsqlite_live_transactions(), 0, "sqlite.sg", 84);
+    assert_eq_i64(sengoo_string_live_handle_count(), baseline, "sqlite.sg", 85);
+    assert_eq_i64(sengoo_buffer_live_handle_count(), buffer_baseline, "sqlite.sg", 86);
+    0;
+}

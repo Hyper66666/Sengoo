@@ -141,7 +141,7 @@ impl Codegen {
             self.declarations
                 .push_str(&format!("; ABI: {}\n", decl.abi.as_str()));
 
-            let ret = self.mir_type_to_llvm_cached(&decl.ret);
+            let ret = common::mir_type_to_llvm_str(&decl.ret);
 
             let params = decl
                 .params

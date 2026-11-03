@@ -1,7 +1,7 @@
 # mainstream-production-readiness Specification
 
 ## Purpose
-TBD - created by archiving change mainstream-production-readiness. Update Purpose after archive.
+Coordinate the production-readiness gates and require integration evidence to update the user-facing support matrix.
 ## Requirements
 ### Requirement: Production readiness program SHALL close current mainstream gates
 

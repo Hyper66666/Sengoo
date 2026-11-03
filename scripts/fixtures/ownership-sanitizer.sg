@@ -1,0 +1,117 @@
+import std::string;
+
+import std::collections;
+
+extern "C" {
+    fn ownership_probe_new(value: i64) -> i64;
+    fn ownership_probe_drop(handle: i64);
+    fn ownership_probe_read(handle: i64) -> i64;
+    fn ownership_probe_live() -> i64;
+    fn ownership_probe_created() -> i64;
+    fn ownership_probe_dropped() -> i64;
+    fn sengoo_string_live_handle_count() -> i64;
+}
+
+struct Owned {
+    handle: i64,
+    label: String,
+}
+
+impl Drop for Owned {
+    def drop(&mut self) {
+        if self.handle != 0 { ownership_probe_drop(self.handle); };
+    }
+}
+
+struct Nested {
+    title: String,
+    owner: Owned,
+    values: Vec<Owned>,
+    optional: Option<Owned>,
+    outcome: Result<Owned, i64>,
+}
+
+struct Pair {
+    left: String,
+    right: String,
+}
+
+def owner(value: i64) -> Result<Owned, i64> {
+    let label = string_from_str("owned-世界")?;
+    Result { is_ok: true, value: Owned { handle: ownership_probe_new(value), label: label }, error: 0 };
+}
+
+def nested() -> Result<Nested, i64> {
+    let title = string_from_str("nested")?;
+    let primary = owner(11)?;
+    let values: Vec<Owned> = vec_new();
+    values.push(owner(12)?);
+    values.push(owner(13)?);
+    let optional = option_some(owner(14)?);
+    let outcome = owner(15);
+    Result { is_ok: true, value: Nested { title: title, owner: primary, values: values, optional: optional, outcome: outcome }, error: 0 };
+}
+
+def check_gate(fail: bool) -> Result<i64, i64> {
+    if fail { Result { is_ok: false, value: 0, error: 9 }; } else { Result { is_ok: true, value: 1, error: 0 }; };
+}
+
+def propagate(fail: bool) -> Result<i64, i64> {
+    let aggregate = nested()?;
+    let allowed = check_gate(fail)?;
+    if ownership_probe_read(aggregate.owner.handle) != 11 { return Result { is_ok: false, value: 0, error: 90 }; };
+    if aggregate.values.len() != 2 { return Result { is_ok: false, value: 0, error: 91 }; };
+    Result { is_ok: true, value: allowed, error: 0 };
+}
+
+def branch(flag: bool) -> Result<i64, i64> {
+    let selected = if flag { owner(21)?; } else { owner(22)?; };
+    if flag { let inner = owner(23)?; if ownership_probe_read(inner.handle) != 23 { return Result { is_ok: false, value: 0, error: 92 }; }; return Result { is_ok: true, value: ownership_probe_read(selected.handle), error: 0 }; };
+    Result { is_ok: true, value: ownership_probe_read(selected.handle), error: 0 };
+}
+
+def loop_exit() -> Result<i64, i64> {
+    let mut index = 0;
+    while index < 5 { let current = owner(30 + index)?; index = index + 1; if index == 1 { continue; }; if ownership_probe_read(current.handle) <= 0 { return Result { is_ok: false, value: 0, error: 93 }; }; if index == 3 { break; }; };
+    Result { is_ok: true, value: index, error: 0 };
+}
+
+def option_choice(present: bool) -> Result<i64, i64> {
+    let payload = if present { owner(41)?; } else { Owned { handle: 0, label: String { handle: 0 } }; };
+    let wrapped: Option<Owned> = Option { is_some: present, value: payload };
+    let selected = wrapped.unwrap_or(owner(42)?);
+    Result { is_ok: true, value: ownership_probe_read(selected.handle), error: 0 };
+}
+
+def exercise() -> Result<i64, i64> {
+    let rejected = propagate(true);
+    if rejected.is_ok() or rejected.error != 9 { return Result { is_ok: false, value: 0, error: 94 }; };
+    if propagate(false)? != 1 { return Result { is_ok: false, value: 0, error: 95 }; };
+    if branch(true)? != 21 or branch(false)? != 22 { return Result { is_ok: false, value: 0, error: 96 }; };
+    if loop_exit()? != 3 { return Result { is_ok: false, value: 0, error: 97 }; };
+    if option_choice(true)? != 41 or option_choice(false)? != 42 { return Result { is_ok: false, value: 0, error: 98 }; };
+    let pair = Pair { left: string_from_str("left")?, right: string_from_str("right")? };
+    let moved = pair.left;
+    if moved.len() != 4 { return Result { is_ok: false, value: 0, error: 99 }; };
+    let absent: Option<Owned> = option_none();
+    Result { is_ok: true, value: 0, error: 0 };
+}
+
+def main() -> i64 {
+    let strings_before = sengoo_string_live_handle_count();
+    let result = exercise();
+    let created = ownership_probe_created();
+    let dropped = ownership_probe_dropped();
+    let strings_after = sengoo_string_live_handle_count();
+    println("ownership-sanitizer probe created/dropped:");
+    println(created);
+    println(dropped);
+    println("ownership-sanitizer String handles before/after:");
+    println(strings_before);
+    println(strings_after);
+    if not result.is_ok() { println(result.error); return 1; };
+    if strings_after != strings_before { return 2; };
+    if ownership_probe_live() != 0 or created != 19 or dropped != created { return 3; };
+    println("ownership-sanitizer: passed");
+    0;
+}

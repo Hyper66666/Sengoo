@@ -1,13 +1,17 @@
 name: realworld-e2e
 
 on:
+  workflow_dispatch:
   push:
     branches: [main]
   pull_request:
 
 jobs:
+  python-wheels:
+    uses: ./.github/workflows/python-wheels.yml
+
   realworld-e2e:
-    name: realworld locked loop (installed release toolchain)
+    name: realworld locked loop (${{ matrix.target }})
     runs-on: ${{ matrix.os }}
     strategy:
       fail-fast: false
@@ -23,6 +27,17 @@ jobs:
             target: x86_64-apple-darwin
     steps:
       - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
+
+      - name: Verify candidate checkout
+        shell: pwsh
+        run: |
+          $expected = "${{ github.event.pull_request.head.sha || github.sha }}"
+          $actual = git rev-parse HEAD
+          if ($LASTEXITCODE -ne 0 -or $actual.Trim() -ne $expected) {
+            throw "checkout revision $actual differs from candidate $expected"
+          }
 
       - uses: dtolnay/rust-toolchain@master
         with:
@@ -30,7 +45,7 @@ jobs:
 
       - uses: actions/setup-python@v5
         with:
-          python-version: "3.x"
+          python-version: "3.12"
 
       - name: Install LLVM clang (Linux)
         if: runner.os == 'Linux'
@@ -68,8 +83,9 @@ jobs:
         env:
           SENGOO_DIST_TARGET: ${{ matrix.target }}
         run: |
-          $env:SENGOO_BUILD_HASH = "${{ github.sha }}".Substring(0, 12)
-          ./scripts/package-toolchain.ps1 -Version 0.1.0-ci -NoBuild -SmokeEvidence "realworld-e2e installed fixture loop ${{ matrix.os }} ${{ github.sha }}"
+          $env:SENGOO_BUILD_HASH = "${{ github.event.pull_request.head.sha || github.sha }}".Substring(0, 12)
+          $env:GITHUB_SHA = "${{ github.event.pull_request.head.sha || github.sha }}"
+          ./scripts/package-toolchain.ps1 -Version 0.1.0-ci -NoBuild -SmokeEvidence "realworld-e2e installed fixture loop ${{ matrix.os }} ${{ github.event.pull_request.head.sha || github.sha }}"
 
       - name: Install package (POSIX)
         if: runner.os != 'Windows'
@@ -150,7 +166,8 @@ jobs:
 
           $summary = @()
           $fixtures = Get-ChildItem examples/realworld -Directory | Where-Object {
-            Test-Path (Join-Path $_.FullName "Sengoo.toml")
+            (Test-Path (Join-Path $_.FullName "Sengoo.toml")) -and
+              $_.Name -notin @("file-csv-index", "python-batch")
           } | Sort-Object Name
           foreach ($fixture in $fixtures) {
             $package = Join-Path $workRoot $fixture.Name
@@ -186,6 +203,35 @@ jobs:
           $summaryPath = Join-Path $workRoot "installed-realworld-summary.json"
           $summary | ConvertTo-Json -Depth 4 | Set-Content -LiteralPath $summaryPath -Encoding utf8
           "SENGOO_REALWORLD_SUMMARY=$summaryPath" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
+
+      - name: Build official offline package artifacts
+        shell: pwsh
+        run: |
+          $suffix = if ($IsWindows) { ".exe" } else { "" }
+          python scripts/package_ecosystem.py build --sgpm "$env:SENGOO_INSTALLED_BIN/sgpm$suffix" --output target/ecosystem-dist
+          if ($LASTEXITCODE -ne 0) { throw "official package artifact build failed" }
+
+      - name: Verify installed daily development and external consumers
+        shell: pwsh
+        run: |
+          python scripts/verify_daily_development.py --bin-dir "$env:SENGOO_INSTALLED_BIN" --distribution target/ecosystem-dist --report target/daily-development-evidence.json
+          if ($LASTEXITCODE -ne 0) { throw "installed daily-development acceptance failed" }
+
+      - name: Verify atomic incremental imports after removing consumer sources
+        shell: pwsh
+        run: |
+          python scripts/verify-index-incremental.py --bin-dir "$env:SENGOO_INSTALLED_BIN" --distribution target/ecosystem-dist --report target/index-incremental-evidence.json
+          if ($LASTEXITCODE -ne 0) { throw "incremental index acceptance failed" }
+
+      - name: Retain candidate ecosystem artifacts and evidence
+        uses: actions/upload-artifact@v4
+        with:
+          name: daily-development-${{ matrix.target }}-${{ github.event.pull_request.head.sha || github.sha }}
+          path: |
+            target/ecosystem-dist
+            target/daily-development-evidence.json
+            target/index-incremental-evidence.json
+          if-no-files-found: error
 
       - name: Verify installed sgc HTTP TLS composition
         shell: pwsh
@@ -272,7 +318,7 @@ jobs:
           Write-Host "reviewed official package: python-hot-path [python smoke, ctypes, .sgreflect.json]"
 
   graphics-package-smoke:
-    name: graphics package smoke (stub mode)
+    name: graphics package smoke (${{ matrix.os }})
     runs-on: ${{ matrix.os }}
     strategy:
       fail-fast: false
@@ -282,6 +328,17 @@ jobs:
       SGPLATFORM_SKIP_GRAPHICS: "1"
     steps:
       - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
+
+      - name: Verify candidate checkout
+        shell: pwsh
+        run: |
+          $expected = "${{ github.event.pull_request.head.sha || github.sha }}"
+          $actual = git rev-parse HEAD
+          if ($LASTEXITCODE -ne 0 -or $actual.Trim() -ne $expected) {
+            throw "checkout revision $actual differs from candidate $expected"
+          }
 
       - uses: dtolnay/rust-toolchain@master
         with:
@@ -301,23 +358,23 @@ jobs:
       - name: Verify sgplatform package
         shell: pwsh
         run: |
-          cargo run -p sgpm -- update --check --manifest-path packages/sgplatform/Sengoo.toml
-          cargo run -p sgpm -- test --locked --manifest-path packages/sgplatform/Sengoo.toml
-          cargo run -p sgpm -- build --locked --manifest-path packages/sgplatform/Sengoo.toml
-          cargo run -p sgpm -- doc --locked --manifest-path packages/sgplatform/Sengoo.toml
+          foreach ($commandArgs in @(@("update", "--check"), @("test", "--locked"), @("build", "--locked"), @("doc", "--locked"))) {
+            cargo run --locked -p sgpm -- --runtime-mode source-development @commandArgs --manifest-path packages/sgplatform/Sengoo.toml
+            if ($LASTEXITCODE -ne 0) { throw "sgplatform $($commandArgs -join ' ') failed" }
+          }
 
       - name: Verify sggame package
         shell: pwsh
         run: |
-          cargo run -p sgpm -- update --check --manifest-path packages/sggame/Sengoo.toml
-          cargo run -p sgpm -- test --locked --manifest-path packages/sggame/Sengoo.toml
-          cargo run -p sgpm -- build --locked --manifest-path packages/sggame/Sengoo.toml
-          cargo run -p sgpm -- doc --locked --manifest-path packages/sggame/Sengoo.toml
+          foreach ($commandArgs in @(@("update", "--check"), @("test", "--locked"), @("build", "--locked"), @("doc", "--locked"))) {
+            cargo run --locked -p sgpm -- --runtime-mode source-development @commandArgs --manifest-path packages/sggame/Sengoo.toml
+            if ($LASTEXITCODE -ne 0) { throw "sggame $($commandArgs -join ' ') failed" }
+          }
 
       - name: Verify sggui package
         shell: pwsh
         run: |
-          cargo run -p sgpm -- update --check --manifest-path packages/sggui/Sengoo.toml
-          cargo run -p sgpm -- test --locked --manifest-path packages/sggui/Sengoo.toml
-          cargo run -p sgpm -- build --locked --manifest-path packages/sggui/Sengoo.toml
-          cargo run -p sgpm -- doc --locked --manifest-path packages/sggui/Sengoo.toml
+          foreach ($commandArgs in @(@("update", "--check"), @("test", "--locked"), @("build", "--locked"), @("doc", "--locked"))) {
+            cargo run --locked -p sgpm -- --runtime-mode source-development @commandArgs --manifest-path packages/sggui/Sengoo.toml
+            if ($LASTEXITCODE -ne 0) { throw "sggui $($commandArgs -join ' ') failed" }
+          }

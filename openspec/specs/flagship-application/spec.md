@@ -1,7 +1,7 @@
 # flagship-application Specification
 
 ## Purpose
-TBD - created by archiving change flagship-reference-application. Update Purpose after archive.
+Require an executable reference application that exercises the matured language and serves as a repeatable CI integration gate.
 ## Requirements
 ### Requirement: A flagship reference application SHALL exist and exercise the matured language
 

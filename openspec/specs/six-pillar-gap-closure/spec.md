@@ -1,7 +1,7 @@
 # six-pillar-gap-closure Specification
 
 ## Purpose
-TBD - created by archiving change six-pillar-gap-closure. Update Purpose after archive.
+Coordinate independently owned closures for standard-library APIs, async execution, package resolution, language surfaces, compile scale, and developer tools. Tie supported status to child-change evidence and the published support matrix.
 ## Requirements
 ### Requirement: Umbrella closure SHALL be delivered through independently archived child changes
 

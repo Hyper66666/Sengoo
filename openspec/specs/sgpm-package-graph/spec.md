@@ -1,7 +1,7 @@
 # sgpm-package-graph Specification
 
 ## Purpose
-TBD - created by archiving change ecosystem-toolchain-maturity. Update Purpose after archive.
+Specify package identity, dependency aliases, coexistence of multiple versions, reproducible lockfiles, registry metadata, and deterministic publication evidence.
 ## Requirements
 ### Requirement: Dependency aliases resolve through an explicit package field
 
@@ -38,6 +38,11 @@ same package name when manifest and source constraints permit it.
   tuple still fail with an actionable diagnostic
 
 ### Requirement: Lockfile version 2 SHALL freeze package identity and edge aliases
+Sengoo.lock version 2 SHALL freeze canonical package-node identities independently from dependency-edge aliases, using the schema and source-normalization rules in the conformance scenario below.
+
+#### Scenario: Complete compatibility contract
+- **WHEN** this capability is implemented or modified
+- **THEN** it SHALL satisfy every clause of the following contract:
 
 `Sengoo.lock` version 2 SHALL use this shape:
 

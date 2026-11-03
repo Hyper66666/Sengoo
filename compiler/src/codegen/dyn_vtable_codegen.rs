@@ -87,7 +87,7 @@ impl Codegen {
 
     /// LLVM function-pointer type of a dispatch shim, e.g. `i64 (i8*)*`.
     fn shim_fn_pointer_type(&mut self, shim: &MirFunction) -> String {
-        let ret = self.mir_type_to_llvm_cached(&shim.return_type);
+        let ret = common::mir_type_to_llvm_str(&shim.return_type);
         let params: Vec<String> = shim
             .params
             .iter()

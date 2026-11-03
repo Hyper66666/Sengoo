@@ -1,5 +1,5 @@
 use miette::{IntoDiagnostic, Result};
-use std::collections::hash_map::DefaultHasher;
+use std::collections::{hash_map::DefaultHasher, BTreeSet};
 use std::fs;
 use std::hash::{Hash, Hasher};
 use std::path::{Path, PathBuf};
@@ -22,6 +22,21 @@ use crate::{
 pub(crate) const MINIMUM_CLANG_MAJOR: u32 = 15;
 pub(crate) const SENGOO_RUNTIME_ABI_VERSION: u32 = 1;
 static RUNTIME_OBJECT_TEMP_COUNTER: AtomicU64 = AtomicU64::new(0);
+
+/// Clang's relative includes do not consistently resolve Win32 verbatim paths.
+fn clang_input_path(path: &Path) -> PathBuf {
+    #[cfg(windows)]
+    {
+        let text = path.to_string_lossy();
+        if let Some(unc) = text.strip_prefix(r"\\?\UNC\") {
+            return PathBuf::from(format!(r"\\{unc}"));
+        }
+        if let Some(local) = text.strip_prefix(r"\\?\") {
+            return PathBuf::from(local);
+        }
+    }
+    path.to_path_buf()
+}
 
 fn effective_target(target: Option<&NativeBuildTarget>) -> NativeBuildTarget {
     target.cloned().unwrap_or_else(NativeBuildTarget::host)
@@ -110,6 +125,24 @@ const RUNTIME_SPLIT_C_SOURCES: &[&str] = &[
 ];
 const RUNTIME_SHARED_HEADER: &str = "runtime_shared.h";
 
+#[cfg(windows)]
+const WINDOWS_SYSTEM_LIBRARIES: &[&str] = &[
+    "kernel32.lib",
+    "ntdll.lib",
+    "userenv.lib",
+    "ws2_32.lib",
+    "dbghelp.lib",
+    "advapi32.lib",
+    "bcrypt.lib",
+    "crypt32.lib",
+    "ncrypt.lib",
+    "secur32.lib",
+    "legacy_stdio_definitions.lib",
+    "msvcrt.lib",
+    "vcruntime.lib",
+    "ucrt.lib",
+];
+
 fn runtime_shared_header_path(runtime_c_path: &Path) -> Option<PathBuf> {
     let local = runtime_c_path.parent()?.join(RUNTIME_SHARED_HEADER);
     if local.is_file() {
@@ -138,7 +171,7 @@ fn parse_runtime_abi_version(header: &str) -> Result<u32> {
     ))
 }
 
-fn validate_runtime_abi_compatibility(runtime_c_path: &Path) -> Result<()> {
+pub(crate) fn validate_runtime_abi_compatibility(runtime_c_path: &Path) -> Result<()> {
     let header_path = runtime_shared_header_path(runtime_c_path).ok_or_else(|| {
         miette::miette!(
             "runtime ABI declaration missing: no {RUNTIME_SHARED_HEADER} beside {}",
@@ -263,7 +296,40 @@ fn compile_runtime_source_to_object(
     opt_level: u8,
     target: &NativeBuildTarget,
     defines: &[&str],
+    shared: bool,
 ) -> Result<()> {
+    let mut command = runtime_c_command(
+        clang_exe,
+        runtime_source_path,
+        opt_level,
+        target,
+        defines,
+        shared,
+    )?;
+    let status = command
+        .arg("-c")
+        .arg(clang_input_path(runtime_source_path))
+        .arg("-o")
+        .arg(object_path)
+        .status()
+        .into_diagnostic()
+        .map_err(|e| miette::miette!("failed to invoke clang for runtime object: {}", e))?;
+    if !status.success() {
+        return Err(miette::miette!(
+            "compile failed while preparing runtime object cache"
+        ));
+    }
+    Ok(())
+}
+
+fn runtime_c_command(
+    clang_exe: &str,
+    runtime_source_path: &Path,
+    opt_level: u8,
+    target: &NativeBuildTarget,
+    defines: &[&str],
+    shared: bool,
+) -> Result<Command> {
     let mut command = Command::new(clang_exe);
     command
         .arg("-Wno-override-module")
@@ -284,22 +350,10 @@ fn compile_runtime_source_to_object(
 
     apply_clang_target_args(&mut command, target)?;
 
-    let status = command
-        .arg("-c")
-        .arg(runtime_source_path)
-        .arg("-o")
-        .arg(object_path)
-        .status()
-        .into_diagnostic()
-        .map_err(|e| miette::miette!("failed to invoke clang for runtime object: {}", e))?;
-
-    if !status.success() {
-        return Err(miette::miette!(
-            "compile failed while preparing runtime object cache"
-        ));
+    if shared && !target.is_windows_msvc() {
+        command.args(["-fPIC", "-fvisibility=hidden"]);
     }
-
-    Ok(())
+    Ok(command)
 }
 
 fn runtime_object_temp_path(object_path: &Path) -> PathBuf {
@@ -350,17 +404,34 @@ pub(crate) fn ensure_runtime_objects_with_defines(
     target: Option<&NativeBuildTarget>,
     defines: &[&str],
 ) -> Result<Vec<PathBuf>> {
+    ensure_runtime_objects_for_mode(clang_exe, runtime_c, opt_level, target, defines, false)
+}
+
+fn ensure_runtime_objects_for_mode(
+    clang_exe: &str,
+    runtime_c: &str,
+    opt_level: u8,
+    target: Option<&NativeBuildTarget>,
+    defines: &[&str],
+    shared: bool,
+) -> Result<Vec<PathBuf>> {
     let target = effective_target(target);
     let runtime_c_path = Path::new(runtime_c);
     validate_runtime_abi_compatibility(runtime_c_path)?;
     let sources = runtime_source_bundle(runtime_c)?;
     let bundle_fingerprint = runtime_bundle_fingerprint(runtime_c)?;
+    let compiler = native_compiler_fingerprint(clang_exe)?;
     let mut object_paths = Vec::with_capacity(sources.len());
     for source_path in sources {
+        let command =
+            runtime_c_command(clang_exe, &source_path, opt_level, &target, defines, shared)?;
+        let mut input_hash = DefaultHasher::new();
+        bundle_fingerprint.hash(&mut input_hash);
+        native_compile_fingerprint(command, &source_path, compiler, shared)?.hash(&mut input_hash);
         let object_path = runtime_object_cache_path(
             &source_path,
             runtime_c_path,
-            bundle_fingerprint,
+            input_hash.finish(),
             opt_level,
             &target,
             defines,
@@ -374,6 +445,7 @@ pub(crate) fn ensure_runtime_objects_with_defines(
                 opt_level,
                 &target,
                 defines,
+                shared,
             );
             if let Err(error) = compile_result {
                 let _ = fs::remove_file(&temp_path);
@@ -550,6 +622,27 @@ pub(crate) fn append_native_runtime_inputs(
     Ok(())
 }
 
+/// Shared libraries require their own PIC, hidden-visibility C runtime objects.
+/// The installed Rust runtime remains selected by the same ABI-checked path.
+pub(crate) fn append_native_runtime_inputs_for_shared(
+    clang_exe: &str,
+    object_paths: &mut Vec<PathBuf>,
+    runtime_c: &str,
+    opt_level: u8,
+    target: Option<&NativeBuildTarget>,
+) -> Result<()> {
+    object_paths.extend(ensure_runtime_objects_for_mode(
+        clang_exe,
+        runtime_c,
+        opt_level,
+        target,
+        &[NATIVE_NET_RUNTIME_DEFINE, NATIVE_ASYNC_RUNTIME_DEFINE],
+        true,
+    )?);
+    object_paths.push(ensure_async_runtime_staticlib(opt_level, target)?);
+    Ok(())
+}
+
 fn platform_linker_args(target: &NativeBuildTarget) -> Vec<&'static str> {
     if target.triple.ends_with("-apple-darwin") || target.triple.ends_with("-apple-macosx") {
         vec!["-framework", "Security", "-framework", "CoreFoundation"]
@@ -664,7 +757,14 @@ fn newest_child_dir(dir: &Path) -> Option<PathBuf> {
         .map(|entry| entry.path())
         .filter(|path| path.is_dir())
         .collect::<Vec<_>>();
-    candidates.sort();
+    candidates.sort_by_key(|path| {
+        path.file_name()
+            .unwrap_or_default()
+            .to_string_lossy()
+            .split('.')
+            .map(|part| part.parse::<u32>().unwrap_or(0))
+            .collect::<Vec<_>>()
+    });
     candidates.pop()
 }
 
@@ -680,29 +780,78 @@ fn find_windows_sdk_include_root() -> Option<PathBuf> {
 
 #[cfg(windows)]
 fn find_msvc_tool_root() -> Option<PathBuf> {
+    if let Some(path) = std::env::var_os("VCToolsInstallDir").map(PathBuf::from) {
+        if path.join("include/stdio.h").is_file() && path.join("lib/x64/vcruntime.lib").is_file() {
+            return Some(path);
+        }
+    }
+    let vswhere =
+        Path::new(r"C:\Program Files (x86)\Microsoft Visual Studio\Installer\vswhere.exe");
+    if let Ok(output) = Command::new(vswhere)
+        .args([
+            "-latest",
+            "-products",
+            "*",
+            "-requires",
+            "Microsoft.VisualStudio.Component.VC.Tools.x86.x64",
+            "-property",
+            "installationPath",
+        ])
+        .output()
+    {
+        if output.status.success() {
+            for install in String::from_utf8_lossy(&output.stdout)
+                .lines()
+                .map(str::trim)
+                .filter(|line| !line.is_empty())
+            {
+                if let Some(path) = newest_child_dir(&Path::new(install).join("VC/Tools/MSVC")) {
+                    return Some(path);
+                }
+            }
+        }
+    }
     for base in [
         Path::new(r"C:\Program Files\Microsoft Visual Studio"),
         Path::new(r"C:\Program Files (x86)\Microsoft Visual Studio"),
     ] {
-        let Some(year_dir) = newest_child_dir(base) else {
-            continue;
-        };
-        let Some(edition_dir) = newest_child_dir(&year_dir) else {
-            continue;
-        };
-        let tool_root = edition_dir.join("VC").join("Tools").join("MSVC");
-        if !tool_root.exists() {
-            continue;
-        }
-        if let Some(version_dir) = newest_child_dir(&tool_root) {
-            return Some(version_dir);
+        if let Some(root) = find_msvc_tool_root_under(base) {
+            return Some(root);
         }
     }
     None
 }
 
 #[cfg(windows)]
-fn find_msvc_link_exe() -> Option<PathBuf> {
+fn find_msvc_tool_root_under(base: &Path) -> Option<PathBuf> {
+    let mut candidates = vec![];
+    for year in fs::read_dir(base).ok()?.flatten() {
+        let Ok(editions) = fs::read_dir(year.path()) else {
+            continue;
+        };
+        for edition in editions.flatten() {
+            if let Some(path) = newest_child_dir(&edition.path().join("VC/Tools/MSVC")) {
+                if path.join("include/stdio.h").is_file()
+                    && path.join("lib/x64/vcruntime.lib").is_file()
+                {
+                    candidates.push(path);
+                }
+            }
+        }
+    }
+    candidates.sort_by_key(|path| {
+        path.file_name()
+            .unwrap_or_default()
+            .to_string_lossy()
+            .split('.')
+            .map(|p| p.parse::<u32>().unwrap_or(0))
+            .collect::<Vec<_>>()
+    });
+    candidates.pop()
+}
+
+#[cfg(windows)]
+pub(crate) fn find_msvc_link_exe() -> Option<PathBuf> {
     let tool_root = find_msvc_tool_root()?;
     let candidate = tool_root
         .join("bin")
@@ -713,7 +862,7 @@ fn find_msvc_link_exe() -> Option<PathBuf> {
 }
 
 #[cfg(windows)]
-fn windows_link_lib_paths() -> Vec<PathBuf> {
+pub(crate) fn windows_link_lib_paths() -> Vec<PathBuf> {
     let mut paths = Vec::new();
     if let Some(tool_root) = find_msvc_tool_root() {
         let vc_lib = tool_root.join("lib").join("x64");
@@ -789,25 +938,7 @@ fn run_windows_link_command(
     for object in &objects {
         link_cmd.arg(object);
     }
-    for lib in [
-        "kernel32.lib",
-        "ntdll.lib",
-        "userenv.lib",
-        "ws2_32.lib",
-        "dbghelp.lib",
-        // Native net/TLS (schannel) support linked through the runtime staticlib.
-        "advapi32.lib",
-        "bcrypt.lib",
-        "crypt32.lib",
-        "ncrypt.lib",
-        "secur32.lib",
-        "legacy_stdio_definitions.lib",
-        "msvcrt.lib",
-        "vcruntime.lib",
-        "ucrt.lib",
-    ] {
-        link_cmd.arg(lib);
-    }
+    link_cmd.args(WINDOWS_SYSTEM_LIBRARIES);
     link_cmd.arg("/ENTRY:mainCRTStartup");
     link_cmd.arg("/SUBSYSTEM:CONSOLE");
     append_windows_debug_link_args(&mut link_cmd, executable_path, debug_info);
@@ -922,13 +1053,167 @@ fn native_c_compile_defines(source_path: &Path) -> Vec<&'static str> {
     }
 }
 
-fn package_native_object_fingerprint(source_path: &Path) -> Result<u64> {
+/// Hash the actual compiler binary and its reported version, not its path alone.
+/// Computed once per bundle so all objects use the same compiler identity.
+fn native_compiler_fingerprint(clang_exe: &str) -> Result<u64> {
     let mut hasher = DefaultHasher::new();
-    file_fingerprint(source_path)?.hash(&mut hasher);
-    if is_sgplatform_shim_source(source_path) {
-        sgplatform_graphics_skip_enabled().hash(&mut hasher);
+    let executable = which::which(clang_exe).into_diagnostic()?;
+    fs::canonicalize(&executable)
+        .unwrap_or(executable.clone())
+        .hash(&mut hasher);
+    file_fingerprint(&executable)?.hash(&mut hasher);
+    let output = Command::new(clang_exe)
+        .arg("--version")
+        .output()
+        .into_diagnostic()?;
+    if !output.status.success() {
+        return Err(miette::miette!(
+            "clang --version failed during native cache validation"
+        ));
+    }
+    output.stdout.hash(&mut hasher);
+    output.stderr.hash(&mut hasher);
+    Ok(hasher.finish())
+}
+
+/// Clang emits make-escaped paths (including spaces and Windows drive letters).
+fn dependency_paths(output: &str) -> Result<Vec<PathBuf>> {
+    let body = output.strip_prefix("sengoo-deps:").ok_or_else(|| {
+        miette::miette!("unrecognized clang dependency output; refusing a stale native cache entry")
+    })?;
+    let body = body.replace("\\\r\n", "").replace("\\\n", "");
+    let mut chars = body.chars().peekable();
+    let mut token = String::new();
+    let mut paths = BTreeSet::new();
+    while let Some(ch) = chars.next() {
+        if ch == '\\'
+            && chars.peek().is_some_and(|next| {
+                next.is_whitespace()
+                    || matches!(*next, '#' | ':')
+                    || (!cfg!(windows) && *next == '\\')
+            })
+        {
+            token.push(chars.next().unwrap());
+        } else if ch.is_whitespace() {
+            if !token.is_empty() {
+                paths.insert(PathBuf::from(std::mem::take(&mut token)));
+            }
+        } else if ch == '$' && chars.peek() == Some(&'$') {
+            chars.next();
+            token.push('$');
+        } else {
+            token.push(ch);
+        }
+    }
+    if !token.is_empty() {
+        paths.insert(PathBuf::from(token));
+    }
+    Ok(paths.into_iter().collect())
+}
+
+fn native_compile_fingerprint(
+    mut command: Command,
+    source_path: &Path,
+    compiler: u64,
+    shared: bool,
+) -> Result<u64> {
+    let mut hasher = DefaultHasher::new();
+    "sengoo-native-object-cache-v2".hash(&mut hasher);
+    compiler.hash(&mut hasher);
+    shared.hash(&mut hasher);
+    command.get_args().collect::<Vec<_>>().hash(&mut hasher);
+    for name in [
+        "CPATH",
+        "C_INCLUDE_PATH",
+        "SDKROOT",
+        "MACOSX_DEPLOYMENT_TARGET",
+        "INCLUDE",
+    ] {
+        name.hash(&mut hasher);
+        std::env::var_os(name).hash(&mut hasher);
+    }
+    let output = command
+        .args(["-M", "-MT", "sengoo-deps"])
+        .arg(clang_input_path(source_path))
+        .output()
+        .into_diagnostic()?;
+    if !output.status.success() {
+        return Err(miette::miette!(
+            "failed to discover native dependencies for {}:\n{}",
+            source_path.display(),
+            String::from_utf8_lossy(&output.stderr)
+        ));
+    }
+    for dependency in dependency_paths(&String::from_utf8_lossy(&output.stdout))? {
+        let canonical = fs::canonicalize(&dependency).unwrap_or(dependency);
+        canonical.hash(&mut hasher);
+        file_fingerprint(&canonical)?.hash(&mut hasher);
     }
     Ok(hasher.finish())
+}
+
+/// The executable cache must see native changes before deciding to skip linking.
+/// Reuses the exact object input model rather than trusting only Sengoo sources.
+pub(crate) fn native_build_input_fingerprint(
+    clang_exe: &str,
+    input: &Path,
+    root_source: &str,
+    runtime_c: Option<&str>,
+    opt_level: u8,
+    target: Option<&NativeBuildTarget>,
+    shared: bool,
+) -> Result<u64> {
+    let target = effective_target(target);
+    let compiler = native_compiler_fingerprint(clang_exe)?;
+    let mut hasher = DefaultHasher::new();
+    compiler.hash(&mut hasher);
+    target.triple.hash(&mut hasher);
+    opt_level.hash(&mut hasher);
+    shared.hash(&mut hasher);
+    if let Some(runtime_c) = runtime_c {
+        runtime_bundle_fingerprint(runtime_c)?.hash(&mut hasher);
+        for source in runtime_source_bundle(runtime_c)? {
+            let command = runtime_c_command(
+                clang_exe,
+                &source,
+                opt_level,
+                &target,
+                &[NATIVE_NET_RUNTIME_DEFINE, NATIVE_ASYNC_RUNTIME_DEFINE],
+                shared,
+            )?;
+            native_compile_fingerprint(command, &source, compiler, shared)?.hash(&mut hasher);
+        }
+    }
+    for source in collect_package_native_c_sources(input, root_source) {
+        let command = package_c_command(clang_exe, &source, opt_level, &target, shared)?;
+        native_compile_fingerprint(command, &source, compiler, shared)?.hash(&mut hasher);
+    }
+    for name in [SDL2_LIB_DIR_ENV, "LIB", "LIBRARY_PATH", "SENGOO_LINKER"] {
+        name.hash(&mut hasher);
+        std::env::var_os(name).hash(&mut hasher);
+    }
+    native_library_search_paths_from_env().hash(&mut hasher);
+    Ok(hasher.finish())
+}
+
+fn package_c_command(
+    clang_exe: &str,
+    source_path: &Path,
+    opt_level: u8,
+    target: &NativeBuildTarget,
+    shared: bool,
+) -> Result<Command> {
+    let mut command = Command::new(clang_exe);
+    command
+        .arg("-Wno-override-module")
+        .arg(format!("-O{}", opt_level));
+    apply_clang_target_args(&mut command, target)?;
+    command.args(native_c_compile_include_args());
+    command.args(native_c_compile_defines(source_path));
+    if shared && !target.is_windows_msvc() {
+        command.args(["-fPIC", "-fvisibility=hidden"]);
+    }
+    Ok(command)
 }
 
 pub(crate) fn compile_c_to_object(
@@ -938,21 +1223,39 @@ pub(crate) fn compile_c_to_object(
     opt_level: u8,
     target: Option<&NativeBuildTarget>,
 ) -> Result<()> {
+    compile_c_to_object_for_mode(
+        clang_exe,
+        source_path,
+        object_path,
+        opt_level,
+        target,
+        false,
+    )
+}
+
+pub(crate) fn compile_c_to_object_for_shared(
+    clang_exe: &str,
+    source_path: &Path,
+    object_path: &Path,
+    opt_level: u8,
+    target: Option<&NativeBuildTarget>,
+) -> Result<()> {
+    compile_c_to_object_for_mode(clang_exe, source_path, object_path, opt_level, target, true)
+}
+
+fn compile_c_to_object_for_mode(
+    clang_exe: &str,
+    source_path: &Path,
+    object_path: &Path,
+    opt_level: u8,
+    target: Option<&NativeBuildTarget>,
+    shared: bool,
+) -> Result<()> {
     let target = effective_target(target);
-    let mut command = Command::new(clang_exe);
-    command
-        .arg("-Wno-override-module")
-        .arg(format!("-O{}", opt_level));
-    apply_clang_target_args(&mut command, &target)?;
-    for arg in native_c_compile_include_args() {
-        command.arg(arg);
-    }
-    for arg in native_c_compile_defines(source_path) {
-        command.arg(arg);
-    }
+    let mut command = package_c_command(clang_exe, source_path, opt_level, &target, shared)?;
     let status = command
         .arg("-c")
-        .arg(source_path)
+        .arg(clang_input_path(source_path))
         .arg("-o")
         .arg(object_path)
         .status()
@@ -986,20 +1289,80 @@ pub(crate) fn append_package_native_inputs(
     opt_level: u8,
     target: Option<&NativeBuildTarget>,
 ) -> Result<()> {
+    append_package_native_inputs_for_mode(
+        clang_exe,
+        object_paths,
+        input_path,
+        root_source,
+        build_dir,
+        opt_level,
+        target,
+        false,
+    )
+}
+
+pub(crate) fn append_package_native_inputs_for_shared(
+    clang_exe: &str,
+    object_paths: &mut Vec<PathBuf>,
+    input_path: &Path,
+    root_source: &str,
+    build_dir: &Path,
+    opt_level: u8,
+    target: Option<&NativeBuildTarget>,
+) -> Result<()> {
+    append_package_native_inputs_for_mode(
+        clang_exe,
+        object_paths,
+        input_path,
+        root_source,
+        build_dir,
+        opt_level,
+        target,
+        true,
+    )
+}
+
+#[allow(clippy::too_many_arguments)]
+fn append_package_native_inputs_for_mode(
+    clang_exe: &str,
+    object_paths: &mut Vec<PathBuf>,
+    input_path: &Path,
+    root_source: &str,
+    build_dir: &Path,
+    opt_level: u8,
+    target: Option<&NativeBuildTarget>,
+    shared: bool,
+) -> Result<()> {
     let target = effective_target(target);
-    for source in collect_package_native_c_sources(input_path, root_source) {
+    let sources = collect_package_native_c_sources(input_path, root_source);
+    if sources.is_empty() {
+        return Ok(());
+    }
+    let compiler = native_compiler_fingerprint(clang_exe)?;
+    for source in sources {
         let stem = source
             .file_stem()
             .and_then(|name| name.to_str())
             .unwrap_or("native");
-        let hash = package_native_object_fingerprint(&source)?;
+        let command = package_c_command(clang_exe, &source, opt_level, &target, shared)?;
+        let hash = native_compile_fingerprint(command, &source, compiler, shared)?;
         let object_path =
             build_dir.join(format!("{}-{:x}.{}", stem, hash, target.object_extension()));
         if !object_path.is_file() {
             if let Some(parent) = object_path.parent() {
                 fs::create_dir_all(parent).into_diagnostic()?;
             }
-            compile_c_to_object(clang_exe, &source, &object_path, opt_level, Some(&target))?;
+            let temporary = runtime_object_temp_path(&object_path);
+            let compile = if shared {
+                compile_c_to_object_for_shared
+            } else {
+                compile_c_to_object
+            };
+            if let Err(error) = compile(clang_exe, &source, &temporary, opt_level, Some(&target)) {
+                let _ = fs::remove_file(&temporary);
+                return Err(error);
+            }
+            publish_runtime_object(&temporary, &object_path)?;
         }
         object_paths.push(object_path);
     }
@@ -1014,13 +1377,56 @@ pub(crate) fn compile_ir_to_object(
     target: Option<&NativeBuildTarget>,
     debug_info: bool,
 ) -> Result<()> {
+    compile_ir_to_object_for_mode(
+        clang_exe,
+        llvm_ir_path,
+        object_path,
+        opt_level,
+        target,
+        debug_info,
+        false,
+    )
+}
+
+pub(crate) fn compile_ir_to_object_for_shared(
+    clang_exe: &str,
+    llvm_ir_path: &Path,
+    object_path: &Path,
+    opt_level: u8,
+    target: Option<&NativeBuildTarget>,
+    debug_info: bool,
+) -> Result<()> {
+    compile_ir_to_object_for_mode(
+        clang_exe,
+        llvm_ir_path,
+        object_path,
+        opt_level,
+        target,
+        debug_info,
+        true,
+    )
+}
+
+fn compile_ir_to_object_for_mode(
+    clang_exe: &str,
+    llvm_ir_path: &Path,
+    object_path: &Path,
+    opt_level: u8,
+    target: Option<&NativeBuildTarget>,
+    debug_info: bool,
+    shared: bool,
+) -> Result<()> {
     let target = effective_target(target);
     let mut command = Command::new(clang_exe);
     command
         .arg("-Wno-override-module")
+        .arg("-Wno-unused-command-line-argument")
         .arg(format!("-O{}", opt_level));
     append_debug_compile_arg(&mut command, &target, debug_info);
     apply_clang_target_args(&mut command, &target)?;
+    if shared && !target.is_windows_msvc() {
+        command.arg("-fPIC");
+    }
 
     let status = command
         .arg("-c")
@@ -1242,6 +1648,99 @@ pub(crate) fn compile_native_binary(
     Ok(())
 }
 
+/// Shared and executable artifacts use the same runtime, target and system
+/// library configuration. Only entry-point/export policy differs here.
+pub(crate) fn link_native_shared_from_objects(
+    clang: &str,
+    objects: &[PathBuf],
+    output: &Path,
+    build_dir: &Path,
+    exports: &BTreeSet<String>,
+    libraries: &[String],
+    target: &NativeBuildTarget,
+) -> Result<()> {
+    let search_paths = native_library_search_paths_from_env();
+    let objects = sorted_object_paths(objects);
+    #[cfg(windows)]
+    let mut command = {
+        let linker = find_msvc_link_exe()
+            .ok_or_else(|| miette::miette!("MSVC linker missing; run sgc doctor"))?;
+        let mut command = Command::new(linker);
+        command
+            .args(["/NOLOGO", "/DLL"])
+            .arg(format!("/OUT:{}", output.display()))
+            .args(&objects);
+        for directory in windows_link_lib_paths() {
+            command.arg(format!("/LIBPATH:{}", directory.display()));
+        }
+        command.args(WINDOWS_SYSTEM_LIBRARIES);
+        for export in exports {
+            command.arg(format!("/EXPORT:{export}"));
+        }
+        let _ = (clang, build_dir);
+        command
+    };
+    #[cfg(not(windows))]
+    let mut command = {
+        let mut command = Command::new(clang);
+        apply_clang_target_args(&mut command, target)?;
+        command
+            .arg(if cfg!(target_os = "macos") {
+                "-dynamiclib"
+            } else {
+                "-shared"
+            })
+            .args(&objects)
+            .arg("-o")
+            .arg(output);
+        command.args(platform_linker_args(target));
+        let export_path = build_dir.join("exports.txt");
+        if cfg!(target_os = "macos") {
+            fs::write(
+                &export_path,
+                exports
+                    .iter()
+                    .map(|symbol| format!("_{symbol}\n"))
+                    .collect::<String>(),
+            )
+            .into_diagnostic()?;
+            command.arg(format!(
+                "-Wl,-exported_symbols_list,{}",
+                export_path.display()
+            ));
+        } else {
+            fs::write(
+                &export_path,
+                format!(
+                    "{{ global: {}; local: *; }};\n",
+                    exports.iter().cloned().collect::<Vec<_>>().join("; ")
+                ),
+            )
+            .into_diagnostic()?;
+            command.arg(format!("-Wl,--version-script={}", export_path.display()));
+            command.args([
+                "-Wl,-Bsymbolic",
+                "-Wl,--exclude-libs,ALL",
+                "-lpthread",
+                "-ldl",
+            ]);
+        }
+        command
+    };
+    append_native_library_link_args(&mut command, libraries, target, &search_paths);
+    append_deterministic_link_args(&mut command, target);
+    let result = command.output().into_diagnostic()?;
+    if !result.status.success() {
+        return Err(miette::miette!(
+            "shared link failed: {}\n{}\n{}",
+            format_native_link_failure_message(libraries),
+            String::from_utf8_lossy(&result.stdout),
+            String::from_utf8_lossy(&result.stderr)
+        ));
+    }
+    Ok(())
+}
+
 pub(crate) fn run_native_binary_with_args(executable_path: &Path, args: &[String]) -> Result<i32> {
     let run_output = Command::new(executable_path)
         .args(args)
@@ -1402,6 +1901,121 @@ mod tests {
             "sengoo-sgc-{label}-{}-{unique}",
             std::process::id()
         ))
+    }
+
+    #[test]
+    fn dependency_parser_preserves_escaped_spaces_drive_letters_and_continuations() {
+        assert_eq!(
+            dependency_paths("sengoo-deps: C:\\src\\main.c dir\\ with\\ spaces/a.h \\\ndeep/b.h\n")
+                .unwrap(),
+            vec![
+                PathBuf::from("C:\\src\\main.c"),
+                PathBuf::from("deep/b.h"),
+                PathBuf::from("dir with spaces/a.h")
+            ]
+        );
+        assert!(dependency_paths("unexpected target: a.c").is_err());
+    }
+
+    #[cfg(windows)]
+    #[test]
+    fn windows_clang_paths_preserve_unc_and_remove_verbatim_prefixes() {
+        assert_eq!(
+            clang_input_path(Path::new(r"\\?\D:\project\native.c")),
+            PathBuf::from(r"D:\project\native.c")
+        );
+        assert_eq!(
+            clang_input_path(Path::new(r"\\?\UNC\server\share\native.c")),
+            PathBuf::from(r"\\server\share\native.c")
+        );
+        assert_eq!(
+            dependency_paths("sengoo-deps: \\\\?\\D:\\project\\native.c\n").unwrap(),
+            vec![PathBuf::from(r"\\?\D:\project\native.c")]
+        );
+    }
+
+    #[cfg(windows)]
+    #[test]
+    fn msvc_discovery_ignores_unrelated_newest_installation_directories() {
+        let root = temp_test_dir("msvc-discovery");
+        fs::create_dir_all(root.join("Installer/newest")).unwrap();
+        fs::create_dir_all(root.join("2022/Shared")).unwrap();
+        let tools = root.join("2022/BuildTools/VC/Tools/MSVC/14.44.35207");
+        write_marker(&tools.join("include/stdio.h"));
+        write_marker(&tools.join("lib/x64/vcruntime.lib"));
+        assert_eq!(find_msvc_tool_root_under(&root), Some(tools));
+        let _ = fs::remove_dir_all(root);
+    }
+
+    #[test]
+    fn native_cache_tracks_transitive_headers_compiler_flags_target_and_mode() {
+        let Some(clang) = crate::find_clang() else {
+            eprintln!("native dependency cache test requires clang on PATH");
+            return;
+        };
+        let root = temp_test_dir("native-cache-inputs");
+        fs::create_dir_all(root.join("headers with spaces")).unwrap();
+        let source = root.join("probe.c");
+        let header = root.join("headers with spaces/deep.h");
+        fs::write(
+            root.join("outer.h"),
+            "#include \"headers with spaces/deep.h\"\n",
+        )
+        .unwrap();
+        fs::write(
+            &source,
+            "#include \"outer.h\"\nint probe(void) { return VALUE; }\n",
+        )
+        .unwrap();
+        fs::write(&header, "#define VALUE 17\n").unwrap();
+        let fingerprint = |compiler, opt, shared, extra: &str| {
+            let mut command =
+                package_c_command(&clang, &source, opt, &NativeBuildTarget::host(), shared)
+                    .unwrap();
+            if !extra.is_empty() {
+                command.arg(extra);
+            }
+            native_compile_fingerprint(command, &source, compiler, shared).unwrap()
+        };
+        let baseline = fingerprint(1, 0, false, "");
+        assert_eq!(
+            baseline,
+            fingerprint(1, 0, false, ""),
+            "unchanged inputs reuse the key"
+        );
+        assert_ne!(baseline, fingerprint(2, 0, false, ""));
+        assert_ne!(baseline, fingerprint(1, 2, false, ""));
+        assert_ne!(baseline, fingerprint(1, 0, true, ""));
+        assert_ne!(baseline, fingerprint(1, 0, false, "-DEXTRA=1"));
+        assert_ne!(
+            baseline,
+            fingerprint(1, 0, false, "--target=aarch64-unknown-linux-gnu")
+        );
+        let modified = fs::metadata(&header).unwrap().modified().unwrap();
+        fs::write(&header, "#define VALUE 29\n").unwrap();
+        fs::OpenOptions::new()
+            .write(true)
+            .open(&header)
+            .unwrap()
+            .set_times(fs::FileTimes::new().set_modified(modified))
+            .unwrap();
+        assert_ne!(
+            baseline,
+            fingerprint(1, 0, false, ""),
+            "same-length transitive header changes invalidate the cache"
+        );
+        fs::remove_file(&header).unwrap();
+        assert!(
+            native_compile_fingerprint(
+                package_c_command(&clang, &source, 0, &NativeBuildTarget::host(), false).unwrap(),
+                &source,
+                1,
+                false
+            )
+            .is_err(),
+            "missing dependencies must fail instead of reusing an old object"
+        );
+        let _ = fs::remove_dir_all(root);
     }
 
     fn write_marker(path: &Path) {

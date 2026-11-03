@@ -8,6 +8,22 @@ Guide for day-to-day editing with `sglsp`, formatting, and CLI diagnostic parity
 2. Point the VS Code Sengoo extension (see `vscode-sengoo/`) at `target/release/sglsp` if it is not already on `PATH`.
 3. Open a package root containing `Sengoo.toml` so import resolution matches `sgpm`.
 
+For an installed toolchain on `PATH`, `.vscode/settings.json` can contain:
+
+```json
+{
+  "sengoo.lsp.enabled": true,
+  "sengoo.lsp.path": "sglsp",
+  "sengoo.sgc.path": "sgc",
+  "sengoo.trace.server": "off",
+  "[sengoo]": { "editor.formatOnSave": true }
+}
+```
+
+Use an absolute executable path for a source build when it is outside `PATH`
+(on Windows include `.exe`). Run `sgc doctor` from the same environment as the
+editor if native builds fail.
+
 `sglsp` exposes:
 
 - context-aware completion for general, receiver member (`.`), namespace
@@ -30,6 +46,8 @@ Guide for day-to-day editing with `sglsp`, formatting, and CLI diagnostic parity
   field/method/function-return chain inference
 - completion and hover for `std::` imports
 - go-to-definition for same-workspace modules
+- binding-aware definition, references, highlights and rename for parameters,
+  scoped locals, captures, aliases and uniquely resolved concrete members
 - diagnostics aligned with compiler import and type errors
 
 The server builds a workspace/dependency index during initialization. Open
@@ -44,6 +62,13 @@ capabilities with executable compiler or `sgc test` evidence: built-in derives,
 `cfg`, `deprecated`, `test`, `case`, `export_name`, and extern-block `link`.
 Targets are filtered before display; unsupported or externally configured
 derive names are not advertised as built-ins.
+
+Rename checks conflicts and capture and never replaces every matching spelling.
+If it refuses a change, repair incomplete source, disambiguate the receiver or
+expand a shorthand field first. Macro/attribute generated positions and dynamic
+dispatch require reliable compiler source maps before they can be edited.
+See [the rename contract](lsp-compatibility.md#symbol-navigation-and-safe-rename)
+for the supported boundary and executable regression suite.
 
 ### Troubleshooting completion and edits
 
@@ -114,3 +139,41 @@ That path is a lightweight `sgc run` / build-and-run DAP wrapper. For native
 source breakpoints, stepping, and local-variable inspection, use the
 `cppvsdbg`/`lldb` launch configurations in `docs/debugging-native.md`; those
 build with `sgc build -O 0 --debug-info` before attaching the native debugger.
+
+For a directly runnable Windows native setup, put this in `.vscode/tasks.json`:
+
+```json
+{
+  "version": "2.0.0",
+  "tasks": [{
+    "label": "sengoo-build-debug",
+    "type": "process",
+    "command": "sgc",
+    "args": ["build", "${file}", "-O", "0", "--debug-info"],
+    "problemMatcher": []
+  }]
+}
+```
+
+Then use `.vscode/launch.json` with the Microsoft C/C++ extension:
+
+```json
+{
+  "version": "0.2.0",
+  "configurations": [{
+    "name": "Sengoo native breakpoints (Windows)",
+    "type": "cppvsdbg",
+    "request": "launch",
+    "program": "${fileDirname}\\build\\${fileBasenameNoExtension}.exe",
+    "cwd": "${fileDirname}",
+    "preLaunchTask": "sengoo-build-debug"
+  }]
+}
+```
+
+For Linux/macOS with CodeLLDB, use `"type": "lldb"` and
+`"program": "${fileDirname}/build/${fileBasenameNoExtension}"` in the same
+launch entry. Open the `.sg` entry file before launching so `${file}` selects
+the intended program. Native breakpoint behavior depends on the installed
+debugger and emitted debug information; the `type: "sengoo"` run wrapper
+executes the program without source breakpoint support.

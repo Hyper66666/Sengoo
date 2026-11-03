@@ -1,0 +1,11 @@
+[package]
+name = "sgcli"
+version = "0.1.0"
+edition = "2026"
+description = "Deterministic CLI argument parsing without printing or process exit."
+
+[lib]
+path = "src/lib.sg"
+
+[[test]]
+path = "tests/cli.sg"

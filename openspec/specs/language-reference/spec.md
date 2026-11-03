@@ -1,7 +1,7 @@
 # language-reference Specification
 
 ## Purpose
-TBD - created by archiving change authoritative-language-reference. Update Purpose after archive.
+Keep an authoritative language reference versioned with the toolchain and verify its runnable examples against implementation evidence.
 ## Requirements
 ### Requirement: An authoritative, versioned language reference SHALL match the implementation
 

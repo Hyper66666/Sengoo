@@ -1,0 +1,11 @@
+[package]
+name = "sgdata"
+version = "0.1.0"
+edition = "2026"
+description = "Bounded UTF-8 files, exact JSON fields and RFC 4180 CSV."
+
+[lib]
+path = "src/lib.sg"
+
+[[test]]
+path = "tests/data.sg"

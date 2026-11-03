@@ -1,0 +1,177 @@
+{
+  "schema_version": 1,
+  "candidate_sha": null,
+  "python": "3.12.14",
+  "platform": "Windows-11-10.0.26300-SP0",
+  "modules": [
+    "sengoo_batch_a",
+    "sengoo_batch_b"
+  ],
+  "iterations_per_module": 20000,
+  "payload_size": 64,
+  "measured_calls_per_iteration_per_module": 5,
+  "elapsed_seconds": 27.687650500003656,
+  "native_baseline": {
+    "sengoo_batch_a": {
+      "strings": 0,
+      "opaque_collections": 0
+    },
+    "sengoo_batch_b": {
+      "strings": 0,
+      "opaque_collections": 0
+    }
+  },
+  "checkpoints": [
+    {
+      "iteration": 2000,
+      "native_handles": {
+        "sengoo_batch_a": {
+          "strings": 0,
+          "opaque_collections": 0
+        },
+        "sengoo_batch_b": {
+          "strings": 0,
+          "opaque_collections": 0
+        }
+      },
+      "python_traced_current_bytes": 12164,
+      "python_traced_peak_bytes": 278569
+    },
+    {
+      "iteration": 4000,
+      "native_handles": {
+        "sengoo_batch_a": {
+          "strings": 0,
+          "opaque_collections": 0
+        },
+        "sengoo_batch_b": {
+          "strings": 0,
+          "opaque_collections": 0
+        }
+      },
+      "python_traced_current_bytes": 13020,
+      "python_traced_peak_bytes": 279777
+    },
+    {
+      "iteration": 6000,
+      "native_handles": {
+        "sengoo_batch_a": {
+          "strings": 0,
+          "opaque_collections": 0
+        },
+        "sengoo_batch_b": {
+          "strings": 0,
+          "opaque_collections": 0
+        }
+      },
+      "python_traced_current_bytes": 13844,
+      "python_traced_peak_bytes": 280601
+    },
+    {
+      "iteration": 8000,
+      "native_handles": {
+        "sengoo_batch_a": {
+          "strings": 0,
+          "opaque_collections": 0
+        },
+        "sengoo_batch_b": {
+          "strings": 0,
+          "opaque_collections": 0
+        }
+      },
+      "python_traced_current_bytes": 14668,
+      "python_traced_peak_bytes": 281425
+    },
+    {
+      "iteration": 10000,
+      "native_handles": {
+        "sengoo_batch_a": {
+          "strings": 0,
+          "opaque_collections": 0
+        },
+        "sengoo_batch_b": {
+          "strings": 0,
+          "opaque_collections": 0
+        }
+      },
+      "python_traced_current_bytes": 15492,
+      "python_traced_peak_bytes": 282249
+    },
+    {
+      "iteration": 12000,
+      "native_handles": {
+        "sengoo_batch_a": {
+          "strings": 0,
+          "opaque_collections": 0
+        },
+        "sengoo_batch_b": {
+          "strings": 0,
+          "opaque_collections": 0
+        }
+      },
+      "python_traced_current_bytes": 16348,
+      "python_traced_peak_bytes": 283105
+    },
+    {
+      "iteration": 14000,
+      "native_handles": {
+        "sengoo_batch_a": {
+          "strings": 0,
+          "opaque_collections": 0
+        },
+        "sengoo_batch_b": {
+          "strings": 0,
+          "opaque_collections": 0
+        }
+      },
+      "python_traced_current_bytes": 17172,
+      "python_traced_peak_bytes": 283929
+    },
+    {
+      "iteration": 16000,
+      "native_handles": {
+        "sengoo_batch_a": {
+          "strings": 0,
+          "opaque_collections": 0
+        },
+        "sengoo_batch_b": {
+          "strings": 0,
+          "opaque_collections": 0
+        }
+      },
+      "python_traced_current_bytes": 17996,
+      "python_traced_peak_bytes": 284753
+    },
+    {
+      "iteration": 18000,
+      "native_handles": {
+        "sengoo_batch_a": {
+          "strings": 0,
+          "opaque_collections": 0
+        },
+        "sengoo_batch_b": {
+          "strings": 0,
+          "opaque_collections": 0
+        }
+      },
+      "python_traced_current_bytes": 18820,
+      "python_traced_peak_bytes": 285577
+    },
+    {
+      "iteration": 20000,
+      "native_handles": {
+        "sengoo_batch_a": {
+          "strings": 0,
+          "opaque_collections": 0
+        },
+        "sengoo_batch_b": {
+          "strings": 0,
+          "opaque_collections": 0
+        }
+      },
+      "python_traced_current_bytes": 19708,
+      "python_traced_peak_bytes": 286465
+    }
+  ],
+  "scope": "Exact String/opaque-handle counts; Python tracemalloc is descriptive and excludes native heap. This is not a general no-leak proof; bridge allocation failures also require sanitizer evidence."
+}

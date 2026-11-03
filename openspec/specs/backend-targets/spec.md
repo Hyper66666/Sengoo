@@ -1,4 +1,4 @@
-﻿# backend-targets Specification
+# backend-targets Specification
 
 ## Purpose
 Coordinate post-v1 alternative backends: versioned MIR/runtime ABI entry gate, independent WASM and bytecode owners, differential native oracle policy, and bytecode go/no-go.

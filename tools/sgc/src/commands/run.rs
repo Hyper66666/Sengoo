@@ -227,11 +227,25 @@ pub(crate) async fn cmd_run(
     drop(graph_snapshot);
 
     let runtime_c = find_runtime_c();
-    let runtime_source_fingerprint = optional_runtime_bundle_fingerprint(runtime_c.as_deref())?;
     let clang_exe = find_clang();
     let lli_exe = find_lli();
 
     let resolved_engine = resolve_engine(requested_engine, clang_exe.is_some(), lli_exe.is_some())?;
+    let runtime_source_fingerprint = if resolved_engine == RunEngine::Native {
+        Some(crate::native_toolchain::native_build_input_fingerprint(
+            clang_exe
+                .as_deref()
+                .ok_or_else(|| miette::miette!("clang is required for native execution"))?,
+            input_path,
+            &root_source,
+            runtime_c.as_deref(),
+            opt_level,
+            None,
+            false,
+        )?)
+    } else {
+        optional_runtime_bundle_fingerprint(runtime_c.as_deref())?
+    };
     let (installed_runtime_fingerprint, runtime_provenance) =
         if matches!(resolved_engine, RunEngine::Native) {
             crate::installed_runtime::native_runtime_cache_context(&NativeBuildTarget::host())?

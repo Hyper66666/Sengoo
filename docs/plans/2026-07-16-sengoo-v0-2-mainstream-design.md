@@ -1,5 +1,8 @@
 # Sengoo v0.2 Mainstream Core Design
 
+Historical design: v0.2.0 release evidence supersedes the old open-gate state.
+Current work follows [the daily-development plan](2026-11-03-daily-development-python-ecosystem.md).
+
 ## Goal
 
 Make Sengoo a coherent native general-purpose language with Go-like default

@@ -1,7 +1,7 @@
 # interned-types Specification
 
 ## Purpose
-TBD - created by archiving change ty-interning-baseline. Update Purpose after archive.
+Define canonical type interning, cheap type handles, and checkpoint storage while preserving existing type semantics and supporting incremental compiler migration.
 ## Requirements
 ### Requirement: Interned type allocation
 

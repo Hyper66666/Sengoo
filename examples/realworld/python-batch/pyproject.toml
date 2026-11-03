@@ -1,0 +1,13 @@
+[build-system]
+requires = ["sengoo-python==0.1.0"]
+build-backend = "sengoo_python.backend"
+
+[project]
+name = "sengoo-batch-example"
+version = "0.1.0"
+requires-python = ">=3.11"
+
+[tool.sengoo]
+manifest = "Sengoo.toml"
+module = "sengoo_batch"
+exports = ["affine", "sum_i64", "echo_i64", "echo_text", "owned_text", "checked_divide", "negate", "no_op", "completed", "accepts_unit", "calibrated", "native_live_strings", "native_live_collections", "choose_text", "checked_text", "consume_owned"]

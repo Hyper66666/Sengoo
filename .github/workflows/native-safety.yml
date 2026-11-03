@@ -1,14 +1,24 @@
 name: native-safety
 
 on:
+  workflow_dispatch:
   pull_request:
     paths:
       - ".github/workflows/native-safety.yml"
       - "scripts/runtime-sanitizer-gate.sh"
+      - "scripts/ownership-sanitizer-gate.py"
+      - "scripts/ownership-combinations.py"
+      - "scripts/test_ownership_combinations.py"
+      - "scripts/fixtures/ownership-sanitizer.sg"
       - "docs/native-safety-audit.md"
       - "runtime/**"
+      - "compiler/**"
       - "tools/sgc/**"
       - "tools/stdlib/**"
+      - "packages/sgcli/**"
+      - "packages/sgdata/**"
+      - "packages/sgsqlite/**"
+      - "packages/test_native_packages.py"
       - "Cargo.toml"
       - "Cargo.lock"
   push:
@@ -18,11 +28,73 @@ on:
     - cron: "13 4 * * 1,4"
 
 jobs:
+  generated-ownership-sanitizers:
+    name: generated ownership sanitizers (${{ matrix.os }})
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 45
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, windows-latest, macos-15, macos-15-intel]
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
+
+      - name: Verify candidate checkout
+        shell: pwsh
+        run: |
+          $expected = "${{ github.event.pull_request.head.sha || github.sha }}"
+          $actual = git rev-parse HEAD
+          if ($LASTEXITCODE -ne 0 -or $actual.Trim() -ne $expected) {
+            throw "checkout revision $actual differs from candidate $expected"
+          }
+      - uses: dtolnay/rust-toolchain@master
+        with:
+          toolchain: 1.94.0
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+      - name: Install LLVM 19
+        uses: KyleMayes/install-llvm-action@v2
+        with:
+          version: "19.1.7"
+      - name: Build the candidate compiler
+        run: cargo build --locked -p sgc
+      - name: Check generated-case reproducibility and failure retention
+        run: python -m unittest discover -s scripts -p "test_ownership_combinations.py"
+      - name: Instrument generated ownership code and seven split runtimes
+        shell: pwsh
+        run: |
+          $sgc = if ($IsWindows) { "target/debug/sgc.exe" } else { "target/debug/sgc" }
+          python scripts/ownership-sanitizer-gate.py --sgc $sgc --work-dir target/ownership-sanitizer-gate --output ownership-sanitizer-evidence.json
+          if ($LASTEXITCODE -ne 0) { throw "generated ownership sanitizer gate failed" }
+      - name: Preserve generated ownership sanitizer evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: generated-ownership-sanitizers-${{ matrix.os }}-${{ github.event.pull_request.head.sha || github.sha }}
+          path: |
+            ownership-sanitizer-evidence.json
+            target/ownership-sanitizer-gate/
+          if-no-files-found: error
+
   linux-sanitizers:
     runs-on: ubuntu-latest
     timeout-minutes: 90
     steps:
       - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
+
+      - name: Verify candidate checkout
+        shell: pwsh
+        run: |
+          $expected = "${{ github.event.pull_request.head.sha || github.sha }}"
+          $actual = git rev-parse HEAD
+          if ($LASTEXITCODE -ne 0 -or $actual.Trim() -ne $expected) {
+            throw "checkout revision $actual differs from candidate $expected"
+          }
 
       - name: Install Clang sanitizer toolchain
         run: |
@@ -33,6 +105,19 @@ jobs:
 
       - name: Run split C runtime under ASan and UBSan
         run: bash scripts/runtime-sanitizer-gate.sh
+
+      - name: Run official package native boundaries under ASan and UBSan
+        env:
+          ASAN_OPTIONS: "detect_leaks=1:halt_on_error=1"
+          UBSAN_OPTIONS: "halt_on_error=1:print_stacktrace=1"
+        run: python3 packages/test_native_packages.py --sanitize --output official-package-sanitizer-evidence.json
+
+      - name: Preserve official package sanitizer evidence
+        uses: actions/upload-artifact@v4
+        with:
+          name: official-package-sanitizers-${{ github.event.pull_request.head.sha || github.sha }}
+          path: official-package-sanitizer-evidence.json
+          if-no-files-found: error
 
       - uses: dtolnay/rust-toolchain@master
         with:
@@ -54,6 +139,17 @@ jobs:
     timeout-minutes: 45
     steps:
       - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
+
+      - name: Verify candidate checkout
+        shell: pwsh
+        run: |
+          $expected = "${{ github.event.pull_request.head.sha || github.sha }}"
+          $actual = git rev-parse HEAD
+          if ($LASTEXITCODE -ne 0 -or $actual.Trim() -ne $expected) {
+            throw "checkout revision $actual differs from candidate $expected"
+          }
 
       - uses: dtolnay/rust-toolchain@master
         with:

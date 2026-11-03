@@ -1,23 +1,27 @@
+#[cfg(test)]
 use std::collections::HashMap;
 #[cfg(test)]
 use std::fs;
 #[cfg(test)]
 use std::path::Path;
 use std::path::PathBuf;
+use tower_lsp::lsp_types::InitializeParams;
 #[cfg(test)]
 use tower_lsp::lsp_types::{GotoDefinitionResponse, SymbolInformation};
-use tower_lsp::lsp_types::{InitializeParams, Location, Position, TextEdit, Url, WorkspaceEdit};
+#[cfg(test)]
+use tower_lsp::lsp_types::{Location, Position, Url, WorkspaceEdit};
 
 #[cfg(test)]
 use super::dependency_sources::dependency_roots_for_workspace_roots;
 #[cfg(test)]
 use super::signatures::{collect_function_signatures, FunctionSignatureInfo};
 #[cfg(test)]
+use super::symbols::extract_identifier_at;
+#[cfg(test)]
 use super::symbols::{
     collect_ast_symbols, completion_kind_to_symbol_kind, find_declaration_in_text,
     find_definition_in_text, AstSymbol,
 };
-use super::symbols::{extract_identifier_at, find_symbol_occurrences, valid_identifier_name};
 
 #[cfg(test)]
 pub(crate) fn workspace_symbols_for_documents(
@@ -301,70 +305,41 @@ pub(crate) fn goto_definition_in_documents(
     None
 }
 
+#[cfg(test)]
+fn semantic_index_for_documents(
+    documents: &HashMap<Url, String>,
+) -> crate::workspace_index::WorkspaceIndex {
+    let index = crate::workspace_index::WorkspaceIndex::default();
+    for (uri, content) in documents {
+        index.open(
+            uri.clone(),
+            1,
+            content.clone(),
+            &crate::workspace_index::IndexCancellation::default(),
+        );
+    }
+    index
+}
+
+#[cfg(test)]
 pub(crate) fn references_in_documents(
     uri: &Url,
     position: Position,
     include_declaration: bool,
     documents: &HashMap<Url, String>,
 ) -> Option<Vec<Location>> {
-    let current_content = documents.get(uri)?;
-    let symbol = extract_identifier_at(current_content, position)?;
-
-    let mut locations = Vec::new();
-    let mut sorted_docs = documents.iter().collect::<Vec<_>>();
-    sorted_docs.sort_by(|(left_uri, _), (right_uri, _)| left_uri.as_str().cmp(right_uri.as_str()));
-    for (doc_uri, doc_content) in sorted_docs {
-        for range in find_symbol_occurrences(doc_content, &symbol.name) {
-            locations.push(Location::new(doc_uri.clone(), range));
-        }
-    }
-
-    if !include_declaration {
-        locations.retain(|loc| loc.range != symbol.range || loc.uri != *uri);
-    }
-
-    if locations.is_empty() {
-        None
-    } else {
-        Some(locations)
-    }
+    semantic_index_for_documents(documents).references(uri, position, include_declaration)
 }
 
+#[cfg(test)]
 pub(crate) fn rename_in_documents(
     uri: &Url,
     position: Position,
     new_name: &str,
     documents: &HashMap<Url, String>,
 ) -> Option<WorkspaceEdit> {
-    if !valid_identifier_name(new_name) {
-        return None;
-    }
-
-    let current_content = documents.get(uri)?;
-    let symbol = extract_identifier_at(current_content, position)?;
-
-    let mut changes: HashMap<Url, Vec<TextEdit>> = HashMap::new();
-    let mut sorted_docs = documents.iter().collect::<Vec<_>>();
-    sorted_docs.sort_by(|(left_uri, _), (right_uri, _)| left_uri.as_str().cmp(right_uri.as_str()));
-    for (doc_uri, doc_content) in sorted_docs {
-        let edits = find_symbol_occurrences(doc_content, &symbol.name)
-            .into_iter()
-            .map(|range| TextEdit {
-                range,
-                new_text: new_name.to_string(),
-            })
-            .collect::<Vec<_>>();
-        if !edits.is_empty() {
-            changes.insert(doc_uri.clone(), edits);
-        }
-    }
-
-    if changes.is_empty() {
-        None
-    } else {
-        Some(WorkspaceEdit {
-            changes: Some(changes),
-            ..Default::default()
-        })
-    }
+    semantic_index_for_documents(documents)
+        .rename(uri, position, new_name, false)
+        .ok()
+        .flatten()
 }

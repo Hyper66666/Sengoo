@@ -52,6 +52,14 @@ fn realworld_fixture_names() -> Vec<String> {
             if !path.is_dir() || !path.join("Sengoo.toml").is_file() {
                 return None;
             }
+            // Dedicated acceptance builds these first-wave consumers from the
+            // downloaded registry bundle / platform wheel, outside the checkout.
+            if matches!(
+                entry.file_name().to_str(),
+                Some("file-csv-index" | "python-batch")
+            ) {
+                return None;
+            }
             Some(entry.file_name().to_string_lossy().into_owned())
         })
         .collect::<Vec<_>>();
@@ -286,4 +294,101 @@ fn realworld_workflow_packages_and_installs_release_toolchain_before_running_eve
         !official_step.contains("documented host-only gap"),
         "official package review step should stop claiming Python interop as a documented gap"
     );
+}
+
+#[test]
+fn real_registry_test_then_doc_and_check_preserves_locked_dependency_bytes() {
+    // This regression uses actual compiler/formatter binaries. CI builds the
+    // toolchain before realworld-e2e; an unavailable required tool is a failure.
+    let dir = temp_dir("immutable_registry_locked_loop");
+    let sgc_binary = sgc();
+    let sgfmt_binary = sgfmt();
+    assert!(
+        sgc_binary.is_file(),
+        "real sgc is required for registry acceptance"
+    );
+    assert!(
+        sgfmt_binary.is_file(),
+        "real sgfmt is required for registry acceptance"
+    );
+    let registry = dir.join("registry");
+    let released = registry.join("released/0.1.0");
+    fs::create_dir_all(released.join("src")).unwrap();
+    fs::create_dir_all(released.join("tests")).unwrap();
+    fs::write(released.join("Sengoo.toml"), "[package]\nname = 'released'\nversion = '0.1.0'\nedition = '2026'\n[lib]\npath = 'src/lib.sg'\n").unwrap();
+    // A released package need not match the consumer's formatter conventions,
+    // and its upstream tests are not the consumer's test suite.
+    fs::write(
+        released.join("src/lib.sg"),
+        "def released_answer( ) -> i64 {42}\n",
+    )
+    .unwrap();
+    fs::write(
+        released.join("tests/upstream.sg"),
+        "def main() -> i64 { 77 }\n",
+    )
+    .unwrap();
+    let app = dir.join("app");
+    fs::create_dir_all(app.join("src")).unwrap();
+    fs::create_dir_all(app.join("tests")).unwrap();
+    fs::write(app.join("Sengoo.toml"), "[package]\nname = 'consumer'\nversion = '0.1.0'\nedition = '2026'\n[bin]\npath = 'src/main.sg'\n[registries.official]\npath = '../registry'\n[dependencies]\nreleased = { version = '=0.1.0', registry = 'official' }\n").unwrap();
+    let source =
+        "import released;\n\ndef main() -> i64 { if released_answer() == 42 { 0 } else { 1 } }\n";
+    fs::write(app.join("src/main.sg"), source).unwrap();
+    fs::write(app.join("tests/consume.sg"), source).unwrap();
+    let snapshot = || {
+        walkdir::WalkDir::new(&registry)
+            .into_iter()
+            .map(Result::unwrap)
+            .filter(|entry| entry.file_type().is_file())
+            .map(|entry| {
+                (
+                    entry.path().strip_prefix(&registry).unwrap().to_path_buf(),
+                    fs::read(entry.path()).unwrap(),
+                )
+            })
+            .collect::<std::collections::BTreeMap<_, _>>()
+    };
+    let registry_before = snapshot();
+    let execute = |arguments: &[&str]| {
+        let output = Command::new(sgpm())
+            .args(["--runtime-mode", "source-development"])
+            .args(arguments)
+            .current_dir(&app)
+            .env("SGPM_SGC", &sgc_binary)
+            .env("SGPM_SGFMT", &sgfmt_binary)
+            .output()
+            .unwrap();
+        assert!(
+            output.status.success(),
+            "{arguments:?}\nstdout:\n{}\nstderr:\n{}",
+            String::from_utf8_lossy(&output.stdout),
+            String::from_utf8_lossy(&output.stderr)
+        );
+        output
+    };
+    execute(&["update"]);
+    let lock_before = fs::read(app.join("Sengoo.lock")).unwrap();
+    for arguments in [
+        vec!["fmt", "--locked"],
+        vec!["fmt", "--check", "--locked"],
+        vec!["test", "--locked"],
+        vec!["doc", "--locked"],
+        vec!["check", "--locked"],
+    ] {
+        execute(&arguments);
+        assert_eq!(
+            fs::read(app.join("Sengoo.lock")).unwrap(),
+            lock_before,
+            "{arguments:?} changed the lockfile"
+        );
+        assert_eq!(
+            snapshot(),
+            registry_before,
+            "{arguments:?} changed registry file bytes or created dependency artifacts"
+        );
+    }
+    assert!(!released.join("target").exists());
+    assert!(!released.join("tests/build").exists());
+    let _ = fs::remove_dir_all(dir);
 }

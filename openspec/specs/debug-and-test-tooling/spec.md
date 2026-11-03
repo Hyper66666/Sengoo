@@ -1,7 +1,7 @@
 # debug-and-test-tooling Specification
 
 ## Purpose
-TBD - created by archiving change debugger-and-test-framework. Update Purpose after archive.
+Specify validated source-level debugging, editor launch workflows, test discovery, fixtures, parametrization, structured results, and coverage reporting.
 ## Requirements
 ### Requirement: Source-level debugging SHALL be validated for the core language
 

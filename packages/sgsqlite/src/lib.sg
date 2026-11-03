@@ -1,0 +1,190 @@
+import std::string;
+
+import std::ffi;
+
+extern "C" {
+    fn sgsqlite_error_status() -> i64;
+    fn sgsqlite_error_code() -> i64;
+    fn sgsqlite_error_message() -> i64;
+    fn sgsqlite_open(path: i64) -> i64;
+    fn sgsqlite_db_close(handle: i64) -> i64;
+    fn sgsqlite_busy_timeout(handle: i64, milliseconds: i64) -> i64;
+    fn sgsqlite_exec(handle: i64, sql: i64) -> i64;
+    fn sgsqlite_prepare(handle: i64, sql: i64) -> i64;
+    fn sgsqlite_stmt_close(handle: i64) -> i64;
+    fn sgsqlite_bind_null(handle: i64, index: i64) -> i64;
+    fn sgsqlite_bind_i64(handle: i64, index: i64, value: i64) -> i64;
+    fn sgsqlite_bind_f64(handle: i64, index: i64, value: f64) -> i64;
+    fn sgsqlite_bind_bytes(handle: i64, index: i64, bytes: i64, length: i64, text: i64) -> i64;
+    fn sgsqlite_step(handle: i64) -> i64;
+    fn sgsqlite_reset(handle: i64) -> i64;
+    fn sgsqlite_column_type(handle: i64, index: i64) -> i64;
+    fn sgsqlite_column_i64(handle: i64, index: i64) -> i64;
+    fn sgsqlite_column_f64(handle: i64, index: i64) -> f64;
+    fn sgsqlite_column_text(handle: i64, index: i64) -> i64;
+    fn sgsqlite_column_blob(handle: i64, index: i64) -> i64;
+    fn sgsqlite_begin(handle: i64) -> i64;
+    fn sgsqlite_tx_exec(handle: i64, sql: i64) -> i64;
+    fn sgsqlite_tx_prepare(handle: i64, sql: i64) -> i64;
+    fn sgsqlite_commit(handle: i64) -> i64;
+    fn sgsqlite_rollback(handle: i64) -> i64;
+    fn sgsqlite_tx_close(handle: i64) -> i64;
+    fn sgsqlite_version() -> i64;
+}
+
+struct SqliteDb {
+    handle: i64,
+}
+
+struct SqliteStmt {
+    handle: i64,
+}
+
+struct SqliteTransaction {
+    handle: i64,
+}
+
+impl !Send for SqliteDb {
+}
+
+impl !Sync for SqliteDb {
+}
+
+impl !Send for SqliteStmt {
+}
+
+impl !Sync for SqliteStmt {
+}
+
+impl !Send for SqliteTransaction {
+}
+
+impl !Sync for SqliteTransaction {
+}
+
+def sqlite_status(raw: i64) -> Result<bool, i64> {
+    Result { is_ok: raw >= 0, value: raw >= 0, error: if raw < 0 { 0 - raw; } else { 0; } };
+}
+
+def sqlite_step_result(raw: i64) -> Result<bool, i64> {
+    Result { is_ok: raw >= 0, value: raw > 0, error: if raw < 0 { 0 - raw; } else { 0; } };
+}
+
+def sqlite_string(raw: i64) -> Result<String, i64> {
+    if raw >= 0 { Result { is_ok: true, value: String { handle: raw }, error: 0 }; } else { Result { is_ok: false, value: String { handle: 0 }, error: 0 - raw }; };
+}
+
+def sqlite_error_code() -> i64 {
+    sgsqlite_error_code();
+}
+
+def sqlite_error_message() -> Result<String, i64> {
+    sqlite_string(sgsqlite_error_message());
+}
+
+def sqlite_version() -> Result<String, i64> {
+    sqlite_string(sgsqlite_version());
+}
+
+def sqlite_open(path: &str) -> Result<SqliteDb, i64> {
+    let raw = sgsqlite_open(sengoo_stdlib_str_ptr(path));
+    if raw > 0 { Result { is_ok: true, value: SqliteDb { handle: raw }, error: 0 }; } else { Result { is_ok: false, value: SqliteDb { handle: 0 }, error: 0 - raw }; };
+}
+
+def sqlite_statement_result(raw: i64) -> Result<SqliteStmt, i64> {
+    if raw > 0 { Result { is_ok: true, value: SqliteStmt { handle: raw }, error: 0 }; } else { Result { is_ok: false, value: SqliteStmt { handle: 0 }, error: 0 - raw }; };
+}
+
+impl SqliteDb {
+    def busy_timeout(&self, milliseconds: i64) -> Result<bool, i64> {
+        sqlite_status(sgsqlite_busy_timeout(self.handle, milliseconds));
+    }
+    def exec(&self, sql: &str) -> Result<bool, i64> {
+        sqlite_status(sgsqlite_exec(self.handle, sengoo_stdlib_str_ptr(sql)));
+    }
+    def prepare(&self, sql: &str) -> Result<SqliteStmt, i64> {
+        sqlite_statement_result(sgsqlite_prepare(self.handle, sengoo_stdlib_str_ptr(sql)));
+    }
+    def transaction(&self) -> Result<SqliteTransaction, i64> {
+        let raw = sgsqlite_begin(self.handle);
+        if raw > 0 { Result { is_ok: true, value: SqliteTransaction { handle: raw }, error: 0 }; } else { Result { is_ok: false, value: SqliteTransaction { handle: 0 }, error: 0 - raw }; };
+    }
+}
+
+impl SqliteStmt {
+    def bind_null(&mut self, index: i64) -> Result<bool, i64> {
+        sqlite_status(sgsqlite_bind_null(self.handle, index));
+    }
+    def bind_i64(&mut self, index: i64, value: i64) -> Result<bool, i64> {
+        sqlite_status(sgsqlite_bind_i64(self.handle, index, value));
+    }
+    def bind_f64(&mut self, index: i64, value: f64) -> Result<bool, i64> {
+        sqlite_status(sgsqlite_bind_f64(self.handle, index, value));
+    }
+    def bind_text(&mut self, index: i64, value: &str) -> Result<bool, i64> {
+        sqlite_status(sgsqlite_bind_bytes(self.handle, index, sengoo_stdlib_str_ptr(value), value.len(), 1));
+    }
+    def bind_blob(&mut self, index: i64, value: &Buffer) -> Result<bool, i64> {
+        sqlite_status(sgsqlite_bind_bytes(self.handle, index, value.ptr(), value.used_len(), 0));
+    }
+    def step(&mut self) -> Result<bool, i64> {
+        sqlite_step_result(sgsqlite_step(self.handle));
+    }
+    def reset(&mut self) -> Result<bool, i64> {
+        sqlite_status(sgsqlite_reset(self.handle));
+    }
+    def is_null(&self, column: i64) -> Result<bool, i64> {
+        let raw = sgsqlite_column_type(self.handle, column);
+        Result { is_ok: raw >= 0, value: raw == 5, error: if raw < 0 { 0 - raw; } else { 0; } };
+    }
+    def integer(&self, column: i64) -> Result<i64, i64> {
+        let value = sgsqlite_column_i64(self.handle, column);
+        let code = sgsqlite_error_status();
+        Result { is_ok: code == 0, value: value, error: code };
+    }
+    def number(&self, column: i64) -> Result<f64, i64> {
+        let value = sgsqlite_column_f64(self.handle, column);
+        let code = sgsqlite_error_status();
+        Result { is_ok: code == 0, value: value, error: code };
+    }
+    def text(&self, column: i64) -> Result<String, i64> {
+        sqlite_string(sgsqlite_column_text(self.handle, column));
+    }
+    def blob(&self, column: i64) -> Result<Buffer, i64> {
+        let raw = sgsqlite_column_blob(self.handle, column);
+        if raw >= 0 { Result { is_ok: true, value: Buffer { handle: raw }, error: 0 }; } else { Result { is_ok: false, value: Buffer { handle: 0 }, error: 0 - raw }; };
+    }
+}
+
+impl SqliteTransaction {
+    def exec(&self, sql: &str) -> Result<bool, i64> {
+        sqlite_status(sgsqlite_tx_exec(self.handle, sengoo_stdlib_str_ptr(sql)));
+    }
+    def prepare(&self, sql: &str) -> Result<SqliteStmt, i64> {
+        sqlite_statement_result(sgsqlite_tx_prepare(self.handle, sengoo_stdlib_str_ptr(sql)));
+    }
+    def commit(&mut self) -> Result<bool, i64> {
+        sqlite_status(sgsqlite_commit(self.handle));
+    }
+    def rollback(&mut self) -> Result<bool, i64> {
+        sqlite_status(sgsqlite_rollback(self.handle));
+    }
+}
+
+impl Drop for SqliteDb {
+    def drop(&mut self) {
+        if self.handle != 0 { sgsqlite_db_close(self.handle); };
+    }
+}
+
+impl Drop for SqliteStmt {
+    def drop(&mut self) {
+        if self.handle != 0 { sgsqlite_stmt_close(self.handle); };
+    }
+}
+
+impl Drop for SqliteTransaction {
+    def drop(&mut self) {
+        if self.handle != 0 { sgsqlite_tx_close(self.handle); };
+    }
+}

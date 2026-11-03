@@ -1,0 +1,11 @@
+[package]
+name = "sgsqlite"
+version = "0.1.0"
+edition = "2026"
+description = "Owned SQLite 3.54.1 connections, statements and rollback transactions."
+
+[lib]
+path = "src/lib.sg"
+
+[[test]]
+path = "tests/sqlite.sg"

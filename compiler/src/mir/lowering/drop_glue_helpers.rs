@@ -1,4 +1,5 @@
 use super::*;
+use crate::hir::HIRTypeKind;
 use crate::mir::InstId;
 
 impl<'a> LoweringContext<'a> {
@@ -31,6 +32,7 @@ impl<'a> LoweringContext<'a> {
     }
 
     pub(super) fn emit_normal_task_scope_joins(&mut self) {
+        self.record_root_exit_ownership();
         let bindings = self
             .drop_bindings
             .iter()
@@ -74,7 +76,23 @@ impl<'a> LoweringContext<'a> {
     }
 
     pub(super) fn emit_active_drop_scopes_before_exit(&mut self) {
+        self.record_root_exit_ownership();
         self.emit_drop_scopes_from_depth(0);
+    }
+
+    fn record_root_exit_ownership(&mut self) {
+        let root_end = self
+            .drop_scope_markers
+            .first()
+            .copied()
+            .unwrap_or(self.drop_bindings.len());
+        let bindings = self.drop_bindings[..root_end]
+            .iter()
+            .filter(|binding| !self.drop_binding_is_moved(binding))
+            .cloned()
+            .collect();
+        self.exit_drop_bindings
+            .insert(self.current_block(), bindings);
     }
 
     pub(super) fn emit_drop_scopes_from_depth(&mut self, depth: usize) {
@@ -126,6 +144,19 @@ impl<'a> LoweringContext<'a> {
         }
     }
 
+    /// A user destructor owns its fields during its body. Release remaining
+    /// fields afterwards, without recursively invoking the parent destructor.
+    pub(super) fn record_destructor_field_drops(&mut self, local: Local) {
+        let MIRType::Struct { fields, .. } = self.get_local_type(local).clone() else {
+            return;
+        };
+        let mut bindings = Vec::new();
+        for (index, (_, ty)) in fields.iter().enumerate() {
+            self.collect_field_drop_bindings(local, ty, &mut vec![index as u32], &mut bindings);
+        }
+        self.drop_bindings.extend(bindings);
+    }
+
     pub(super) fn mark_drop_local_moved(&mut self, local: Local) {
         self.moved_drop_locals.insert(local);
     }
@@ -138,21 +169,8 @@ impl<'a> LoweringContext<'a> {
 
     pub(super) fn mark_drop_expr_moved(&mut self, expr: &HIRExpr) {
         match expr {
-            HIRExpr::If {
-                then_branch,
-                else_branch,
-                ..
-            } => {
-                if let Some(expr) = then_branch.expr.as_deref() {
-                    self.mark_drop_expr_moved(expr);
-                }
-                if let Some(expr) = else_branch
-                    .as_deref()
-                    .and_then(|branch| branch.expr.as_deref())
-                {
-                    self.mark_drop_expr_moved(expr);
-                }
-            }
+            // Branch tails transfer ownership inside their own control-flow path.
+            HIRExpr::If { .. } => {}
             HIRExpr::Block(body) | HIRExpr::TryBlock(body) | HIRExpr::AsyncBlock(body) => {
                 if let Some(expr) = body.expr.as_deref() {
                     self.mark_drop_expr_moved(expr);
@@ -173,6 +191,12 @@ impl<'a> LoweringContext<'a> {
                 if field_path.is_empty() {
                     self.mark_drop_local_moved(local);
                 } else {
+                    if self
+                        .drop_place_type(local, &field_path)
+                        .is_some_and(|ty| !self.type_needs_drop(&ty))
+                    {
+                        return;
+                    }
                     self.mark_drop_field_moved(local, field_path);
                 }
             }
@@ -381,8 +405,8 @@ impl<'a> LoweringContext<'a> {
 
     fn drop_func_for_local(&mut self, local: Local) -> Option<String> {
         let local_ty = self.get_local_type(local).clone();
-        if Self::option_payload_type(&local_ty).is_some() {
-            return self.ensure_option_drop_helper(&local_ty);
+        if matches!(local_ty, MIRType::Struct { .. }) {
+            return self.drop_func_for_type(&local_ty);
         }
         let type_name = match &local_ty {
             MIRType::Struct { name, .. } => Some(name.as_str()),
@@ -393,13 +417,37 @@ impl<'a> LoweringContext<'a> {
     }
 
     fn drop_func_for_type(&mut self, ty: &MIRType) -> Option<String> {
-        if Self::option_payload_type(ty).is_some() {
-            return self.ensure_option_drop_helper(ty);
+        if Self::tagged_payload_types(ty).is_some() {
+            return self.ensure_tagged_drop_helper(ty);
         }
         let MIRType::Struct { name, .. } = ty else {
             return None;
         };
         let drop_func = format!("{name}_Drop_drop");
+        if !self.is_known_function(&drop_func) {
+            // Constructor-generated helpers belong to another function's
+            // overlay. Consumers still own their collection and Rc fields.
+            if let Some(hir_ty) = self.concrete_type_registry.hir_type_for_mir(ty) {
+                if let HIRTypeKind::Named { name: base, args } = hir_ty.kind {
+                    match (base.as_str(), args.len()) {
+                        ("Vec" | "VecDeque", 1) => {
+                            super::named_call_helpers::synthesize_vec_owner_drop_if_missing(
+                                self, ty, name,
+                            )
+                        }
+                        ("HashMap" | "BTreeMap", 2) | ("HashSet" | "BTreeSet", 1) => {
+                            super::named_call_helpers::synthesize_hashmap_owner_drop_if_missing(
+                                self, ty, name,
+                            )
+                        }
+                        ("Rc", 1) => {
+                            super::named_call_helpers::synthesize_rc_owner_drop(self, ty, name)
+                        }
+                        _ => {}
+                    }
+                }
+            }
+        }
         self.is_known_function(&drop_func).then_some(drop_func)
     }
 
@@ -418,8 +466,26 @@ impl<'a> LoweringContext<'a> {
             .and_then(|(field, ty)| (field == "value").then_some(ty.clone()))
     }
 
-    fn ensure_option_drop_helper(&mut self, option_ty: &MIRType) -> Option<String> {
-        let payload_ty = Self::option_payload_type(option_ty)?;
+    fn tagged_payload_types(ty: &MIRType) -> Option<(MIRType, Option<MIRType>)> {
+        if let Some(payload) = Self::option_payload_type(ty) {
+            return Some((payload, None));
+        }
+        let MIRType::Struct { name, fields } = ty else {
+            return None;
+        };
+        if !(name == "Result" || name.starts_with("Result_"))
+            || fields.len() != 3
+            || !matches!(fields.first(), Some((field, MIRType::Bool)) if field == "is_ok")
+            || fields[1].0 != "value"
+            || fields[2].0 != "error"
+        {
+            return None;
+        }
+        Some((fields[1].1.clone(), Some(fields[2].1.clone())))
+    }
+
+    fn ensure_tagged_drop_helper(&mut self, option_ty: &MIRType) -> Option<String> {
+        let (payload_ty, error_ty) = Self::tagged_payload_types(option_ty)?;
         let MIRType::Struct { name, .. } = option_ty else {
             return None;
         };
@@ -480,6 +546,29 @@ impl<'a> LoweringContext<'a> {
             then_block: payload_block,
             else_block: empty_return,
         });
+        if let Some(error_ty) = error_ty {
+            let extracted = helper_ctx.add_local(None, LocalKind::Temp, error_ty.clone());
+            helper_ctx.mir_fn.push_inst_to_block(
+                empty_return,
+                Instruction::Extract {
+                    destination: extracted,
+                    value: option,
+                    index: 2,
+                },
+            );
+            let error = helper_ctx.add_local(None, LocalKind::User, error_ty);
+            helper_ctx.mir_fn.push_inst_to_block(
+                empty_return,
+                Instruction::Store {
+                    destination: error,
+                    value: extracted,
+                },
+            );
+            helper_ctx.set_current_block(empty_return);
+            helper_ctx.push_drop_scope();
+            helper_ctx.record_drop_binding_if_needed(error);
+            helper_ctx.pop_drop_scope(None);
+        }
         helper_ctx.mir_fn.basic_blocks[empty_return].set_terminator(Terminator::Return(None));
 
         let extracted = helper_ctx.add_local(None, LocalKind::Temp, payload_ty.clone());
@@ -541,7 +630,7 @@ impl<'a> LoweringContext<'a> {
         }
     }
 
-    fn drop_binding_is_moved(&self, binding: &DropBinding) -> bool {
+    pub(super) fn drop_binding_is_moved(&self, binding: &DropBinding) -> bool {
         self.moved_drop_locals.contains(&binding.local)
             || self.moved_drop_fields.iter().any(|(local, moved_path)| {
                 *local == binding.local
@@ -555,6 +644,23 @@ impl<'a> LoweringContext<'a> {
     }
 
     pub(super) fn mark_drop_field_moved(&mut self, local: Local, field_path: Vec<u32>) {
+        // Option has one conditional payload, represented by a root Drop helper.
+        // Transferring that payload consumes the corresponding root obligation.
+        if field_path.len() == 1
+            && Self::tagged_payload_types(self.get_local_type(local))
+                .is_some_and(|(_, err)| field_path[0] == 1 || (field_path[0] == 2 && err.is_some()))
+        {
+            self.mark_drop_local_moved(local);
+            return;
+        }
+        if self
+            .drop_bindings
+            .iter()
+            .any(|binding| binding.local == local && binding.field_path.is_empty())
+        {
+            self.errors.push("[unsupported-partial-move-with-drop] an owning field cannot be partially moved from a value with Drop or a tagged payload; move the whole payload first".to_string());
+            return;
+        }
         if self
             .drop_bindings
             .iter()
@@ -564,17 +670,19 @@ impl<'a> LoweringContext<'a> {
         }
     }
 
-    pub(super) fn insert_drop_glue(&mut self) {
-        let bindings = self
-            .drop_bindings
-            .iter()
-            .filter(|binding| !self.drop_binding_is_moved(binding))
-            .cloned()
-            .collect::<Vec<_>>();
-        if bindings.is_empty() {
-            return;
+    fn type_needs_drop(&mut self, ty: &MIRType) -> bool {
+        if self.drop_func_for_type(ty).is_some() {
+            return true;
         }
+        match ty {
+            MIRType::Struct { fields, .. } => fields.iter().any(|(_, ty)| self.type_needs_drop(ty)),
+            MIRType::Tuple(fields) => fields.iter().any(|ty| self.type_needs_drop(ty)),
+            MIRType::Array(ty, count) => *count > 0 && self.type_needs_drop(ty),
+            _ => false,
+        }
+    }
 
+    pub(super) fn insert_drop_glue(&mut self) {
         let cleanup_exits = self
             .mir_fn
             .basic_blocks
@@ -590,10 +698,26 @@ impl<'a> LoweringContext<'a> {
             return;
         }
 
-        if cleanup_exits.len() == 1 && self.all_bindings_initialized_in_entry(&bindings) {
-            self.insert_straight_line_drops(cleanup_exits[0].0, &bindings);
-        } else {
-            self.insert_flagged_drops(&cleanup_exits, &bindings);
+        for (exit, terminator) in cleanup_exits {
+            let bindings = self
+                .exit_drop_bindings
+                .get(&exit)
+                .cloned()
+                .unwrap_or_else(|| {
+                    self.drop_bindings
+                        .iter()
+                        .filter(|binding| !self.drop_binding_is_moved(binding))
+                        .cloned()
+                        .collect()
+                });
+            if bindings.is_empty() {
+                continue;
+            }
+            if self.all_bindings_initialized_in_entry(&bindings) {
+                self.insert_straight_line_drops(exit, &bindings);
+            } else {
+                self.insert_flagged_drops(&[(exit, terminator)], &bindings);
+            }
         }
     }
 
@@ -680,7 +804,7 @@ impl<'a> LoweringContext<'a> {
         self.set_block_terminator_at(exit_block, Terminator::Goto(next), source_site);
     }
 
-    fn push_drop_call(&mut self, block: usize, binding: &DropBinding) {
+    pub(super) fn push_drop_call(&mut self, block: usize, binding: &DropBinding) {
         self.push_drop_call_at(block, binding, self.current_source_site);
     }
 

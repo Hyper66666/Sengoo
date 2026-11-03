@@ -29,7 +29,75 @@ impl TempSource {
 
 impl Drop for TempSource {
     fn drop(&mut self) {
+        if std::thread::panicking() {
+            eprintln!(
+                "numeric failure artifacts retained at {}",
+                self.root.display()
+            );
+            return;
+        }
         let _ = fs::remove_dir_all(&self.root);
+    }
+}
+
+#[test]
+fn float_equality_and_inequality_follow_ieee754_with_nan() {
+    let source = TempSource::new(
+        r#"
+def equal32(left: f32, right: f32) -> bool { left == right }
+def unequal32(left: f32, right: f32) -> bool { left != right }
+def equal64(left: f64, right: f64) -> bool { left == right }
+def unequal64(left: f64, right: f64) -> bool { left != right }
+
+def main() -> i64 {
+    let nan32 = 0.0f32 / 0.0f32;
+    let nan64 = 0.0f64 / 0.0f64;
+    if !unequal32(nan32, nan32) || !unequal64(nan64, nan64) { return 1; };
+    if equal32(nan32, nan32) || equal64(nan64, nan64) { return 2; };
+    if !unequal32(nan32, 1.0f32) || !unequal32(1.0f32, nan32)
+        || !unequal64(nan64, 1.0f64) || !unequal64(1.0f64, nan64) { return 3; };
+    if equal32(nan32, 1.0f32) || equal32(1.0f32, nan32)
+        || equal64(nan64, 1.0f64) || equal64(1.0f64, nan64) { return 4; };
+    if nan32 < 1.0f32 || nan32 <= 1.0f32 || nan32 > 1.0f32 || nan32 >= 1.0f32
+        || nan64 < 1.0f64 || nan64 <= 1.0f64 || nan64 > 1.0f64 || nan64 >= 1.0f64 { return 5; };
+    if !equal32(0.0f32, -0.0f32) || unequal32(0.0f32, -0.0f32)
+        || !equal64(0.0f64, -0.0f64) || unequal64(0.0f64, -0.0f64) { return 6; };
+    let infinity32 = 1.0f32 / 0.0f32;
+    let infinity64 = 1.0f64 / 0.0f64;
+    if !equal32(infinity32, infinity32) || !equal64(infinity64, infinity64)
+        || !unequal32(infinity32, -infinity32) || !unequal64(infinity64, -infinity64) { return 7; };
+    if !equal32(1.0f32, 1.0f32) || unequal32(1.0f32, 1.0f32)
+        || !unequal32(1.0f32, 2.0f32) || !equal64(1.0f64, 1.0f64)
+        || unequal64(1.0f64, 1.0f64) || !unequal64(1.0f64, 2.0f64) { return 8; };
+    0
+}
+"#,
+    );
+    for optimization in ["-O0", "-O2"] {
+        let output = source_sgc_command()
+            .arg("run")
+            .arg(&source.path)
+            .arg("--force-rebuild")
+            .arg(optimization)
+            .output()
+            .expect("sgc should launch");
+        fs::write(
+            source.root.join(format!("{optimization}.stdout.txt")),
+            &output.stdout,
+        )
+        .unwrap();
+        fs::write(
+            source.root.join(format!("{optimization}.stderr.txt")),
+            &output.stderr,
+        )
+        .unwrap();
+        assert_eq!(
+            output.status.code(),
+            Some(0),
+            "IEEE-754 comparison fixture failed at {optimization}\nstdout:\n{}\nstderr:\n{}",
+            String::from_utf8_lossy(&output.stdout),
+            String::from_utf8_lossy(&output.stderr)
+        );
     }
 }
 

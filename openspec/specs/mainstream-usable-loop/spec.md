@@ -139,6 +139,11 @@ and symbols.
   back to a realworld example import set
 
 ### Requirement: Gaps SHALL be classified as supported, unsupported, deferred, platform-specific, or accepted-risk
+The repository SHALL publish mainstream usability gaps in one user-facing support matrix. Documentation links and accepted-risk classifications SHALL follow the evidence rules in the conformance scenario below.
+
+#### Scenario: Complete compatibility contract
+- **WHEN** this capability is implemented or modified
+- **THEN** it SHALL satisfy every clause of the following contract:
 
 The repository SHALL publish a current support matrix for gaps that materially
 affect mainstream usability. `examples/realworld/SUPPORT_MATRIX.md` SHALL be

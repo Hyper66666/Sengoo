@@ -1,7 +1,7 @@
 # numeric-types Specification
 
 ## Purpose
-TBD - created by archiving change numeric-type-system. Update Purpose after archive.
+Specify integer and floating-point types, conversions, overflow, operator dispatch, and numeric literal syntax against the production native backend.
 ## Requirements
 ### Requirement: Numeric semantics SHALL have one production backend reference
 
@@ -78,6 +78,11 @@ functions, parsing, and formatting.
 - **THEN** parsing yields the correct value and formatting honors the precision
 
 ### Requirement: Numeric operators SHALL be trait-based, and literals SHALL support suffixes, bases, and separators
+Numeric operators SHALL use the explicit trait-based output-projection contract below, with unique concrete impl selection and full generic-bound enforcement. The lexer SHALL support typed suffixes, base prefixes, and digit separators.
+
+#### Scenario: Complete compatibility contract
+- **WHEN** this capability is implemented or modified
+- **THEN** it SHALL satisfy every clause of the following contract:
 
 Arithmetic operators SHALL dispatch through numeric operator traits. Binary
 traits use the explicit `Trait<Rhs, Output>` model and unary negation uses

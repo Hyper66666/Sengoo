@@ -16,6 +16,15 @@ pub(super) fn lower_lambda_expr_with_expected(
 ) -> Local {
     let lambda_name = ctx.lambda_name();
     let free_vars = ctx.collect_free_vars(params, body);
+    for (name, local) in &free_vars {
+        if !matches!(
+            ctx.get_local_type(*local),
+            MIRType::Int(64) | MIRType::UInt(64)
+        ) {
+            ctx.errors.push(format!("[unsupported-closure-capture] capture `{name}` requires a typed owning closure environment; only 64-bit integer captures are supported. Pass an owned value as an explicit closure parameter instead"));
+            return ctx.add_local(None, LocalKind::Temp, MIR_UNIT);
+        }
+    }
 
     let (mut param_types, ret_type) = match expected_ty {
         Some(MIRType::Fn {
@@ -110,6 +119,7 @@ pub(super) fn lower_lambda_expr_with_expected(
     };
     lambda_ctx.lower_body_to_block(&lambda_body, lambda_start);
     lambda_ctx.insert_drop_glue();
+    ctx.errors.extend(std::mem::take(&mut lambda_ctx.errors));
 
     ctx.lambda_functions.push(lambda_fn);
 

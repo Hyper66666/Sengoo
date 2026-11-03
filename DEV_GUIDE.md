@@ -1,8 +1,14 @@
 # Sengoo 编译器开发文档
 
-> **版本**: v0.2.0
-> **更新日期**: 2025-01-19
+> **版本**: v0.2.1-dev.0（已发布稳定版 v0.2.0）
+> **更新日期**: 2026-11-04
 > **目标**: AI Agent 接手继续开发的完整指南
+
+当前能力与边界以 [语言参考](docs/language-reference.md) 和
+[支持矩阵](examples/realworld/SUPPORT_MATRIX.md) 为准；下文的编译器代码片段
+用于说明结构，修改时须核对实际源码。[实施证据](docs/development-evidence.md)
+区分已发布 v0.2.0 证据和当前工作区验证，开发任务见 `openspec/changes/m0-*`
+至 `m5-*`。新功能不能仅凭此文档中的状态表认定已通过发布门禁。
 
 ---
 
@@ -39,7 +45,7 @@
 | 模块 | 状态 | 说明 |
 |------|------|------|
 | Lexer | ✅ | 基于 `logos` |
-| Parser | ✅ | 基于 `chumsky` |
+| Parser | ✅ | 手写递归下降解析器，见 `compiler/src/parser/` |
 | AST | ✅ | 完整定义 |
 | Type Checker | ✅ | 基础类型检查 + Trait 注册表 |
 | HIR | ✅ | 高级中间表示 |
@@ -57,7 +63,7 @@ compiler/src/
 ├── lexer/              # 词法分析 (logos)
 │   ├── mod.rs          # Lexer 结构
 │   └── token.rs        # Token 定义
-├── parser/             # 语法分析 (chumsky)
+├── parser/             # 手写递归下降语法分析
 │   ├── mod.rs          # Parser 入口
 │   ├── expr.rs         # 表达式解析
 │   ├── stmt.rs         # 语句解析
@@ -674,54 +680,49 @@ mir::Instruction::Discriminant { destination, source } => {
 
 | 工具 | 状态 | 说明 |
 |------|------|------|
-| `sgc` | ✅ | 编译器 CLI，工作正常 |
-| `sgpy` | ✅ | 包管理器，已修复编译错误 |
-| `sgfmt` | ⚠️ | 代码格式化器，API 不匹配待修复 |
-| `sglsp` | ⚠️ | LSP 服务器，tower_lsp API 兼容性问题待修复 |
+| `sgc` | 原生主路径 | 文本 LLVM IR 经 clang 15+ 编译、链接；CI 使用 LLVM 19 |
+| `sgpm` | 包管理与工作区 | manifest、锁文件、本地/HTTP registry 与 locked 开发流程 |
+| `sgfmt` | 格式化 | 用 `sgpm fmt --check --locked` 验证 |
+| `sglsp` | 编辑器服务 | 协议边界和验证见 `docs/lsp-compatibility.md` |
 
-### 8.2 sgpy 功能
+### 8.2 可复现的开发流程
 
 ```bash
 # 初始化项目
-sgpy init
+sgpm new demo
+cd demo
+sgpm update
 
 # 添加依赖
-sgpy add serde="1.0"
+sgpm check --locked
+sgpm fmt --check --locked
+sgpm test --locked
+sgpm doc --locked
 
 # 构建项目
-sgpy build
+sgpm build --locked
+sgpm run --locked
 
 # 发布包
-sgpy publish
+sgpm publish --dry-run
 ```
 
 ---
 
 ## 9. 待完成工作
 
-### 9.1 高优先级 - MIR 层
+泛型、集合、模块、Trait 方法、动态分派和 async/await 已有支持范围，
+不再作为“尚未实现”的整项待办。准确边界和测试链接见语言参考及支持矩阵。
+本轮按 M0→M1→M2→M3/M4→M5 推进，任务只在对应阶段维护：
 
-- [ ] 方法调用降低到 MIR
-- [ ] Trait 方法代码生成
-- [ ] 动态分发 (Trait 对象 `dyn Trait`)
+- M1：语义重命名、可运行项目模板和 `sgc doctor`。
+- M2：拥有值组合的精确 Drop、借用诊断、原生共享库及缓存正确性。
+- M3：`sgcli`、`sgdata`、`sgsqlite` 独立包。
+- M4：Python 生成绑定、构建后端和自包含 wheel。
+- M5：离线分发、仓库外消费、四平台安装与独立用户试用。
 
-### 9.2 中优先级 - 标准库
-
-- [ ] `Display`, `Debug` Trait
-- [ ] `Iterator` Trait
-- [ ] `Vec<T>`, `HashMap<K, V>` 基础实现
-
-### 9.3 低优先级 - 工具链修复
-
-- [ ] 修复 `sgfmt` API 不匹配
-- [ ] 修复 `sglsp` tower_lsp 兼容性
-
-### 9.4 长期规划
-
-- [ ] 泛型支持
-- [ ] async/await 语法
-- [ ] 宏系统
-- [ ] 模块系统
+Cranelift 仅提供实验性的基础数值子集，不能替代 clang 原生主路径。
+本轮不扩展 WASM、字节码、GUI、游戏或 HTTP 框架。
 
 ---
 
@@ -786,8 +787,8 @@ edition = "2021"
 
 [dependencies]
 logos = "0.15"
-chumsky = "1.0"
-inkwell = { version = "0.5", features = ["llvm18-0"] }
+# 解析器与文本 LLVM IR 生成均由 compiler/src 中的 Rust 代码实现。
+# 本机原生编译需要 clang 15+；不需要 Rust 的 inkwell/llvm-sys。
 ```
 
 ### B. 参考资源

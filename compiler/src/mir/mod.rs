@@ -14,6 +14,7 @@ pub(crate) mod async_dispatch_synthesis_helpers;
 pub(crate) mod async_frame_helpers;
 pub mod async_lowering;
 pub(crate) mod async_origin_helpers;
+mod async_ownership_helpers;
 mod bb;
 pub(crate) mod concrete_type_helpers;
 #[cfg(test)]
@@ -265,7 +266,11 @@ impl MIRType {
     }
 
     pub fn tuple(types: Vec<MIRType>) -> Self {
-        MIRType::Tuple(types)
+        if types.is_empty() {
+            MIRType::Unit
+        } else {
+            MIRType::Tuple(types)
+        }
     }
 
     /// 创建枚举类型
@@ -320,7 +325,7 @@ impl From<HIRType> for MIRType {
             HIRTypeKind::Ptr(inner) => MIRType::Ptr(Box::new((*inner).into())),
             HIRTypeKind::Array(elem, len) => MIRType::Array(Box::new((*elem).into()), len as u64),
             HIRTypeKind::Tuple(types) => {
-                MIRType::Tuple(types.into_iter().map(|t| t.into()).collect())
+                MIRType::tuple(types.into_iter().map(|t| t.into()).collect())
             }
             HIRTypeKind::Fn { params, ret } => MIRType::Fn {
                 params: params.into_iter().map(|t| t.into()).collect(),

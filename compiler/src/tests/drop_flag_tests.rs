@@ -135,21 +135,17 @@ def checked() -> Result<i64, i64> {
     assert_eq!(
         calls.len(),
         2,
-        "both the ? early-return exit and success exit should run guarded drop glue"
+        "both the ? early-return exit and success exit should run drop glue"
     );
     assert_eq!(
         bool_assigns(checked, false),
-        1,
-        "one drop flag should be initialized false at function entry"
+        0,
+        "a binding initialized in the entry block needs no runtime flag"
     );
     assert_eq!(
         bool_assigns(checked, true),
-        1,
-        "the drop flag should be set true after the owned binding initializes"
-    );
-    assert!(
-        has_guard_terminator(checked),
-        "multi-exit drop glue should guard drop calls with the drop flag"
+        0,
+        "ownership known at both exits needs no runtime flag"
     );
 }
 
@@ -214,8 +210,8 @@ def checked() -> Result<i64, i64> {
 
     assert_eq!(
         string_drop_calls(checked).len(),
-        2,
-        "the later binding appears in both exit chains but must be flag-guarded"
+        1,
+        "the later binding must appear only in the success exit's cleanup"
     );
     assert_eq!(bool_assigns(checked, false), 1);
     assert_eq!(bool_assigns(checked, true), 1);

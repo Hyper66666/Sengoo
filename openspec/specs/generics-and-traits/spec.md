@@ -1,7 +1,7 @@
 # generics-and-traits Specification
 
 ## Purpose
-TBD - created by archiving change generics-and-trait-system. Update Purpose after archive.
+Define generic monomorphization, checked trait bounds, dynamic dispatch, associated types, derivable core traits, and package-local implementation coherence.
 ## Requirements
 ### Requirement: Generic functions, methods, and types SHALL be monomorphized over arbitrary type parameters
 

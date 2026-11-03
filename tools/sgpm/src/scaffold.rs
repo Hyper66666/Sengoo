@@ -61,6 +61,7 @@ fn initialize_project(root: &Path, name: &str, kind: ProjectKind) -> Result<()> 
         root.join("Sengoo.toml"),
         root.join(kind.entry_path()),
         root.join(".gitignore"),
+        root.join("tests/smoke.sg"),
     ] {
         if path.exists() {
             miette::bail!("refusing to overwrite {}", path.display());
@@ -76,6 +77,7 @@ fn initialize_project(root: &Path, name: &str, kind: ProjectKind) -> Result<()> 
 
     write_new_file(&root.join("Sengoo.toml"), manifest_template(name, kind))?;
     write_new_file(&root.join(kind.entry_path()), kind.source_template())?;
+    write_new_file(&root.join("tests/smoke.sg"), test_template(name, kind))?;
     write_new_file(&root.join(".gitignore"), gitignore_template())?;
 
     Ok(())
@@ -139,8 +141,8 @@ edition = "2026"
 
 fn main_template() -> String {
     r#"def main() -> i64 {
-    print("Hello from sgpm!")
-    0
+    print("Hello from sgpm!");
+    0;
 }
 "#
     .to_string()
@@ -148,10 +150,17 @@ fn main_template() -> String {
 
 fn lib_template() -> String {
     r#"def answer() -> i64 {
-    42
+    42;
 }
 "#
     .to_string()
+}
+
+fn test_template(name: &str, kind: ProjectKind) -> String {
+    match kind {
+        ProjectKind::Binary => "import std::assert;\n\ndef main() -> i64 {\n    assert_eq_i64(2 + 2, 4);\n    0;\n}\n".to_string(),
+        ProjectKind::Library => format!("import std::assert;\n\nimport {};\n\ndef main() -> i64 {{\n    assert_eq_i64(answer(), 42);\n    0;\n}}\n", name.replace('-', "_")),
+    }
 }
 
 fn gitignore_template() -> String {
@@ -262,6 +271,22 @@ mod tests {
             "existing"
         );
         assert!(!root.join("src").exists());
+        let _ = fs::remove_dir_all(root);
+    }
+
+    #[test]
+    fn init_preserves_existing_smoke_test_before_writing_any_project_files() {
+        let root = temp_dir("init_existing_test");
+        fs::create_dir_all(root.join("tests")).unwrap();
+        fs::write(root.join("tests/smoke.sg"), "existing user test\n").unwrap();
+        let error = init_project(Some("demo"), Some(&root)).unwrap_err();
+        assert!(error.to_string().contains("refusing to overwrite"));
+        assert!(!root.join("Sengoo.toml").exists());
+        assert!(!root.join("src").exists());
+        assert_eq!(
+            fs::read_to_string(root.join("tests/smoke.sg")).unwrap(),
+            "existing user test\n"
+        );
         let _ = fs::remove_dir_all(root);
     }
 }

@@ -184,7 +184,8 @@ impl Codegen {
                             ));
                         }
                         mir::MirConstant::Unit => {
-                            self.ir.push_str(&format!("store i8 0, i8* {}\n", dest));
+                            self.ir
+                                .push_str(&format!("store {{}} zeroinitializer, {{}}* {}\n", dest));
                         }
                     }
                     self.attach_debug_location_to_segment(instruction_ir_start, &dbg);
@@ -271,7 +272,10 @@ impl Codegen {
                     }
 
                     mir::MirConstant::Unit => {
-                        self.ir.push_str(&format!("{} = add i8 0, 0\n", dest));
+                        self.ir.push_str(&format!(
+                            "{} = select i1 true, {{}} zeroinitializer, {{}} zeroinitializer\n",
+                            dest
+                        ));
                     }
                 }
             }
@@ -751,7 +755,7 @@ impl Codegen {
 
                 let dest_ty = self.get_local_type(mir_fn, *destination);
 
-                let ret_ty = self.mir_type_to_llvm_cached(dest_ty);
+                let ret_ty = common::mir_type_to_llvm_str(dest_ty);
 
                 // Lower the built-in print function through puts when applicable.
                 let is_print = func == "print";
@@ -837,7 +841,7 @@ impl Codegen {
             } => {
                 let dest = self.local_name(*destination);
                 let dest_ty = self.get_local_type(mir_fn, *destination).clone();
-                let ret_ty = self.mir_type_to_llvm_cached(&dest_ty);
+                let ret_ty = common::mir_type_to_llvm_str(&dest_ty);
 
                 let mut arg_tys: Vec<String> = Vec::new();
                 let mut arg_strs: Vec<String> = Vec::new();

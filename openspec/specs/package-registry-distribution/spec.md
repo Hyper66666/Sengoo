@@ -1,7 +1,7 @@
 # package-registry-distribution Specification
 
 ## Purpose
-TBD - created by archiving change package-registry-and-distribution. Update Purpose after archive.
+Define the package-registry protocol, hash-locked registry resolution, and distribution of versioned toolchain binaries.
 ## Requirements
 ### Requirement: A package registry protocol and reference server SHALL exist
 

@@ -1,6 +1,7 @@
 name: hardening-fuzz
 
 on:
+  workflow_dispatch:
   pull_request:
     paths:
       - ".github/workflows/hardening-fuzz.yml"
@@ -26,6 +27,17 @@ jobs:
       SENGOO_FUZZ_CASES: ${{ github.event_name == 'schedule' && '4096' || '512' }}
     steps:
       - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
+
+      - name: Verify candidate checkout
+        shell: pwsh
+        run: |
+          $expected = "${{ github.event.pull_request.head.sha || github.sha }}"
+          $actual = git rev-parse HEAD
+          if ($LASTEXITCODE -ne 0 -or $actual.Trim() -ne $expected) {
+            throw "checkout revision $actual differs from candidate $expected"
+          }
 
       - uses: dtolnay/rust-toolchain@master
         with:

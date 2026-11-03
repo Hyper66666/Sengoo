@@ -1,0 +1,198 @@
+name: python-wheels
+
+on:
+  workflow_call:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+env:
+  CANDIDATE_SHA: ${{ github.event.pull_request.head.sha || github.sha }}
+
+jobs:
+  native-wheels:
+    name: wheel-build (${{ matrix.platform }}, CPython 3.11)
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: windows-latest
+            platform: windows-x64
+          - os: macos-15-intel
+            platform: macos-x64
+          - os: macos-15
+            platform: macos-arm64
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 90
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
+      - name: Verify candidate checkout
+        shell: pwsh
+        run: |
+          if ((git rev-parse HEAD).Trim() -ne $env:CANDIDATE_SHA) { throw 'candidate checkout mismatch' }
+      - uses: dtolnay/rust-toolchain@master
+        with:
+          toolchain: 1.94.0
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+      - name: Install LLVM 19
+        uses: KyleMayes/install-llvm-action@v2
+        with:
+          version: "19.1.7"
+      - name: Build toolchain and backend
+        shell: pwsh
+        run: |
+          cargo build --locked -p sgc -p sgpm
+          if ($LASTEXITCODE -ne 0) { throw "toolchain build failed" }
+          python -m pip install ./tools/sengoo-python
+          if ($LASTEXITCODE -ne 0) { throw "backend install failed" }
+          python -m unittest discover -s tools/sengoo-python/tests
+          if ($LASTEXITCODE -ne 0) { throw "backend unit tests failed" }
+          cargo test --locked -p sgc --bin sgc python_bindings::tests
+          if ($LASTEXITCODE -ne 0) { throw "typed binding and cleanup tests failed" }
+      - name: Build two external consumers
+        shell: pwsh
+        env:
+          SENGOO_PYTHON_RUNTIME_MODE: source-development
+        run: |
+          $suffix = if ($IsWindows) { '.exe' } else { '' }
+          $env:SGPM_SGC = Join-Path $PWD "target/debug/sgc$suffix"
+          $env:SENGOO_SGPM = Join-Path $PWD "target/debug/sgpm$suffix"
+          python tools/sengoo-python/tests/wheel_smoke.py --build-dir raw-wheels
+          if ($LASTEXITCODE -ne 0) { throw "external wheel build failed" }
+      - name: Repair Windows DLL dependencies
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: |
+          python -m pip install delvewheel==1.13.2
+          if ($LASTEXITCODE -ne 0) { throw "delvewheel install failed" }
+          python tools/sengoo-python/tests/repair_wheels.py --input-dir raw-wheels --output-dir wheelhouse --platform windows-x64 --report python-build-evidence/repair.json
+          if ($LASTEXITCODE -ne 0) { throw "Windows wheel repair failed" }
+      - name: Bundle macOS dynamic dependencies and validate deployment tag
+        if: runner.os == 'macOS'
+        shell: bash
+        run: |
+          set -euo pipefail
+          python -m pip install delocate==0.13.0
+          python tools/sengoo-python/tests/repair_wheels.py --input-dir raw-wheels --output-dir wheelhouse --platform ${{ matrix.platform }} --report python-build-evidence/repair.json
+      - uses: actions/upload-artifact@v4
+        with:
+          name: python-wheels-${{ matrix.platform }}-${{ github.event.pull_request.head.sha || github.sha }}
+          path: wheelhouse/*.whl
+          if-no-files-found: error
+      - uses: actions/upload-artifact@v4
+        with:
+          name: python-wheel-build-evidence-${{ matrix.platform }}-${{ github.event.pull_request.head.sha || github.sha }}
+          path: python-build-evidence/
+          if-no-files-found: error
+
+  manylinux-wheels:
+    name: wheel-build (linux-x64, CPython 3.11)
+    runs-on: ubuntu-latest
+    timeout-minutes: 90
+    # Fixed image identity, resolved from quay.io's published manifest. Builds
+    # happen inside this glibc 2.28 environment; auditwheel validates dependencies.
+    container:
+      image: quay.io/pypa/manylinux_2_28_x86_64@sha256:7e41b1c7fd64dfc69703a1124b43c404382973ee06ec5d764b85c34d2221fded
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
+      - name: Verify candidate checkout
+        shell: bash
+        run: test "$(git rev-parse HEAD)" = "$CANDIDATE_SHA"
+      - name: Install source-build toolchains inside manylinux
+        shell: bash
+        run: |
+          set -euo pipefail
+          dnf install -y clang llvm-devel lld openssl-devel
+          clang --version
+          curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs -o /tmp/rustup-init.sh
+          sh /tmp/rustup-init.sh -y --default-toolchain 1.94.0 --profile minimal
+      - name: Build true manylinux wheels
+        shell: bash
+        run: |
+          set -euo pipefail
+          export PATH="$HOME/.cargo/bin:/opt/python/cp311-cp311/bin:$PATH"
+          export SGPM_SGC="$PWD/target/debug/sgc"
+          export SENGOO_SGPM="$PWD/target/debug/sgpm"
+          export SENGOO_PYTHON_RUNTIME_MODE=source-development
+          cargo build --locked -p sgc -p sgpm
+          python -m pip install ./tools/sengoo-python auditwheel==6.8.2
+          python -m unittest discover -s tools/sengoo-python/tests
+          cargo test --locked -p sgc --bin sgc python_bindings::tests
+          clang -fsanitize=address,undefined -fno-omit-frame-pointer tools/sengoo-python/tests/bridge_failure_probe.c -o /tmp/sengoo-bridge-sanitizer
+          ASAN_OPTIONS=detect_leaks=1:halt_on_error=1 /tmp/sengoo-bridge-sanitizer
+          python tools/sengoo-python/tests/wheel_smoke.py --build-dir raw-wheels
+          python tools/sengoo-python/tests/repair_wheels.py --input-dir raw-wheels --output-dir wheelhouse --platform linux-x64 --report python-build-evidence/repair.json
+      - uses: actions/upload-artifact@v4
+        with:
+          name: python-wheels-linux-x64-${{ github.event.pull_request.head.sha || github.sha }}
+          path: wheelhouse/*.whl
+          if-no-files-found: error
+      - uses: actions/upload-artifact@v4
+        with:
+          name: python-wheel-build-evidence-linux-x64-${{ github.event.pull_request.head.sha || github.sha }}
+          path: python-build-evidence/
+          if-no-files-found: error
+
+  installed-wheel-consumers:
+    name: wheel-consumer (${{ matrix.host.platform }}, CPython ${{ matrix.python }})
+    needs: [native-wheels, manylinux-wheels]
+    strategy:
+      fail-fast: false
+      matrix:
+        python: ["3.11", "3.12", "3.13", "3.14"]
+        host:
+          - {os: windows-latest, platform: windows-x64}
+          - {os: ubuntu-latest, platform: linux-x64}
+          - {os: macos-15-intel, platform: macos-x64}
+          - {os: macos-15, platform: macos-arm64}
+    runs-on: ${{ matrix.host.os }}
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
+      - name: Verify candidate checkout
+        shell: bash
+        run: test "$(git rev-parse HEAD)" = "$CANDIDATE_SHA"
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python }}
+      - uses: actions/download-artifact@v4
+        with:
+          name: python-wheels-${{ matrix.host.platform }}-${{ github.event.pull_request.head.sha || github.sha }}
+          path: wheelhouse
+      - name: Verify offline wheel installation with build tools absent from PATH
+        run: python tools/sengoo-python/tests/wheel_smoke.py --verify-dir wheelhouse --report-dir python-consumer-evidence --iterations 20000
+      - uses: actions/upload-artifact@v4
+        with:
+          name: python-wheel-evidence-${{ matrix.host.platform }}-cp${{ matrix.python }}-${{ github.event.pull_request.head.sha || github.sha }}
+          path: python-consumer-evidence/
+          if-no-files-found: error
+
+  python-wheel-gate:
+    name: python-wheel-gate
+    if: always()
+    needs: [native-wheels, manylinux-wheels, installed-wheel-consumers]
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
+      - name: Verify candidate checkout
+        run: test "$(git rev-parse HEAD)" = "$CANDIDATE_SHA"
+      - name: Require all four hosts and sixteen interpreter consumers
+        env:
+          NATIVE_RESULT: ${{ needs.native-wheels.result }}
+          MANYLINUX_RESULT: ${{ needs.manylinux-wheels.result }}
+          CONSUMER_RESULT: ${{ needs.installed-wheel-consumers.result }}
+        run: |
+          test "$NATIVE_RESULT" = success
+          test "$MANYLINUX_RESULT" = success
+          test "$CONSUMER_RESULT" = success

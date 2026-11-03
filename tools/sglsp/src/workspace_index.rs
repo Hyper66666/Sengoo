@@ -26,10 +26,7 @@ use crate::signatures::{
 use crate::stdlib::{
     stdlib_definitions_for_content, stdlib_signatures_for_content, stdlib_symbols_for_content,
 };
-use crate::symbols::{
-    collect_ast_symbols, completion_kind_to_symbol_kind, extract_identifier_at,
-    find_declaration_in_text, find_definition_in_text, AstSymbol,
-};
+use crate::symbols::{collect_ast_symbols, completion_kind_to_symbol_kind, AstSymbol};
 use crate::text_editing::{apply_content_changes, span_to_range};
 
 #[derive(Debug, Clone, Default)]
@@ -216,6 +213,7 @@ pub(crate) struct IndexedDocument {
     pub(crate) enums: Vec<IndexedEnum>,
     pub(crate) documentation: HashMap<String, String>,
     pub(crate) scopes: Vec<IndexedScope>,
+    pub(crate) bindings: crate::bindings::BindingFacts,
     pub(crate) stdlib_symbols: Vec<AstSymbol>,
     pub(crate) stdlib_signatures: Vec<FunctionSignatureInfo>,
     pub(crate) stdlib_definitions: HashMap<String, Location>,
@@ -231,6 +229,7 @@ impl IndexedDocument {
         last_good: Option<&IndexedDocument>,
     ) -> Self {
         let content: Arc<str> = Arc::from(text);
+        let bindings = crate::bindings::BindingFacts::parse(&content);
         let parsed = sgfmt::format_source(&content, &sgfmt::FormatOptions::default()).is_ok();
         let (
             symbols,
@@ -302,6 +301,7 @@ impl IndexedDocument {
             enums,
             documentation,
             scopes,
+            bindings,
             stdlib_symbols,
             stdlib_signatures,
             stdlib_definitions,
@@ -349,6 +349,21 @@ pub(crate) struct WorkspaceIndex {
     metrics: MetricCounters,
     next_build_generation: AtomicU64,
     active_build: Mutex<Option<(u64, IndexCancellation)>>,
+    // Notification receipt precedes asynchronous parsing/publication. Keep the
+    // client's latest revision separate so the old snapshot cannot authorize
+    // unversioned edits while a newer change is queued or being parsed.
+    observed_revisions: Mutex<HashMap<Url, i32>>,
+    // Compose deltas when notifications arrive, before parser jobs can race.
+    queued_overlays: Mutex<HashMap<Url, QueuedOverlay>>,
+    next_overlay_token: AtomicU64,
+}
+
+#[derive(Debug, Clone)]
+pub(crate) struct QueuedOverlay {
+    uri: Url,
+    revision: i32,
+    text: String,
+    token: u64,
 }
 
 #[derive(Debug)]
@@ -466,6 +481,13 @@ impl WorkspaceIndex {
         let mut documents = HashMap::new();
         let mut failures = HashMap::new();
         for (path, origin) in files {
+            // A dependency may live below a workspace root. De-duplicating the
+            // scan must not turn it into editable workspace source.
+            let canonical = canonical_path_for_matching(&path);
+            let origin = indexed_roots
+                .iter()
+                .find(|root| canonical.starts_with(&root.path))
+                .map_or(origin, |root| root.origin);
             cancellation.check()?;
             index.metrics.disk_reads.fetch_add(1, Ordering::Relaxed);
             let uri = match Url::from_file_path(&path) {
@@ -642,19 +664,6 @@ impl WorkspaceIndex {
     #[cfg(test)]
     pub(crate) fn failure(&self, uri: &Url) -> Option<IndexFailure> {
         self.snapshot().failures.get(uri).cloned()
-    }
-
-    pub(crate) fn documents(&self) -> HashMap<Url, String> {
-        let snapshot = self.snapshot();
-        snapshot
-            .documents
-            .iter()
-            .map(|(uri, document)| {
-                debug_assert_eq!(uri, &document.uri);
-                debug_assert!(document.generation <= snapshot.generation);
-                (uri.clone(), document.content.to_string())
-            })
-            .collect()
     }
 
     pub(crate) fn module_paths(&self, current_uri: &Url) -> Vec<String> {
@@ -960,50 +969,91 @@ impl WorkspaceIndex {
         position: Position,
     ) -> Option<GotoDefinitionResponse> {
         self.count_query();
-        let snapshot = self.snapshot();
-        let current = snapshot.documents.get(current_uri)?;
-        let symbol = extract_identifier_at(&current.content, position)?;
-        if let Some(found) = current.symbols.iter().find(|item| item.name == symbol.name) {
-            return Some(GotoDefinitionResponse::Scalar(Location::new(
-                current_uri.clone(),
-                found.range,
-            )));
-        }
-        if let Some(range) = find_declaration_in_text(&current.content, &symbol.name) {
-            return Some(GotoDefinitionResponse::Scalar(Location::new(
-                current_uri.clone(),
-                range,
-            )));
-        }
-        let mut documents = snapshot.documents.iter().collect::<Vec<_>>();
-        documents.sort_by(|(left, _), (right, _)| left.as_str().cmp(right.as_str()));
-        for (uri, document) in documents {
-            if uri == current_uri {
-                continue;
-            }
-            if let Some(found) = document
-                .symbols
-                .iter()
-                .find(|item| item.name == symbol.name)
-            {
-                return Some(GotoDefinitionResponse::Scalar(Location::new(
-                    uri.clone(),
-                    found.range,
-                )));
-            }
-            if let Some(range) = find_declaration_in_text(&document.content, &symbol.name)
-                .or_else(|| find_definition_in_text(&document.content, &symbol.name))
-            {
-                return Some(GotoDefinitionResponse::Scalar(Location::new(
-                    uri.clone(),
-                    range,
-                )));
-            }
-        }
-        find_definition_in_text(&current.content, &symbol.name)
-            .map(|range| GotoDefinitionResponse::Scalar(Location::new(current_uri.clone(), range)))
+        crate::bindings::definition(&self.snapshot(), current_uri, position)
     }
 
+    pub(crate) fn references(
+        &self,
+        uri: &Url,
+        position: Position,
+        include_declaration: bool,
+    ) -> Option<Vec<Location>> {
+        self.count_query();
+        crate::bindings::references(&self.snapshot(), uri, position, include_declaration)
+    }
+
+    pub(crate) fn prepare_rename(
+        &self,
+        uri: &Url,
+        position: Position,
+    ) -> Option<tower_lsp::lsp_types::PrepareRenameResponse> {
+        let snapshot = self.snapshot();
+        let result = crate::bindings::prepare(&snapshot, uri, position);
+        self.rename_snapshot_is_current(&snapshot)
+            .then_some(result)
+            .flatten()
+    }
+
+    pub(crate) fn rename(
+        &self,
+        uri: &Url,
+        position: Position,
+        new_name: &str,
+        versioned: bool,
+    ) -> Result<Option<tower_lsp::lsp_types::WorkspaceEdit>, String> {
+        self.rename_from_snapshot(&self.snapshot(), uri, position, new_name, versioned)
+    }
+
+    pub(crate) fn rename_from_snapshot(
+        &self,
+        snapshot: &Arc<WorkspaceSnapshot>,
+        uri: &Url,
+        position: Position,
+        new_name: &str,
+        versioned: bool,
+    ) -> Result<Option<tower_lsp::lsp_types::WorkspaceEdit>, String> {
+        if !self.observed_revisions_match(snapshot) {
+            return Err(
+                "a newer document version is awaiting indexing; retry after it is published".into(),
+            );
+        }
+        let result = crate::bindings::rename(snapshot, uri, position, new_name, versioned)?;
+        if !self.rename_snapshot_is_current(snapshot) {
+            return Err("document or workspace changed while computing rename; retry on the current version".into());
+        }
+        Ok(result)
+    }
+
+    pub(crate) fn observe_document_revision(&self, uri: &Url, revision: i32) {
+        self.observed_revisions
+            .lock()
+            .expect("observed revision lock poisoned")
+            .entry(uri.clone())
+            .and_modify(|known| *known = (*known).max(revision))
+            .or_insert(revision);
+    }
+
+    fn observed_revisions_match(&self, snapshot: &WorkspaceSnapshot) -> bool {
+        self.observed_revisions
+            .lock()
+            .expect("observed revision lock poisoned")
+            .iter()
+            .all(|(uri, revision)| {
+                snapshot
+                    .documents
+                    .get(uri)
+                    .and_then(|document| document.revision)
+                    == Some(*revision)
+            })
+    }
+
+    fn rename_snapshot_is_current(&self, snapshot: &Arc<WorkspaceSnapshot>) -> bool {
+        // Check publication and received notifications together. A queued parse
+        // may not have published a new Arc yet, but its version already makes
+        // edits computed against the old text unsafe for unversioned clients.
+        let current = self.snapshot.read().expect("workspace index lock poisoned");
+        Arc::ptr_eq(snapshot, &current) && self.observed_revisions_match(snapshot)
+    }
     pub(crate) fn metrics(&self) -> IndexMetrics {
         IndexMetrics {
             recursive_scans: self.metrics.recursive_scans.load(Ordering::Acquire),
@@ -1014,6 +1064,7 @@ impl WorkspaceIndex {
         }
     }
 
+    #[cfg(test)]
     pub(crate) fn open(
         &self,
         uri: Url,
@@ -1021,9 +1072,11 @@ impl WorkspaceIndex {
         text: String,
         cancellation: &IndexCancellation,
     ) -> bool {
-        self.publish_overlay(uri, revision, text, cancellation)
+        self.queue_open(uri, revision, text)
+            .is_some_and(|overlay| self.publish_overlay(overlay, cancellation))
     }
 
+    #[cfg(test)]
     pub(crate) fn change(
         &self,
         uri: &Url,
@@ -1031,25 +1084,89 @@ impl WorkspaceIndex {
         changes: Vec<TextDocumentContentChangeEvent>,
         cancellation: &IndexCancellation,
     ) -> bool {
-        let Some(current) = self.document(uri) else {
-            return false;
-        };
-        if current.revision.is_some_and(|known| revision <= known) || cancellation.check().is_err()
-        {
-            return false;
-        }
-        let mut text = current.content.to_string();
-        apply_content_changes(&mut text, changes);
-        self.publish_overlay(uri.clone(), revision, text, cancellation)
+        self.queue_change(uri, revision, changes)
+            .is_some_and(|overlay| self.publish_overlay(overlay, cancellation))
     }
 
-    fn publish_overlay(
+    pub(crate) fn queue_open(
         &self,
         uri: Url,
         revision: i32,
         text: String,
+    ) -> Option<QueuedOverlay> {
+        let snapshot = self.snapshot.read().expect("workspace index lock poisoned");
+        let mut queued = self
+            .queued_overlays
+            .lock()
+            .expect("overlay queue lock poisoned");
+        // A complete didOpen can retry an unpublished, cancelled version.
+        // Replacing its token still prevents the earlier worker publishing.
+        if queued.get(&uri).is_some_and(|old| revision < old.revision)
+            || snapshot
+                .documents
+                .get(&uri)
+                .and_then(|document| document.revision)
+                .is_some_and(|known| revision <= known)
+        {
+            return None;
+        }
+        Some(self.queue_overlay(&mut queued, uri, revision, text))
+    }
+
+    pub(crate) fn queue_change(
+        &self,
+        uri: &Url,
+        revision: i32,
+        changes: Vec<TextDocumentContentChangeEvent>,
+    ) -> Option<QueuedOverlay> {
+        let snapshot = self.snapshot.read().expect("workspace index lock poisoned");
+        let mut queued = self
+            .queued_overlays
+            .lock()
+            .expect("overlay queue lock poisoned");
+        let (known, mut text) = if let Some(previous) = queued.get(uri) {
+            (Some(previous.revision), previous.text.clone())
+        } else {
+            let previous = snapshot.documents.get(uri)?;
+            previous.revision?;
+            (previous.revision, previous.content.to_string())
+        };
+        if known.is_some_and(|known| revision <= known) {
+            return None;
+        }
+        apply_content_changes(&mut text, changes);
+        Some(self.queue_overlay(&mut queued, uri.clone(), revision, text))
+    }
+
+    fn queue_overlay(
+        &self,
+        queued: &mut HashMap<Url, QueuedOverlay>,
+        uri: Url,
+        revision: i32,
+        text: String,
+    ) -> QueuedOverlay {
+        let overlay = QueuedOverlay {
+            uri: uri.clone(),
+            revision,
+            text,
+            token: self.next_overlay_token.fetch_add(1, Ordering::Relaxed) + 1,
+        };
+        self.observe_document_revision(&uri, revision);
+        queued.insert(uri, overlay.clone());
+        overlay
+    }
+
+    pub(crate) fn publish_overlay(
+        &self,
+        overlay: QueuedOverlay,
         cancellation: &IndexCancellation,
     ) -> bool {
+        let QueuedOverlay {
+            uri,
+            revision,
+            text,
+            token,
+        } = overlay;
         if cancellation.check().is_err() {
             return false;
         }
@@ -1091,6 +1208,12 @@ impl WorkspaceIndex {
             .expect("workspace index lock poisoned");
         if cancellation.check().is_err()
             || Self::entry_epoch(&guard, &uri).overlay != captured_overlay_epoch
+            || self
+                .queued_overlays
+                .lock()
+                .expect("overlay queue lock poisoned")
+                .get(&uri)
+                .is_none_or(|queued| queued.token != token)
         {
             return false;
         }
@@ -1215,6 +1338,16 @@ impl WorkspaceIndex {
             .snapshot
             .write()
             .expect("workspace index lock poisoned");
+        // Versions belong to an open-document session. After close the disk
+        // snapshot has no version, and reopening may restart at a lower one.
+        self.queued_overlays
+            .lock()
+            .expect("overlay queue lock poisoned")
+            .remove(uri);
+        self.observed_revisions
+            .lock()
+            .expect("observed revision lock poisoned")
+            .remove(uri);
         if !guard.documents.contains_key(uri) {
             return false;
         }
@@ -1531,7 +1664,7 @@ fn dependency_aliases_for_workspace_roots(roots: &[PathBuf]) -> HashMap<PathBuf,
     aliases
 }
 
-fn module_identity_from_snapshot(
+pub(crate) fn module_identity_from_snapshot(
     snapshot: &WorkspaceSnapshot,
     uri: &Url,
 ) -> Option<ModuleIdentity> {
@@ -3185,6 +3318,87 @@ manifest = "../dep/Sengoo.toml"
         tokio::task::spawn_blocking(move || gate.release.wait())
             .await
             .unwrap();
+    }
+
+    #[tokio::test]
+    async fn queued_incremental_changes_compose_before_either_snapshot_is_published() {
+        let index = Arc::new(WorkspaceIndex::default());
+        let uri = Url::parse("file:///queued-incremental.sg").unwrap();
+        let source = "def main() -> i64 { 1 + 2 }";
+        assert!(index.open(uri.clone(), 7, source.into(), &IndexCancellation::default()));
+        let first_digit = source.find("1 +").unwrap() as u32;
+        let last_digit = source.find("2 }").unwrap() as u32;
+        let change = |character, value: &str| TextDocumentContentChangeEvent {
+            range: Some(Range::new(
+                Position::new(0, character),
+                Position::new(0, character + 1),
+            )),
+            range_length: None,
+            text: value.into(),
+        };
+        let gate = install_publication_gate(&uri, TestPublicationKind::Overlay);
+        let first_index = Arc::clone(&index);
+        let first_uri = uri.clone();
+        let first = tokio::spawn(run_index_operation(move |cancellation| {
+            first_index.change(&first_uri, 8, vec![change(first_digit, "3")], &cancellation)
+        }));
+        wait_gate_reached(Arc::clone(&gate)).await;
+        assert!(index.change(
+            &uri,
+            9,
+            vec![change(last_digit, "4")],
+            &IndexCancellation::default()
+        ));
+        release_gate(gate).await;
+        assert!(!first.await.unwrap());
+        assert_eq!(index.document(&uri).unwrap().revision, Some(9));
+        assert_eq!(
+            index.document(&uri).unwrap().content.as_ref(),
+            "def main() -> i64 { 3 + 4 }"
+        );
+    }
+
+    #[test]
+    fn queued_notifications_survive_reversed_workers_and_close_reopen_sessions() {
+        let index = WorkspaceIndex::default();
+        let uri = Url::parse("file:///queued-sessions.sg").unwrap();
+        let source = "def main(value: i64) -> i64 { value }";
+        let first = index.queue_open(uri.clone(), 7, source.into()).unwrap();
+        let latest = index
+            .queue_change(
+                &uri,
+                8,
+                vec![TextDocumentContentChangeEvent {
+                    range: None,
+                    range_length: None,
+                    text: source.replace("value", "latest"),
+                }],
+            )
+            .unwrap();
+        // The v8 parser may finish before the worker for the original didOpen.
+        assert!(index.publish_overlay(latest, &IndexCancellation::default()));
+        assert!(!index.publish_overlay(first, &IndexCancellation::default()));
+        assert_eq!(index.document(&uri).unwrap().revision, Some(8));
+        assert!(index.document(&uri).unwrap().content.contains("latest"));
+        let pending = index.queue_open(uri.clone(), 9, source.into()).unwrap();
+        assert!(index.close(&uri));
+        assert!(index.queue_change(&uri, 10, vec![]).is_none());
+        let reopened = index
+            .queue_open(uri.clone(), 1, source.replace("value", "fresh"))
+            .unwrap();
+        assert!(index.publish_overlay(reopened, &IndexCancellation::default()));
+        assert!(!index.publish_overlay(pending, &IndexCancellation::default()));
+        assert_eq!(index.document(&uri).unwrap().revision, Some(1));
+        assert!(index.document(&uri).unwrap().content.contains("fresh"));
+        assert!(index.prepare_rename(&uri, Position::new(0, 10)).is_some());
+
+        let unopened = Url::parse("file:///not-published.sg").unwrap();
+        let pending = index
+            .queue_open(unopened.clone(), 100, source.into())
+            .unwrap();
+        assert!(!index.close(&unopened));
+        assert!(!index.publish_overlay(pending, &IndexCancellation::default()));
+        assert!(index.document(&unopened).is_none());
     }
 
     #[tokio::test]

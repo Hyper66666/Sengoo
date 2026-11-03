@@ -1,0 +1,80 @@
+import std::collections;
+
+import std::string;
+
+import std::result;
+
+extern "C" {
+    fn sengoo_string_live_handle_count() -> i64;
+    fn sengoo_opaque_live_handle_count() -> i64;
+}
+
+pub def affine(values: Vec<f64>, scale: f64, bias: f64) -> Vec<f64> {
+    let output: Vec<f64> = vec_new();
+    let mut index: i64 = 0;
+    while index < values.len() { let value: &f64 = values.get(index); output.push(*value * scale + bias); index = index + 1; };
+    output;
+}
+
+pub def sum_i64(values: Vec<i64>) -> i64 {
+    let mut total: i64 = 0;
+    let mut index: i64 = 0;
+    while index < values.len() { total = total + values.get(index).unwrap_or(0); index = index + 1; };
+    total;
+}
+
+pub def echo_i64(values: Vec<i64>) -> Vec<i64> {
+    values;
+}
+
+pub def echo_text(value: &str) -> Result<String, i64> {
+    string_from_str(value);
+}
+
+pub def owned_text(value: String) -> String {
+    value;
+}
+
+pub def checked_divide(value: i64, divisor: i64) -> Result<i64, i64> {
+    if divisor == 0 { result_err_i64(22); } else { result_ok_i64(value / divisor); };
+}
+
+pub def negate(value: bool) -> bool {
+    not value;
+}
+
+pub def no_op() {
+}
+
+pub def completed() -> Result<(), i64> {
+    result_ok_with((), 0);
+}
+
+pub def accepts_unit(value: ()) -> bool {
+    true;
+}
+
+pub def choose_text(left: String, right: String, choose_left: bool) -> String {
+    if choose_left { left; } else { right; };
+}
+
+pub def checked_text(value: String, reject: bool) -> Result<String, i64> {
+    if reject { result_err_with(value, 22); } else { result_ok_with(value, 0); };
+}
+
+pub def consume_owned(label: String, values: Vec<i64>) {
+}
+
+pub def calibrated(label: String, values: Vec<f64>, scale: f64, bias: f64) -> Result<Vec<f64>, i64> {
+    if label.len() == 0 { let empty: Vec<f64> = vec_new(); return result_err_with(empty, 22); };
+    if scale != scale or bias != bias { let empty: Vec<f64> = vec_new(); return result_err_with(empty, 34); };
+    result_ok_with(affine(values, scale, bias), 0);
+}
+
+pub def native_live_strings() -> i64 {
+    sengoo_string_live_handle_count();
+}
+
+pub def native_live_collections() -> i64 {
+    sengoo_opaque_live_handle_count();
+}

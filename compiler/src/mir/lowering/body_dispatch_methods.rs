@@ -204,6 +204,11 @@ impl<'a> LoweringContext<'a> {
     ) -> Local {
         self.push_drop_scope();
         let result = self.lower_body_to_block_val(body, target_block);
+        if !self.current_block_is_terminated() {
+            if let Some(expr) = body.expr.as_deref() {
+                self.mark_drop_expr_moved(expr);
+            }
+        }
         self.pop_drop_scope(Some(result));
         result
     }

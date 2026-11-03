@@ -1,4 +1,4 @@
-﻿# stdlib-mainstream-usability Specification
+# stdlib-mainstream-usability Specification
 
 ## Purpose
 Defines portable standard-library APIs and toolchain wiring requirements for common scripting, CLI, filesystem, and process workflows.
@@ -97,6 +97,11 @@ The standard library SHALL provide `std::process` helpers for process ID, curren
 - **AND** `process_exit_code(false, failure_code)` returns `failure_code`
 
 ### Requirement: Later process and data-format extensions SHALL remain gated by explicit follow-up design
+Later process and data-format extensions SHALL require explicit accepted follow-up design. The conformance scenario below identifies the existing accepted API boundaries; expansions beyond them SHALL NOT be added opportunistically.
+
+#### Scenario: Complete compatibility contract
+- **WHEN** this capability is implemented or modified
+- **THEN** it SHALL satisfy every clause of the following contract:
 
 This requirement SHALL keep later process and data-format extensions gated by
 explicit follow-up design. The `stdlib-next-usability-wave` change satisfies the
@@ -408,6 +413,11 @@ The C runtime bridge SHALL keep `runtime.c` as the anchor/core source while larg
 - **THEN** native build, run, reflection native linking, and stdlib runtime tests include the required sibling runtime object files
 
 ### Requirement: Stdlib SHALL expose additive owned-text production helpers
+The standard library SHALL add the listed owned-text and production helpers while preserving existing Buffer-based APIs and canonical JSON input names, as specified in the conformance scenario below.
+
+#### Scenario: Complete compatibility contract
+- **WHEN** this capability is implemented or modified
+- **THEN** it SHALL satisfy every clause of the following contract:
 
 Sengoo SHALL add the following additive helpers without renaming existing
 Buffer-based APIs:
@@ -602,6 +612,11 @@ this phase.
 - **AND** the support matrix documents HTTPS as supported subset and FTP as unsupported
 
 ### Requirement: TLS failures SHALL map to stable status categories
+HTTPS client failures SHALL use the existing positive std::status namespace and the stable TLS categories in the conformance scenario below, unless an accepted design replaces that table before implementation.
+
+#### Scenario: Complete compatibility contract
+- **WHEN** this capability is implemented or modified
+- **THEN** it SHALL satisfy every clause of the following contract:
 
 HTTPS client failures SHALL use the existing positive `std::status` namespace.
 This change SHALL add these stable categories unless a later accepted design

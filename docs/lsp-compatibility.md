@@ -1,5 +1,52 @@
 # sglsp capability and compatibility reference
 
+## Symbol navigation and safe rename
+
+Definition, references, document highlights, `prepareRename`, and rename share
+compiler-AST binding facts cached with each workspace snapshot. Each parameter,
+local, closure parameter, loop variable and match binding has a separate
+identity. Initializers resolve before the new local becomes visible; nested
+blocks and closure captures retain lexical scope. `includeDeclaration: false`
+excludes the actual declaration, including when the request starts on a use.
+All source positions and edits use LSP UTF-16 coordinates.
+
+Workspace declarations resolve through canonical module identities and import
+facts. Import aliases are separate local bindings: renaming an alias changes
+its declaration and uses, while renaming the original changes its import path.
+Concrete fields and inherent methods resolve through a known receiver type.
+Dependency declarations, including dependencies located inside the workspace
+directory, and standard-library declarations are read-only.
+
+Rename rejects keywords, declaration conflicts, and changes that capture a
+reference. It checks the proposed binding graph before producing edits and
+revalidates the immutable snapshot before returning. Clients advertising
+`workspace.workspaceEdit.documentChanges` receive `TextDocumentEdit` values
+with the exact open-document version; closed files use a null version. Other
+clients receive ordinary `WorkspaceEdit.changes` after the same server-side
+validation. Clients must still apply responses to the requested document state.
+
+Received open/change notifications update a separate pending text and version
+before asynchronous parsing starts. Incremental changes compose against that
+pending text; a queued newer version blocks rename until its snapshot is
+published. Closing a document clears its session tokens, so delayed parser jobs
+cannot revive it or overwrite a reopened session with a restarted version.
+
+Ambiguity, incomplete syntax, unknown or dynamic receiver types, macro or
+attribute expansion without a source map, trait implementation methods without
+linked trait/dispatch identities, alternative match bindings, and
+shorthand tokens with multiple meanings cause conservative refusal. Expand
+`A { value }` to `A { value: value }` before renaming either meaning. Last-good
+facts used for completion are never used to edit a broken overlay. There is no
+global same-spelling replacement fallback. These boundaries also mean that a
+public rename can be refused while another workspace source is incomplete.
+
+Executable evidence: `cargo test --locked -p sglsp --bin sglsp bindings::tests`
+covers local isolation, shadowing, closures, patterns, capture, Unicode,
+versioned edits, stale snapshots, aliases, module identity, read-only
+dependencies, concrete members, and conservative refusal. Workspace-index
+regressions also cover concurrent incremental changes, reversed worker order,
+and close/reopen sessions using deterministic publication barriers.
+
 ## Completion metadata schema v1
 
 `initialize` advertises:

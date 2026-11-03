@@ -142,7 +142,7 @@ pub(crate) fn hir_type_to_mir_with_structs_and_enums(
             )),
             *len as u64,
         ),
-        HIRTypeKind::Tuple(types) => MIRType::Tuple(
+        HIRTypeKind::Tuple(types) => MIRType::tuple(
             types
                 .iter()
                 .map(|item| {

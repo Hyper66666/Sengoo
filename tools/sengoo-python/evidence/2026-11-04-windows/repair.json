@@ -1,0 +1,103 @@
+{
+  "schema_version": 1,
+  "candidate_sha": null,
+  "platform": "windows-x64",
+  "repair_tool": "delvewheel",
+  "repair_tool_version": "1.13.2",
+  "inputs": [
+    {
+      "filename": "sengoo_batch_a-0.1.0-py3-none-win_amd64.whl",
+      "sha256": "375662e4d537845251fc19b5a1f4ff100f87b92fbe47dc78241219ca3f7a44d6"
+    },
+    {
+      "filename": "sengoo_batch_b-0.1.0-py3-none-win_amd64.whl",
+      "sha256": "01e0471bf35203407903447688b1ce807de4e2033e00c57d4f3939ad0e162222"
+    }
+  ],
+  "outputs": [
+    {
+      "filename": "sengoo_batch_a-0.1.0-py3-none-win_amd64.whl",
+      "sha256": "6edcb73f32296ecc673a1719a6f66eccf653620a8055365f00ce4b40599bfbde",
+      "tags": [
+        "py3-none-win_amd64"
+      ],
+      "native_files": [
+        "sengoo_batch_a/_native.dll",
+        "sengoo_batch_a.libs/vcruntime140-d5e4d9a3e835fa679450145d6a7d94e3.dll"
+      ]
+    },
+    {
+      "filename": "sengoo_batch_b-0.1.0-py3-none-win_amd64.whl",
+      "sha256": "cef8ba5af5a9ac75a49e49ae5f1b28593ef0c7ada51c4f6184d74080b8af102e",
+      "tags": [
+        "py3-none-win_amd64"
+      ],
+      "native_files": [
+        "sengoo_batch_b/_native.dll",
+        "sengoo_batch_b.libs/vcruntime140-d5e4d9a3e835fa679450145d6a7d94e3.dll"
+      ]
+    }
+  ],
+  "dependency_commands": [
+    {
+      "command": [
+        "C:\\Users\\admin\\.cache\\codex-runtimes\\codex-primary-runtime\\dependencies\\python\\python.exe",
+        "-m",
+        "delvewheel",
+        "show",
+        "--analyze-existing",
+        "--add-path",
+        "C:\\Users\\admin\\.cache\\codex-runtimes\\codex-primary-runtime\\dependencies\\python;C:\\WINDOWS\\System32",
+        "D:\\Sengoo\\target\\python-daily-nan-fixed-raw-wheels\\sengoo_batch_a-0.1.0-py3-none-win_amd64.whl"
+      ],
+      "stdout": "Analyzing sengoo_batch_a-0.1.0-py3-none-win_amd64.whl\n\nThe following DLLs will be copied into the wheel.\n    vcruntime140.dll (C:\\Users\\admin\\.cache\\codex-runtimes\\codex-primary-runtime\\dependencies\\python\\vcruntime140.dll)\n\nThe following DLLs are assumed to be present in the end user's environment and will not be copied into the wheel.\n    api-ms-win-crt-convert-l1-1-0.dll\n    api-ms-win-crt-environment-l1-1-0.dll\n    api-ms-win-crt-filesystem-l1-1-0.dll\n    api-ms-win-crt-heap-l1-1-0.dll\n    api-ms-win-crt-math-l1-1-0.dll\n    api-ms-win-crt-runtime-l1-1-0.dll\n    api-ms-win-crt-stdio-l1-1-0.dll\n    api-ms-win-crt-string-l1-1-0.dll\n    api-ms-win-crt-time-l1-1-0.dll\n    api-ms-win-crt-utility-l1-1-0.dll\n    kernel32.dll\n",
+      "stderr": ""
+    },
+    {
+      "command": [
+        "C:\\Users\\admin\\.cache\\codex-runtimes\\codex-primary-runtime\\dependencies\\python\\python.exe",
+        "-m",
+        "delvewheel",
+        "repair",
+        "--analyze-existing",
+        "--add-path",
+        "C:\\Users\\admin\\.cache\\codex-runtimes\\codex-primary-runtime\\dependencies\\python;C:\\WINDOWS\\System32",
+        "--wheel-dir",
+        "D:\\Sengoo\\target\\python-daily-final-wheels",
+        "D:\\Sengoo\\target\\python-daily-nan-fixed-raw-wheels\\sengoo_batch_a-0.1.0-py3-none-win_amd64.whl"
+      ],
+      "stdout": "repairing D:\\Sengoo\\target\\python-daily-nan-fixed-raw-wheels\\sengoo_batch_a-0.1.0-py3-none-win_amd64.whl\nfinding DLL dependencies\ncopying DLLs into sengoo_batch_a.libs\nmangling DLL names\npatching sengoo_batch_a\\__init__.py\nrepackaging wheel\nfixed wheel written to D:\\Sengoo\\target\\python-daily-final-wheels\\sengoo_batch_a-0.1.0-py3-none-win_amd64.whl\n",
+      "stderr": ""
+    },
+    {
+      "command": [
+        "C:\\Users\\admin\\.cache\\codex-runtimes\\codex-primary-runtime\\dependencies\\python\\python.exe",
+        "-m",
+        "delvewheel",
+        "show",
+        "--analyze-existing",
+        "--add-path",
+        "C:\\Users\\admin\\.cache\\codex-runtimes\\codex-primary-runtime\\dependencies\\python;C:\\WINDOWS\\System32",
+        "D:\\Sengoo\\target\\python-daily-nan-fixed-raw-wheels\\sengoo_batch_b-0.1.0-py3-none-win_amd64.whl"
+      ],
+      "stdout": "Analyzing sengoo_batch_b-0.1.0-py3-none-win_amd64.whl\n\nThe following DLLs will be copied into the wheel.\n    vcruntime140.dll (C:\\Users\\admin\\.cache\\codex-runtimes\\codex-primary-runtime\\dependencies\\python\\vcruntime140.dll)\n\nThe following DLLs are assumed to be present in the end user's environment and will not be copied into the wheel.\n    api-ms-win-crt-convert-l1-1-0.dll\n    api-ms-win-crt-environment-l1-1-0.dll\n    api-ms-win-crt-filesystem-l1-1-0.dll\n    api-ms-win-crt-heap-l1-1-0.dll\n    api-ms-win-crt-math-l1-1-0.dll\n    api-ms-win-crt-runtime-l1-1-0.dll\n    api-ms-win-crt-stdio-l1-1-0.dll\n    api-ms-win-crt-string-l1-1-0.dll\n    api-ms-win-crt-time-l1-1-0.dll\n    api-ms-win-crt-utility-l1-1-0.dll\n    kernel32.dll\n",
+      "stderr": ""
+    },
+    {
+      "command": [
+        "C:\\Users\\admin\\.cache\\codex-runtimes\\codex-primary-runtime\\dependencies\\python\\python.exe",
+        "-m",
+        "delvewheel",
+        "repair",
+        "--analyze-existing",
+        "--add-path",
+        "C:\\Users\\admin\\.cache\\codex-runtimes\\codex-primary-runtime\\dependencies\\python;C:\\WINDOWS\\System32",
+        "--wheel-dir",
+        "D:\\Sengoo\\target\\python-daily-final-wheels",
+        "D:\\Sengoo\\target\\python-daily-nan-fixed-raw-wheels\\sengoo_batch_b-0.1.0-py3-none-win_amd64.whl"
+      ],
+      "stdout": "repairing D:\\Sengoo\\target\\python-daily-nan-fixed-raw-wheels\\sengoo_batch_b-0.1.0-py3-none-win_amd64.whl\nfinding DLL dependencies\ncopying DLLs into sengoo_batch_b.libs\nmangling DLL names\npatching sengoo_batch_b\\__init__.py\nrepackaging wheel\nfixed wheel written to D:\\Sengoo\\target\\python-daily-final-wheels\\sengoo_batch_b-0.1.0-py3-none-win_amd64.whl\n",
+      "stderr": ""
+    }
+  ]
+}

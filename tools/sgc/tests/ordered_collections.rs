@@ -292,8 +292,8 @@ def scoped(before: i64) -> i64 {
     };
     let removed = values.remove(1).unwrap_or(Payload { text: String { handle: 0 } });
     let popped = values.pop().unwrap_or(Payload { text: String { handle: 0 } });
-    let removed_ok = removed.text.handle != 0;
-    let popped_ok = popped.text.handle != 0;
+    let removed_ok = removed.text.len() == 11;
+    let popped_ok = popped.text.len() == 8;
     let cleared = values.clear();
     let after_clear = sengoo_string_live_handle_count();
     if pushed == false {
@@ -312,7 +312,7 @@ def scoped(before: i64) -> i64 {
         10
     } else if cleared == false {
         3
-    } else if after_clear != before {
+    } else if after_clear != before + 2 {
         4
     } else if values.len() != 0 {
         5

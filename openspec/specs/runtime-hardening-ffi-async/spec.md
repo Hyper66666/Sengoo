@@ -1,7 +1,7 @@
 # runtime-hardening-ffi-async Specification
 
 ## Purpose
-TBD - created by archiving change runtime-hardening-ffi-async. Update Purpose after archive.
+Define testable async and concurrency behavior, explicit FFI and platform boundaries, diagnostic context, and validated resource-handle lifecycles.
 ## Requirements
 ### Requirement: Runtime async and concurrency semantics SHALL be stable and testable
 

@@ -284,6 +284,25 @@ type StreamingLimitServer = (
     thread::JoinHandle<()>,
 );
 
+fn write_counted_payload(
+    writer: &mut impl Write,
+    mut payload: &[u8],
+    bytes_sent: &mut usize,
+) -> std::io::Result<()> {
+    while !payload.is_empty() {
+        match writer.write(payload) {
+            Ok(0) => return Err(std::io::ErrorKind::WriteZero.into()),
+            Ok(written) => {
+                *bytes_sent += written;
+                payload = &payload[written..];
+            }
+            Err(error) if error.kind() == std::io::ErrorKind::Interrupted => continue,
+            Err(error) => return Err(error),
+        }
+    }
+    Ok(())
+}
+
 fn spawn_streaming_limit_remote_package_server(
     package: &str,
     version: &str,
@@ -318,13 +337,15 @@ fn spawn_streaming_limit_remote_package_server(
                     if stream.write_all(chunk_header.as_bytes()).is_err() {
                         break;
                     }
-                    if stream.write_all(&chunk).is_err() {
+                    // The client can close as soon as part of this chunk crosses
+                    // the limit. Count each successful write even if the rest
+                    // of the payload or its framing fails after that close.
+                    if write_counted_payload(&mut stream, &chunk, &mut bytes_sent).is_err() {
                         break;
                     }
                     if stream.write_all(b"\r\n").is_err() {
                         break;
                     }
-                    bytes_sent += chunk.len();
                     thread::sleep(Duration::from_millis(2));
                 }
             } else {
@@ -337,6 +358,31 @@ fn spawn_streaming_limit_remote_package_server(
     });
 
     (format!("http://{}", addr), rx, handle)
+}
+
+#[test]
+fn streaming_limit_server_counts_partial_payload_before_disconnect() {
+    struct DisconnectingWriter(usize);
+    impl Write for DisconnectingWriter {
+        fn write(&mut self, bytes: &[u8]) -> std::io::Result<usize> {
+            self.0 += 1;
+            match self.0 {
+                1 => Ok(bytes.len().min(5)),
+                2 => Err(std::io::ErrorKind::Interrupted.into()),
+                3 => Ok(bytes.len().min(2)),
+                _ => Err(std::io::ErrorKind::ConnectionReset.into()),
+            }
+        }
+        fn flush(&mut self) -> std::io::Result<()> {
+            Ok(())
+        }
+    }
+
+    let mut bytes_sent = 0;
+    let error =
+        write_counted_payload(&mut DisconnectingWriter(0), &[0; 16], &mut bytes_sent).unwrap_err();
+    assert_eq!(error.kind(), std::io::ErrorKind::ConnectionReset);
+    assert_eq!(bytes_sent, 7);
 }
 
 fn duplicate_path_registry_archive() -> Vec<u8> {
@@ -1157,7 +1203,7 @@ fn remote_registry_download_aborts_when_stream_exceeds_compressed_limit() {
     );
     assert!(
         bytes_sent > max_compressed_bytes,
-        "the server should stream enough compressed bytes to cross the enforced limit"
+        "the server should stream enough compressed bytes to cross the enforced limit: sent {bytes_sent}, limit {max_compressed_bytes}"
     );
     assert!(!app.join("target/sgpm/registry/default/foo/1.2.0").exists());
 
@@ -2543,6 +2589,111 @@ fn sgpm_fmt_formats_src_and_tests_files() {
         "stdout should count src and tests files:\n{stdout}"
     );
 
+    let _ = fs::remove_dir_all(dir);
+}
+
+#[test]
+fn local_development_commands_preserve_locked_registry_dependencies() {
+    let dir = temp_dir("immutable_registry_development_commands");
+    let registry = dir.join("registry");
+    let dependency = registry.join("released/0.1.0");
+    write_lib_pkg(&dependency, "released");
+    fs::create_dir_all(dependency.join("tests")).unwrap();
+    fs::write(
+        dependency.join("tests/released.sg"),
+        "def main() -> i64 { 0 }\n",
+    )
+    .unwrap();
+    let local = dir.join("local");
+    write_lib_pkg(&local, "local");
+    let app = dir.join("app");
+    write_pkg(&app, "app", &[]);
+    fs::write(app.join("Sengoo.toml"),
+        "[package]\nname = 'app'\nversion = '0.1.0'\n[registries.official]\npath = '../registry'\n[dependencies]\nreleased = { version = '=0.1.0', registry = 'official' }\nlocal = { path = '../local' }\n").unwrap();
+    let fake_sgc = fake_sgc(&dir);
+    let fake_sgfmt = fake_sgfmt(&dir);
+    // Model real delegated tools: test emits artifacts in its working package,
+    // and fmt --write changes source bytes. Neither may touch a registry node.
+    #[cfg(windows)]
+    let (compiler_script, formatter_script) = (
+        "@echo off\r\necho %CD% :: %* >> \"%SGPM_RECORD%\"\r\nif \"%~1\"==\"test\" (\r\nif not exist target mkdir target\r\necho artifact>target\\sgc-test-artifact\r\n)\r\nexit /b 0\r\n",
+        "@echo off\r\necho %CD% :: %* >> \"%SGPM_RECORD%\"\r\nif \"%~2\"==\"--write\" echo // formatted>>\"%~1\"\r\nexit /b 0\r\n",
+    );
+    #[cfg(not(windows))]
+    let (compiler_script, formatter_script) = (
+        "#!/bin/sh\nprintf '%s :: %s\\n' \"$PWD\" \"$*\" >> \"$SGPM_RECORD\"\nif [ \"$1\" = test ]; then mkdir -p target; printf artifact > target/sgc-test-artifact; fi\n",
+        "#!/bin/sh\nprintf '%s :: %s\\n' \"$PWD\" \"$*\" >> \"$SGPM_RECORD\"\nif [ \"$2\" = --write ]; then printf '\\n// formatted\\n' >> \"$1\"; fi\n",
+    );
+    fs::write(&fake_sgc, compiler_script).unwrap();
+    fs::write(&fake_sgfmt, formatter_script).unwrap();
+    let snapshot = || {
+        walkdir::WalkDir::new(&registry)
+            .into_iter()
+            .map(Result::unwrap)
+            .filter(|entry| entry.file_type().is_file())
+            .map(|entry| {
+                (
+                    entry.path().strip_prefix(&registry).unwrap().to_path_buf(),
+                    fs::read(entry.path()).unwrap(),
+                )
+            })
+            .collect::<std::collections::BTreeMap<_, _>>()
+    };
+    let original = snapshot();
+    let record = dir.join("record.txt");
+    let update = run_sgpm(&["update"], &app);
+    assert!(
+        update.status.success(),
+        "{}",
+        String::from_utf8_lossy(&update.stderr)
+    );
+    let original_lockfile = fs::read(app.join("Sengoo.lock")).unwrap();
+    for args in [
+        vec!["fmt", "--locked"],
+        vec!["fmt", "--check", "--locked"],
+        vec!["test", "--locked"],
+        vec!["doc", "--locked"],
+        vec!["check", "--locked"],
+    ] {
+        let output = Command::new(sgpm())
+            .args(&args)
+            .current_dir(&app)
+            .env("SGPM_SGC", &fake_sgc)
+            .env("SGPM_SGFMT", &fake_sgfmt)
+            .env("SGPM_RECORD", &record)
+            .output()
+            .unwrap();
+        assert!(
+            output.status.success(),
+            "{args:?}: {}",
+            String::from_utf8_lossy(&output.stderr)
+        );
+        assert_eq!(
+            fs::read(app.join("Sengoo.lock")).unwrap(),
+            original_lockfile
+        );
+        assert_eq!(
+            snapshot(),
+            original,
+            "{args:?} changed immutable registry bytes"
+        );
+    }
+    assert!(app.join("target/sgc-test-artifact").is_file());
+    assert!(local.join("target/sgc-test-artifact").is_file());
+    assert!(!dependency.join("target").exists());
+    let log = fs::read_to_string(record).unwrap().replace('\\', "/");
+    let tests = log
+        .lines()
+        .filter(|line| line.contains(" :: test"))
+        .collect::<Vec<_>>();
+    assert_eq!(
+        tests.len(),
+        2,
+        "only the root and local path package should be tested: {log}"
+    );
+    assert!(tests
+        .iter()
+        .all(|line| !line.contains("registry/released/0.1.0")));
     let _ = fs::remove_dir_all(dir);
 }
 

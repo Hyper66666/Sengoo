@@ -1,0 +1,6 @@
+__pycache__/
+*.pyc
+/build/
+/.sengoo-shared-*/
+/dist/
+/consumer/

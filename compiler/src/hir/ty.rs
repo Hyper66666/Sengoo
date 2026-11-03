@@ -70,7 +70,11 @@ impl HIRType {
 
     /// 元组类型
     pub fn tuple(types: Vec<HIRType>) -> Self {
-        Self::new(HIRTypeKind::Tuple(types))
+        Self::new(if types.is_empty() {
+            HIRTypeKind::Unit
+        } else {
+            HIRTypeKind::Tuple(types)
+        })
     }
 
     /// 函数类型

@@ -1,7 +1,7 @@
 # p0-gate-closure Specification
 
 ## Purpose
-TBD - created by archiving change p0-gate-closure. Update Purpose after archive.
+Close core correctness gates for concrete Drop through dynamic values, mutable dynamic dispatch, object hashing, and borrow tracking through reassignment.
 ## Requirements
 ### Requirement: Dropping a `dyn` value SHALL run the concrete `Drop`
 

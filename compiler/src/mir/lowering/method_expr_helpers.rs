@@ -26,7 +26,7 @@ pub(super) fn lower_method_call_expr(
     for arg in args {
         ctx.mark_drop_expr_moved(arg);
     }
-    if consumes_receiver || method == "drop" {
+    if consumes_receiver || matches!(method, "drop" | "free" | "close") {
         ctx.mark_drop_expr_moved(receiver);
     }
     result

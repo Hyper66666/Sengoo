@@ -1,0 +1,16 @@
+[package]
+name = "file_csv_index"
+version = "0.1.0"
+edition = "2026"
+description = "Persistent CSV index using the three official Sengoo packages."
+
+[bin]
+path = "src/main.sg"
+
+[registries.official]
+path = "registry"
+
+[dependencies]
+sgcli = { version = "=0.1.0", registry = "official" }
+sgdata = { version = "=0.1.0", registry = "official" }
+sgsqlite = { version = "=0.1.0", registry = "official" }

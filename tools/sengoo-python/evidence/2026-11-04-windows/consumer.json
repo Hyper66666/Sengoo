@@ -1,0 +1,18 @@
+{
+  "schema_version": 1,
+  "candidate_sha": null,
+  "python": "3.12.14 (main, Aug 25 2026, 14:01:42) [MSC v.1944 64 bit (AMD64)]",
+  "offline_install": true,
+  "toolchain_on_path": false,
+  "source_project_available": false,
+  "wheels": [
+    {
+      "filename": "sengoo_batch_a-0.1.0-py3-none-win_amd64.whl",
+      "sha256": "6edcb73f32296ecc673a1719a6f66eccf653620a8055365f00ce4b40599bfbde"
+    },
+    {
+      "filename": "sengoo_batch_b-0.1.0-py3-none-win_amd64.whl",
+      "sha256": "cef8ba5af5a9ac75a49e49ae5f1b28593ef0c7ada51c4f6184d74080b8af102e"
+    }
+  ]
+}

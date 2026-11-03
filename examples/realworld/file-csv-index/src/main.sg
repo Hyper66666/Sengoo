@@ -1,0 +1,109 @@
+import sgcli;
+
+import sgdata;
+
+import sgsqlite;
+
+import std::io;
+
+struct IndexOutcome {
+    rows: i64,
+    unchanged: bool,
+}
+
+def diagnostic(message: &str) {
+    io_stderr_write(message);
+    io_stderr_write("\n");
+    ();
+}
+
+def input_error(path: &str) {
+    diagnostic("Cannot index CSV:");
+    diagnostic(path);
+    let message = data_last_error();
+    if message.is_ok() { diagnostic(message.value.as_str()); };
+}
+
+def unchanged_rows(transaction: &SqliteTransaction, path: &str, content: &str) -> Result<i64, i64> {
+    let mut lookup = transaction.prepare("SELECT row_count FROM index_sources WHERE source = ? AND content = ?")?;
+    lookup.bind_text(1, path)?;
+    lookup.bind_text(2, content)?;
+    if lookup.step()? { return lookup.integer(0); };
+    Result { is_ok: true, value: -1, error: 0 };
+}
+
+def index_csv(database: &SqliteDb, path: &str, maximum: i64) -> Result<IndexOutcome, i64> {
+    let read = text_read(path, maximum);
+    if not read.is_ok() { input_error(path); return Result { is_ok: false, value: IndexOutcome { rows: 0, unchanged: false }, error: read.error }; };
+    let content = read.value;
+    let mut transaction = database.transaction()?;
+    let previous = unchanged_rows(&transaction, path, content.as_str())?;
+    if previous >= 0 { transaction.commit()?; return Result { is_ok: true, value: IndexOutcome { rows: previous, unchanged: true }, error: 0 }; };
+    let parsed = csv_parse(content.as_str());
+    if not parsed.is_ok() { input_error(path); return Result { is_ok: false, value: IndexOutcome { rows: 0, unchanged: false }, error: parsed.error }; };
+    let csv = parsed.value;
+    if csv.columns() != 2 or csv.rows() < 1 { diagnostic("CSV must contain exactly the header name,note and two columns per row:"); diagnostic(path); return Result { is_ok: false, value: IndexOutcome { rows: 0, unchanged: false }, error: 10 }; };
+    let name_header = csv.field(0, 0)?;
+    let note_header = csv.field(0, 1)?;
+    if name_header.as_str() != "name" or note_header.as_str() != "note" { diagnostic("CSV header must be name,note (UTF-8, no byte-order mark):"); diagnostic(path); return Result { is_ok: false, value: IndexOutcome { rows: 0, unchanged: false }, error: 10 }; };
+    let mut clear = transaction.prepare("DELETE FROM entries WHERE source = ?")?;
+    clear.bind_text(1, path)?;
+    clear.step()?;
+    let mut insert = transaction.prepare("INSERT INTO entries(source, row_number, name, note) VALUES(?, ?, ?, ?)")?;
+    let mut row = 1;
+    while row < csv.rows() { let name = csv.field(row, 0)?; let note = csv.field(row, 1)?; insert.bind_text(1, path)?; insert.bind_i64(2, row)?; insert.bind_text(3, name.as_str())?; insert.bind_text(4, note.as_str())?; insert.step()?; insert.reset()?; row = row + 1; };
+    let mut record = transaction.prepare("INSERT OR REPLACE INTO index_sources(source, content, row_count) VALUES(?, ?, ?)")?;
+    record.bind_text(1, path)?;
+    record.bind_text(2, content.as_str())?;
+    record.bind_i64(3, csv.rows() - 1)?;
+    record.step()?;
+    transaction.commit()?;
+    Result { is_ok: true, value: IndexOutcome { rows: csv.rows() - 1, unchanged: false }, error: 0 };
+}
+
+def query_csv(database: &SqliteDb, name: &str) -> Result<i64, i64> {
+    let mut statement = database.prepare("SELECT source, row_number, name, note FROM entries WHERE instr(name, ?) > 0 ORDER BY source, row_number")?;
+    statement.bind_text(1, name)?;
+    let mut count = 0;
+    while statement.step()? { let source = statement.text(0)?; let row = statement.integer(1)?; let found_name = statement.text(2)?; let note = statement.text(3)?; println(source.as_str()); println(row); println(found_name.as_str()); println(note.as_str()); count = count + 1; };
+    Result { is_ok: true, value: count, error: 0 };
+}
+
+def run_command(db_path: &str, command: &str, arguments: &CliMatches, maximum: i64) -> Result<i64, i64> {
+    let database = sqlite_open(db_path)?;
+    database.busy_timeout(2000)?;
+    database.exec("CREATE TABLE IF NOT EXISTS entries(source TEXT NOT NULL, row_number INTEGER NOT NULL, name TEXT NOT NULL, note TEXT NOT NULL, PRIMARY KEY(source, row_number))")?;
+    database.exec("CREATE TABLE IF NOT EXISTS index_sources(source TEXT PRIMARY KEY, content TEXT NOT NULL, row_count INTEGER NOT NULL)")?;
+    if command == "index" { let path = arguments.string("csv", 0)?; let outcome = index_csv(&database, path.as_str(), maximum)?; if outcome.unchanged { println("Unchanged rows:"); } else { println("Indexed rows:"); }; println(outcome.rows); } else { let name = arguments.string("name", 0)?; let count = query_csv(&database, name.as_str())?; println("Matching rows:"); println(count); };
+    Result { is_ok: true, value: 0, error: 0 };
+}
+
+def execute() -> Result<i64, i64> {
+    let mut app = cli_app("file-csv-index", "0.1.0", "Index UTF-8 name,note CSV files and query the persistent database")?;
+    app.string_option("db", "d", false, true, "SQLite file path")?;
+    app.command("index", "Import changed CSV files atomically; skip identical content")?;
+    app.command("query", "Find rows whose names contain the supplied text")?;
+    app.command_string_option("index", "csv", "c", false, true, "CSV file (maximum 16 MiB)")?;
+    app.command_int_option("index", "max-bytes", "", false, false, "Input byte limit from 1 to 16777216 (default 16777216)")?;
+    app.command_string_option("query", "name", "n", false, true, "Case-sensitive name substring")?;
+    app.positionals(0, 0)?;
+    let parsed = app.parse_args();
+    if not parsed.is_ok() { let error = app.last_error()?; println(error.as_str()); let help = app.help()?; println(help.as_str()); return Result { is_ok: true, value: 2, error: 0 }; };
+    let arguments = parsed.value;
+    if arguments.flag("help") { let help = app.help()?; println(help.as_str()); return Result { is_ok: true, value: 0, error: 0 }; };
+    if arguments.flag("version") { let version = app.version()?; println(version.as_str()); return Result { is_ok: true, value: 0, error: 0 }; };
+    let command = arguments.command()?;
+    if command.as_str() != "index" and command.as_str() != "query" { diagnostic("Select index or query; use --help for usage."); return Result { is_ok: true, value: 2, error: 0 }; };
+    let mut maximum = 16777216;
+    if arguments.count("max-bytes") > 0 { maximum = arguments.integer("max-bytes", 0)?; };
+    if maximum < 1 or maximum > 16777216 { diagnostic("--max-bytes must be from 1 to 16777216."); return Result { is_ok: true, value: 2, error: 0 }; };
+    let db_path = arguments.string("db", 0)?;
+    let result = run_command(db_path.as_str(), command.as_str(), &arguments, maximum);
+    if not result.is_ok() { diagnostic("Database:"); diagnostic(db_path.as_str()); };
+    result;
+}
+
+def main() -> i64 {
+    let result = execute();
+    if result.is_ok() { result.value; } else { let code = sqlite_error_code(); if code != 0 { let message = sqlite_error_message(); if message.is_ok() { diagnostic("SQLite error:"); diagnostic(message.value.as_str()); }; println("SQLite code:"); println(code); }; println("Operation failed with Sengoo status:"); println(result.error); 1; };
+}

@@ -406,7 +406,7 @@ fn distribution_workflow_smokes_explicit_upgrade_outside_checkout_without_a_real
     );
     assert!(
         prepare_release_feed.contains(
-            "$primaryBuildHash = \"${{ github.sha }}\".Substring(0, 12)"
+            "$primaryBuildHash = \"${{ github.event.pull_request.head.sha || github.sha }}\".Substring(0, 12)"
         )
             && prepare_release_feed.contains(
                 "$primaryBuildHash -notmatch '^[0-9a-fA-F]{12}$'"
@@ -868,11 +868,8 @@ fn distribution_manifest() -> Value {
 }
 
 fn powershell() -> &'static str {
-    if cfg!(windows) {
-        "powershell.exe"
-    } else {
-        "pwsh"
-    }
+    // Match the PowerShell 7 host used by distribution jobs on every platform.
+    "pwsh"
 }
 
 fn run_manifest_comparator(left: &Path, right: &Path, output: &Path) -> std::process::Output {

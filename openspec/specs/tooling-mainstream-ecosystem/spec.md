@@ -1,7 +1,7 @@
 # tooling-mainstream-ecosystem Specification
 
 ## Purpose
-TBD - created by archiving change sgc-test-manifest-tooling. Update Purpose after archive.
+Define a reproducible project workflow across manifests, lockfiles, package operations, tests, editor tooling, debugging, and internal releases. Keep tool behavior and ecosystem discoverability aligned with executable CI evidence.
 ## Requirements
 ### Requirement: Project tooling SHALL stabilize the existing manifest and lockfile baseline
 

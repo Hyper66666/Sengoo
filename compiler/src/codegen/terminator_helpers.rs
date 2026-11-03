@@ -24,7 +24,7 @@ impl Codegen {
                         self.emit_indent();
 
                         self.ir.push_str(&format!("ret i64 0{dbg}\n"));
-                    } else if matches!(mir_fn.return_type, MIRType::Unit | MIRType::Never) {
+                    } else if common::is_unit_value(&mir_fn.return_type) {
                         self.emit_indent();
 
                         self.ir.push_str(&format!("ret void{dbg}\n"));
@@ -162,7 +162,7 @@ impl Codegen {
 
                 let dest_ty = self.get_local_type(mir_fn, *destination);
 
-                let ret_ty = self.mir_type_to_llvm_cached(dest_ty);
+                let ret_ty = common::mir_type_to_llvm_str(dest_ty);
 
                 let arg_strs: Vec<String> = args
                     .iter()

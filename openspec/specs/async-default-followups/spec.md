@@ -8,6 +8,11 @@ owned-fd readiness, exhaustive user-future diagnostics, and wakeup-registration
 enforcement.
 ## Requirements
 ### Requirement: Async default follow-ups SHALL preserve current supported subset
+Sengoo SHALL preserve the documented async subset and keep further support claims bounded by the conformance scenario below, its host-specific tests, and independently owned follow-up changes.
+
+#### Scenario: Complete compatibility contract
+- **WHEN** this capability is implemented or modified
+- **THEN** it SHALL satisfy every clause of the following contract:
 
 Sengoo SHALL keep the current async supported subset stable while separately
 owning remaining mainstream-default async gaps. This includes preserving

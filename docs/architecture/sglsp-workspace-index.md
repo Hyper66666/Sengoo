@@ -9,7 +9,7 @@ Accepted for the smart-completion foundation.
 `sglsp` builds workspace roots and resolved direct path-dependency roots once
 during initialization. Each source file is represented by an indexed entry
 containing its text, origin, symbols, members, signatures, import facts,
-documentation, and generation. Standard-library metadata has an independent
+documentation, lexical binding facts, and generation. Standard-library metadata has an independent
 revision marker in the same immutable snapshot.
 
 Open documents are exact-version overlays over disk entries. Open, incremental
@@ -56,6 +56,28 @@ for newly opened or watched files uses the longest containing canonical root,
 so files created after initial indexing keep dependency provenance.
 
 ## Syntax authority
+
+`bindings.rs` walks the compiler AST while indexing each revision. Declarations
+are keyed by canonical definition URI and a per-document binding ordinal;
+occurrences carry their source span and visible lexical bindings. Globals also
+carry the declaring container and canonical package/module identity; aliases
+retain an independent binding and their original target path. Bindings for
+same-spelled locals in different functions or shadowing scopes never share an
+identity. Initializer expressions are visited before registering a new local.
+
+Definition, references, highlights, prepare-rename and rename use this shared
+resolver. Proposed renames simulate changed resolution for every occurrence;
+conflicts or captures abort the edit. Incomplete, expanded or ambiguously mapped
+source cannot produce edits. A final snapshot identity check rejects stale
+results and checks received versions that have not been published yet.
+Notification handlers synchronously compose incremental changes in a pending
+overlay queue. Parser jobs carry unique tokens, and only the current token can
+publish; close clears it before a new open session may restart its versions.
+Negotiated versioned edits additionally bind each open file to its
+integer revision. Closed-file edits carry a null version, as required by LSP.
+The cached facts do not reuse completion recovery spans from a last-good entry.
+Dependency provenance uses the longest containing root even during the initial
+scan, preventing nested dependency checkouts from becoming writable by accident.
 
 Completion recovery may tolerate incomplete text, but it does not redefine the
 language. Import facts are constrained by compiler-parser and `sgfmt` fixtures.

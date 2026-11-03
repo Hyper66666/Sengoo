@@ -1,0 +1,153 @@
+import std::string;
+
+import std::collections;
+
+import std::args;
+
+extern "C" {
+    fn sgcli_new(name: i64, version: i64, description: i64) -> i64;
+    fn sgcli_close(handle: i64) -> i64;
+    fn sgcli_command(handle: i64, name: i64, help: i64) -> i64;
+    fn sgcli_option(handle: i64, scope: i64, name: i64, short_name: i64, kind: i64, repeat: i64, required: i64, help: i64) -> i64;
+    fn sgcli_positionals(handle: i64, minimum: i64, maximum: i64) -> i64;
+    fn sgcli_error(handle: i64) -> i64;
+    fn sgcli_matches_new() -> i64;
+    fn sgcli_matches_close(handle: i64) -> i64;
+    fn sgcli_argument(handle: i64, value: i64) -> i64;
+    fn sgcli_process_arguments(handle: i64) -> i64;
+    fn sgcli_parse(app: i64, matches: i64) -> i64;
+    fn sgcli_parse_owned(app: i64, matches: i64) -> i64;
+    fn sgcli_parse_process(app: i64, argc: i64) -> i64;
+    fn sgcli_count(handle: i64, name: i64) -> i64;
+    fn sgcli_string(handle: i64, name: i64, index: i64) -> i64;
+    fn sgcli_integer(handle: i64, name: i64, index: i64) -> i64;
+    fn sgcli_kind(handle: i64, name: i64, index: i64) -> i64;
+    fn sgcli_positional_count(handle: i64) -> i64;
+    fn sgcli_positional(handle: i64, index: i64) -> i64;
+    fn sgcli_selected_command(handle: i64) -> i64;
+    fn sgcli_help(handle: i64) -> i64;
+    fn sgcli_version(handle: i64) -> i64;
+}
+
+struct CliApp {
+    handle: i64,
+}
+
+struct CliMatches {
+    handle: i64,
+}
+
+impl !Send for CliApp {
+}
+
+impl !Sync for CliApp {
+}
+
+impl !Send for CliMatches {
+}
+
+impl !Sync for CliMatches {
+}
+
+def cli_status(raw: i64) -> Result<bool, i64> {
+    Result { is_ok: raw >= 0, value: raw >= 0, error: if raw < 0 { 0 - raw; } else { 0; } };
+}
+
+def cli_string(raw: i64) -> Result<String, i64> {
+    if raw >= 0 { Result { is_ok: true, value: String { handle: raw }, error: 0 }; } else { Result { is_ok: false, value: String { handle: 0 }, error: 0 - raw }; };
+}
+
+def cli_app(name: &str, version: &str, description: &str) -> Result<CliApp, i64> {
+    let raw = sgcli_new(sengoo_stdlib_str_ptr(name), sengoo_stdlib_str_ptr(version), sengoo_stdlib_str_ptr(description));
+    if raw > 0 { Result { is_ok: true, value: CliApp { handle: raw }, error: 0 }; } else { Result { is_ok: false, value: CliApp { handle: 0 }, error: 0 - raw }; };
+}
+
+def cli_matches_result(raw: i64) -> Result<CliMatches, i64> {
+    if raw > 0 { Result { is_ok: true, value: CliMatches { handle: raw }, error: 0 }; } else { Result { is_ok: false, value: CliMatches { handle: 0 }, error: 0 - raw }; };
+}
+
+impl CliApp {
+    def option(&mut self, command: &str, name: &str, short_name: &str, kind: i64, repeated: bool, required: bool, help: &str) -> Result<bool, i64> {
+        cli_status(sgcli_option(self.handle, sengoo_stdlib_str_ptr(command), sengoo_stdlib_str_ptr(name), sengoo_stdlib_str_ptr(short_name), kind, if repeated { 1; } else { 0; }, if required { 1; } else { 0; }, sengoo_stdlib_str_ptr(help)));
+    }
+    def flag(&mut self, name: &str, short_name: &str, help: &str) -> Result<bool, i64> {
+        self.option("", name, short_name, 0, false, false, help);
+    }
+    def string_option(&mut self, name: &str, short_name: &str, repeated: bool, required: bool, help: &str) -> Result<bool, i64> {
+        self.option("", name, short_name, 1, repeated, required, help);
+    }
+    def int_option(&mut self, name: &str, short_name: &str, repeated: bool, required: bool, help: &str) -> Result<bool, i64> {
+        self.option("", name, short_name, 2, repeated, required, help);
+    }
+    def command_flag(&mut self, command: &str, name: &str, short_name: &str, help: &str) -> Result<bool, i64> {
+        self.option(command, name, short_name, 0, false, false, help);
+    }
+    def command_string_option(&mut self, command: &str, name: &str, short_name: &str, repeated: bool, required: bool, help: &str) -> Result<bool, i64> {
+        self.option(command, name, short_name, 1, repeated, required, help);
+    }
+    def command_int_option(&mut self, command: &str, name: &str, short_name: &str, repeated: bool, required: bool, help: &str) -> Result<bool, i64> {
+        self.option(command, name, short_name, 2, repeated, required, help);
+    }
+    def command(&mut self, name: &str, help: &str) -> Result<bool, i64> {
+        cli_status(sgcli_command(self.handle, sengoo_stdlib_str_ptr(name), sengoo_stdlib_str_ptr(help)));
+    }
+    def positionals(&mut self, minimum: i64, maximum: i64) -> Result<bool, i64> {
+        cli_status(sgcli_positionals(self.handle, minimum, maximum));
+    }
+    def last_error(&self) -> Result<String, i64> {
+        cli_string(sgcli_error(self.handle));
+    }
+    def help(&self) -> Result<String, i64> {
+        cli_string(sgcli_help(self.handle));
+    }
+    def version(&self) -> Result<String, i64> {
+        cli_string(sgcli_version(self.handle));
+    }
+    def parse_from(&self, arguments: &Vec<String>) -> Result<CliMatches, i64> {
+        let raw = sgcli_matches_new();
+        if raw < 0 { return cli_matches_result(raw); };
+        let mut index = 0;
+        while index < arguments.len() { let item = arguments.get(index); if not item.is_ok() { sgcli_matches_close(raw); return cli_matches_result(0 - item.error); }; let argument = item.value; let status = sgcli_argument(raw, sengoo_stdlib_str_ptr(argument.as_str())); if status < 0 { sgcli_matches_close(raw); return cli_matches_result(status); }; index = index + 1; };
+        cli_matches_result(sgcli_parse_owned(self.handle, raw));
+    }
+    def parse_args(&self) -> Result<CliMatches, i64> {
+        cli_matches_result(sgcli_parse_process(self.handle, args_len()));
+    }
+}
+
+impl CliMatches {
+    def count(&self, name: &str) -> i64 {
+        sgcli_count(self.handle, sengoo_stdlib_str_ptr(name));
+    }
+    def flag(&self, name: &str) -> bool {
+        self.count(name) > 0;
+    }
+    def string(&self, name: &str, index: i64) -> Result<String, i64> {
+        cli_string(sgcli_string(self.handle, sengoo_stdlib_str_ptr(name), index));
+    }
+    def integer(&self, name: &str, index: i64) -> Result<i64, i64> {
+        let kind = sgcli_kind(self.handle, sengoo_stdlib_str_ptr(name), index);
+        if kind == 2 { Result { is_ok: true, value: sgcli_integer(self.handle, sengoo_stdlib_str_ptr(name), index), error: 0 }; } else { Result { is_ok: false, value: 0, error: if kind < 0 { 0 - kind; } else { 2; } }; };
+    }
+    def positional_count(&self) -> i64 {
+        sgcli_positional_count(self.handle);
+    }
+    def positional(&self, index: i64) -> Result<String, i64> {
+        cli_string(sgcli_positional(self.handle, index));
+    }
+    def command(&self) -> Result<String, i64> {
+        cli_string(sgcli_selected_command(self.handle));
+    }
+}
+
+impl Drop for CliApp {
+    def drop(&mut self) {
+        if self.handle != 0 { sgcli_close(self.handle); };
+    }
+}
+
+impl Drop for CliMatches {
+    def drop(&mut self) {
+        if self.handle != 0 { sgcli_matches_close(self.handle); };
+    }
+}

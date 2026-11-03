@@ -48,6 +48,42 @@ fn typeck_ok(source: &str) {
 }
 
 #[test]
+fn nested_owned_borrow_escape_and_move_use_stable_diagnostics() {
+    let prefix = "struct Owned { id: i64 }\nimpl Drop for Owned { def drop(&mut self) {} }\nstruct Inner { value: Owned }\nstruct Outer { inner: Inner }\n";
+    let escaping = format!("{prefix}def escape() -> &Owned {{ let outer = Outer {{ inner: Inner {{ value: Owned {{ id: 1 }} }} }}; &outer.inner.value }}");
+    assert_eq!(typeck_err_code(&escaping), "borrow-escapes-owner");
+    let moved = format!("{prefix}def main() -> i64 {{ let outer = Outer {{ inner: Inner {{ value: Owned {{ id: 1 }} }} }}; let borrowed = &outer.inner.value; let transferred = outer; (*borrowed).id }}");
+    assert_eq!(typeck_err_code(&moved), "cannot-move-borrowed");
+}
+
+#[test]
+fn partial_moves_from_tagged_owned_payloads_are_rejected_stably() {
+    let source = format!(
+        "{}\n{}",
+        load_stdlib(&["option.sg", "result.sg"]),
+        r#"
+struct Owned { id: i64 }
+impl Drop for Owned { def drop(&mut self) {} }
+struct Pair { first: Owned, second: Owned }
+def main() -> i64 {
+    let wrapped = option_some(Pair { first: Owned { id: 1 }, second: Owned { id: 2 } });
+    let transferred = wrapped.value.first;
+    transferred.id
+}
+"#
+    );
+    let error = compile_to_mir(&source).expect_err(
+        "a guarded aggregate needs payload-aware partial cleanup before this can be accepted",
+    );
+    assert!(
+        error
+            .to_string()
+            .contains("unsupported-partial-move-with-drop"),
+        "{error}"
+    );
+}
+
+#[test]
 fn m1_borrow_escape_and_move_while_borrowed_use_stable_codes() {
     let stdlib = load_stdlib(&["option.sg", "result.sg", "ffi.sg", "string.sg"]);
     let escape = format!(

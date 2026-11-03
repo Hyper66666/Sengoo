@@ -49,6 +49,7 @@ use std::collections::{BTreeMap, HashSet};
 pub fn expand_async_functions(
     mir_fns: &mut [MirFunction],
 ) -> Result<Vec<MirFunction>, CompileError> {
+    super::async_ownership_helpers::check_owned_cancellation(mir_fns)?;
     let async_fn_names: Vec<String> = mir_fns
         .iter()
         .filter(|f| f.is_async)

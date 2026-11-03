@@ -695,7 +695,11 @@ impl TypeEnv {
 
     /// 创建元组类型
     pub fn tuple_ty(&mut self, types: Vec<Ty>) -> Ty {
-        self.new_ty(TyKind::Tuple(types))
+        self.new_ty(if types.is_empty() {
+            TyKind::Unit
+        } else {
+            TyKind::Tuple(types)
+        })
     }
 
     /// 创建数组类型

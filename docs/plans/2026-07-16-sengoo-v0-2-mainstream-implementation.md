@@ -1,5 +1,10 @@
 # Sengoo v0.2 Mainstream Core Implementation Plan
 
+Historical plan: reconciled with the published v0.2.0 evidence on 2026-11-03.
+Its five active remediation copies now live under `openspec/changes/archive/2026-11-03-*`.
+Current implementation ownership is defined in
+[the daily-development plan](2026-11-03-daily-development-python-ecosystem.md).
+
 > **For Claude:** REQUIRED SUB-SKILL: Use superpowers:executing-plans to implement this plan task-by-task.
 
 **Goal:** Close M0-M4 so Sengoo has one coherent, testable native v0.2 language and toolchain contract.

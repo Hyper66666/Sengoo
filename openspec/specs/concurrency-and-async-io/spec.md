@@ -1,7 +1,7 @@
 # concurrency-and-async-io Specification
 
 ## Purpose
-TBD - created by archiving change concurrency-safety-and-async-io. Update Purpose after archive.
+Define the language data-race safety contract and runtime foundations for multithreaded execution, cross-platform IO readiness, futures, channels, and structured concurrency.
 ## Requirements
 ### Requirement: The language SHALL enforce a data-race safety model
 

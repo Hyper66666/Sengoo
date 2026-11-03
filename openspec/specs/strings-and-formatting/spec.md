@@ -1,7 +1,7 @@
 # strings-and-formatting Specification
 
 ## Purpose
-TBD - created by archiving change first-class-strings-and-formatting. Update Purpose after archive.
+Specify first-class owned and borrowed UTF-8 text, ergonomic string operations, safe slicing, trait-based formatting, and interpolated literals.
 ## Requirements
 ### Requirement: `String` and `&str` SHALL be first-class UTF-8 text types
 

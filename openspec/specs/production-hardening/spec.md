@@ -1,4 +1,4 @@
-﻿# production-hardening Specification
+# production-hardening Specification
 
 ## Purpose
 Define the retained safety, compatibility, performance, and installed-release

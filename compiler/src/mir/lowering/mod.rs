@@ -238,6 +238,8 @@ struct LoweringContext<'a> {
     drop_scope_markers: Vec<usize>,
     moved_drop_locals: HashSet<Local>,
     moved_drop_fields: HashSet<(Local, Vec<u32>)>,
+    /// Root ownership at each exit, before later lowering can move another path.
+    exit_drop_bindings: HashMap<usize, Vec<DropBinding>>,
 }
 
 impl<'a> LoweringContext<'a> {

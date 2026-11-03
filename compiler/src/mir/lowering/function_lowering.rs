@@ -69,12 +69,23 @@ pub(super) fn lower_function(
         if let Some((_, MIRType::Struct { name, .. })) = ctx.mir_fn.locals.get(i + 1) {
             ctx.type_names.insert(local, name.clone());
         }
-        if !fn_item.name.ends_with("_Drop_drop")
+        if fn_item.name.ends_with("_Drop_drop") && param.name == "self" {
+            ctx.record_destructor_field_drops(local);
+        } else if !fn_item.name.ends_with("_Drop_drop")
             && !param.ty.is_ref()
             && !param.is_borrowed
             && crate::mir::dyn_dispatch::dyn_trait_of_hir_param(&param.ty).is_none()
         {
-            ctx.record_drop_binding_if_needed(local);
+            if param.name == "fallback"
+                && fn_item.name.ends_with("_unwrap_or")
+                && (fn_item.name.starts_with("Option_") || fn_item.name.starts_with("Result_"))
+            {
+                // This parameter is an owned alternative, never a legacy
+                // borrowed handle receiver. Release it on the success branch.
+                ctx.force_record_owned_param_drop(local);
+            } else {
+                ctx.record_drop_binding_if_needed(local);
+            }
         }
         ctx.contract_param_bindings
             .push((param.name.clone(), param.symbol, local));

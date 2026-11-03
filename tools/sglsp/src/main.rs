@@ -1,12 +1,15 @@
 //! sglsp - Sengoo language server.
 
 use miette::Result;
+#[cfg(test)]
 use std::collections::HashMap;
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
 use tower_lsp::jsonrpc::Result as LspResult;
 use tower_lsp::lsp_types::*;
 use tower_lsp::{Client, LanguageServer, LspService, Server};
 
+mod bindings;
 mod completion;
 mod completion_context;
 mod dependency_sources;
@@ -38,21 +41,22 @@ use signatures::signature_help_for_request;
 use stdlib::stdlib_definition_for_content;
 #[cfg(test)]
 use symbols::{collect_ast_symbols, find_declaration_in_text};
-use symbols::{
-    completion_kind_to_symbol_kind, extract_identifier_at, find_symbol_occurrences,
-    valid_identifier_name,
-};
+use symbols::{completion_kind_to_symbol_kind, extract_identifier_at};
+#[cfg(test)]
+use symbols::{find_symbol_occurrences, valid_identifier_name};
 #[cfg(test)]
 use text_editing::apply_content_changes;
 use text_editing::folding_ranges_for;
 #[cfg(test)]
 use workspace::workspace_documents_for_roots_and_open_documents;
+use workspace::workspace_roots_from_initialize;
 #[cfg(test)]
 use workspace::{
     completion_symbols_for_documents, find_symbol_detail_in_documents,
     goto_definition_in_documents, workspace_symbols_for_documents,
 };
-use workspace::{references_in_documents, rename_in_documents, workspace_roots_from_initialize};
+#[cfg(test)]
+use workspace::{references_in_documents, rename_in_documents};
 use workspace_index::{rebuild_workspace_index, run_index_operation, WorkspaceIndex};
 
 const SGLSP_VERSION: &str = concat!(
@@ -107,6 +111,7 @@ struct SengooLanguageServer {
     client: Client,
     index: Arc<WorkspaceIndex>,
     config: ServerConfig,
+    versioned_edits: AtomicBool,
 }
 
 impl SengooLanguageServer {
@@ -115,6 +120,7 @@ impl SengooLanguageServer {
             client,
             index: Arc::new(WorkspaceIndex::default()),
             config: ServerConfig::default(),
+            versioned_edits: AtomicBool::new(false),
         }
     }
 
@@ -133,10 +139,6 @@ impl SengooLanguageServer {
         self.client
             .publish_diagnostics(uri.clone(), diagnostics, None)
             .await;
-    }
-
-    async fn workspace_documents(&self) -> HashMap<Url, String> {
-        self.index.documents()
     }
 
     async fn record_index_result(&self, operation: &str, uri: &Url, published: bool) {
@@ -171,6 +173,7 @@ fn stdlib_definition_for_cursor_fallback(
     stdlib_definition.map(GotoDefinitionResponse::Scalar)
 }
 
+#[cfg(test)]
 fn document_highlights_for_content(
     content: &str,
     position: Position,
@@ -187,6 +190,7 @@ fn document_highlights_for_content(
     (!highlights.is_empty()).then_some(highlights)
 }
 
+#[cfg(test)]
 fn prepare_rename_for_content(content: &str, position: Position) -> Option<PrepareRenameResponse> {
     let symbol = extract_identifier_at(content, position)?;
     if !valid_identifier_name(&symbol.name) {
@@ -202,6 +206,16 @@ fn prepare_rename_for_content(content: &str, position: Position) -> Option<Prepa
 #[tower_lsp::async_trait]
 impl LanguageServer for SengooLanguageServer {
     async fn initialize(&self, params: InitializeParams) -> LspResult<InitializeResult> {
+        self.versioned_edits.store(
+            params
+                .capabilities
+                .workspace
+                .as_ref()
+                .and_then(|w| w.workspace_edit.as_ref())
+                .and_then(|e| e.document_changes)
+                .unwrap_or(false),
+            Ordering::Release,
+        );
         let roots = workspace_roots_from_initialize(&params);
         if let Err(error) = rebuild_workspace_index(Arc::clone(&self.index), roots).await {
             self.client
@@ -285,35 +299,33 @@ impl LanguageServer for SengooLanguageServer {
 
     async fn did_open(&self, params: DidOpenTextDocumentParams) {
         let uri = params.text_document.uri;
-        let content = params.text_document.text;
+        let Some(overlay) = self.index.queue_open(
+            uri.clone(),
+            params.text_document.version,
+            params.text_document.text,
+        ) else {
+            return;
+        };
         let index = Arc::clone(&self.index);
-        let operation_uri = uri.clone();
-        let published = run_index_operation(move |cancellation| {
-            index.open(
-                operation_uri,
-                params.text_document.version,
-                content,
-                &cancellation,
-            )
-        })
-        .await;
+        let published =
+            run_index_operation(move |cancellation| index.publish_overlay(overlay, &cancellation))
+                .await;
         self.record_index_result("open", &uri, published).await;
         self.publish_diagnostics(&uri).await;
     }
 
     async fn did_change(&self, params: DidChangeTextDocumentParams) {
         let uri = params.text_document.uri;
+        let Some(overlay) =
+            self.index
+                .queue_change(&uri, params.text_document.version, params.content_changes)
+        else {
+            return;
+        };
         let index = Arc::clone(&self.index);
-        let operation_uri = uri.clone();
-        let published = run_index_operation(move |cancellation| {
-            index.change(
-                &operation_uri,
-                params.text_document.version,
-                params.content_changes,
-                &cancellation,
-            )
-        })
-        .await;
+        let published =
+            run_index_operation(move |cancellation| index.publish_overlay(overlay, &cancellation))
+                .await;
         self.record_index_result("change", &uri, published).await;
         self.publish_diagnostics(&uri).await;
     }
@@ -400,13 +412,9 @@ impl LanguageServer for SengooLanguageServer {
     async fn references(&self, params: ReferenceParams) -> LspResult<Option<Vec<Location>>> {
         let uri = params.text_document_position.text_document.uri;
         let position = params.text_document_position.position;
-        let documents = self.workspace_documents().await;
-        Ok(references_in_documents(
-            &uri,
-            position,
-            params.context.include_declaration,
-            &documents,
-        ))
+        Ok(self
+            .index
+            .references(&uri, position, params.context.include_declaration))
     }
 
     async fn document_highlight(
@@ -415,11 +423,19 @@ impl LanguageServer for SengooLanguageServer {
     ) -> LspResult<Option<Vec<DocumentHighlight>>> {
         let uri = params.text_document_position_params.text_document.uri;
         let position = params.text_document_position_params.position;
-        let Some(content) = self.document_text(&uri).await else {
-            return Ok(None);
-        };
-
-        Ok(document_highlights_for_content(&content, position))
+        Ok(self
+            .index
+            .references(&uri, position, true)
+            .map(|locations| {
+                locations
+                    .into_iter()
+                    .filter(|location| location.uri == uri)
+                    .map(|location| DocumentHighlight {
+                        range: location.range,
+                        kind: Some(DocumentHighlightKind::TEXT),
+                    })
+                    .collect()
+            }))
     }
 
     async fn hover(&self, params: HoverParams) -> LspResult<Option<Hover>> {
@@ -589,13 +605,14 @@ impl LanguageServer for SengooLanguageServer {
     async fn rename(&self, params: RenameParams) -> LspResult<Option<WorkspaceEdit>> {
         let uri = params.text_document_position.text_document.uri;
         let position = params.text_document_position.position;
-        let documents = self.workspace_documents().await;
-        Ok(rename_in_documents(
-            &uri,
-            position,
-            &params.new_name,
-            &documents,
-        ))
+        self.index
+            .rename(
+                &uri,
+                position,
+                &params.new_name,
+                self.versioned_edits.load(Ordering::Acquire),
+            )
+            .map_err(tower_lsp::jsonrpc::Error::invalid_params)
     }
 
     async fn prepare_rename(
@@ -604,11 +621,7 @@ impl LanguageServer for SengooLanguageServer {
     ) -> LspResult<Option<PrepareRenameResponse>> {
         let uri = params.text_document.uri;
         let position = params.position;
-        let Some(content) = self.document_text(&uri).await else {
-            return Ok(None);
-        };
-
-        Ok(prepare_rename_for_content(&content, position))
+        Ok(self.index.prepare_rename(&uri, position))
     }
 }
 

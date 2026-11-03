@@ -1,7 +1,7 @@
 # mainstream-default-readiness Specification
 
 ## Purpose
-TBD - created by archiving change mainstream-default-readiness. Update Purpose after archive.
+Prioritize mainstream development gaps across compile scale, async execution, distribution, standard-library breadth, and additive language polish, using the support matrix as the public status source.
 ## Requirements
 ### Requirement: Mainstream default readiness SHALL be priority ordered
 

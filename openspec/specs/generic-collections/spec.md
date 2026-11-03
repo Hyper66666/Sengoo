@@ -1,7 +1,7 @@
 # generic-collections Specification
 
 ## Purpose
-TBD - created by archiving change generic-collections. Update Purpose after archive.
+Specify owning generic collections and iterator adapters with deterministic numeric reduction and explicit collection sinks, preserving existing scalar helper APIs.
 ## Requirements
 ### Requirement: The standard library SHALL provide generic owning collections
 
@@ -45,6 +45,11 @@ types, own their elements, and drop them automatically.
 - **THEN** borrow checking rejects the mutation until the borrow ends
 
 ### Requirement: Iterator adapters SHALL be available over collections
+The standard library SHALL provide the listed Iterator adapters, preserve numeric item types and empty-reduction identities, and use explicit collection sinks as specified in the conformance scenario below.
+
+#### Scenario: Complete compatibility contract
+- **WHEN** this capability is implemented or modified
+- **THEN** it SHALL satisfy every clause of the following contract:
 
 The standard library SHALL provide `map`, `filter`, `fold`, `enumerate`, `take`,
 `skip`, `count`, `sum`, and `collect` over the `Iterator` trait.

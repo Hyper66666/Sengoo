@@ -20,6 +20,7 @@ desktop.ini
 /build/
 /examples/build/
 /examples/**/build/
+/packages/**/build/
 /.tmp-target-verify/
 
 # Temporary or scratch files
@@ -44,3 +45,9 @@ linux-dist-copy/
 
 # Local windsurf scratch
 .windsurf-history/
+
+# Python backend and consumer build output
+__pycache__/
+*.py[cod]
+*.egg-info/
+.venv/

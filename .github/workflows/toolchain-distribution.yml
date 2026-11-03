@@ -54,6 +54,17 @@ jobs:
 
     steps:
       - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
+
+      - name: Verify candidate checkout
+        shell: pwsh
+        run: |
+          $expected = "${{ github.event.pull_request.head.sha || github.sha }}"
+          $actual = git rev-parse HEAD
+          if ($LASTEXITCODE -ne 0 -or $actual.Trim() -ne $expected) {
+            throw "checkout revision $actual differs from candidate $expected"
+          }
 
       - uses: dtolnay/rust-toolchain@stable
 
@@ -178,6 +189,7 @@ jobs:
         env:
           SENGOO_DIST_TARGET: ${{ matrix.target }}
         run: |
+          $env:GITHUB_SHA = "${{ github.event.pull_request.head.sha || github.sha }}"
           if ("${{ github.ref_type }}" -eq "tag") {
             $version = "${{ github.ref_name }}".Substring(1)
           } else {
@@ -198,7 +210,7 @@ jobs:
             -Version $version `
             -OutputDir $primaryOutput `
             -CargoTargetDir $cargoTargetA `
-            -SmokeEvidence "toolchain-distribution workflow build A ${{ matrix.os }} ${{ github.sha }}"
+            -SmokeEvidence "toolchain-distribution workflow build A ${{ matrix.os }} ${{ github.event.pull_request.head.sha || github.sha }}"
 
           $manifestA = Join-Path $primaryOutput "sengoo-$version-${{ matrix.target }}/manifest.json"
           $packageA = Get-Content -LiteralPath $manifestA -Raw | ConvertFrom-Json
@@ -217,7 +229,7 @@ jobs:
               -Version $version `
               -OutputDir $secondaryOutput `
               -CargoTargetDir $cargoTargetB `
-              -SmokeEvidence "toolchain-distribution workflow build B ${{ matrix.os }} ${{ github.sha }}"
+              -SmokeEvidence "toolchain-distribution workflow build B ${{ matrix.os }} ${{ github.event.pull_request.head.sha || github.sha }}"
 
             $manifestB = Join-Path $secondaryOutput "sengoo-$version-${{ matrix.target }}/manifest.json"
             $packageB = Get-Content -LiteralPath $manifestB -Raw | ConvertFrom-Json
@@ -246,6 +258,7 @@ jobs:
         env:
           SENGOO_DIST_TARGET: ${{ matrix.target }}
         run: |
+          $env:GITHUB_SHA = "${{ github.event.pull_request.head.sha || github.sha }}"
           if ("${{ github.ref_type }}" -eq "tag") {
             $baseVersion = "${{ github.ref_name }}".Substring(1)
           } else {
@@ -254,7 +267,7 @@ jobs:
           $parsedBaseVersion = [System.Management.Automation.SemanticVersion]$baseVersion
           $upgradePatch = $parsedBaseVersion.Patch + 1
           $upgradeVersion = "$($parsedBaseVersion.Major).$($parsedBaseVersion.Minor).$upgradePatch-upgrade-smoke"
-          $primaryBuildHash = "${{ github.sha }}".Substring(0, 12)
+          $primaryBuildHash = "${{ github.event.pull_request.head.sha || github.sha }}".Substring(0, 12)
           if ($primaryBuildHash -notmatch '^[0-9a-fA-F]{12}$') {
             throw "primary build hash must be hexadecimal, got $primaryBuildHash"
           }
@@ -286,7 +299,7 @@ jobs:
           if ($LASTEXITCODE -ne 0) {
             throw "secondary native runtime static library build failed"
           }
-          ./scripts/package-toolchain.ps1 -Version $upgradeVersion -OutputDir $upgradeOutputDir -NoBuild -SmokeEvidence "toolchain-distribution workflow upgrade smoke ${{ matrix.os }} ${{ github.sha }}"
+          ./scripts/package-toolchain.ps1 -Version $upgradeVersion -OutputDir $upgradeOutputDir -NoBuild -SmokeEvidence "toolchain-distribution workflow upgrade smoke ${{ matrix.os }} ${{ github.event.pull_request.head.sha || github.sha }}"
           $upgradeArchive = (Get-Content (Join-Path $upgradeOutputDir "latest-archive.txt")).Trim()
           $upgradeReleaseDir = Join-Path $downloadRoot "v$upgradeVersion"
           New-Item -ItemType Directory -Force -Path $upgradeReleaseDir | Out-Null

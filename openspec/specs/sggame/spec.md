@@ -5,6 +5,11 @@ Define the pygame-inspired phase-1 game package built on `sgplatform`,
 including display, event, timing, draw, input, and example-game expectations.
 ## Requirements
 ### Requirement: sggame SHALL provide a pygame-inspired game API on sgplatform
+The sggame package SHALL expose the specified pygame-inspired subset on sgplatform, preserve prefixed lifecycle names, avoid a second graphics stack, and bound image loading as defined in the conformance scenario below.
+
+#### Scenario: Complete compatibility contract
+- **WHEN** this capability is implemented or modified
+- **THEN** it SHALL satisfy every clause of the following contract:
 
 The `sggame` package SHALL depend on `sgplatform` and expose familiar module
 names for the supported subset: top-level `sggame_init`/`sggame_quit`,

@@ -11,3 +11,6 @@ sgpm-index.toml text eol=lf
 bench/results/**/*.json -text
 bench/frontend-memory-baseline.json text eol=lf
 
+# Preserve the pinned upstream amalgamation and its checksums byte-for-byte.
+packages/sgsqlite/native/vendor/sqlite-amalgamation-3540100/** -text -whitespace
+

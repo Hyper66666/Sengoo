@@ -1,7 +1,7 @@
 # concurrent-async-runtime Specification
 
 ## Purpose
-TBD - created by archiving change concurrent-async-runtime. Update Purpose after archive.
+Specify opt-in multithreaded execution, Send-checked blocking captures, async channel and mutex integration, and stable reactor and select semantics.
 ## Requirements
 ### Requirement: Async runtime exposes an opt-in thread pool
 

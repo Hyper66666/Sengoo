@@ -11,6 +11,7 @@ extern "C" {
     fn sengoo_json_doc_new_string(handle: i64, value: i64) -> i64;
     fn sengoo_json_doc_new_bool(handle: i64, value: i64) -> i64;
     fn sengoo_json_doc_new_number(handle: i64, value: f64) -> i64;
+    fn sengoo_json_doc_new_i64(handle: i64, value: i64) -> i64;
     fn sengoo_json_doc_new_null(handle: i64) -> i64;
     fn sengoo_json_value_kind(doc_handle: i64, node_id: i64) -> i64;
     fn sengoo_json_object_has(doc_handle: i64, node_id: i64, key: i64) -> i64;
@@ -179,6 +180,10 @@ impl JsonDoc {
 
     def new_number(self, value: f64) -> Result<JsonValue, i64> {
         json_value_result(self.handle, sengoo_json_doc_new_number(self.handle, value))
+    }
+
+    def new_i64(self, value: i64) -> Result<JsonValue, i64> {
+        json_value_result(self.handle, sengoo_json_doc_new_i64(self.handle, value))
     }
 
     def new_null(self) -> Result<JsonValue, i64> {

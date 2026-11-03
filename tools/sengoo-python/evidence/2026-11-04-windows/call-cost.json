@@ -1,0 +1,136 @@
+{
+  "schema_version": 1,
+  "candidate_sha": null,
+  "python": "3.12.14",
+  "implementation": "CPython",
+  "platform": "Windows-11-10.0.26300-SP0",
+  "machine": "AMD64",
+  "processor": "Intel64 Family 6 Model 165 Stepping 3, GenuineIntel",
+  "toolchain": "0.2.1-dev.0 (45c789f4fa58)",
+  "target": "x86_64-pc-windows-msvc",
+  "binding_identity": "ccb2438da751b3756656ff5dab08f8223115c4d73c1d5c65db5d0c32af1b991b",
+  "clock": "perf_counter_ns",
+  "records": [
+    {
+      "operation": "python_no_op",
+      "elements": null,
+      "repetitions_per_sample": 20000,
+      "samples": 5,
+      "median_ns_per_call": 41.205,
+      "min_ns_per_call": 40.69,
+      "max_ns_per_call": 42.28,
+      "median_ns_per_element": null
+    },
+    {
+      "operation": "sengoo_no_op",
+      "elements": null,
+      "repetitions_per_sample": 20000,
+      "samples": 5,
+      "median_ns_per_call": 1978.08,
+      "min_ns_per_call": 1974.005,
+      "max_ns_per_call": 2092.26,
+      "median_ns_per_element": null
+    },
+    {
+      "operation": "sengoo_affine_with_input_output_copies",
+      "elements": 0,
+      "repetitions_per_sample": 2000,
+      "samples": 5,
+      "median_ns_per_call": 7092.4,
+      "min_ns_per_call": 7003.6,
+      "max_ns_per_call": 7243.1,
+      "median_ns_per_element": null
+    },
+    {
+      "operation": "python_affine_list",
+      "elements": 0,
+      "repetitions_per_sample": 2000,
+      "samples": 5,
+      "median_ns_per_call": 99.15,
+      "min_ns_per_call": 98.95,
+      "max_ns_per_call": 102.4,
+      "median_ns_per_element": null
+    },
+    {
+      "operation": "sengoo_affine_with_input_output_copies",
+      "elements": 1,
+      "repetitions_per_sample": 2000,
+      "samples": 5,
+      "median_ns_per_call": 9681.6,
+      "min_ns_per_call": 9609.9,
+      "max_ns_per_call": 9794.95,
+      "median_ns_per_element": 9681.6
+    },
+    {
+      "operation": "python_affine_list",
+      "elements": 1,
+      "repetitions_per_sample": 2000,
+      "samples": 5,
+      "median_ns_per_call": 140.3,
+      "min_ns_per_call": 140.05,
+      "max_ns_per_call": 143.2,
+      "median_ns_per_element": 140.3
+    },
+    {
+      "operation": "sengoo_affine_with_input_output_copies",
+      "elements": 32,
+      "repetitions_per_sample": 2000,
+      "samples": 5,
+      "median_ns_per_call": 21569.45,
+      "min_ns_per_call": 21545.4,
+      "max_ns_per_call": 21686.35,
+      "median_ns_per_element": 674.0453125
+    },
+    {
+      "operation": "python_affine_list",
+      "elements": 32,
+      "repetitions_per_sample": 2000,
+      "samples": 5,
+      "median_ns_per_call": 1265.8,
+      "min_ns_per_call": 1258.75,
+      "max_ns_per_call": 1287.05,
+      "median_ns_per_element": 39.55625
+    },
+    {
+      "operation": "sengoo_affine_with_input_output_copies",
+      "elements": 1024,
+      "repetitions_per_sample": 128,
+      "samples": 5,
+      "median_ns_per_call": 387032.03125,
+      "min_ns_per_call": 384135.15625,
+      "max_ns_per_call": 388162.5,
+      "median_ns_per_element": 377.9609680175781
+    },
+    {
+      "operation": "python_affine_list",
+      "elements": 1024,
+      "repetitions_per_sample": 128,
+      "samples": 5,
+      "median_ns_per_call": 41667.1875,
+      "min_ns_per_call": 41597.65625,
+      "max_ns_per_call": 42067.96875,
+      "median_ns_per_element": 40.69061279296875
+    },
+    {
+      "operation": "sengoo_affine_with_input_output_copies",
+      "elements": 65536,
+      "repetitions_per_sample": 2,
+      "samples": 5,
+      "median_ns_per_call": 25591950.0,
+      "min_ns_per_call": 25372100.0,
+      "max_ns_per_call": 26013400.0,
+      "median_ns_per_element": 390.5021667480469
+    },
+    {
+      "operation": "python_affine_list",
+      "elements": 65536,
+      "repetitions_per_sample": 2,
+      "samples": 5,
+      "median_ns_per_call": 2491850.0,
+      "min_ns_per_call": 2478450.0,
+      "max_ns_per_call": 2523400.0,
+      "median_ns_per_element": 38.022613525390625
+    }
+  ],
+  "scope": "Descriptive host-local measurements, no speed or regression threshold. Native calls retain the GIL and copy vectors in both directions. Compare batches to scalar calls; this is not a cross-machine performance promise."
+}

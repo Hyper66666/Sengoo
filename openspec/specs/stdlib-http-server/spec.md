@@ -159,6 +159,11 @@ its proof commands.
 - **THEN** `SUPPORT_MATRIX.md` contains an HTTP server row with status, host scope, proof, and stable diagnostics columns filled
 
 ### Requirement: HTTP server SHALL expose an awaitable dynamic request future
+HttpServer SHALL expose an awaitable dynamic-request future that does not block the cooperative scheduler and reuses the synchronous request contract, as detailed in the conformance scenario below.
+
+#### Scenario: Complete compatibility contract
+- **WHEN** this capability is implemented or modified
+- **THEN** it SHALL satisfy every clause of the following contract:
 
 `std::net::HttpServer` SHALL provide an async request API that can be awaited
 without blocking the cooperative async runtime thread while waiting for the
@@ -198,6 +203,11 @@ status taxonomy as synchronous `HttpServer.next_request(timeout_ms)`.
   succeed
 
 ### Requirement: Async HTTP request future SHALL clean up reactor interest
+Dropping an incomplete async HTTP request future SHALL release owned resources and reactor interest without closing the server. Accepted connections and the scope of cancellation claims SHALL follow the conformance scenario below.
+
+#### Scenario: Complete compatibility contract
+- **WHEN** this capability is implemented or modified
+- **THEN** it SHALL satisfy every clause of the following contract:
 
 The async request future SHALL unregister any reactor interest and release any
 owned native resources when it is dropped before completion. Dropping or timing
@@ -249,6 +259,11 @@ hosts and C-only fallback bundles SHALL expose the same symbols but return
   cancellation semantics remain Deferred rows or notes
 
 ### Requirement: Requests SHALL be routable via a Sengoo-side HttpRouter
+HttpRouter SHALL register exact method-and-path handlers and one default handler, dispatching through serve_http and the existing async pull API. Handler signatures, matching, ABI, and mode exclusivity SHALL follow the conformance scenario below.
+
+#### Scenario: Complete compatibility contract
+- **WHEN** this capability is implemented or modified
+- **THEN** it SHALL satisfy every clause of the following contract:
 
 The stdlib SHALL expose `HttpRouter` registration of exact method+path
 handlers and a single default handler, plus `serve_http` that dispatches by

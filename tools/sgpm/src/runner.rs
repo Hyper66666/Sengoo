@@ -1,4 +1,4 @@
-use crate::resolver::{render_tree, Graph, PackageNode};
+use crate::resolver::{render_tree, Graph, PackageNode, PackageSource};
 use miette::{Context, IntoDiagnostic, Result};
 use std::collections::{BTreeMap, BTreeSet};
 use std::env;
@@ -108,6 +108,64 @@ impl Toolchain {
         Ok(())
     }
 
+    pub fn build_shared(
+        &self,
+        graph: &Graph,
+        profile: BuildProfile,
+        output: Option<&Path>,
+        exports: &[String],
+        verbose: bool,
+    ) -> Result<()> {
+        let node = graph
+            .root_package()
+            .ok_or_else(|| miette::miette!("dependency graph has no root package"))?;
+        let lib = node
+            .manifest
+            .lib
+            .as_ref()
+            .ok_or_else(|| miette::miette!("--shared requires [lib] in Sengoo.toml"))?;
+        let extension = if cfg!(windows) {
+            "dll"
+        } else if cfg!(target_os = "macos") {
+            "dylib"
+        } else {
+            "so"
+        };
+        let default_output = node
+            .root_dir
+            .join("target")
+            .join(profile.dir_name())
+            .join(format!("{}.{}", node.name.replace('-', "_"), extension));
+        let output = match output {
+            Some(path) if path.is_relative() => env::current_dir().into_diagnostic()?.join(path),
+            Some(path) => path.to_path_buf(),
+            None => default_output,
+        };
+        ensure_parent(&output)?;
+        let mut command = self.sgc_command();
+        command
+            .current_dir(&node.root_dir)
+            .arg("build")
+            .arg(node.root_dir.join(&lib.path))
+            .arg("--emit-shared")
+            .arg("--output")
+            .arg(&output)
+            .arg("-O")
+            .arg(profile.opt_level());
+        for export in exports {
+            command.arg("--python-export").arg(export);
+        }
+        configure_module_map(&mut command, graph, node, true)?;
+        self.append_runtime_mode(&mut command);
+        if verbose {
+            eprintln!("sgpm: {}", render_command(&command));
+        }
+        run_command(
+            command,
+            &format!("shared build failed for package '{}'", node.name),
+        )
+    }
+
     pub fn check(&self, graph: &Graph, verbose: bool) -> Result<()> {
         for node in &graph.nodes {
             let mut command = self.sgc_command();
@@ -166,7 +224,12 @@ impl Toolchain {
 
     pub fn test(&self, graph: &Graph, profile: BuildProfile, verbose: bool) -> Result<()> {
         let mut ran = 0usize;
-        for node in &graph.nodes {
+        let development_packages = development_package_ids(graph);
+        for node in graph
+            .nodes
+            .iter()
+            .filter(|node| development_packages.contains(&node.id))
+        {
             let mut command = self.sgc_command();
             command
                 .current_dir(&node.root_dir)
@@ -200,7 +263,12 @@ impl Toolchain {
         })?;
 
         let mut formatted = 0usize;
-        for node in &graph.nodes {
+        let development_packages = development_package_ids(graph);
+        for node in graph
+            .nodes
+            .iter()
+            .filter(|node| development_packages.contains(&node.id))
+        {
             for file in discover_format_files(&node.root_dir)? {
                 let mut command = Command::new(sgfmt);
                 command.current_dir(&node.root_dir).arg(&file);
@@ -263,6 +331,30 @@ impl Toolchain {
 
         Ok(())
     }
+}
+
+/// Tests and formatting belong to the selected project and its local path
+/// dependencies. Registry/Git contents are immutable inputs, including path
+/// dependencies reached through them; running their tests writes artifacts into
+/// checksum-protected package roots and formatting would rewrite released code.
+fn development_package_ids(graph: &Graph) -> BTreeSet<String> {
+    let Some(root) = graph.root_package() else {
+        return BTreeSet::new();
+    };
+    let mut selected = BTreeSet::from([root.id.clone()]);
+    let mut pending = vec![root.id.clone()];
+    while let Some(package_id) = pending.pop() {
+        for edge in graph.edges.iter().filter(|edge| edge.from == package_id) {
+            if let Some(dependency) = graph.node_by_id(&edge.to) {
+                if matches!(dependency.source, PackageSource::Path)
+                    && selected.insert(dependency.id.clone())
+                {
+                    pending.push(dependency.id.clone());
+                }
+            }
+        }
+    }
+    selected
 }
 
 pub fn print_tree(graph: &Graph) {
@@ -578,5 +670,63 @@ mod tests {
         let output = package_output_path(&node, BuildProfile::Release).unwrap();
         assert!(output.to_string_lossy().contains("target"));
         assert!(output.to_string_lossy().contains("release"));
+    }
+
+    #[test]
+    fn development_packages_stop_at_immutable_dependency_boundaries() {
+        let node = |name: &str, source| PackageNode {
+            id: name.to_string(),
+            name: name.to_string(),
+            manifest_path: PathBuf::from(name).join("Sengoo.toml"),
+            root_dir: PathBuf::from(name),
+            entry_path: PathBuf::from(name).join("src/lib.sg"),
+            manifest: crate::manifest::Manifest::parse(&format!(
+                "[package]\nname = '{name}'\nversion = '0.1.0'\n[lib]\npath = 'src/lib.sg'\n"
+            ))
+            .unwrap(),
+            source,
+        };
+        let graph = Graph {
+            root: PathBuf::from("root/Sengoo.toml"),
+            nodes: vec![
+                node("root", PackageSource::Path),
+                node("local", PackageSource::Path),
+                node(
+                    "git",
+                    PackageSource::Git {
+                        url: "https://example.invalid/repo".into(),
+                        rev: "fixed".into(),
+                    },
+                ),
+                node(
+                    "registry",
+                    PackageSource::Registry {
+                        registry: "official".into(),
+                        version: "0.1.0".into(),
+                        metadata: Default::default(),
+                    },
+                ),
+                node("vendored_path", PackageSource::Path),
+            ],
+            edges: [
+                ("root", "local"),
+                ("root", "git"),
+                ("root", "registry"),
+                ("registry", "vendored_path"),
+                ("git", "vendored_path"),
+            ]
+            .into_iter()
+            .map(|(from, to)| crate::resolver::DependencyEdge {
+                from: from.into(),
+                alias: to.into(),
+                to: to.into(),
+            })
+            .collect(),
+            registries: BTreeMap::new(),
+        };
+        assert_eq!(
+            development_package_ids(&graph),
+            BTreeSet::from(["root".to_string(), "local".to_string()])
+        );
     }
 }

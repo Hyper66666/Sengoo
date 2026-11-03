@@ -65,8 +65,16 @@ pub(crate) enum Commands {
         contract_checks: ContractChecksMode,
 
         /// Emit LLVM IR instead of a native executable.
-        #[arg(long)]
+        #[arg(long, conflicts_with = "emit_shared")]
         emit_llvm: bool,
+
+        /// Build a native shared library without requiring main.
+        #[arg(long, conflicts_with = "daemon")]
+        emit_shared: bool,
+
+        /// Select a synchronous function for a typed Python bridge (repeatable).
+        #[arg(long, requires = "emit_shared")]
+        python_export: Vec<String>,
 
         /// Ignore cached build artifacts and rebuild.
         #[arg(long)]
@@ -257,6 +265,14 @@ pub(crate) enum Commands {
     /// Start REPL.
     Repl,
 
+    /// Diagnose the installed development toolchain without modifying it.
+    Doctor {
+        #[arg(long, value_enum, default_value_t = crate::doctor::DoctorFormat::Text)]
+        format: crate::doctor::DoctorFormat,
+        #[arg(long, value_enum, default_value_t = crate::doctor::DoctorProfile::Native)]
+        profile: crate::doctor::DoctorProfile,
+    },
+
     /// Dump AST.
     DumpAst {
         /// Input source file.
@@ -375,6 +391,8 @@ async fn dispatch(command: Commands) -> Result<()> {
             opt_level,
             contract_checks,
             emit_llvm,
+            emit_shared,
+            python_export,
             force_rebuild,
             low_memory,
             frontend_jobs,
@@ -397,8 +415,10 @@ async fn dispatch(command: Commands) -> Result<()> {
                 if daemon {
                     miette::bail!("portable targets do not support daemon dispatch");
                 }
-                if emit_llvm {
-                    miette::bail!("--emit-llvm cannot be combined with a portable target");
+                if emit_llvm || emit_shared {
+                    miette::bail!(
+                        "--emit-llvm/--emit-shared cannot be combined with a portable target"
+                    );
                 }
                 if debug_info {
                     miette::bail!("portable targets do not support native debug metadata");
@@ -415,6 +435,17 @@ async fn dispatch(command: Commands) -> Result<()> {
                 Some("native") => None,
                 other => other,
             };
+            if emit_shared {
+                return crate::shared_build::build_shared(
+                    &input,
+                    output.as_deref(),
+                    opt_level,
+                    contract_checks,
+                    native_target,
+                    &python_export,
+                    debug_info,
+                );
+            }
             if daemon {
                 let addr = resolve_daemon_addr(daemon_addr.as_deref());
                 let outcome = dispatch_build_via_daemon(
@@ -601,6 +632,7 @@ async fn dispatch(command: Commands) -> Result<()> {
         }
         Commands::Doc { input, output } => cmd_doc(&input, &output).await,
         Commands::Repl => cmd_repl().await,
+        Commands::Doctor { format, profile } => crate::doctor::cmd_doctor(format, profile),
         Commands::DumpAst { input } => cmd_dump_ast(&input).await,
         Commands::Daemon { addr } => {
             validate_runtime_mode_daemon_combination(

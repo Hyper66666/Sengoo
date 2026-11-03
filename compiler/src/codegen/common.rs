@@ -35,18 +35,18 @@ pub fn mir_type_to_llvm_str(ty: &MIRType) -> String {
             _ => "double".to_string(),
         },
         MIRType::Ref(inner) | MIRType::Ptr(inner) => {
-            format!("{}*", mir_type_to_llvm_str(inner))
+            format!("{}*", mir_value_type_to_llvm_str(inner))
         }
         MIRType::Array(elem, n) => {
-            format!("[{} x {}]", n, mir_type_to_llvm_str(elem))
+            format!("[{} x {}]", n, mir_value_type_to_llvm_str(elem))
         }
         MIRType::Tuple(types) if types.is_empty() => "void".to_string(),
         MIRType::Tuple(types) => {
-            let field_types: Vec<String> = types.iter().map(mir_type_to_llvm_str).collect();
+            let field_types: Vec<String> = types.iter().map(mir_value_type_to_llvm_str).collect();
             format!("{{{}}}", field_types.join(", "))
         }
         MIRType::Fn { params, ret } => {
-            let param_str: Vec<String> = params.iter().map(mir_type_to_llvm_str).collect();
+            let param_str: Vec<String> = params.iter().map(mir_value_type_to_llvm_str).collect();
             format!("{} ({})*", mir_type_to_llvm_str(ret), param_str.join(", "))
         }
         MIRType::Struct { name, .. } => {
@@ -61,6 +61,21 @@ pub fn mir_type_to_llvm_str(ty: &MIRType) -> String {
             "i64".to_string()
         }
     }
+}
+
+/// LLVM `void` is valid only as a function result, never a stored value,
+/// parameter, array element or aggregate field. Unit values occupy no bytes.
+pub fn mir_value_type_to_llvm_str(ty: &MIRType) -> String {
+    match ty {
+        MIRType::Unit | MIRType::Never => "{}".into(),
+        MIRType::Tuple(fields) if fields.is_empty() => "{}".into(),
+        _ => mir_type_to_llvm_str(ty),
+    }
+}
+
+pub fn is_unit_value(ty: &MIRType) -> bool {
+    matches!(ty, MIRType::Unit | MIRType::Never)
+        || matches!(ty, MIRType::Tuple(fields) if fields.is_empty())
 }
 
 fn align_to(value: u64, alignment: u64) -> u64 {
@@ -219,7 +234,9 @@ pub fn binary_op_to_llvm(op: MirBinOp, ty: &MIRType) -> &'static str {
         }
         MirBinOp::Ne => {
             if is_float {
-                "fcmp one"
+                // IEEE-754 inequality is true for unordered operands (NaN).
+                // Ordered inequality would make both x == NaN and x != NaN false.
+                "fcmp une"
             } else {
                 "icmp ne"
             }
@@ -518,7 +535,7 @@ mod tests {
     fn test_binary_op_float_comparison() {
         let float_ty = MIRType::Float(64);
         assert_eq!(binary_op_to_llvm(MirBinOp::Eq, &float_ty), "fcmp oeq");
-        assert_eq!(binary_op_to_llvm(MirBinOp::Ne, &float_ty), "fcmp one");
+        assert_eq!(binary_op_to_llvm(MirBinOp::Ne, &float_ty), "fcmp une");
         assert_eq!(binary_op_to_llvm(MirBinOp::Lt, &float_ty), "fcmp olt");
         assert_eq!(binary_op_to_llvm(MirBinOp::Gt, &float_ty), "fcmp ogt");
         assert_eq!(binary_op_to_llvm(MirBinOp::Le, &float_ty), "fcmp ole");

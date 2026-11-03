@@ -1,0 +1,47 @@
+import sgcli;
+
+import std::assert;
+
+extern "C" {
+    fn sgcli_live_handles() -> i64;
+    fn sengoo_string_live_handle_count() -> i64;
+}
+
+def exercise_cli() -> Result<i64, i64> {
+    let mut app = cli_app("example", "0.1.0", "CLI package test")?;
+    app.flag("verbose", "v", "Verbose output")?;
+    app.string_option("name", "n", false, true, "User name")?;
+    app.int_option("count", "c", true, false, "Counts")?;
+    let args: Vec<String> = vec_new();
+    args.push(string_from_str("--name=世界")?);
+    args.push(string_from_str("-v")?);
+    args.push(string_from_str("--count")?);
+    args.push(string_from_str("-12")?);
+    args.push(string_from_str("--count=42")?);
+    args.push(string_from_str("--")?);
+    args.push(string_from_str("--literal")?);
+    let matches = app.parse_from(&args)?;
+    assert_true(matches.flag("verbose"), "cli.sg", 24);
+    assert_eq_i64(matches.count("count"), 2, "cli.sg", 25);
+    assert_eq_i64(matches.integer("count", 0)?, -12, "cli.sg", 26);
+    let name = matches.string("name", 0)?;
+    assert_eq_str(name.as_str(), "世界", "cli.sg", 28);
+    let positional = matches.positional(0)?;
+    assert_eq_str(positional.as_str(), "--literal", "cli.sg", 30);
+    let bad: Vec<String> = vec_new();
+    bad.push(string_from_str("--unknown")?);
+    assert_true(app.parse_from(&bad).is_err(), "cli.sg", 33);
+    let error = app.last_error()?;
+    assert_true(error.len() > 0, "cli.sg", 35);
+    Result { is_ok: true, value: 0, error: 0 };
+}
+
+def main() -> i64 {
+    let baseline = sengoo_string_live_handle_count();
+    let result = exercise_cli();
+    if not result.is_ok() { println(result.error); };
+    assert_true(result.is_ok(), "cli.sg", 43);
+    assert_eq_i64(sgcli_live_handles(), 0, "cli.sg", 44);
+    assert_eq_i64(sengoo_string_live_handle_count(), baseline, "cli.sg", 45);
+    0;
+}

@@ -1,7 +1,7 @@
 # mainstream-adoption-gap-closure Specification
 
 ## Purpose
-TBD - created by archiving change mainstream-adoption-gap-closure. Update Purpose after archive.
+Coordinate independently delivered adoption gates for native debugging, bounded cancellation, HTTP serving, and versioned prebuilt toolchains, with evidence-backed support status.
 ## Requirements
 ### Requirement: Adoption closure SHALL be delivered through independently archived child changes
 

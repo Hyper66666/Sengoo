@@ -881,6 +881,30 @@ long long sengoo_json_doc_new_number(long long handle, double value) {
     return node_id;
 }
 
+/* Preserve the decimal spelling instead of rounding through binary64. */
+long long sengoo_json_doc_new_i64(long long handle, long long value) {
+    sengoo_json_clear_error();
+    SengooJsonDoc* doc = sengoo_json_doc_from_handle(handle);
+    if (!doc) {
+        sengoo_json_set_error(SENGOO_STATUS_INVALID_HANDLE, -1, "json document handle not found");
+        return 0;
+    }
+    long long node_id = sengoo_json_doc_add_node(doc, SENGOO_JSON_KIND_NUMBER);
+    SengooJsonNode* node = sengoo_json_node_from_id(doc, node_id);
+    if (!node) return 0;
+    char text[32];
+    snprintf(text, sizeof(text), "%lld", value);
+    node->number_text = sengoo_copy_cstr_from_handle((long long)(intptr_t)text);
+    if (!node->number_text) {
+        sengoo_json_set_error(SENGOO_STATUS_OUT_OF_MEMORY, -1, "json integer allocation failed");
+        return 0;
+    }
+    node->number_i64 = value;
+    node->number_has_i64 = 1;
+    node->number_f64 = (double)value;
+    return node_id;
+}
+
 long long sengoo_json_doc_new_null(long long handle) {
     sengoo_json_clear_error();
     SengooJsonDoc* doc = sengoo_json_doc_from_handle(handle);

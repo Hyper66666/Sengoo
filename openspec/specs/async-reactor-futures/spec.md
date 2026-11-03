@@ -1,7 +1,7 @@
 # async-reactor-futures Specification
 
 ## Purpose
-TBD - created by archiving change async-reactor-futures. Update Purpose after archive.
+Specify native IO wakeups, the ownership-safe user Future contract, bounded variadic select, and distinct timeout cancellation semantics across supported hosts.
 ## Requirements
 ### Requirement: Async runtime SHALL provide a reactor with IO wakeups
 
@@ -17,6 +17,11 @@ timer, TCP socket, and supported file-descriptor readiness.
 - **AND** compiler and native runtime tests cover the behavior
 
 ### Requirement: User-defined awaitables SHALL implement a frozen Future contract
+Sengoo SHALL accept user-defined awaitables through the frozen Future and Poll contract below, enforcing exclusive polling, wakeup registration, terminal cleanup, and bounded ownership.
+
+#### Scenario: Complete compatibility contract
+- **WHEN** this capability is implemented or modified
+- **THEN** it SHALL satisfy every clause of the following contract:
 
 Sengoo SHALL accept user types that implement this contract:
 

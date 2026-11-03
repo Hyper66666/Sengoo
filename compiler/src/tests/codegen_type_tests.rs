@@ -8,6 +8,30 @@
 
 use crate::compile_to_ir;
 
+#[test]
+fn float_equality_is_ordered_and_inequality_includes_unordered_values() {
+    for (source_type, llvm_type) in [("f32", "float"), ("f64", "double")] {
+        let source = format!(
+            "def equal(left: {source_type}, right: {source_type}) -> bool {{ left == right }}\n\
+             def unequal(left: {source_type}, right: {source_type}) -> bool {{ left != right }}\n\
+             def main() -> i64 {{ if equal(1.0{source_type}, 2.0{source_type}) || unequal(1.0{source_type}, 2.0{source_type}) {{ 0 }} else {{ 1 }} }}"
+        );
+        let ir = compile_to_ir(&source).expect("floating-point comparisons should compile");
+        assert!(
+            ir.contains(&format!("fcmp oeq {llvm_type}")),
+            "NaN must never compare equal:\n{ir}"
+        );
+        assert!(
+            ir.contains(&format!("fcmp une {llvm_type}")),
+            "NaN must compare unequal, including against itself:\n{ir}"
+        );
+        assert!(
+            !ir.contains("fcmp one "),
+            "ordered inequality incorrectly makes NaN != NaN false:\n{ir}"
+        );
+    }
+}
+
 /// Test that User locals of type `Bool` generate `load i1, i1*` (not `load i64, i64*`).
 ///
 /// When a boolean variable is declared and used, the codegen should emit a load

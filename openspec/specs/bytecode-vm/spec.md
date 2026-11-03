@@ -1,4 +1,4 @@
-﻿# bytecode-vm Specification
+# bytecode-vm Specification
 
 ## Purpose
 Record that a production Sengoo bytecode VM was evaluated and cancelled after

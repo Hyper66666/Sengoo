@@ -3,6 +3,15 @@
 > Status: stable subset documented June 2026. Unsupported operations return
 > compile-time or runtime errors; they do not leave unresolved native symbols.
 
+Development reliability boundary (`0.2.1-dev.0`): generated async frames with
+owned resources do not yet have cancellation destructors. A traceable attempt
+to cancel such a pending frame reports `unsupported-owned-async-cancellation`.
+Await resource-owning futures to completion; cancellation remains supported for
+resource-free frames. Source/MIR call-flow tracing is a bounded check, not a full
+lifetime proof through FFI, indirect calls or escaped raw handles. See
+`tools/sgc/tests/ownership_composition.rs` and the language reference. This is a
+documented soundness correction, and does not change runtime ABI 1.
+
 ## Scheduler
 
 - **Model:** cooperative, single-threaded tick loop (`CoroutineScheduler`).

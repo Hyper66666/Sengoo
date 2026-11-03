@@ -1,9 +1,14 @@
 # language-surface-expansion Specification
 
 ## Purpose
-TBD - created by archiving change language-surface-expansion. Update Purpose after archive.
+Define the accepted declaration-attribute matrix, class base and trait header syntax, and bounded native dynamic FFI arity.
 ## Requirements
 ### Requirement: Supported attributes parse on listed declaration kinds
+The compiler SHALL enforce the phase-4a declaration-attribute matrix and its target, removal, warning, and unsupported-site rules in the conformance scenario below.
+
+#### Scenario: Complete compatibility contract
+- **WHEN** this capability is implemented or modified
+- **THEN** it SHALL satisfy every clause of the following contract:
 
 The compiler SHALL accept only the following attribute matrix in phase 4a:
 

@@ -1,6 +1,7 @@
 name: core-conformance
 
 on:
+  workflow_dispatch:
   pull_request:
   push:
     branches:
@@ -14,6 +15,17 @@ jobs:
       LLVM_VERSION: "19"
     steps:
       - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
+
+      - name: Verify candidate checkout
+        shell: pwsh
+        run: |
+          $expected = "${{ github.event.pull_request.head.sha || github.sha }}"
+          $actual = git rev-parse HEAD
+          if ($LASTEXITCODE -ne 0 -or $actual.Trim() -ne $expected) {
+            throw "checkout revision $actual differs from candidate $expected"
+          }
 
       - uses: dtolnay/rust-toolchain@master
         with:
@@ -34,6 +46,9 @@ jobs:
 
       - name: Run core conformance examples
         run: cargo test --locked -p sgc core_conformance_examples_compile_link_and_run -- --nocapture
+
+      - name: Verify candidate evidence fails closed
+        run: python3 -m unittest discover -s scripts -p "test_candidate_evidence.py"
 
       - name: Run portable target and ABI contract smoke tests
         run: |

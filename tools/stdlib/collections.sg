@@ -1878,13 +1878,13 @@ impl Drop for HashMapIter<bool> {
 
 impl Drop for EnumerateHashSetIterI64 {
     def drop(&mut self) {
-        sengoo_raw_map_key_iter_free(self.iter.handle);
+        self.iter.drop();
     }
 }
 
 impl Drop for EnumerateHashSetIterBool {
     def drop(&mut self) {
-        sengoo_raw_map_key_iter_free(self.iter.handle);
+        self.iter.drop();
     }
 }
 
@@ -2248,7 +2248,7 @@ impl VecIter<bool> {
 }
 
 impl EnumerateVecIterBool {
-    def next(self) -> Option<EnumeratedBool> {
+    def next(&self) -> Option<EnumeratedBool> {
         if sengoo_raw_vec_iter_done(self.iter.handle) != 0 {
             option_none_with(EnumeratedBool { index: 0, value: false })
         } else {
@@ -2386,7 +2386,7 @@ impl Iterator for VecIter<i64> {
 }
 
 impl EnumerateVecIterI64 {
-    def next(self) -> Option<EnumeratedI64> {
+    def next(&self) -> Option<EnumeratedI64> {
         if sengoo_raw_vec_iter_done(self.iter.handle) != 0 {
             option_none_with(EnumeratedI64 { index: 0, value: 0 })
         } else {
@@ -2711,7 +2711,7 @@ impl HashMapIter<bool> {
 }
 
 impl EnumerateHashMapIterBool {
-    def next(self) -> Option<EnumeratedBool> {
+    def next(&self) -> Option<EnumeratedBool> {
         if sengoo_raw_vec_iter_done(self.iter.handle) != 0 {
             option_none_with(EnumeratedBool { index: 0, value: false })
         } else {
@@ -2884,7 +2884,7 @@ impl Iterator for HashSetIter<i64> {
 }
 
 impl EnumerateHashSetIterI64 {
-    def next(self) -> Option<EnumeratedI64> {
+    def next(&self) -> Option<EnumeratedI64> {
         if sengoo_raw_map_key_iter_done(self.iter.handle) != 0 {
             option_none_with(EnumeratedI64 { index: 0, value: 0 })
         } else {
@@ -2948,7 +2948,7 @@ impl Iterator for HashSetIter<bool> {
 }
 
 impl EnumerateHashSetIterBool {
-    def next(self) -> Option<EnumeratedBool> {
+    def next(&self) -> Option<EnumeratedBool> {
         if sengoo_raw_map_key_iter_done(self.iter.handle) != 0 {
             option_none_with(EnumeratedBool { index: 0, value: false })
         } else {
@@ -3058,7 +3058,7 @@ impl Iterator for HashMapIter<i64> {
 }
 
 impl EnumerateHashMapIterI64 {
-    def next(self) -> Option<EnumeratedI64> {
+    def next(&self) -> Option<EnumeratedI64> {
         if sengoo_raw_vec_iter_done(self.iter.handle) != 0 {
             option_none_with(EnumeratedI64 { index: 0, value: 0 })
         } else {
@@ -3799,7 +3799,7 @@ impl StringMapKeyIter {
 }
 
 impl EnumerateStringMapKeyIter {
-    def next(self) -> Option<EnumeratedString> {
+    def next(&self) -> Option<EnumeratedString> {
         if sengoo_raw_map_key_iter_done(self.iter.handle) != 0 {
             option_none_with(EnumeratedString { index: 0, value: String { handle: 0 } })
         } else {

@@ -21,6 +21,14 @@ pub(super) fn lower_array_expr(ctx: &mut LoweringContext<'_>, elems: &[HIRExpr])
 }
 
 pub(super) fn lower_tuple_expr(ctx: &mut LoweringContext<'_>, elems: &[HIRExpr]) -> Local {
+    if elems.is_empty() {
+        let unit = ctx.add_local(None, LocalKind::Temp, MIR_UNIT);
+        ctx.push_inst(Instruction::Assign {
+            destination: unit,
+            value: MirConstant::Unit,
+        });
+        return unit;
+    }
     let elem_locals: Vec<Local> = elems.iter().map(|e| ctx.lower_expr(e)).collect();
     let elem_tys = elem_locals
         .iter()

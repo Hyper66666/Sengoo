@@ -90,7 +90,7 @@ enum Commands {
     },
 
     /// Build the package and path dependencies.
-    Build(PackageArgs),
+    Build(BuildArgs),
 
     /// Type-check the package and path dependencies.
     Check(PackageArgs),
@@ -252,6 +252,21 @@ struct CleanArgs {
     /// Operate on every member when manifest-path points at a workspace root.
     #[arg(long)]
     workspace: bool,
+}
+
+#[derive(Parser, Debug, Clone)]
+struct BuildArgs {
+    #[command(flatten)]
+    package_args: PackageArgs,
+    /// Build the selected package's [lib] as a shared library.
+    #[arg(long)]
+    shared: bool,
+    /// Output shared library path.
+    #[arg(short, long, requires = "shared")]
+    output: Option<PathBuf>,
+    /// Select a typed Python export (repeatable).
+    #[arg(long, requires = "shared")]
+    python_export: Vec<String>,
 }
 
 #[derive(Parser, Debug, Clone)]
@@ -444,6 +459,8 @@ fn main() -> Result<()> {
             Ok(())
         }
         Commands::Build(args) => {
+            let build_args = args;
+            let args = &build_args.package_args;
             let graphs = load_graphs(
                 &args.manifest_path,
                 args.locked,
@@ -452,7 +469,20 @@ fn main() -> Result<()> {
             )?;
             let toolchain = Toolchain::discover(runtime_mode)?;
             for graph in &graphs {
-                toolchain.build(graph, profile(args.release), args.verbose)?;
+                if build_args.shared {
+                    if graphs.len() != 1 {
+                        miette::bail!("--shared requires one selected package; use --package");
+                    }
+                    toolchain.build_shared(
+                        graph,
+                        profile(args.release),
+                        build_args.output.as_deref(),
+                        &build_args.python_export,
+                        args.verbose,
+                    )?;
+                } else {
+                    toolchain.build(graph, profile(args.release), args.verbose)?;
+                }
             }
             Ok(())
         }

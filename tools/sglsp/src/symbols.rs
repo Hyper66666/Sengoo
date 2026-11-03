@@ -316,6 +316,7 @@ fn is_code_span(mask: &[bool], start: usize, end: usize) -> bool {
     start < end && end <= mask.len() && mask[start..end].iter().all(|is_code| *is_code)
 }
 
+#[cfg(test)]
 pub(super) fn find_declaration_in_text(content: &str, symbol: &str) -> Option<Range> {
     let declaration_keywords = ["def", "fn", "struct", "let", "const", "type", "enum"];
 
@@ -349,6 +350,7 @@ pub(super) fn find_declaration_in_text(content: &str, symbol: &str) -> Option<Ra
     None
 }
 
+#[cfg(test)]
 pub(super) fn find_definition_in_text(content: &str, symbol: &str) -> Option<Range> {
     if let Some(range) = find_declaration_in_text(content, symbol) {
         return Some(range);
@@ -357,6 +359,7 @@ pub(super) fn find_definition_in_text(content: &str, symbol: &str) -> Option<Ran
     find_symbol_occurrences(content, symbol).into_iter().next()
 }
 
+#[cfg(test)]
 pub(super) fn valid_identifier_name(name: &str) -> bool {
     let mut chars = name.chars();
     let Some(first) = chars.next() else {

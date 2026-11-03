@@ -175,14 +175,16 @@ impl Codegen {
             return Ok(());
         }
 
+        // Library modules retain the args runtime declarations. The final
+        // executable supplies argv initialization through its own entry point.
         let Some(main_fn) = mir_fns.iter().find(|f| f.name == "main") else {
-            return Err("std::args requires a source-level main function".to_string());
+            return Ok(());
         };
         if !main_fn.params.is_empty() {
             return Err("std::args requires a zero-argument source-level main".to_string());
         }
 
-        let ret_ty = self.mir_type_to_llvm_cached(&main_fn.return_type);
+        let ret_ty = common::mir_type_to_llvm_str(&main_fn.return_type);
 
         self.ir.push_str("\n; Args runtime entry wrapper\n");
         self.ir
@@ -254,7 +256,7 @@ impl Codegen {
                 continue;
             };
 
-            let ret_ty = self.mir_type_to_llvm_cached(&target.return_type);
+            let ret_ty = common::mir_type_to_llvm_str(&target.return_type);
             let params = target
                 .params
                 .iter()

@@ -256,7 +256,7 @@ impl Codegen {
 
         self.ir.push_str(&format!("; Function: {}\n", mir_fn.name));
 
-        let return_type = self.mir_type_to_llvm_cached(&mir_fn.return_type);
+        let return_type = common::mir_type_to_llvm_str(&mir_fn.return_type);
 
         let function_name = self.emitted_function_name(&mir_fn.name);
 
@@ -493,7 +493,7 @@ impl Codegen {
 
         // Delegate to shared utility for cache misses
 
-        let result = common::mir_type_to_llvm_str(ty);
+        let result = common::mir_value_type_to_llvm_str(ty);
 
         self.type_str_cache.insert(ty.clone(), result.clone());
 
@@ -511,6 +511,9 @@ impl Codegen {
 
     /// Resolve an operand to an LLVM value, loading from stack slots when needed.
     fn operand_value(&mut self, local: Local, mir_fn: &MirFunction) -> String {
+        if common::is_unit_value(self.get_local_type(mir_fn, local)) {
+            return "zeroinitializer".into();
+        }
         if self.local_uses_stack_slot(local, mir_fn) {
             // User locals and mutable compiler temporaries are stack slots, so
             // load from the alloca before use.

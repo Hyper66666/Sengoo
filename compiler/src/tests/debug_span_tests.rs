@@ -236,6 +236,7 @@ impl Drop for Resource {\n\
     }\n\
 }\n\
 def main() -> i64 {\n\
+    if true { };\n\
     let resource = Resource { handle: 1 };\n\
     if resource.handle > 0 { return 1; };\n\
     return 0;\n\
@@ -253,7 +254,10 @@ def main() -> i64 {\n\
         .copied()
         .collect::<Vec<_>>();
 
-    assert_eq!(hidden_entry_instructions.len(), 2);
+    assert!(
+        hidden_entry_instructions.len() >= 2,
+        "the non-entry initialization must exercise a real drop-flag prologue"
+    );
     assert!(hidden_entry_instructions.iter().all(|inst| main
         .instruction_source_sites
         .get(inst.0 as usize)

@@ -1,7 +1,7 @@
 # integration-baseline Specification
 
 ## Purpose
-TBD - created by archiving change mainline-release-baseline. Update Purpose after archive.
+Keep integration recoverable and reproducible by preserving capability ownership, recording implementation evidence, and requiring a green mainline baseline.
 ## Requirements
 ### Requirement: Development progress SHALL be recoverable before integration
 

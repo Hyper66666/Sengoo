@@ -546,6 +546,29 @@ impl BorrowChecker {
 
     fn check_borrow_escape_expr(&mut self, expr: &Expr) {
         match &expr.kind {
+            ExprKind::Unary {
+                op: UnOp::Ref | UnOp::RefMut,
+                operand,
+            } => {
+                let path = Self::expr_move_path(operand)
+                    .map(|path| self.borrow_aliases.get(&path.root).cloned().unwrap_or(path));
+                // Reborrowing an external reference can outlive this function.
+                // A reference into a local/by-value parameter or temporary cannot.
+                if path
+                    .as_ref()
+                    .and_then(|path| self.var_ty(&path.root))
+                    .is_some_and(|ty| matches!(ty.kind, TyKind::Ref(..)))
+                {
+                    return;
+                }
+                self.errors.push(BorrowError::BorrowEscapesScope {
+                    var: path
+                        .map(|path| path.display())
+                        .unwrap_or_else(|| "<temporary>".to_string()),
+                    borrow_span: (operand.span.lo as usize, operand.span.hi as usize),
+                    escape_span: (expr.span.lo as usize, expr.span.hi as usize),
+                });
+            }
             ExprKind::Paren(inner) => self.check_borrow_escape_expr(inner),
             ExprKind::Tuple(elems) | ExprKind::Array(elems) => {
                 for elem in elems {

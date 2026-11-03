@@ -332,7 +332,22 @@ impl Formatter {
             self.format_type_params(&impl_decl.type_params)
         );
         if let Some(trait_path) = &impl_decl.trait_path {
+            if impl_decl.is_negative {
+                head.push('!');
+            }
             head.push_str(&self.format_path(trait_path));
+            if !impl_decl.trait_args.is_empty() {
+                head.push('<');
+                head.push_str(
+                    &impl_decl
+                        .trait_args
+                        .iter()
+                        .map(|ty| self.format_type(ty))
+                        .collect::<Vec<_>>()
+                        .join(", "),
+                );
+                head.push('>');
+            }
             head.push_str(" for ");
         }
         head.push_str(&self.format_type(&impl_decl.target_type));
@@ -771,6 +786,33 @@ mod tests {
         let src = "def main()->i64{let mut value=1;value=value+1;value}";
         let formatted = format_test_source(src, FormatOptions::default());
         assert!(formatted.contains("let mut value = 1;"));
+    }
+
+    #[test]
+    fn preserves_negative_auto_traits_and_generic_trait_arguments() {
+        let source = "struct Handle { value: i64 }\nimpl !Send for Handle {}\nimpl !Sync for Handle {}\ntrait Convert<T> {}\nimpl Convert<i64> for Handle {}";
+        let formatted = format_test_source(source, FormatOptions::default());
+        let reparsed = SgParser::parse(&formatted).unwrap();
+        let implementations: Vec<_> = reparsed
+            .decls
+            .iter()
+            .filter_map(|decl| match &decl.kind {
+                DeclKind::Impl(value) => Some(value),
+                _ => None,
+            })
+            .collect();
+        assert!(implementations[0].is_negative);
+        assert!(implementations[1].is_negative);
+        assert!(!implementations[2].is_negative);
+        assert_eq!(implementations[2].trait_args.len(), 1);
+        assert_eq!(
+            formatted,
+            format_test_source(&formatted, FormatOptions::default())
+        );
+        let mut checker = sengoo_compiler::TypeChecker::new();
+        checker
+            .check_program(&reparsed)
+            .expect("formatted negative and generic implementations retain type checking");
     }
 
     #[test]

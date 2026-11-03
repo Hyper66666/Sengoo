@@ -1,8 +1,13 @@
 # Sengoo Language Reference
 
-Reference version: toolchain `0.2.0`, frozen by stable release evidence on SHA
+Stable reference baseline: toolchain `0.2.0`, frozen by release evidence on SHA
 `92c8f399f61b73d63990581c637da68572b6e133`
 ([PR #56](https://github.com/Hyper66666/Sengoo/pull/56)).
+
+Sections explicitly marked `0.2.1-dev.0` describe the current development
+implementation and its soundness corrections. Their local proof and remaining
+release gates are tracked in [development-evidence.md](development-evidence.md);
+the stable release evidence does not certify these additions.
 
 This is the authoritative entry point for Sengoo language behavior. It records
 implemented status first, and links each major surface to a proof example,
@@ -189,6 +194,35 @@ Proof:
 - AMM compiler tests under `compiler/src/tests/`
 - `compiler/src/tests/m1_language_coherence_tests.rs` (last-use, escape, partial move)
 - `compiler/src/tests/owned_string_tests.rs`
+- `tools/sgc/tests/ownership_composition.rs` (native observable Drop counts and
+  String live-handle baselines for nested fields, partial moves, wrappers,
+  branches, loops, closure parameters and successive `?` operations)
+
+The `0.2.1-dev.0` reliability work corrects `Option.unwrap_or` payload transfer
+and unused fallback cleanup, successive `?` cleanup, and inactive
+`Result` placeholder destruction. The tagged-struct `Option/Result`
+representation remains unchanged. `Result<(), i64>` uses an empty aggregate
+for its unit value rather than an invalid LLVM `void` field.
+
+After a user `Drop` body returns, remaining owned fields are destroyed
+automatically. Explicit field `.drop()`, `.free()` and `.close()` calls retain
+their existing cleanup contract and suppress a second automatic field cleanup.
+Returned aggregates carrying `Vec<T>` and nested owning wrappers retain their
+generated cleanup helpers across function boundaries. The native composition
+suite and instrumented ownership fixture cover these paths.
+
+Moving an owning field out of an aggregate with its own `Drop`, or out of a
+tagged owning payload that needs conditional cleanup, reports
+`unsupported-partial-move-with-drop`. Move the whole payload first. Ordinary
+field moves from aggregates without their own destructor remain supported and
+are checked by the native composition tests.
+
+Closures currently support 64-bit integer captures and explicit owned closure
+parameters. Capturing a non-integer aggregate, String, or another resource
+requires a typed owning environment that is not implemented. Such a capture
+reports `unsupported-closure-capture`; pass the owned value explicitly instead.
+This is a soundness correction to formerly accepted but incorrectly lowered
+capture shapes, not a complete lifetime system.
 
 Known open work:
 
@@ -311,6 +345,15 @@ Supported:
 Proof: `docs/runtime-async-semantics.md`, `compiler/src/tests/async_tests.rs`,
 `tools/sgc/src/tests.rs`.
 
+In `0.2.1-dev.0`, canceling a pending async frame that owns a resource is rejected
+with `unsupported-owned-async-cancellation` when the compiler can trace that
+cancellation target. Normal completion still runs cleanup; resource-free
+cancellation remains supported. The current generated frame cancellation path
+does not implement state-dependent owned-value destructors. This restriction is
+a soundness exception to prior acceptance. Do not infer complete cancellation
+safety through FFI, indirect calls or escaped raw task handles. Native tests in
+`tools/sgc/tests/ownership_composition.rs` pin supported and rejected cases.
+
 Supported (concurrency subset, also under `std::async`):
 
 - Generic `channel<T: Send>` with async send/recv, owned endpoints, and Drop
@@ -348,8 +391,9 @@ Open:
 ## Standard Library Surface
 
 The language reference only defines language behavior. Standard-library module
-availability is tracked in `tools/stdlib/README.md` and the active stdlib
-OpenSpec changes. Important current surfaces include:
+availability is tracked in `tools/stdlib/README.md` and
+`examples/realworld/SUPPORT_MATRIX.md`, with canonical OpenSpec requirements
+and linked tests as evidence. Important current surfaces include:
 
 - `std::string`
 - `std::math`
@@ -364,7 +408,7 @@ OpenSpec changes. Important current surfaces include:
 
 ## Versioning Policy
 
-Reference version `0.1.x` tracks the active toolchain line. A release that
+Reference version `0.2.x` tracks the active toolchain line. A release that
 changes source semantics must update this file in the same change or explicitly
 mark the behavior as experimental/unsupported. All Sengoo code blocks in this
 file are compile/run doctests enforced by the `sgc` workspace test gate.

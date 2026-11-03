@@ -22,6 +22,7 @@ pub(crate) fn hir_type_instance_name(ty: &HIRType) -> String {
         HIRTypeKind::Ref(_, inner) => format!("ref_{}", hir_type_instance_name(inner)),
         HIRTypeKind::Ptr(inner) => format!("ptr_{}", hir_type_instance_name(inner)),
         HIRTypeKind::Array(elem, len) => format!("array_{}_{}", len, hir_type_instance_name(elem)),
+        HIRTypeKind::Tuple(items) if items.is_empty() => "unit".to_string(),
         HIRTypeKind::Tuple(items) => {
             let parts: Vec<String> = items.iter().map(hir_type_instance_name).collect();
             format!("tuple_{}", parts.join("_"))
@@ -48,6 +49,7 @@ pub(crate) fn mir_type_instance_name(ty: &MIRType) -> String {
         MIRType::Ref(inner) => format!("ref_{}", mir_type_instance_name(inner)),
         MIRType::Ptr(inner) => format!("ptr_{}", mir_type_instance_name(inner)),
         MIRType::Array(elem, len) => format!("array_{}_{}", len, mir_type_instance_name(elem)),
+        MIRType::Tuple(items) if items.is_empty() => "unit".to_string(),
         MIRType::Tuple(items) => {
             let parts: Vec<String> = items.iter().map(mir_type_instance_name).collect();
             format!("tuple_{}", parts.join("_"))

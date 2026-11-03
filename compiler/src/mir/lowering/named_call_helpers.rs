@@ -884,7 +884,7 @@ fn erased_typed_function_pointer(
     erased
 }
 
-fn synthesize_hashmap_owner_drop_if_missing(
+pub(super) fn synthesize_hashmap_owner_drop_if_missing(
     ctx: &mut LoweringContext<'_>,
     map_ty: &MIRType,
     map_name: &str,
@@ -998,7 +998,7 @@ fn lower_vec_new_call(
     result
 }
 
-fn synthesize_vec_owner_drop_if_missing(
+pub(super) fn synthesize_vec_owner_drop_if_missing(
     ctx: &mut LoweringContext<'_>,
     vec_ty: &MIRType,
     vec_name: &str,
@@ -2389,7 +2389,11 @@ fn lower_raw_rwlock_write_guard_set_call(
     result
 }
 
-fn synthesize_rc_owner_drop(ctx: &mut LoweringContext<'_>, rc_ty: &MIRType, rc_name: &str) {
+pub(super) fn synthesize_rc_owner_drop(
+    ctx: &mut LoweringContext<'_>,
+    rc_ty: &MIRType,
+    rc_name: &str,
+) {
     let drop_name = format!("{rc_name}_Drop_drop");
     if ctx.is_known_function(&drop_name) {
         return;
@@ -2572,6 +2576,10 @@ fn synthesize_rc_drop_thunk(
     thunk_ctx.insert_drop_glue();
 
     let generated = thunk_ctx.mir_fn.clone();
+    let nested_helpers = std::mem::take(&mut thunk_ctx.lambda_functions);
+    let errors = std::mem::take(&mut thunk_ctx.errors);
+    ctx.lambda_functions.extend(nested_helpers);
+    ctx.errors.extend(errors);
     ctx.lambda_functions.push(generated);
     ctx.insert_known_function(thunk_name.clone());
     ctx.insert_function_sig(

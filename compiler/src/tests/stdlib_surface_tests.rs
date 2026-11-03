@@ -596,9 +596,21 @@ def main() -> i64 {
     );
     let unwrap_or = llvm_function_section(&ir, "define %Buffer @Result_Buffer_i64_unwrap_or");
 
+    let direct_drops = unwrap_or
+        .lines()
+        .filter(|line| {
+            line.trim_start()
+                .starts_with("call void @Buffer_Drop_drop(")
+        })
+        .collect::<Vec<_>>();
+    assert_eq!(
+        direct_drops.len(),
+        1,
+        "the unused fallback must be released on success\n{unwrap_or}"
+    );
     assert!(
-        !unwrap_or.contains("Buffer_Drop_drop"),
-        "owned Result.unwrap_or must move its selected value out before drop glue runs\n{unwrap_or}"
+        direct_drops[0].contains("%Buffer %l_2"),
+        "only the fallback may be dropped directly; the selected payload is moved out\n{unwrap_or}"
     );
 }
 
@@ -1335,6 +1347,17 @@ fn codegen_preserves_zero_argument_main_without_args_runtime() {
     assert!(ir.contains("define i64 @main()"));
     assert!(!ir.contains("sengoo_args_init"));
     assert!(!ir.contains("sengoo_user_main"));
+}
+
+#[test]
+fn args_runtime_is_usable_in_a_library_without_main() {
+    let ir = compile_with_stdlib_modules(
+        &["option.sg", "result.sg", "ffi.sg", "status.sg", "args.sg"],
+        "def library_argument_count() -> i64 { args_len() }",
+    );
+    assert!(ir.contains("declare i64 @sengoo_args_len()"));
+    assert!(ir.contains("define i64 @library_argument_count()"));
+    assert!(!ir.contains("define i32 @main("));
 }
 
 #[test]

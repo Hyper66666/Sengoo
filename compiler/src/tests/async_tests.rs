@@ -4,6 +4,83 @@ use crate::mir::{Instruction, LocalKind, MirConstant, Terminator};
 use crate::CompileError;
 use crate::{compile_to_ir, compile_to_mir, Parser};
 
+const OWNING_ASYNC: &str = r#"
+struct Owned { id: i64 }
+impl Drop for Owned { def drop(&mut self) {} }
+async def owned_worker() -> i64 {
+    let owned = Owned { id: 1 };
+    await sleep(1);
+    owned.id
+}
+"#;
+
+#[test]
+fn canceling_an_owned_frame_has_a_stable_diagnostic() {
+    let source = format!("{OWNING_ASYNC}\nasync def main() -> i64 {{ let task = spawn_task(owned_worker()); if cancel_task(task) {{ 0 }} else {{ 1 }} }}");
+    let error = compile_to_ir(&source).expect_err("an owning cancellation must not silently leak");
+    assert!(
+        error
+            .to_string()
+            .contains("unsupported-owned-async-cancellation"),
+        "{error}"
+    );
+}
+
+#[test]
+fn cancellation_origins_propagate_through_function_parameters() {
+    let source = format!("{OWNING_ASYNC}\nasync def stop(task: i64) -> bool {{ cancel_task(task) }}\nasync def main() -> i64 {{ let task = spawn_task(owned_worker()); let canceled = await stop(task); if canceled {{ 0 }} else {{ 1 }} }}");
+    let error = compile_to_ir(&source).expect_err("a helper must not hide an owning cancellation");
+    assert!(
+        error
+            .to_string()
+            .contains("unsupported-owned-async-cancellation"),
+        "{error}"
+    );
+}
+
+#[test]
+fn unused_cancel_helper_does_not_reject_normal_owned_async_completion() {
+    let source = format!("{OWNING_ASYNC}\nasync def unused_stop(task: i64) -> bool {{ cancel_task(task) }}\nasync def main() -> i64 {{ await owned_worker() }}");
+    compile_to_ir(&source)
+        .expect("an unused cancellation API does not make normal completion unsafe");
+}
+
+#[test]
+fn canceling_a_scalar_task_preserves_unrelated_owned_async_completion() {
+    let source = format!("{OWNING_ASYNC}\nasync def scalar_worker() -> i64 {{ await sleep(1000); 0 }}\nasync def main() -> i64 {{ let task = spawn_task(scalar_worker()); let canceled = cancel_task(task); await owned_worker() }}");
+    compile_to_ir(&source)
+        .expect("only the actual cancellation target needs the owning-frame boundary");
+}
+
+#[test]
+fn canceling_a_parent_checks_its_pending_owned_child() {
+    let source = format!("{OWNING_ASYNC}\nasync def parent() -> i64 {{ await owned_worker() }}\nasync def main() -> i64 {{ let task = spawn_task(parent()); if cancel_task(task) {{ 0 }} else {{ 1 }} }}");
+    let error = compile_to_ir(&source)
+        .expect_err("an owned child must not escape the cancellation boundary");
+    assert!(
+        error
+            .to_string()
+            .contains("unsupported-owned-async-cancellation"),
+        "{error}"
+    );
+}
+
+#[test]
+fn an_owned_value_released_before_suspension_can_be_canceled() {
+    let source = r#"
+struct Owned { id: i64 }
+impl Drop for Owned { def drop(&mut self) {} }
+async def worker() -> i64 {
+    { let owned = Owned { id: 1 }; }
+    await sleep(1000);
+    0
+}
+async def main() -> i64 { let task = spawn_task(worker()); if cancel_task(task) { 0 } else { 1 } }
+"#;
+    compile_to_ir(source)
+        .expect("a resource released before suspension is absent from the pending frame");
+}
+
 #[test]
 fn parser_marks_async_def_as_async_function() {
     let source = r#"

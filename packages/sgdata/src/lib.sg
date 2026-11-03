@@ -1,0 +1,115 @@
+import std::string;
+
+import std::json;
+
+import std::ffi;
+
+extern "C" {
+    fn sgdata_error_code() -> i64;
+    fn sgdata_error_message() -> i64;
+    fn sgdata_read_text(path: i64, maximum: i64) -> i64;
+    fn sgdata_write_text(path: i64, bytes: i64, length: i64) -> i64;
+    fn sgdata_csv_new(columns: i64) -> i64;
+    fn sgdata_csv_parse(bytes: i64, length: i64) -> i64;
+    fn sgdata_csv_close(handle: i64) -> i64;
+    fn sgdata_csv_rows(handle: i64) -> i64;
+    fn sgdata_csv_columns(handle: i64) -> i64;
+    fn sgdata_csv_field(handle: i64, row: i64, column: i64) -> i64;
+    fn sgdata_csv_push_field(handle: i64, bytes: i64, length: i64) -> i64;
+    fn sgdata_csv_serialize(handle: i64) -> i64;
+}
+
+struct CsvTable {
+    handle: i64,
+}
+
+impl !Send for CsvTable {
+}
+
+impl !Sync for CsvTable {
+}
+
+def data_string_result(raw: i64) -> Result<String, i64> {
+    if raw >= 0 { Result { is_ok: true, value: String { handle: raw }, error: 0 }; } else { Result { is_ok: false, value: String { handle: 0 }, error: 0 - raw }; };
+}
+
+def data_status_result(raw: i64) -> Result<bool, i64> {
+    Result { is_ok: raw >= 0, value: raw >= 0, error: if raw < 0 { 0 - raw; } else { 0; } };
+}
+
+def data_last_error() -> Result<String, i64> {
+    data_string_result(sgdata_error_message());
+}
+
+def text_read(path: &str, maximum_bytes: i64) -> Result<String, i64> {
+    data_string_result(sgdata_read_text(sengoo_stdlib_str_ptr(path), maximum_bytes));
+}
+
+def text_write(path: &str, text: &str) -> Result<bool, i64> {
+    data_status_result(sgdata_write_text(sengoo_stdlib_str_ptr(path), sengoo_stdlib_str_ptr(text), text.len()));
+}
+
+def json_read(path: &str, maximum_bytes: i64) -> Result<JsonDoc, i64> {
+    let text = text_read(path, maximum_bytes)?;
+    json_parse(text.as_str());
+}
+
+def json_write(path: &str, document: &JsonDoc) -> Result<bool, i64> {
+    let text = document.serialize_string()?;
+    text_write(path, text.as_str());
+}
+
+def json_field_i64(document: &JsonDoc, key: &str) -> Result<i64, i64> {
+    let field = document.root().object_get(key)?;
+    field.number_i64();
+}
+
+def json_field_string(document: &JsonDoc, key: &str) -> Result<String, i64> {
+    let field = document.root().object_get(key)?;
+    field.string_value();
+}
+
+def csv_table_result(raw: i64) -> Result<CsvTable, i64> {
+    if raw > 0 { Result { is_ok: true, value: CsvTable { handle: raw }, error: 0 }; } else { Result { is_ok: false, value: CsvTable { handle: 0 }, error: 0 - raw }; };
+}
+
+def csv_new(columns: i64) -> Result<CsvTable, i64> {
+    csv_table_result(sgdata_csv_new(columns));
+}
+
+def csv_parse(text: &str) -> Result<CsvTable, i64> {
+    csv_table_result(sgdata_csv_parse(sengoo_stdlib_str_ptr(text), text.len()));
+}
+
+def csv_read(path: &str, maximum_bytes: i64) -> Result<CsvTable, i64> {
+    let text = text_read(path, maximum_bytes)?;
+    csv_parse(text.as_str());
+}
+
+impl CsvTable {
+    def rows(&self) -> i64 {
+        sgdata_csv_rows(self.handle);
+    }
+    def columns(&self) -> i64 {
+        sgdata_csv_columns(self.handle);
+    }
+    def field(&self, row: i64, column: i64) -> Result<String, i64> {
+        data_string_result(sgdata_csv_field(self.handle, row, column));
+    }
+    def push_field(&mut self, text: &str) -> Result<bool, i64> {
+        data_status_result(sgdata_csv_push_field(self.handle, sengoo_stdlib_str_ptr(text), text.len()));
+    }
+    def serialize(&self) -> Result<String, i64> {
+        data_string_result(sgdata_csv_serialize(self.handle));
+    }
+    def write(&self, path: &str) -> Result<bool, i64> {
+        let text = self.serialize()?;
+        text_write(path, text.as_str());
+    }
+}
+
+impl Drop for CsvTable {
+    def drop(&mut self) {
+        if self.handle != 0 { sgdata_csv_close(self.handle); };
+    }
+}

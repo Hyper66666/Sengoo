@@ -185,7 +185,21 @@ pub(crate) async fn cmd_build(
         }
     }
     let runtime_c = find_runtime_c();
-    let runtime_source_fingerprint = optional_runtime_bundle_fingerprint(runtime_c.as_deref())?;
+    let runtime_source_fingerprint = if emit_llvm {
+        optional_runtime_bundle_fingerprint(runtime_c.as_deref())?
+    } else {
+        let clang = find_clang()
+            .ok_or_else(|| miette::miette!("clang is required to validate native build inputs"))?;
+        Some(crate::native_toolchain::native_build_input_fingerprint(
+            &clang,
+            input_path,
+            &root_source,
+            runtime_c.as_deref(),
+            opt_level,
+            Some(&build_target),
+            false,
+        )?)
+    };
     let (installed_runtime_fingerprint, runtime_provenance) = if emit_llvm {
         (None, NativeRuntimeProvenance::not_linked())
     } else {

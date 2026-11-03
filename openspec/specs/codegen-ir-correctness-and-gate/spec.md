@@ -1,7 +1,7 @@
 # codegen-ir-correctness-and-gate Specification
 
 ## Purpose
-TBD - created by archiving change codegen-ir-correctness-and-gate. Update Purpose after archive.
+Require documented core language forms to produce type-consistent native LLVM IR and execute through the real compiler CLI under an enforced toolchain contract.
 ## Requirements
 ### Requirement: Documented core forms SHALL compile and run via the real `sgc` CLI
 
