@@ -65,9 +65,9 @@ def ffi_last_error_code() -> i64 {
 def ffi_open_raw(path_ptr: i64) -> Result<CLib, i64> {
     let handle = sengoo_ffi_c_open(path_ptr);
     if handle != 0 {
-        Result { is_ok: true, value: CLib { handle: handle }, error: 0 }
+        Ok(CLib { handle: handle })
     } else {
-        Result { is_ok: false, value: CLib { handle: 0 }, error: sengoo_ffi_last_error_code() }
+        Err(sengoo_ffi_last_error_code())
     }
 }
 
@@ -86,9 +86,9 @@ def ffi_last_error_copy_raw(buffer_ptr: i64, capacity: i64) -> i64 {
 def ffi_last_error_copy(buffer: Buffer) -> Result<i64, i64> {
     let copied = ffi_last_error_copy_raw(sengoo_ffi_buffer_ptr(buffer.handle), sengoo_ffi_buffer_len(buffer.handle));
     if copied >= 0 {
-        Result { is_ok: true, value: copied, error: 0 }
+        Ok(copied)
     } else {
-        Result { is_ok: false, value: 0, error: sengoo_ffi_last_error_code() }
+        Err(sengoo_ffi_last_error_code())
     }
 }
 
@@ -99,9 +99,9 @@ def ffi_last_error_clear() -> bool {
 def ffi_i64_value_result(value: i64) -> Result<i64, i64> {
     let error = sengoo_ffi_last_error_code();
     if error == 0 {
-        Result { is_ok: true, value: value, error: 0 }
+        Ok(value)
     } else {
-        Result { is_ok: false, value: 0, error: error }
+        Err(error)
     }
 }
 
@@ -123,9 +123,9 @@ def ffi_status_from_raw(code: i64) -> i64 {
 
 def ffi_byte_count_result(value: i64) -> Result<i64, i64> {
     if value >= 0 {
-        Result { is_ok: true, value: value, error: 0 }
+        Ok(value)
     } else {
-        Result { is_ok: false, value: 0, error: ffi_status_from_raw(value) }
+        Err(ffi_status_from_raw(value))
     }
 }
 
@@ -137,9 +137,9 @@ impl CLib {
     def call_i64_raw(self, symbol_ptr: i64, argc: i64, argv_ptr: i64, out_value_ptr: i64) -> Result<i64, i64> {
         let status = sengoo_ffi_c_call_i64(self.handle, symbol_ptr, argc, argv_ptr, out_value_ptr);
         if status == 0 {
-            Result { is_ok: true, value: status, error: 0 }
+            Ok(status)
         } else {
-            Result { is_ok: false, value: 0, error: status }
+            Err(status)
         }
     }
 
@@ -174,9 +174,9 @@ impl CLib {
     def bind_callback_i64_raw(self, symbol_ptr: i64, arity: i64) -> Result<CallbackToken, i64> {
         let handle = sengoo_ffi_callback_bind_i64(self.handle, symbol_ptr, arity);
         if handle != 0 {
-            Result { is_ok: true, value: CallbackToken { handle: handle }, error: 0 }
+            Ok(CallbackToken { handle: handle })
         } else {
-            Result { is_ok: false, value: CallbackToken { handle: 0 }, error: sengoo_ffi_last_error_code() }
+            Err(sengoo_ffi_last_error_code())
         }
     }
 
@@ -187,9 +187,9 @@ impl CLib {
     def object_create_raw(self, constructor_symbol_ptr: i64, argc: i64, argv_ptr: i64, destructor_symbol_ptr: i64) -> Result<CppObject, i64> {
         let handle = sengoo_ffi_object_create(self.handle, constructor_symbol_ptr, argc, argv_ptr, destructor_symbol_ptr);
         if handle != 0 {
-            Result { is_ok: true, value: CppObject { handle: handle }, error: 0 }
+            Ok(CppObject { handle: handle })
         } else {
-            Result { is_ok: false, value: CppObject { handle: 0 }, error: sengoo_ffi_last_error_code() }
+            Err(sengoo_ffi_last_error_code())
         }
     }
 
@@ -200,9 +200,9 @@ impl CLib {
     def object_create_value_raw(self, constructor_symbol_ptr: i64, argc: i64, a0: i64, a1: i64, a2: i64, a3: i64, destructor_symbol_ptr: i64) -> Result<CppObject, i64> {
         let handle = sengoo_ffi_object_create_value(self.handle, constructor_symbol_ptr, argc, a0, a1, a2, a3, destructor_symbol_ptr);
         if handle != 0 {
-            Result { is_ok: true, value: CppObject { handle: handle }, error: 0 }
+            Ok(CppObject { handle: handle })
         } else {
-            Result { is_ok: false, value: CppObject { handle: 0 }, error: sengoo_ffi_last_error_code() }
+            Err(sengoo_ffi_last_error_code())
         }
     }
 
@@ -235,9 +235,9 @@ impl CppObject {
     def call_i64_raw(self, method_symbol_ptr: i64, argc: i64, argv_ptr: i64, out_value_ptr: i64) -> Result<i64, i64> {
         let status = sengoo_ffi_object_call_i64(self.handle, method_symbol_ptr, argc, argv_ptr, out_value_ptr);
         if status == 0 {
-            Result { is_ok: true, value: status, error: 0 }
+            Ok(status)
         } else {
-            Result { is_ok: false, value: 0, error: status }
+            Err(status)
         }
     }
 
@@ -279,9 +279,9 @@ impl CallbackToken {
 def ffi_buffer_from_bytes_raw(data_ptr: i64, len: i64) -> Result<Buffer, i64> {
     let handle = sengoo_ffi_buffer_from_bytes(data_ptr, len);
     if handle != 0 {
-        Result { is_ok: true, value: Buffer { handle: handle }, error: 0 }
+        Ok(Buffer { handle: handle })
     } else {
-        Result { is_ok: false, value: Buffer { handle: 0 }, error: sengoo_ffi_last_error_code() }
+        Err(sengoo_ffi_last_error_code())
     }
 }
 
@@ -292,9 +292,9 @@ def ffi_buffer_from_bytes(data: &str) -> Result<Buffer, i64> {
 def ffi_buffer_new(capacity: i64) -> Result<Buffer, i64> {
     let handle = sengoo_ffi_buffer_new(capacity);
     if handle != 0 {
-        Result { is_ok: true, value: Buffer { handle: handle }, error: 0 }
+        Ok(Buffer { handle: handle })
     } else {
-        Result { is_ok: false, value: Buffer { handle: 0 }, error: sengoo_ffi_last_error_code() }
+        Err(sengoo_ffi_last_error_code())
     }
 }
 
@@ -326,9 +326,9 @@ impl Buffer {
     def copy_out(self, out: Buffer) -> Result<i64, i64> {
         let copied = self.copy_out_raw(out.ptr(), out.len());
         if copied >= 0 {
-            Result { is_ok: true, value: copied, error: 0 }
+            Ok(copied)
         } else {
-            Result { is_ok: false, value: 0, error: sengoo_ffi_last_error_code() }
+            Err(sengoo_ffi_last_error_code())
         }
     }
 
@@ -351,9 +351,9 @@ impl Buffer {
     def copy_from_str(self, value: &str) -> Result<i64, i64> {
         let status = sengoo_ffi_buffer_copy_in(self.handle, sengoo_stdlib_str_ptr(value), value.len());
         if status == 0 {
-            Result { is_ok: true, value: value.len(), error: 0 }
+            Ok(value.len())
         } else {
-            Result { is_ok: false, value: 0, error: ffi_status_from_raw(status) }
+            Err(ffi_status_from_raw(status))
         }
     }
 
@@ -363,7 +363,7 @@ impl Buffer {
 
     def append_from(self, src: Buffer, start: i64, len: i64) -> Result<i64, i64> {
         if start < 0 || len < 0 {
-            Result { is_ok: false, value: 0, error: 2 }
+            Err(2)
         } else {
             let base = sengoo_ffi_buffer_ptr(src.handle);
             ffi_byte_count_result(sengoo_ffi_buffer_append(self.handle, base + start, len))

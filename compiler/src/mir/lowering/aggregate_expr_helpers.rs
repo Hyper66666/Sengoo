@@ -209,6 +209,11 @@ pub(super) fn lower_field_expr(
         }
         ty => (base_local, ty),
     };
+    if let MIRType::Enum { .. } = &base_ty {
+        if let Some(local) = lower_compat_enum_field(ctx, base_local, &base_ty, field) {
+            return local;
+        }
+    }
     let field_index = match &base_ty {
         MIRType::Struct { fields, .. } => fields
             .iter()
@@ -232,6 +237,112 @@ pub(super) fn lower_field_expr(
     });
 
     result_local
+}
+
+/// Deprecated field surface (`.is_ok`, `.is_some`, `.value`, `.error`) over the
+/// enum forms of `Option` and `Result`, kept for one release so the ~430
+/// in-tree field reads keep compiling while call sites move to patterns.
+///
+/// A payload read off the other arm — `.value` on `Err`, `.error` on `Ok` —
+/// yields the default value for that type rather than trapping, matching what
+/// the placeholder the struct form carried used to hold. In-tree code reads
+/// `.value` unguarded on failure arms (`Option::ok_or`, `Result::ok`), so a
+/// trap would turn a compile-time migration into a runtime break.
+///
+/// Returns `None` for any other field so genuine enum field access still falls
+/// through to the ordinary path.
+fn lower_compat_enum_field(
+    ctx: &mut LoweringContext<'_>,
+    base_local: Local,
+    base_ty: &MIRType,
+    field: &str,
+) -> Option<Local> {
+    let (success, failure) = enum_option_result_discriminants(ctx, base_ty)?;
+    let discr_local = ctx.add_local(None, LocalKind::Temp, MIR_I64);
+    ctx.push_inst(Instruction::Discriminant {
+        destination: discr_local,
+        source: base_local,
+    });
+
+    let (wanted, payload_field) = match field {
+        "is_ok" | "is_some" => (success, false),
+        "value" => (success, true),
+        "error" => (failure, true),
+        _ => return None,
+    };
+
+    let wanted_local = ctx.lower_literal(&HIRLiteral::Int(i64::from(wanted)));
+    let matches_local = ctx.add_local(None, LocalKind::Temp, MIR_BOOL);
+    ctx.push_inst(Instruction::Binary {
+        destination: matches_local,
+        op: MirBinOp::Eq,
+        left: discr_local,
+        right: wanted_local,
+    });
+    if !payload_field {
+        return Some(matches_local);
+    }
+
+    let payload_ty = crate::mir::enum_defs::EnumDef::instance_variant_payload(base_ty, wanted)?;
+    let result_local = ctx.add_local(None, LocalKind::User, payload_ty.clone());
+    let default_local = super::try_expr_helpers::default_value_for_type(ctx, &payload_ty);
+    ctx.push_inst(Instruction::Store {
+        destination: result_local,
+        value: default_local,
+    });
+
+    let extract_block = ctx.new_block();
+    let join_block = ctx.new_block();
+    ctx.set_terminator(Terminator::If {
+        cond: matches_local,
+        then_block: extract_block,
+        else_block: join_block,
+    });
+
+    ctx.set_current_block(extract_block);
+    let payload_local = ctx.add_local(None, LocalKind::Temp, payload_ty);
+    ctx.push_inst(Instruction::ExtractPayload {
+        destination: payload_local,
+        source: base_local,
+    });
+    ctx.push_inst(Instruction::Store {
+        destination: result_local,
+        value: payload_local,
+    });
+    ctx.set_terminator(Terminator::Goto(join_block));
+
+    ctx.set_current_block(join_block);
+    Some(result_local)
+}
+
+/// `(success, failure)` discriminants when `ty` is an `Option`/`Result`-shaped
+/// enum instance, resolved from variant names.
+fn enum_option_result_discriminants(ctx: &LoweringContext<'_>, ty: &MIRType) -> Option<(u32, u32)> {
+    let MIRType::Enum { name, .. } = ty else {
+        return None;
+    };
+    if !(name == "Option"
+        || name == "Result"
+        || name.starts_with("Option_")
+        || name.starts_with("Result_"))
+    {
+        return None;
+    }
+    let def = ctx.options.enum_defs.get(name).or_else(|| {
+        ctx.options
+            .enum_defs
+            .iter()
+            .filter(|(decl, _)| name.starts_with(&format!("{decl}_")))
+            .max_by_key(|(decl, _)| decl.len())
+            .map(|(_, def)| def)
+    })?;
+    let success = def
+        .variant_discriminant("Ok")
+        .or_else(|| def.variant_discriminant("Some"))?;
+    let failure = def
+        .variant_discriminant("Err")
+        .or_else(|| def.variant_discriminant("None"))?;
+    Some((success, failure))
 }
 
 fn tuple_field_index(field: &str) -> Option<usize> {

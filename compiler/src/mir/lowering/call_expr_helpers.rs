@@ -54,6 +54,22 @@ pub(super) fn lower_call_expr_with_expected_mir(
         if name == "format" {
             return ctx.lower_format_call(args);
         }
+        if matches!(name.as_str(), "print" | "println" | "eprintln")
+            && args.len() > 1
+            && matches!(
+                args.first(),
+                Some(HIRExpr::Lit(crate::hir::HIRLiteral::String(_)))
+            )
+        {
+            let formatted = ctx.lower_format_call(args);
+            let formatted_ty = ctx.get_local_type(formatted).clone();
+            if name == "eprintln" {
+                ctx.emit_eprint_value(formatted, &formatted_ty);
+            } else {
+                ctx.emit_print_value(formatted, &formatted_ty);
+            }
+            return ctx.add_local(None, LocalKind::Temp, MIR_UNIT);
+        }
         if is_spawn_blocking_call(name) {
             if let Some(capture) = args
                 .first()

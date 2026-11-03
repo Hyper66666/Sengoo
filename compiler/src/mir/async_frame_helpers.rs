@@ -40,6 +40,15 @@ pub(crate) fn enum_is_payloadless(ty: &MIRType) -> bool {
     )
 }
 
+/// Number of i64 frame slots for a payload-carrying enum: one for the
+/// discriminant plus the widest variant's payload rounded up to whole words.
+/// The payload bytes are stored word-wise from the enum's LLVM aggregate, so
+/// layout matches `{ i64, [N x i8] }` exactly.
+fn enum_frame_slot_count(ty: &MIRType) -> usize {
+    let payload_size = crate::codegen::common::enum_payload_storage_size(ty);
+    1 + payload_size.div_ceil(8) as usize
+}
+
 pub(crate) fn async_frame_slot_count(ty: &MIRType) -> Result<usize, CompileError> {
     let storage_ty = frame_storage_ty(ty);
     match &storage_ty {
@@ -61,10 +70,7 @@ pub(crate) fn async_frame_slot_count(ty: &MIRType) -> Result<usize, CompileError
             Ok(acc + async_frame_slot_count(field_ty)?)
         }),
         MIRType::Enum { .. } if enum_is_payloadless(&storage_ty) => Ok(1),
-        MIRType::Enum { .. } => Err(unsupported_async_frame_type(
-            &storage_ty,
-            "payload-carrying enum values cannot cross await points yet",
-        )),
+        MIRType::Enum { .. } => Ok(enum_frame_slot_count(&storage_ty)),
         _ => Err(unsupported_async_frame_type(
             &storage_ty,
             "only scalar, pointer-like, tuple/struct/array, and Future values are supported in async frames yet",
@@ -309,7 +315,11 @@ pub(crate) fn push_frame_store_typed(
 ) -> Result<(), CompileError> {
     let storage_ty = frame_storage_ty(ty);
     match &storage_ty {
-        MIRType::Enum { .. } if enum_is_payloadless(&storage_ty) => {
+        MIRType::Enum { .. } => {
+            // Discriminant word first; then the payload bytes reinterpreted as
+            // whole i64 words (`[W x i64]` matches the `{ i64, [N x i8] }`
+            // layout padding-inclusive), so any variant round-trips without
+            // knowing which one is active.
             let discr = f.add_local(LocalKind::Temp, MIR_I64);
             let inst = f.alloc_inst(Instruction::Discriminant {
                 destination: discr,
@@ -317,12 +327,23 @@ pub(crate) fn push_frame_store_typed(
             });
             f.basic_blocks[block].push(inst);
             push_frame_store(f, block, handle, offset, discr);
+
+            let words = enum_frame_slot_count(&storage_ty) - 1;
+            if words > 0 && !enum_is_payloadless(&storage_ty) {
+                let words_ty = MIRType::Array(Box::new(MIR_I64), words as u64);
+                let payload_words = f.add_local(LocalKind::Temp, words_ty);
+                let extract = f.alloc_inst(Instruction::ExtractPayload {
+                    destination: payload_words,
+                    source: value,
+                });
+                f.basic_blocks[block].push(extract);
+                for word in 0..words {
+                    let word_local = push_extract_value(f, block, payload_words, word, MIR_I64);
+                    push_frame_store(f, block, handle, offset + 1 + word as i64, word_local);
+                }
+            }
             Ok(())
         }
-        MIRType::Enum { .. } => Err(unsupported_async_frame_type(
-            &storage_ty,
-            "payload-carrying enum values cannot cross await points yet",
-        )),
         MIRType::Tuple(items) => {
             let mut next_offset = offset;
             for (index, item_ty) in items.iter().enumerate() {
@@ -484,10 +505,34 @@ pub(crate) fn push_frame_load_typed(
             let discr = push_frame_load(f, block, handle, offset, MIR_I64);
             Ok(push_aggregate_value(f, block, storage_ty, vec![discr]))
         }
-        MIRType::Enum { .. } => Err(unsupported_async_frame_type(
-            &storage_ty,
-            "payload-carrying enum values cannot cross await points yet",
-        )),
+        MIRType::Enum { .. } => {
+            // Mirror of the store path: discriminant word plus the payload
+            // words, written back through the enum aggregate so the bytes land
+            // in the `{ i64, [N x i8] }` payload slot unchanged.
+            let discr = push_frame_load(f, block, handle, offset, MIR_I64);
+            let words = enum_frame_slot_count(&storage_ty) - 1;
+            if words == 0 {
+                return Ok(push_aggregate_value(f, block, storage_ty, vec![discr]));
+            }
+            let mut word_locals = Vec::with_capacity(words);
+            for word in 0..words {
+                word_locals.push(push_frame_load(
+                    f,
+                    block,
+                    handle,
+                    offset + 1 + word as i64,
+                    MIR_I64,
+                ));
+            }
+            let words_ty = MIRType::Array(Box::new(MIR_I64), words as u64);
+            let payload_words = push_aggregate_value(f, block, words_ty, word_locals);
+            Ok(push_aggregate_value(
+                f,
+                block,
+                storage_ty,
+                vec![discr, payload_words],
+            ))
+        }
         MIRType::Tuple(items) => {
             let mut fields = Vec::with_capacity(items.len());
             let mut next_offset = offset;

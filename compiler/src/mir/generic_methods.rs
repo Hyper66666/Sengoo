@@ -109,7 +109,7 @@ impl ConcreteTypeRegistry {
                 }
                 Some(HIRType::tuple(hir_items))
             }
-            MIRType::Struct { name, .. } => {
+            MIRType::Struct { name, .. } | MIRType::Enum { name, .. } => {
                 self.inner.borrow().hir_by_instance_name.get(name).cloned()
             }
             _ => None,
@@ -512,6 +512,21 @@ mod tests {
             resolved,
             Some(HIRType::named("Box".to_string(), vec![i64_ty()]))
         );
+    }
+
+    #[test]
+    fn concrete_type_registry_resolves_registered_enum_instances() {
+        let registry = ConcreteTypeRegistry::default();
+        let option_i64 = HIRType::named("Option".to_string(), vec![i64_ty()]);
+        registry.register_instance("Option_i64".to_string(), option_i64.clone());
+
+        let resolved = registry.hir_type_for_mir(&MIRType::Enum {
+            name: "Option_i64".to_string(),
+            discr_type: Box::new(MIRType::Int(64)),
+            variants: vec![(0, None), (1, Some(MIRType::Int(64)))],
+        });
+
+        assert_eq!(resolved, Some(option_i64));
     }
 
     #[test]

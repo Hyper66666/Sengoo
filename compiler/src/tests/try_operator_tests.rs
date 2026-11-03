@@ -260,3 +260,68 @@ def main() -> i64 { 0 }
         "the failure path must not return the operand container unchanged:\n{bridge}"
     );
 }
+
+#[test]
+fn enum_result_question_propagates_result_to_result() {
+    compile_to_ir(
+        r#"
+enum Result<T, E> { Ok(T), Err(E) }
+def divide(a: i64, b: i64) -> Result<i64, i64> {
+    if b == 0 { Err(1) } else { Ok(a / b) }
+}
+def chain(a: i64, b: i64) -> Result<i64, i64> {
+    let value = divide(a, b)?;
+    Ok(value + 100)
+}
+def main() -> i64 { 0 }
+"#,
+    )
+    .expect("enum Result `?` should propagate Result to Result");
+}
+
+#[test]
+fn enum_option_question_propagates_option_to_option() {
+    compile_to_ir(
+        r#"
+enum Option<T> { None, Some(T) }
+def find(n: i64) -> Option<i64> {
+    if n > 0 { Some(n) } else { None }
+}
+def bump(n: i64) -> Option<i64> {
+    let value = find(n)?;
+    Some(value + 1)
+}
+def main() -> i64 { 0 }
+"#,
+    )
+    .expect("enum Option `?` should propagate Option to Option");
+}
+
+#[test]
+fn enum_question_rejects_result_in_option_context() {
+    typeck_err(
+        r#"
+enum Result<T, E> { Ok(T), Err(E) }
+enum Option<T> { None, Some(T) }
+def ok() -> Result<i64, i64> { Ok(1) }
+def main() -> Option<i64> {
+    let sink = ok()?;
+    Some(sink)
+}
+"#,
+    );
+}
+
+#[test]
+fn enum_question_rejects_plain_i64_main() {
+    typeck_err(
+        r#"
+enum Result<T, E> { Ok(T), Err(E) }
+def ok() -> Result<i64, i64> { Ok(1) }
+def main() -> i64 {
+    let sink = ok()?;
+    sink
+}
+"#,
+    );
+}

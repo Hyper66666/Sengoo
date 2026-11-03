@@ -20,6 +20,9 @@ impl Button {
     }
     def draw(self, renderer: Renderer, fill: Color, border: Color) -> Result<i64, i64> {
         let filled = renderer.fill_rect(self.bounds, fill);
-        if not filled.is_ok { filled; } else { renderer.draw_rect(self.bounds, border); };
+        match filled {
+            Err(error) => Err(error),
+            Ok(_) => renderer.draw_rect(self.bounds, border),
+        }
     }
 }

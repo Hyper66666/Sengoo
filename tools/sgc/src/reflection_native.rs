@@ -159,7 +159,7 @@ fn link_shared_library_from_objects(
             return Err(miette::miette!("compile failed (lld linker mode)"));
         }
         LLD_AVAILABILITY.store(LINKER_UNAVAILABLE, Ordering::Relaxed);
-        println!("link fallback: lld unavailable, retrying with system linker");
+        vprintln!("link fallback: lld unavailable, retrying with system linker");
     }
 
     let status = run_shared_link_command(

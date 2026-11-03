@@ -3,12 +3,13 @@
 The MVP standard library is split into small source modules so compiler tests,
 runtime wrappers, and examples can depend on only the surfaces they need.
 
-- `option.sg`: generic `Option<T>`, generic constructors (`option_some`,
-  `option_none_with`), i64/bool convenience constructors, bool/i64 unwrap and
-  expect helpers, and i64 map helpers.
-- `result.sg`: generic `Result<T, E>`, generic constructors (`result_ok_with`,
-  `result_err_with`), i64 and `Result<bool, i64>` convenience constructors, and
-  bool/i64 unwrap, map, and projection helpers.
+- `option.sg`: generic enum `Option<T> { None, Some(T) }`, `Some`/`None`
+  constructors, deprecated placeholder `option_none_with`, i64/bool convenience
+  constructors, bool/i64 unwrap and expect helpers, and i64 map helpers.
+- `result.sg`: generic enum `Result<T, E> { Ok(T), Err(E) }`, `Ok`/`Err`
+  constructors, deprecated placeholder `result_ok_with` / `result_err_with`,
+  i64 and `Result<bool, i64>` convenience constructors, and bool/i64 unwrap,
+  map, and projection helpers.
 - `collections.sg`: ABI-v1 runtime-backed `Vec<T>`, `HashMap<K, V>`,
   `HashSet<T>`, deterministic `BTreeMap<K, V>` / `BTreeSet<T>`, iterators,
   source-compatible scalar/string helper names, `Rc<i64>`/`Rc<bool>`/`Rc<String>` shared

@@ -1,12 +1,10 @@
 import sggui;
 
 def main() -> i64 {
-    let created = app_new("sggui counter", 480, 320);
-    if !created.is_ok {
-        return 1;
-    }
-
-    let app = created.value;
+    let app = match app_new("sggui counter", 480, 320) {
+        Ok(value) => value,
+        Err(_) => return 1,
+    };
     let renderer = app.renderer_ref();
 
     let panel_bounds = layout_rect(40, 40, 400, 240);
@@ -38,20 +36,25 @@ def main() -> i64 {
         }
 
         let frame = app_loop.begin_frame();
-        if !frame.is_ok {
-            running = false;
-        } else {
-            panel.draw(renderer, panel_bg, panel_border);
-            label_loop.draw(renderer, label_bg, label_accent, 8);
-            increment_button.draw(renderer, button_fill, button_border);
-
-            let presented = app_loop.end_frame();
-            if !presented.is_ok {
+        match frame {
+            Err(_) => {
                 running = false;
-            } else {
-                let delayed = app_delay_ms(app_loop, 16);
-                if !delayed {
-                    running = false;
+            }
+            Ok(_) => {
+                panel.draw(renderer, panel_bg, panel_border);
+                label_loop.draw(renderer, label_bg, label_accent, 8);
+                increment_button.draw(renderer, button_fill, button_border);
+
+                match app_loop.end_frame() {
+                    Err(_) => {
+                        running = false;
+                    }
+                    Ok(_) => {
+                        let delayed = app_delay_ms(app_loop, 16);
+                        if !delayed {
+                            running = false;
+                        }
+                    }
                 }
             }
         }

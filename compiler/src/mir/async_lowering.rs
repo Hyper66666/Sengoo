@@ -642,7 +642,7 @@ mod tests {
     }
 
     #[test]
-    fn expand_async_functions_rejects_spilled_payload_enum_local() {
+    fn expand_async_functions_supports_spilled_payload_enum_local() {
         let enum_ty = MIRType::enum_type(MIR_I64, vec![(0, Some(MIR_I64)), (1, None)]);
         let mut mir_fn = MirFunction::new("main".to_string(), vec![], MIR_I64);
         mir_fn.is_async = true;
@@ -679,12 +679,31 @@ mod tests {
         mir_fn.basic_blocks[ready].set_terminator(Terminator::Return(Some(result)));
 
         let mut mir_fns = vec![mir_fn];
-        let err = expand_async_functions(&mut mir_fns)
-            .expect_err("payload-carrying enum locals should still be rejected");
-        let message = format!("{err}");
+        let helpers = expand_async_functions(&mut mir_fns)
+            .expect("payload-carrying enum locals now spill word-wise across awaits");
+        let poll = helpers
+            .iter()
+            .find(|f| f.name == "main__poll")
+            .expect("poll helper should be generated");
+        // The spill uses one discriminant slot plus one payload word: both a
+        // Discriminant read (store side) and an enum Aggregate rebuild (load
+        // side) must appear in the poll body.
+        let has_discriminant = poll
+            .instructions
+            .iter()
+            .any(|inst| matches!(inst, Instruction::Discriminant { .. }));
+        let rebuilds_enum = poll.instructions.iter().any(|inst| {
+            matches!(
+                inst,
+                Instruction::Aggregate {
+                    ty: MIRType::Enum { .. },
+                    ..
+                }
+            )
+        });
         assert!(
-            message.contains("payload-carrying enum values cannot cross await points yet"),
-            "unexpected error: {message}"
+            has_discriminant && rebuilds_enum,
+            "expected word-wise enum spill in poll body"
         );
     }
 

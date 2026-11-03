@@ -375,6 +375,7 @@ mod tests {
     #[test]
     fn test_mir_type_to_llvm_str_enum() {
         let enum_ty = MIRType::Enum {
+            name: String::new(),
             discr_type: Box::new(MIRType::Int(64)),
             variants: vec![(0, None), (1, Some(MIRType::Int(64)))],
         };
@@ -384,6 +385,7 @@ mod tests {
     #[test]
     fn test_enum_payload_storage_uses_largest_variant_layout() {
         let enum_ty = MIRType::Enum {
+            name: String::new(),
             discr_type: Box::new(MIRType::Int(64)),
             variants: vec![
                 (0, None),

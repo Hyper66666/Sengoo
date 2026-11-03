@@ -16,9 +16,9 @@ struct GlobMatch {
 def fs_glob(root: &str, pattern: &str) -> Result<GlobMatch, i64> {
     let handle = sengoo_fs_glob_collect(sengoo_stdlib_str_ptr(root), sengoo_stdlib_str_ptr(pattern));
     if handle > 0 {
-        Result { is_ok: true, value: GlobMatch { handle: handle }, error: 0 }
+        Ok(GlobMatch { handle: handle })
     } else {
-        Result { is_ok: false, value: GlobMatch { handle: 0 }, error: status_from_raw_ffi(handle) }
+        Err(status_from_raw_ffi(handle))
     }
 }
 
@@ -26,18 +26,18 @@ impl GlobMatch {
     def count(self) -> Result<i64, i64> {
         let count = sengoo_fs_glob_count(self.handle);
         if count >= 0 {
-            Result { is_ok: true, value: count, error: 0 }
+            Ok(count)
         } else {
-            Result { is_ok: false, value: 0, error: status_from_raw_ffi(count) }
+            Err(status_from_raw_ffi(count))
         }
     }
 
     def name_copy(self, index: i64, buffer: Buffer) -> Result<i64, i64> {
         let copied = sengoo_fs_glob_copy(self.handle, index, buffer.handle, buffer.len());
         if copied >= 0 {
-            Result { is_ok: true, value: copied, error: 0 }
+            Ok(copied)
         } else {
-            Result { is_ok: false, value: 0, error: status_from_raw_ffi(copied) }
+            Err(status_from_raw_ffi(copied))
         }
     }
 
@@ -58,17 +58,17 @@ def fs_copy_file(source: &str, destination: &str, overwrite: bool) -> Result<boo
         flag
     );
     if status >= 0 {
-        Result { is_ok: true, value: true, error: 0 }
+        Ok(true)
     } else {
-        Result { is_ok: false, value: false, error: status_from_raw_ffi(status) }
+        Err(status_from_raw_ffi(status))
     }
 }
 
 def fs_remove_file(path: &str) -> Result<bool, i64> {
     let status = sengoo_file_remove(sengoo_stdlib_str_ptr(path));
     if status >= 0 {
-        Result { is_ok: true, value: true, error: 0 }
+        Ok(true)
     } else {
-        Result { is_ok: false, value: false, error: status_from_raw_ffi(status) }
+        Err(status_from_raw_ffi(status))
     }
 }

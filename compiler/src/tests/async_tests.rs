@@ -1,7 +1,6 @@
 use crate::ast::DeclKind;
 use crate::codegen::{Codegen, FfiCodegenConfig, JITCodegen};
 use crate::mir::{Instruction, LocalKind, MirConstant, Terminator};
-use crate::CompileError;
 use crate::{compile_to_ir, compile_to_mir, Parser};
 
 #[test]
@@ -183,28 +182,30 @@ fn linux_sysv_async_three_field_results_use_sret_for_declaration_and_call() {
 }
 
 #[test]
-fn async_frame_rejects_payload_enum_local_crossing_await_before_codegen() {
+fn async_frame_supports_mixed_payload_enum_local_crossing_await() {
     let source = r#"
-enum Maybe { Val(i64) }
+enum Maybe { None, Val(i64) }
 
 async def one() -> i64 { 1 }
 
 async def main(value: Maybe) -> i64 {
     let waited = await one();
     match value {
+        Maybe::None => 0,
         Maybe::Val(inner) => inner + waited,
     }
 }
 "#;
 
-    let err = compile_to_ir(source).expect_err("payload enum crossing await should be deferred");
-    match &err {
-        CompileError::AsyncUnsupportedType { reason, .. } => {
-            assert!(reason.contains("payload-carrying enum values cannot cross await points yet"));
-        }
-        other => panic!("expected async unsupported type diagnostic, got {other:?}"),
-    }
-    assert!(err.to_string().contains("[async::unsupported_frame_type]"));
+    let ir = compile_to_ir(source).expect("mixed payload enum should spill across await");
+    assert!(
+        ir.contains("@main__poll"),
+        "expected async poll helper:\n{ir}"
+    );
+    assert!(
+        ir.contains("@sengoo_async_frame_store"),
+        "mixed enum discriminant and payload must spill into the async frame:\n{ir}"
+    );
 }
 
 #[test]

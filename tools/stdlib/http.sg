@@ -19,9 +19,9 @@ struct HttpResponse {
 def http_client_get(url: &str, timeout_ms: i64) -> Result<HttpResponse, i64> {
     let handle = sengoo_http_get(sengoo_stdlib_str_ptr(url), timeout_ms);
     if handle != 0 {
-        Result { is_ok: true, value: HttpResponse { handle: handle }, error: 0 }
+        Ok(HttpResponse { handle: handle })
     } else {
-        Result { is_ok: false, value: HttpResponse { handle: 0 }, error: status_from_net_error(sengoo_net_last_error()) }
+        Err(status_from_net_error(sengoo_net_last_error()))
     }
 }
 
@@ -33,9 +33,9 @@ def http_client_post(url: &str, body: &str, timeout_ms: i64) -> Result<HttpRespo
         timeout_ms
     );
     if handle != 0 {
-        Result { is_ok: true, value: HttpResponse { handle: handle }, error: 0 }
+        Ok(HttpResponse { handle: handle })
     } else {
-        Result { is_ok: false, value: HttpResponse { handle: 0 }, error: status_from_net_error(sengoo_net_last_error()) }
+        Err(status_from_net_error(sengoo_net_last_error()))
     }
 }
 
@@ -43,18 +43,18 @@ impl HttpResponse {
     def status_code(self) -> Result<i64, i64> {
         let status = sengoo_http_status(self.handle);
         if status >= 0 {
-            Result { is_ok: true, value: status, error: 0 }
+            Ok(status)
         } else {
-            Result { is_ok: false, value: 0, error: status_from_net_error(sengoo_net_last_error()) }
+            Err(status_from_net_error(sengoo_net_last_error()))
         }
     }
 
     def body_copy(self, buffer: Buffer) -> Result<i64, i64> {
         let copied = sengoo_http_body_copy(self.handle, buffer.ptr(), buffer.len());
         if copied >= 0 {
-            Result { is_ok: true, value: copied, error: 0 }
+            Ok(copied)
         } else {
-            Result { is_ok: false, value: 0, error: status_from_net_error(sengoo_net_last_error()) }
+            Err(status_from_net_error(sengoo_net_last_error()))
         }
     }
 

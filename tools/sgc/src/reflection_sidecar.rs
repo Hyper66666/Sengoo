@@ -357,6 +357,6 @@ pub(crate) fn maybe_emit_reflection_sidecar(
                 e
             )
         })?;
-    println!("Reflection metadata: {}", sidecar_path.to_string_lossy());
+    vprintln!("Reflection metadata: {}", sidecar_path.to_string_lossy());
     Ok(())
 }

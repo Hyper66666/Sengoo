@@ -1,0 +1,326 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>SENGOO QUEST — 编译型系统语言</title>
+  <meta name="description" content="Sengoo: LLVM 原生后端 · 增量编译 · 借用检查 · Python 互操作 · 异步运行时" />
+  <meta name="theme-color" content="#0D0D12" />
+  <link rel="icon" type="image/png" href="assets/img/sengoo-mark.png" />
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link href="https://fonts.googleapis.com/css2?family=Press+Start+2P&family=DotGothic16&family=JetBrains+Mono:wght@400;500;700&display=swap" rel="stylesheet" />
+  <link rel="stylesheet" href="assets/css/pixel.css" />
+</head>
+<body>
+
+  <!-- CRT Overlay -->
+  <div class="crt" aria-hidden="true"></div>
+
+  <!-- XP Progress Bar -->
+  <div class="xp-bar" aria-hidden="true"><div class="xp-fill" id="xpFill"></div></div>
+
+  <!-- ═══════════ TITLE SCREEN ═══════════ -->
+  <section class="title-screen" id="titleScreen">
+    <div class="title-stars" aria-hidden="true"></div>
+    <div class="title-content">
+      <div class="title-logo-wrap">
+        <img src="assets/img/sengoo-logo-transparent.png" alt="Sengoo" class="title-logo" width="120" height="120" />
+        <div class="title-glow"></div>
+      </div>
+      <h1 class="title-name">SENGOO</h1>
+      <p class="title-sub">COMPILED SYSTEMS LANGUAGE</p>
+      <div class="title-meta">
+        <span>LLVM BACKEND</span><span class="dot">·</span>
+        <span>BORROW CHECK</span><span class="dot">·</span>
+        <span>ASYNC RUNTIME</span>
+      </div>
+      <a href="#world" class="press-start" id="pressStart">
+        <span class="blink">▶</span> PRESS START
+      </a>
+      <p class="title-ver">v0.1.0-rc.1 — NATIVE BUILD</p>
+    </div>
+    <div class="title-scroll-hint">▼ SCROLL ▼</div>
+  </section>
+
+  <!-- ═══════════ GAME WORLD ═══════════ -->
+  <div class="world" id="world">
+
+    <!-- Zone: SKILLS (Features) -->
+    <section class="zone zone-skills" id="skills">
+      <div class="zone-header">
+        <span class="zone-tag">ZONE 01</span>
+        <h2>SKILL TREE</h2>
+        <p class="zone-desc">每个节点都是编译器里真实跑的路径，不是 roadmap 上的占位符。</p>
+      </div>
+
+      <div class="skill-tree">
+        <!-- Central node -->
+        <div class="skill-core">
+          <img src="assets/img/sengoo-mark.png" alt="" width="36" height="36" />
+          <span>CORE</span>
+        </div>
+
+        <div class="skill-branch branch-left">
+          <div class="skill-node" data-tier="S">
+            <div class="skill-rank">S</div>
+            <h3>LLVM 原生后端</h3>
+            <p>文本 IR → clang 优化链接。不绑 inkwell / llvm-sys，构建链全透明。</p>
+          </div>
+          <div class="skill-node" data-tier="S">
+            <div class="skill-rank">S</div>
+            <h3>增量编译</h3>
+            <p>AST 编辑分类。签名不变 → 跳过。100k LOC 增量 33ms，缩减 96%。</p>
+          </div>
+          <div class="skill-node" data-tier="A">
+            <div class="skill-rank">A</div>
+            <h3>借用检查</h3>
+            <p>NLL 风格。可变 ⊕ 不可变互斥，编译期拦截，零运行时税。</p>
+          </div>
+        </div>
+
+        <div class="skill-branch branch-right">
+          <div class="skill-node" data-tier="A">
+            <div class="skill-rank">A</div>
+            <h3>Python 互操作</h3>
+            <p>CPython FFI 层。热路径逐步替换为原生模块，渐进迁移不重写。</p>
+          </div>
+          <div class="skill-node" data-tier="A">
+            <div class="skill-rank">A</div>
+            <h3>异步运行时</h3>
+            <p>async def / spawn / select / timeout 一等语法。帧降低 + 原生调度。</p>
+          </div>
+          <div class="skill-node" data-tier="B">
+            <div class="skill-rank">B</div>
+            <h3>非侵入反射</h3>
+            <p>--reflect=auto 按需 sidecar 元数据。不用零开销，用时零注册。</p>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <!-- Zone: BATTLE (Performance) -->
+    <section class="zone zone-battle" id="battle">
+      <div class="zone-header">
+        <span class="zone-tag">ZONE 02</span>
+        <h2>BATTLE RESULTS</h2>
+        <p class="zone-desc">本地实测。同硬件全量编译端到端（含链接），单位 ms。</p>
+      </div>
+
+      <div class="battle-arena">
+        <div class="battle-row">
+          <span class="battle-name player">SENGOO</span>
+          <div class="battle-hp"><div class="battle-hp-fill hp-s" style="width:18%"></div></div>
+          <span class="battle-val">1,828</span>
+        </div>
+        <div class="battle-row">
+          <span class="battle-name">C++</span>
+          <div class="battle-hp"><div class="battle-hp-fill hp-cpp" style="width:48%"></div></div>
+          <span class="battle-val">4,884</span>
+        </div>
+        <div class="battle-row">
+          <span class="battle-name">RUST</span>
+          <div class="battle-hp"><div class="battle-hp-fill hp-rust" style="width:100%"></div></div>
+          <span class="battle-val">54,642</span>
+        </div>
+        <div class="battle-row">
+          <span class="battle-name">PYTHON</span>
+          <div class="battle-hp"><div class="battle-hp-fill hp-py" style="width:82%"></div></div>
+          <span class="battle-val">8,283</span>
+        </div>
+        <p class="battle-note">▲ 1000k LOC — 越短越强。SENGOO 耗时仅为 RUST 的 3.3%。</p>
+      </div>
+
+      <div class="battle-loot">
+        <div class="loot-item"><span class="loot-num">96%</span><span class="loot-label">增量缩减</span></div>
+        <div class="loot-item"><span class="loot-num">50.9×</span><span class="loot-label">热路径 vs Py</span></div>
+        <div class="loot-item"><span class="loot-num">33ms</span><span class="loot-label">增量延迟</span></div>
+        <div class="loot-item"><span class="loot-num">≈C++</span><span class="loot-label">运行时 p50</span></div>
+      </div>
+    </section>
+
+    <!-- Zone: GRIMOIRE (Code) -->
+    <section class="zone zone-code" id="grimoire">
+      <div class="zone-header">
+        <span class="zone-tag">ZONE 03</span>
+        <h2>GRIMOIRE</h2>
+        <p class="zone-desc">语法设计目标：别人写的模块，5 分钟读懂。</p>
+      </div>
+
+      <div class="grimoire-grid">
+        <div class="spell-card">
+          <div class="spell-head"><span class="spell-icon">◆</span> struct.sg</div>
+          <pre><code><span class="kw">struct</span> Vec2 { x: <span class="ty">f64</span>, y: <span class="ty">f64</span> }
+
+<span class="kw">impl</span> Vec2 {
+  <span class="kw">def</span> <span class="fn">length</span>(self) -> <span class="ty">f64</span> {
+    (self.x*self.x + self.y*self.y).sqrt()
+  }
+}</code></pre>
+        </div>
+        <div class="spell-card">
+          <div class="spell-head"><span class="spell-icon">◆</span> async.sg</div>
+          <pre><code><span class="kw">async def</span> <span class="fn">main</span>() -> <span class="ty">i64</span> {
+  <span class="kw">let</span> a = spawn(fetch(<span class="str">"/users"</span>))
+  <span class="kw">let</span> b = spawn(fetch(<span class="str">"/orders"</span>))
+  <span class="kw">let</span> (u, o) = <span class="kw">await</span> join(a, b)
+  print(u.len() + o.len())
+}</code></pre>
+        </div>
+        <div class="spell-card">
+          <div class="spell-head"><span class="spell-icon">◆</span> match.sg</div>
+          <pre><code><span class="kw">match</span> json.get(<span class="str">"mode"</span>) {
+  <span class="ty">Some</span>(v) <span class="kw">if</span> v==<span class="str">"strict"</span>
+    => config_strict(json),
+  <span class="ty">Some</span>(_) => config_default(json),
+  <span class="ty">None</span>   => err(missing(<span class="str">"mode"</span>)),
+}</code></pre>
+        </div>
+        <div class="spell-card">
+          <div class="spell-head"><span class="spell-icon">◆</span> contract.sg</div>
+          <pre><code><span class="kw">def</span> <span class="fn">divide</span>(a:<span class="ty">i64</span>, b:<span class="ty">i64</span>) -> <span class="ty">i64</span>
+<span class="kw">requires</span> b != 0
+<span class="kw">ensures</span> result * b == a
+{ a / b }
+<span class="cmt">// --contract-checks on</span></code></pre>
+        </div>
+      </div>
+    </section>
+
+    <!-- Zone: ARMORY (Toolchain) -->
+    <section class="zone zone-tools" id="armory">
+      <div class="zone-header">
+        <span class="zone-tag">ZONE 04</span>
+        <h2>ARMORY</h2>
+        <p class="zone-desc">四件装备，共享同一份 AST 内核。</p>
+      </div>
+
+      <div class="armory-slots">
+        <div class="equip-slot">
+          <div class="equip-icon">⚔️</div>
+          <div class="equip-info">
+            <span class="equip-name">sgc</span>
+            <span class="equip-type">MAIN HAND</span>
+            <p>编译器 CLI — check / build / run / doc / bench · -O 0~3 · --low-memory</p>
+          </div>
+        </div>
+        <div class="equip-slot">
+          <div class="equip-icon">🛡️</div>
+          <div class="equip-info">
+            <span class="equip-name">sgpm</span>
+            <span class="equip-type">OFF HAND</span>
+            <p>包管理器 — Sengoo.toml · path/git/registry 依赖 · workspace · lockfile</p>
+          </div>
+        </div>
+        <div class="equip-slot">
+          <div class="equip-icon">✨</div>
+          <div class="equip-info">
+            <span class="equip-name">sgfmt</span>
+            <span class="equip-type">ENCHANT</span>
+            <p>格式化 — CI --check 模式确保提交风格一致</p>
+          </div>
+        </div>
+        <div class="equip-slot">
+          <div class="equip-icon">📜</div>
+          <div class="equip-info">
+            <span class="equip-name">sglsp</span>
+            <span class="equip-type">SCROLL</span>
+            <p>Language Server — 诊断 · 补全 · 跳转定义 · VS Code 扩展</p>
+          </div>
+        </div>
+      </div>
+
+      <div class="inventory">
+        <span class="inv-title">STDLIB INVENTORY:</span>
+        <div class="inv-items">
+          <span>collections</span><span>string</span><span>json</span><span>io</span>
+          <span>file</span><span>process</span><span>math</span><span>error</span>
+          <span>strconv</span><span>path</span><span>env</span><span>net</span>
+          <span>db</span><span>ffi</span><span>reflect</span>
+        </div>
+      </div>
+    </section>
+
+    <!-- Zone: NEW GAME (Get Started) -->
+    <section class="zone zone-start" id="newgame">
+      <div class="start-dialog">
+        <div class="dialog-portrait">
+          <img src="assets/img/sengoo-mark.png" alt="" width="48" height="48" />
+        </div>
+        <div class="dialog-box">
+          <p class="dialog-speaker">SENGOO</p>
+          <p class="dialog-text">
+            准备好了？从源码构建工具链，创建第一个项目，编译运行。<br/>
+            全部本地完成，没有云端依赖。
+          </p>
+          <div class="dialog-choices">
+            <a class="choice-btn" href="https://github.com/Hyper66666/Sengoo" target="_blank" rel="noopener">► 获取源码 (GitHub)</a>
+            <a class="choice-btn" href="https://sengoo.dev" target="_blank" rel="noopener">► 访问 sengoo.dev</a>
+          </div>
+        </div>
+      </div>
+
+      <div class="start-terminal">
+        <div class="term-chrome"><span>■ ■ ■</span><em>quest.sh</em></div>
+        <pre><code><span class="cmt"># 构建工具链</span>
+$ cargo build --release
+
+<span class="cmt"># 创建项目</span>
+$ target/release/sgpm new hello && cd hello
+
+<span class="cmt"># 编译运行</span>
+$ ../target/release/sgpm run
+<span class="ok">Hello from Sengoo! ✓</span>
+
+<span class="cmt"># 单文件直接跑</span>
+$ sgc run examples/01_hello.sg -O 2
+<span class="ok">42</span></code></pre>
+      </div>
+    </section>
+
+  </div><!-- /world -->
+
+  <!-- ═══════════ BOTTOM HUD ═══════════ -->
+  <nav class="hud" aria-label="Zone navigation">
+    <a href="#titleScreen" class="hud-btn" data-zone="TITLE">⌂</a>
+    <a href="#skills" class="hud-btn" data-zone="SKILLS">◈</a>
+    <a href="#battle" class="hud-btn" data-zone="BATTLE">⚔</a>
+    <a href="#grimoire" class="hud-btn" data-zone="CODE">✦</a>
+    <a href="#armory" class="hud-btn" data-zone="ITEMS">▣</a>
+    <a href="#newgame" class="hud-btn" data-zone="START">▶</a>
+    <a href="https://github.com/Hyper66666/Sengoo" target="_blank" rel="noopener" class="hud-btn hud-gh" data-zone="SRC">GH</a>
+  </nav>
+
+  <script>
+    // XP bar scroll progress
+    const xp = document.getElementById('xpFill');
+    const onScroll = () => {
+      const h = document.documentElement.scrollHeight - innerHeight;
+      xp.style.width = (h > 0 ? (scrollY / h) * 100 : 0) + '%';
+    };
+    addEventListener('scroll', onScroll, { passive: true });
+    onScroll();
+
+    // HUD active state
+    const zones = document.querySelectorAll('.zone, .title-screen');
+    const hudBtns = document.querySelectorAll('.hud-btn[data-zone]');
+    const zoneMap = { titleScreen:'TITLE', skills:'SKILLS', battle:'BATTLE', grimoire:'CODE', armory:'ITEMS', newgame:'START' };
+    const obs = new IntersectionObserver(entries => {
+      entries.forEach(e => {
+        if (e.isIntersecting) {
+          const id = e.target.id;
+          hudBtns.forEach(b => b.classList.toggle('active', b.dataset.zone === zoneMap[id]));
+        }
+      });
+    }, { threshold: 0.3 });
+    zones.forEach(z => obs.observe(z));
+
+    // Title screen parallax fade
+    const title = document.getElementById('titleScreen');
+    addEventListener('scroll', () => {
+      const r = title.getBoundingClientRect();
+      if (r.bottom > 0) title.style.opacity = Math.max(0, r.bottom / innerHeight);
+    }, { passive: true });
+  </script>
+</body>
+</html>

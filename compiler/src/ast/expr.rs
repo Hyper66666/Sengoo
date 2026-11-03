@@ -100,6 +100,36 @@ impl Expr {
         )
     }
 
+    /// 创建 if-let 表达式
+    pub fn if_let_expr(
+        pattern: super::pattern::Pattern,
+        expr: Expr,
+        then_branch: Block,
+        else_branch: Option<Box<Expr>>,
+        span: Span,
+    ) -> Self {
+        Self::new(
+            ExprKind::IfLet {
+                pattern,
+                expr: Box::new(expr),
+                then_branch,
+                else_branch,
+            },
+            span,
+        )
+    }
+
+    /// 创建 pinned `vec!` 表达式
+    pub fn vec_bang(elements: Vec<Expr>, count: Option<Expr>, span: Span) -> Self {
+        Self::new(
+            ExprKind::VecBang {
+                elements,
+                count: count.map(Box::new),
+            },
+            span,
+        )
+    }
+
     /// 创建 while 循环
     pub fn while_loop(cond: Expr, body: Block, span: Span) -> Self {
         Self::new(
@@ -350,6 +380,20 @@ pub enum ExprKind {
         cond: Box<Expr>,
         then_branch: Block,
         else_branch: Option<Box<Expr>>,
+    },
+
+    /// If-let 表达式 `if let PATTERN = EXPR { .. } else { .. }`
+    IfLet {
+        pattern: super::pattern::Pattern,
+        expr: Box<Expr>,
+        then_branch: Block,
+        else_branch: Option<Box<Expr>>,
+    },
+
+    /// Pinned `vec![a, b, c]` / `vec![value; count]` form.
+    VecBang {
+        elements: Vec<Expr>,
+        count: Option<Box<Expr>>,
     },
 
     /// While 循环

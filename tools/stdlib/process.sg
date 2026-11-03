@@ -51,25 +51,25 @@ impl !Sync for ProcessHandle {}
 
 def process_i64_result(value: i64) -> Result<i64, i64> {
     if value >= 0 {
-        Result { is_ok: true, value: value, error: 0 }
+        Ok(value)
     } else {
-        Result { is_ok: false, value: 0, error: status_from_raw_ffi(value) }
+        Err(status_from_raw_ffi(value))
     }
 }
 
 def process_status_i64_result(value: i64) -> Result<i64, i64> {
     if value >= 0 {
-        Result { is_ok: true, value: value, error: 0 }
+        Ok(value)
     } else {
-        Result { is_ok: false, value: 0, error: status_from_raw_ffi(value) }
+        Err(status_from_raw_ffi(value))
     }
 }
 
 def process_status_bool_result(value: i64) -> Result<bool, i64> {
     if value >= 0 {
-        Result { is_ok: true, value: value != 0, error: 0 }
+        Ok(value != 0)
     } else {
-        Result { is_ok: false, value: false, error: status_from_raw_ffi(value) }
+        Err(status_from_raw_ffi(value))
     }
 }
 
@@ -132,9 +132,9 @@ def process_run_3(executable: &str, arg0: &str, arg1: &str, arg2: &str) -> Resul
 def process_command_raw(executable_ptr: i64) -> Result<ProcessCommand, i64> {
     let handle = sengoo_process_command_new(executable_ptr);
     if handle != 0 {
-        Result { is_ok: true, value: ProcessCommand { handle: handle }, error: 0 }
+        Ok(ProcessCommand { handle: handle })
     } else {
-        Result { is_ok: false, value: ProcessCommand { handle: 0 }, error: STATUS_UNKNOWN() }
+        Err(STATUS_UNKNOWN())
     }
 }
 
@@ -144,19 +144,19 @@ def process_command(executable: &str) -> Result<ProcessCommand, i64> {
 
 def process_output_handle_result(handle: i64) -> Result<ProcessOutput, i64> {
     if handle != 0 {
-        Result { is_ok: true, value: ProcessOutput { handle: handle }, error: 0 }
+        Ok(ProcessOutput { handle: handle })
     } else {
-        Result { is_ok: false, value: ProcessOutput { handle: 0 }, error: STATUS_UNKNOWN() }
+        Err(STATUS_UNKNOWN())
     }
 }
 
 def process_handle_result(handle: i64) -> Result<ProcessHandle, i64> {
     if handle > 0 {
-        Result { is_ok: true, value: ProcessHandle { handle: handle }, error: 0 }
+        Ok(ProcessHandle { handle: handle })
     } else if handle < 0 {
-        Result { is_ok: false, value: ProcessHandle { handle: 0 }, error: status_from_raw_ffi(handle) }
+        Err(status_from_raw_ffi(handle))
     } else {
-        Result { is_ok: false, value: ProcessHandle { handle: 0 }, error: STATUS_UNKNOWN() }
+        Err(STATUS_UNKNOWN())
     }
 }
 
@@ -216,11 +216,11 @@ impl ProcessCommand {
     def pipe_stdout_to(self, child: ProcessCommand) -> Result<ProcessCommand, i64> {
         let merged = sengoo_process_command_pipe_stdout_to(self.handle, child.handle);
         if merged > 0 {
-            Result { is_ok: true, value: ProcessCommand { handle: merged }, error: 0 }
+            Ok(ProcessCommand { handle: merged })
         } else if merged < 0 {
-            Result { is_ok: false, value: ProcessCommand { handle: 0 }, error: status_from_raw_ffi(merged) }
+            Err(status_from_raw_ffi(merged))
         } else {
-            Result { is_ok: false, value: ProcessCommand { handle: 0 }, error: STATUS_UNKNOWN() }
+            Err(STATUS_UNKNOWN())
         }
     }
 

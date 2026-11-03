@@ -2,6 +2,7 @@
 //!
 //! 管理 Trait 定义和 Impl 块的注册和查询。
 
+use crate::ast::SelfParam;
 use crate::typeck::ty::{Ty, TyVarId};
 use std::collections::HashMap;
 use std::sync::Arc;
@@ -109,6 +110,7 @@ impl TraitInfo {
 #[derive(Debug, Clone)]
 pub struct MethodSig {
     pub has_self: bool,
+    pub self_param: Option<SelfParam>,
     pub param_types: Vec<Ty>,
     pub return_type: Ty,
     pub generic_params: Vec<TyVarId>,
@@ -117,13 +119,14 @@ pub struct MethodSig {
 
 impl MethodSig {
     pub fn new(
-        has_self: bool,
+        self_param: Option<SelfParam>,
         param_types: Vec<Ty>,
         return_type: Ty,
         generic_params: Vec<TyVarId>,
     ) -> Self {
         Self {
-            has_self,
+            has_self: self_param.is_some(),
+            self_param,
             param_types,
             return_type,
             generic_params,
@@ -132,13 +135,14 @@ impl MethodSig {
     }
 
     pub fn with_default(
-        has_self: bool,
+        self_param: Option<SelfParam>,
         param_types: Vec<Ty>,
         return_type: Ty,
         generic_params: Vec<TyVarId>,
     ) -> Self {
         Self {
-            has_self,
+            has_self: self_param.is_some(),
+            self_param,
             param_types,
             return_type,
             generic_params,
@@ -205,6 +209,7 @@ impl ImplInfo {
 pub struct FunctionTy {
     /// 是否有 self 参数
     pub has_self: bool,
+    pub self_param: Option<SelfParam>,
     /// 参数类型
     pub param_types: Vec<Ty>,
     /// 返回类型
@@ -213,9 +218,10 @@ pub struct FunctionTy {
 }
 
 impl FunctionTy {
-    pub fn new(has_self: bool, param_types: Vec<Ty>, return_type: Ty) -> Self {
+    pub fn new(self_param: Option<SelfParam>, param_types: Vec<Ty>, return_type: Ty) -> Self {
         Self {
-            has_self,
+            has_self: self_param.is_some(),
+            self_param,
             param_types,
             return_type,
             generic_params: Vec::new(),
@@ -223,13 +229,14 @@ impl FunctionTy {
     }
 
     pub fn with_generic_params(
-        has_self: bool,
+        self_param: Option<SelfParam>,
         param_types: Vec<Ty>,
         return_type: Ty,
         generic_params: Vec<TyVarId>,
     ) -> Self {
         Self {
-            has_self,
+            has_self: self_param.is_some(),
+            self_param,
             param_types,
             return_type,
             generic_params,

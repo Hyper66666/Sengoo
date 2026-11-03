@@ -5,31 +5,39 @@
 // Run: sgc run examples/generics/03_result_chain.sg
 // Expected output: 18
 
-struct Result<T, E> {
-    is_ok: bool,
-    value: T,
-    error: E,
+enum Result<T, E> {
+    Ok(T),
+    Err(E),
 }
 
 def ok_i64(value: i64) -> Result<i64, i64> {
-    Result { is_ok: true, value: value, error: 0 }
+    Ok(value)
 }
 
 def err_i64(error: i64) -> Result<i64, i64> {
-    Result { is_ok: false, value: 0, error: error }
+    Err(error)
 }
 
 impl Result<i64, i64> {
     def unwrap_or(self, fallback: i64) -> i64 {
-        if self.is_ok { self.value } else { fallback }
+        match self {
+            Ok(value) => value,
+            Err(_) => fallback,
+        }
     }
 
     def map_add(self, delta: i64) -> Result<i64, i64> {
-        if self.is_ok { ok_i64(self.value + delta) } else { err_i64(self.error) }
+        match self {
+            Ok(value) => ok_i64(value + delta),
+            Err(error) => err_i64(error),
+        }
     }
 
     def and_then_mul(self, factor: i64) -> Result<i64, i64> {
-        if self.is_ok { ok_i64(self.value * factor) } else { err_i64(self.error) }
+        match self {
+            Ok(value) => ok_i64(value * factor),
+            Err(error) => err_i64(error),
+        }
     }
 }
 

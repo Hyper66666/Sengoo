@@ -107,16 +107,16 @@ def platform_status_from_raw(code: i64) -> i64 {
 }
 
 def platform_i64_result(code: i64) -> Result<i64, i64> {
-    if code == STATUS_OK() { Result { is_ok: true, value: code, error: 0 }; } else { Result { is_ok: false, value: 0, error: platform_status_from_raw(code) }; };
+    if code == STATUS_OK() { Ok(code); } else { Err(platform_status_from_raw(code)); };
 }
 
 def platform_handle_result(handle: i64) -> Result<i64, i64> {
-    if handle != 0 { Result { is_ok: true, value: handle, error: 0 }; } else { Result { is_ok: false, value: 0, error: STATUS_PLATFORM() }; };
+    if handle != 0 { Ok(handle); } else { Err(STATUS_PLATFORM()); };
 }
 
 def init() -> Result<Platform, i64> {
     let status = sgplatform_init();
-    if status == STATUS_OK() { Result { is_ok: true, value: Platform { alive: true }, error: 0 }; } else { Result { is_ok: false, value: Platform { alive: false }, error: platform_status_from_raw(status) }; };
+    if status == STATUS_OK() { Ok(Platform { alive: true }); } else { Err(platform_status_from_raw(status)); };
 }
 
 def quit(platform: Platform) -> bool {
@@ -153,7 +153,14 @@ def event_is_key_down(event: Event) -> bool {
 
 impl Platform {
     def create_window(self, title: &str, width: i64, height: i64) -> Result<Window, i64> {
-        if not self.alive { Result { is_ok: false, value: Window { handle: 0, closed: true }, error: STATUS_INVALID_HANDLE() }; } else { let created = platform_handle_result(sgplatform_create_window(sengoo_stdlib_str_ptr(title), width, height)); if created.is_ok { Result { is_ok: true, value: Window { handle: created.value, closed: false }, error: 0 }; } else { Result { is_ok: false, value: Window { handle: 0, closed: false }, error: created.error }; }; };
+        if not self.alive {
+            Err(STATUS_INVALID_HANDLE())
+        } else {
+            match platform_handle_result(sgplatform_create_window(sengoo_stdlib_str_ptr(title), width, height)) {
+                Ok(handle) => Ok(Window { handle: handle, closed: false }),
+                Err(error) => Err(error),
+            }
+        }
     }
     def poll_event(self) -> Event {
         let kind = sgplatform_poll_event();
@@ -169,7 +176,14 @@ impl Platform {
 
 impl Window {
     def create_renderer(self) -> Result<Renderer, i64> {
-        if self.closed or self.handle == 0 { Result { is_ok: false, value: Renderer { handle: 0, destroyed: true }, error: STATUS_INVALID_HANDLE() }; } else { let created = platform_handle_result(sgplatform_create_renderer(self.handle)); if created.is_ok { Result { is_ok: true, value: Renderer { handle: created.value, destroyed: false }, error: 0 }; } else { Result { is_ok: false, value: Renderer { handle: 0, destroyed: false }, error: created.error }; }; };
+        if self.closed or self.handle == 0 {
+            Err(STATUS_INVALID_HANDLE())
+        } else {
+            match platform_handle_result(sgplatform_create_renderer(self.handle)) {
+                Ok(handle) => Ok(Renderer { handle: handle, destroyed: false }),
+                Err(error) => Err(error),
+            }
+        }
     }
     def close(self) -> bool {
         if not self.closed and self.handle != 0 { sgplatform_destroy_window(self.handle) == STATUS_OK(); } else { true; };
@@ -178,19 +192,19 @@ impl Window {
 
 impl Renderer {
     def clear(self, color: Color) -> Result<i64, i64> {
-        if self.destroyed or self.handle == 0 { Result { is_ok: false, value: 0, error: STATUS_INVALID_HANDLE() }; } else { platform_i64_result(sgplatform_renderer_clear(self.handle, color.r, color.g, color.b, color.a)); };
+        if self.destroyed or self.handle == 0 { Err(STATUS_INVALID_HANDLE()); } else { platform_i64_result(sgplatform_renderer_clear(self.handle, color.r, color.g, color.b, color.a)); };
     }
     def present(self) -> Result<i64, i64> {
-        if self.destroyed or self.handle == 0 { Result { is_ok: false, value: 0, error: STATUS_INVALID_HANDLE() }; } else { platform_i64_result(sgplatform_renderer_present(self.handle)); };
+        if self.destroyed or self.handle == 0 { Err(STATUS_INVALID_HANDLE()); } else { platform_i64_result(sgplatform_renderer_present(self.handle)); };
     }
     def draw_rect(self, rect: Rect, color: Color) -> Result<i64, i64> {
-        if self.destroyed or self.handle == 0 { Result { is_ok: false, value: 0, error: STATUS_INVALID_HANDLE() }; } else { platform_i64_result(sgplatform_renderer_draw_rect(self.handle, rect.x, rect.y, rect.w, rect.h, color.r, color.g, color.b, color.a)); };
+        if self.destroyed or self.handle == 0 { Err(STATUS_INVALID_HANDLE()); } else { platform_i64_result(sgplatform_renderer_draw_rect(self.handle, rect.x, rect.y, rect.w, rect.h, color.r, color.g, color.b, color.a)); };
     }
     def fill_rect(self, rect: Rect, color: Color) -> Result<i64, i64> {
-        if self.destroyed or self.handle == 0 { Result { is_ok: false, value: 0, error: STATUS_INVALID_HANDLE() }; } else { platform_i64_result(sgplatform_renderer_fill_rect(self.handle, rect.x, rect.y, rect.w, rect.h, color.r, color.g, color.b, color.a)); };
+        if self.destroyed or self.handle == 0 { Err(STATUS_INVALID_HANDLE()); } else { platform_i64_result(sgplatform_renderer_fill_rect(self.handle, rect.x, rect.y, rect.w, rect.h, color.r, color.g, color.b, color.a)); };
     }
     def draw_line(self, x1: i64, y1: i64, x2: i64, y2: i64, color: Color) -> Result<i64, i64> {
-        if self.destroyed or self.handle == 0 { Result { is_ok: false, value: 0, error: STATUS_INVALID_HANDLE() }; } else { platform_i64_result(sgplatform_renderer_draw_line(self.handle, x1, y1, x2, y2, color.r, color.g, color.b, color.a)); };
+        if self.destroyed or self.handle == 0 { Err(STATUS_INVALID_HANDLE()); } else { platform_i64_result(sgplatform_renderer_draw_line(self.handle, x1, y1, x2, y2, color.r, color.g, color.b, color.a)); };
     }
     def destroy(self) -> bool {
         if not self.destroyed and self.handle != 0 { sgplatform_destroy_renderer(self.handle) == STATUS_OK(); } else { true; };

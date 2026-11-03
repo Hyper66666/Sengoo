@@ -18,18 +18,18 @@ struct TomlDoc {
 
 def config_doc_result(handle: i64) -> Result<i64, i64> {
     if handle > 0 {
-        Result { is_ok: true, value: handle, error: 0 }
+        Ok(handle)
     } else {
-        Result { is_ok: false, value: 0, error: status_from_raw_ffi(handle) }
+        Err(status_from_raw_ffi(handle))
     }
 }
 
 def ini_parse(text: &str) -> Result<IniDoc, i64> {
     let handle = sengoo_config_ini_parse(sengoo_stdlib_str_ptr(text), text.len());
     if handle > 0 {
-        Result { is_ok: true, value: IniDoc { handle: handle }, error: 0 }
+        Ok(IniDoc { handle: handle })
     } else {
-        Result { is_ok: false, value: IniDoc { handle: 0 }, error: status_from_raw_ffi(handle) }
+        Err(status_from_raw_ffi(handle))
     }
 }
 
@@ -42,9 +42,9 @@ impl IniDoc {
             buffer.len()
         );
         if copied >= 0 {
-            Result { is_ok: true, value: copied, error: 0 }
+            Ok(copied)
         } else {
-            Result { is_ok: false, value: 0, error: status_from_raw_ffi(copied) }
+            Err(status_from_raw_ffi(copied))
         }
     }
 
@@ -56,9 +56,9 @@ impl IniDoc {
 def toml_parse(text: &str) -> Result<TomlDoc, i64> {
     let handle = sengoo_config_toml_parse(sengoo_stdlib_str_ptr(text), text.len());
     if handle > 0 {
-        Result { is_ok: true, value: TomlDoc { handle: handle }, error: 0 }
+        Ok(TomlDoc { handle: handle })
     } else {
-        Result { is_ok: false, value: TomlDoc { handle: 0 }, error: status_from_raw_ffi(handle) }
+        Err(status_from_raw_ffi(handle))
     }
 }
 
@@ -71,9 +71,9 @@ impl TomlDoc {
             buffer.len()
         );
         if copied >= 0 {
-            Result { is_ok: true, value: copied, error: 0 }
+            Ok(copied)
         } else {
-            Result { is_ok: false, value: 0, error: status_from_raw_ffi(copied) }
+            Err(status_from_raw_ffi(copied))
         }
     }
 

@@ -8,6 +8,19 @@ import std::status;
 
 def main() -> i64 {
     let started = sggame_init();
-    if env_has_var("SGPLATFORM_SKIP_GRAPHICS") { assert_true(not started.is_ok); assert_eq_i64(started.error, STATUS_PLATFORM()); } else if started.is_ok { assert_eq_i64(started.value, STATUS_OK()); assert_true(sggame_quit()); } else { assert_eq_i64(started.error, STATUS_PLATFORM()); };
+    if env_has_var("SGPLATFORM_SKIP_GRAPHICS") {
+        match started {
+            Ok(_) => assert_true(false),
+            Err(error) => assert_eq_i64(error, STATUS_PLATFORM()),
+        }
+    } else {
+        match started {
+            Ok(value) => {
+                assert_eq_i64(value, STATUS_OK());
+                assert_true(sggame_quit());
+            }
+            Err(error) => assert_eq_i64(error, STATUS_PLATFORM()),
+        }
+    }
     0;
 }

@@ -3,7 +3,7 @@ use crate::mir::enum_defs::EnumDefMap;
 use crate::mir::hir_specialization_helpers::substitute_hir_type;
 use crate::mir::MIRType;
 use crate::type_naming::mir_type_instance_name;
-use std::cell::Cell;
+use std::cell::{Cell, RefCell};
 use std::collections::HashMap;
 
 thread_local! {
@@ -33,6 +33,60 @@ pub(crate) fn with_target_pointer_width<T>(bits: u8, action: impl FnOnce() -> T)
     })
 }
 
+thread_local! {
+    /// Enum names currently being instantiated, used to break layout recursion.
+    static ENUM_INSTANTIATION_STACK: RefCell<Vec<String>> = const { RefCell::new(Vec::new()) };
+}
+
+thread_local! {
+    /// Enum declarations for the module currently being lowered, so type
+    /// binders that only receive `struct_defs` can still see enums.
+    static ACTIVE_ENUM_DEFS: RefCell<Option<std::rc::Rc<EnumDefMap>>> =
+        const { RefCell::new(None) };
+}
+
+/// RAII guard exposing `enum_defs` to nested type binding until dropped, so
+/// the long lowering entry function does not need restructuring around a
+/// closure scope.
+pub(crate) struct ScopedEnumDefs;
+
+impl ScopedEnumDefs {
+    pub(crate) fn install(defs: EnumDefMap) -> Self {
+        ACTIVE_ENUM_DEFS.with(|cell| {
+            *cell.borrow_mut() = Some(std::rc::Rc::new(defs));
+        });
+        ScopedEnumDefs
+    }
+}
+
+impl Drop for ScopedEnumDefs {
+    fn drop(&mut self) {
+        ACTIVE_ENUM_DEFS.with(|cell| {
+            *cell.borrow_mut() = None;
+        });
+    }
+}
+
+fn with_active_enum_defs<T>(reader: impl FnOnce(&EnumDefMap) -> Option<T>) -> Option<T> {
+    ACTIVE_ENUM_DEFS.with(|cell| {
+        let defs = cell.borrow().clone()?;
+        reader(&defs)
+    })
+}
+
+fn enum_instantiation_in_progress(name: &str) -> bool {
+    ENUM_INSTANTIATION_STACK.with(|stack| stack.borrow().iter().any(|entry| entry == name))
+}
+
+fn with_enum_instantiation<T>(name: &str, action: impl FnOnce() -> T) -> T {
+    ENUM_INSTANTIATION_STACK.with(|stack| stack.borrow_mut().push(name.to_string()));
+    let result = action();
+    ENUM_INSTANTIATION_STACK.with(|stack| {
+        stack.borrow_mut().pop();
+    });
+    result
+}
+
 pub(crate) fn integer_bits_for_mir(kind: crate::hir::IntKind) -> u8 {
     match kind {
         crate::hir::IntKind::ISize | crate::hir::IntKind::USize => {
@@ -56,10 +110,24 @@ pub(crate) fn hir_type_to_mir_with_structs_and_enums(
                 }
             }
 
-            if args.is_empty() {
-                if let Some(enum_def) = enum_defs.get(name) {
+            if let Some(enum_def) = enum_defs.get(name) {
+                if args.is_empty() && !enum_def.is_generic() {
                     return enum_def.mir_type();
                 }
+                // A recursive enum has no flat layout; break the cycle by
+                // falling back to the uninstantiated declaration.
+                if enum_instantiation_in_progress(name) {
+                    return enum_def.mir_type();
+                }
+                let mir_args: Vec<MIRType> = args
+                    .iter()
+                    .map(|arg| {
+                        hir_type_to_mir_with_structs_and_enums(arg, struct_defs, enum_defs, subst)
+                    })
+                    .collect();
+                return with_enum_instantiation(name, || {
+                    enum_def.instantiate(&mir_args, struct_defs, enum_defs)
+                });
             }
 
             if let Some(def) = struct_defs.get(name) {
@@ -231,6 +299,57 @@ pub(crate) fn bind_mir_subst_from_hir_type(
                         );
                     }
                 }
+            } else if let MIRType::Enum {
+                name: instance_name,
+                ..
+            } = actual
+            {
+                // `Option<T>` against `Option_i64 { .., (1, Some(i64)) }`:
+                // bind each generic argument through the matching variant
+                // payloads, so stdlib methods over enum receivers specialize
+                // exactly like struct receivers do.
+                with_active_enum_defs(|enum_defs| {
+                    let def = enum_defs.get(name)?;
+                    if !instance_name.starts_with(name.as_str()) {
+                        return None;
+                    }
+                    for (discr, _, payload) in &def.hir_variants {
+                        let actual_payload =
+                            crate::mir::enum_defs::EnumDef::instance_variant_payload(
+                                actual, *discr,
+                            );
+                        let template_payload = match payload {
+                            crate::mir::enum_defs::EnumVariantPayload::Unit => None,
+                            crate::mir::enum_defs::EnumVariantPayload::Tuple(types)
+                                if types.len() == 1 =>
+                            {
+                                Some(types[0].clone())
+                            }
+                            crate::mir::enum_defs::EnumVariantPayload::Tuple(types) => {
+                                Some(HIRType::new(HIRTypeKind::Tuple(types.clone())))
+                            }
+                            crate::mir::enum_defs::EnumVariantPayload::Struct(_) => None,
+                        };
+                        if let (Some(mut template_payload), Some(actual_payload)) =
+                            (template_payload, actual_payload)
+                        {
+                            // The declaration names its own params; rename them
+                            // to this template's argument spelling first.
+                            let mut rename = HashMap::new();
+                            for (param, arg) in def.type_params.iter().zip(args.iter()) {
+                                rename.insert(param.clone(), arg.clone());
+                            }
+                            template_payload = substitute_hir_type(&template_payload, &rename);
+                            bind_mir_subst_from_hir_type(
+                                &template_payload,
+                                &actual_payload,
+                                struct_defs,
+                                subst,
+                            );
+                        }
+                    }
+                    Some(())
+                });
             }
         }
         HIRTypeKind::Ref(_, inner) => {

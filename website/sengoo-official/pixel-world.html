@@ -1,0 +1,373 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>SENGOO OVERWORLD — 编译型系统语言</title>
+  <meta name="description" content="Sengoo：LLVM 原生后端 · 增量编译 · 借用检查 · Python 互操作 · 异步运行时" />
+  <meta name="theme-color" content="#EAF5FF" />
+  <link rel="icon" type="image/png" href="assets/img/sengoo-mark.png" />
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link href="https://fonts.googleapis.com/css2?family=Press+Start+2P&family=DotGothic16&family=JetBrains+Mono:wght@400;500;700&display=swap" rel="stylesheet" />
+  <link rel="stylesheet" href="assets/css/pixel-world.css" />
+</head>
+<body>
+
+  <!-- 漂浮像素云（装饰层） -->
+  <div class="sky-layer" aria-hidden="true">
+    <div class="p-cloud c1"></div>
+    <div class="p-cloud c2"></div>
+    <div class="p-cloud c3"></div>
+    <div class="p-cloud c4"></div>
+  </div>
+
+  <!-- 右侧攀爬进度：像素小方块随滚动上升 -->
+  <div class="climb-track" aria-hidden="true">
+    <div class="climb-flag">⚑</div>
+    <div class="climber" id="climber"></div>
+  </div>
+
+  <!-- ══════════ 顶部：世界地图标题 ══════════ -->
+  <header class="overworld-head">
+    <div class="ow-inner">
+      <a class="ow-brand" href="#">
+        <img src="assets/img/sengoo-mark.png" alt="Sengoo" width="26" height="26" />
+        <span>SENGOO</span>
+      </a>
+      <nav class="ow-nav">
+        <a href="#pipeline">流水线</a>
+        <a href="#stages">关卡</a>
+        <a href="#race">竞速</a>
+        <a href="#blocks">砖块</a>
+        <a href="#goal">终点</a>
+      </nav>
+      <a class="ow-gh" href="https://github.com/Hyper66666/Sengoo" target="_blank" rel="noopener">GITHUB ↗</a>
+    </div>
+  </header>
+
+  <!-- ══════════ HERO：天空场景 ══════════ -->
+  <section class="hero-sky">
+    <div class="pixel-sun" aria-hidden="true"></div>
+    <div class="hero-core">
+      <span class="world-badge">WORLD 1-1 · v0.1.0-rc.1</span>
+      <div class="hero-logo-frame">
+        <img src="assets/img/sengoo-logo-transparent.png" alt="Sengoo Logo" width="128" height="128" />
+      </div>
+      <h1>SENGOO<br/><em>OVERWORLD</em></h1>
+      <p class="hero-line">
+        一门编译型系统语言。LLVM 后端输出原生二进制，<br class="br-wide"/>
+        借用检查守住内存安全，增量编译把迭代压进毫秒。
+      </p>
+      <div class="hero-btns">
+        <a href="#goal" class="pxw-btn primary">▶ START GAME</a>
+        <a href="#pipeline" class="pxw-btn">观看编译流水线</a>
+      </div>
+    </div>
+    <!-- 地面砖块 -->
+    <div class="ground" aria-hidden="true"></div>
+  </section>
+
+  <!-- ══════════ ZONE 1：编译流水线（核心创新） ══════════ -->
+  <section class="zone" id="pipeline">
+    <div class="zone-title">
+      <span class="zone-no">STAGE 1</span>
+      <h2>编译流水线 · 实况</h2>
+      <p>一个 .sg 方块的旅程 —— 从源码到原生二进制，每一站都是真实的编译阶段。</p>
+    </div>
+
+    <div class="pipeline">
+      <div class="pipe-belt" aria-hidden="true">
+        <div class="pipe-cargo" id="cargoBox">.sg</div>
+      </div>
+      <div class="pipe-stations">
+        <div class="station" data-step="0">
+          <div class="station-tower">Aa</div>
+          <span class="station-name">LEXER</span>
+          <span class="station-sub">logos 词法</span>
+        </div>
+        <div class="station" data-step="1">
+          <div class="station-tower">{}</div>
+          <span class="station-name">PARSER</span>
+          <span class="station-sub">AST 构建</span>
+        </div>
+        <div class="station" data-step="2">
+          <div class="station-tower">✓</div>
+          <span class="station-name">TYPECK</span>
+          <span class="station-sub">类型+借用</span>
+        </div>
+        <div class="station" data-step="3">
+          <div class="station-tower">≡</div>
+          <span class="station-name">MIR</span>
+          <span class="station-sub">中间降低</span>
+        </div>
+        <div class="station" data-step="4">
+          <div class="station-tower">⚙</div>
+          <span class="station-name">LLVM</span>
+          <span class="station-sub">clang 链接</span>
+        </div>
+        <div class="station station-final" data-step="5">
+          <div class="station-tower">★</div>
+          <span class="station-name">EXE</span>
+          <span class="station-sub">原生二进制</span>
+        </div>
+      </div>
+      <p class="pipe-note">▲ 增量模式下：签名未变的模块直接跳过 LEXER→MIR，100k 行项目增量重编 33ms。</p>
+    </div>
+  </section>
+
+  <!-- ══════════ ZONE 2：关卡选择（特性） ══════════ -->
+  <section class="zone zone-tint" id="stages">
+    <div class="zone-title">
+      <span class="zone-no">STAGE 2</span>
+      <h2>能力关卡 · SELECT</h2>
+      <p>六个已通关的关卡。每一关都在编译器主线里，不是 DLC 预告。</p>
+    </div>
+
+    <div class="stage-grid">
+      <article class="stage-card cleared">
+        <div class="stage-head"><span class="stage-id">1-1</span><span class="stage-stars">★★★</span></div>
+        <h3>LLVM 原生后端</h3>
+        <p>生成文本 LLVM IR，由 clang 优化和链接。不依赖 inkwell / llvm-sys，构建链干净透明。</p>
+        <span class="stage-clear">CLEAR</span>
+      </article>
+      <article class="stage-card cleared">
+        <div class="stage-head"><span class="stage-id">1-2</span><span class="stage-stars">★★★</span></div>
+        <h3>增量编译</h3>
+        <p>AST 感知编辑分类：noop / impl_only / interface_change。签名不变就跳过，增量缩减 96%。</p>
+        <span class="stage-clear">CLEAR</span>
+      </article>
+      <article class="stage-card cleared">
+        <div class="stage-head"><span class="stage-id">1-3</span><span class="stage-stars">★★★</span></div>
+        <h3>借用检查</h3>
+        <p>NLL 风格借用规则。可变与不可变借用互斥，编译期拦截数据竞争，零运行时开销。</p>
+        <span class="stage-clear">CLEAR</span>
+      </article>
+      <article class="stage-card cleared">
+        <div class="stage-head"><span class="stage-id">1-4</span><span class="stage-stars">★★☆</span></div>
+        <h3>Python 互操作</h3>
+        <p>运行时 CPython FFI 层。把 Python 项目的热路径逐步换成原生模块，不必整体重写。</p>
+        <span class="stage-clear">CLEAR</span>
+      </article>
+      <article class="stage-card cleared">
+        <div class="stage-head"><span class="stage-id">1-5</span><span class="stage-stars">★★☆</span></div>
+        <h3>异步运行时</h3>
+        <p>async def / spawn / select / timeout 一等语法。编译器做帧降低，运行时做调度。</p>
+        <span class="stage-clear">CLEAR</span>
+      </article>
+      <article class="stage-card cleared">
+        <div class="stage-head"><span class="stage-id">1-6</span><span class="stage-stars">★★☆</span></div>
+        <h3>非侵入反射</h3>
+        <p>--reflect=auto 按需生成 sidecar 元数据。未使用时零开销，使用时零手动注册。</p>
+        <span class="stage-clear">CLEAR</span>
+      </article>
+    </div>
+  </section>
+
+  <!-- ══════════ ZONE 3：编译竞速 ══════════ -->
+  <section class="zone" id="race">
+    <div class="zone-title">
+      <span class="zone-no">STAGE 3</span>
+      <h2>编译竞速 · TIME ATTACK</h2>
+      <p>1000k LOC 全量编译端到端（含链接），本地同硬件实测。越短越快。</p>
+    </div>
+
+    <div class="race-track">
+      <div class="race-lane">
+        <span class="race-tag me">SENGOO</span>
+        <div class="race-path"><div class="racer me" style="--dist:8%"></div></div>
+        <span class="race-time">1.8s</span>
+      </div>
+      <div class="race-lane">
+        <span class="race-tag">C++</span>
+        <div class="race-path"><div class="racer" style="--dist:22%"></div></div>
+        <span class="race-time">4.9s</span>
+      </div>
+      <div class="race-lane">
+        <span class="race-tag">PYTHON*</span>
+        <div class="race-path"><div class="racer" style="--dist:38%"></div></div>
+        <span class="race-time">8.3s</span>
+      </div>
+      <div class="race-lane">
+        <span class="race-tag">RUST</span>
+        <div class="race-path"><div class="racer" style="--dist:96%"></div></div>
+        <span class="race-time">54.6s</span>
+      </div>
+      <p class="race-note">* Python 为字节码编译。终点在左侧 —— SENGOO 用时仅为 Rust 的 3.3%。</p>
+    </div>
+
+    <div class="coin-stats">
+      <div class="coin"><b>96%</b><i>增量缩减</i></div>
+      <div class="coin"><b>50.9×</b><i>热路径 vs Py</i></div>
+      <div class="coin"><b>33ms</b><i>增量延迟</i></div>
+      <div class="coin"><b>≈C++</b><i>运行时 p50</i></div>
+    </div>
+  </section>
+
+  <!-- ══════════ ZONE 4：代码卷轴 ══════════ -->
+  <section class="zone zone-tint" id="scrolls">
+    <div class="zone-title">
+      <span class="zone-no">STAGE 4</span>
+      <h2>代码卷轴</h2>
+      <p>浅色代码面板。语法目标：别人写的模块，5 分钟能读懂。</p>
+    </div>
+
+    <div class="scroll-grid">
+      <div class="code-scroll">
+        <div class="scroll-tab">◆ struct.sg</div>
+        <pre><code><span class="kw">struct</span> Vec2 { x: <span class="ty">f64</span>, y: <span class="ty">f64</span> }
+
+<span class="kw">impl</span> Vec2 {
+    <span class="kw">def</span> <span class="fn">length</span>(self) -> <span class="ty">f64</span> {
+        (self.x * self.x + self.y * self.y).sqrt()
+    }
+}</code></pre>
+      </div>
+      <div class="code-scroll">
+        <div class="scroll-tab">◆ async.sg</div>
+        <pre><code><span class="kw">async def</span> <span class="fn">main</span>() -> <span class="ty">i64</span> {
+    <span class="kw">let</span> a = spawn(fetch(<span class="str">"/users"</span>));
+    <span class="kw">let</span> b = spawn(fetch(<span class="str">"/orders"</span>));
+    <span class="kw">let</span> (u, o) = <span class="kw">await</span> join(a, b);
+    print(u.len() + o.len())
+}</code></pre>
+      </div>
+      <div class="code-scroll">
+        <div class="scroll-tab">◆ match.sg</div>
+        <pre><code><span class="kw">match</span> json.get(<span class="str">"mode"</span>) {
+    <span class="ty">Some</span>(v) <span class="kw">if</span> v == <span class="str">"strict"</span> => strict(json),
+    <span class="ty">Some</span>(_) => default_of(json),
+    <span class="ty">None</span>    => err(missing(<span class="str">"mode"</span>)),
+}</code></pre>
+      </div>
+      <div class="code-scroll">
+        <div class="scroll-tab">◆ contract.sg</div>
+        <pre><code><span class="kw">def</span> <span class="fn">divide</span>(a: <span class="ty">i64</span>, b: <span class="ty">i64</span>) -> <span class="ty">i64</span>
+<span class="kw">requires</span> b != 0
+<span class="kw">ensures</span> result * b == a
+{ a / b }  <span class="cmt">// --contract-checks on</span></code></pre>
+      </div>
+    </div>
+  </section>
+
+  <!-- ══════════ ZONE 5：? 砖块工具链 ══════════ -->
+  <section class="zone" id="blocks">
+    <div class="zone-title">
+      <span class="zone-no">STAGE 5</span>
+      <h2>道具砖块 · 顶一下</h2>
+      <p>四块 ? 砖块 = 四件工具。悬停顶开看内容物，全部围绕同一份 AST 内核。</p>
+    </div>
+
+    <div class="block-row">
+      <div class="q-block">
+        <div class="q-face">?</div>
+        <div class="q-loot">
+          <b>sgc</b>
+          <p>编译器 CLI。check / build / run / doc / bench，-O 0~3 与 --low-memory。</p>
+        </div>
+      </div>
+      <div class="q-block">
+        <div class="q-face">?</div>
+        <div class="q-loot">
+          <b>sgpm</b>
+          <p>包管理器。Sengoo.toml、path / git / registry 依赖、workspace、lockfile。</p>
+        </div>
+      </div>
+      <div class="q-block">
+        <div class="q-face">?</div>
+        <div class="q-loot">
+          <b>sgfmt</b>
+          <p>格式化。CI 里 --check 模式确保提交风格一致。</p>
+        </div>
+      </div>
+      <div class="q-block">
+        <div class="q-face">?</div>
+        <div class="q-loot">
+          <b>sglsp</b>
+          <p>Language Server。诊断、补全、跳转定义，对接 VS Code 扩展。</p>
+        </div>
+      </div>
+    </div>
+
+    <div class="coin-bag">
+      <span class="bag-label">◎ STDLIB 金币收集 15/15</span>
+      <div class="bag-coins">
+        <span>collections</span><span>string</span><span>json</span><span>io</span><span>file</span>
+        <span>process</span><span>math</span><span>error</span><span>strconv</span><span>path</span>
+        <span>env</span><span>net</span><span>db</span><span>ffi</span><span>reflect</span>
+      </div>
+    </div>
+  </section>
+
+  <!-- ══════════ ZONE 6：终点旗帜 ══════════ -->
+  <section class="zone zone-goal" id="goal">
+    <div class="goal-flagpole" aria-hidden="true">
+      <div class="flag">⚑</div>
+      <div class="pole"></div>
+    </div>
+    <div class="goal-panel">
+      <span class="zone-no">GOAL</span>
+      <h2>COURSE CLEAR!</h2>
+      <p>从源码构建工具链、创建项目、编译运行 —— 全部本地完成，没有云端依赖。</p>
+      <div class="goal-term">
+        <div class="goal-term-bar"><i></i><i></i><i></i><em>new-game.sh</em></div>
+        <pre><code><span class="cmt"># 构建工具链</span>
+$ cargo build --release
+
+<span class="cmt"># 创建并运行项目</span>
+$ sgpm new hello && cd hello
+$ sgpm run
+<span class="ok">Hello from Sengoo! ✓</span>
+
+<span class="cmt"># 单文件直接跑</span>
+$ sgc run examples/01_hello.sg -O 2
+<span class="ok">42</span></code></pre>
+      </div>
+      <div class="goal-btns">
+        <a class="pxw-btn primary" href="https://github.com/Hyper66666/Sengoo" target="_blank" rel="noopener">► GITHUB 获取源码</a>
+        <a class="pxw-btn" href="https://sengoo.dev" target="_blank" rel="noopener">sengoo.dev ↗</a>
+      </div>
+    </div>
+  </section>
+
+  <!-- ══════════ FOOTER ══════════ -->
+  <footer class="ow-footer">
+    <div class="ow-footer-inner">
+      <div class="ow-footer-brand">
+        <img src="assets/img/sengoo-mark.png" alt="" width="20" height="20" />
+        <span>SENGOO</span>
+      </div>
+      <span class="ow-footer-note">COMPILED SYSTEMS LANGUAGE · LLVM · MIT LICENSE</span>
+      <span class="ow-footer-credit">© 2026 SENGOO TEAM — THANK YOU FOR PLAYING</span>
+    </div>
+  </footer>
+
+  <script>
+    // 右侧攀爬进度
+    const climber = document.getElementById('climber');
+    const track = document.querySelector('.climb-track');
+    const updateClimb = () => {
+      const h = document.documentElement.scrollHeight - innerHeight;
+      const p = h > 0 ? scrollY / h : 0;
+      const trackH = track.clientHeight - 44;
+      climber.style.transform = `translateY(${ -p * trackH }px)`;
+    };
+    addEventListener('scroll', updateClimb, { passive: true });
+    addEventListener('resize', updateClimb);
+    updateClimb();
+
+    // 流水线：货物方块沿传送带循环，经过每站时变换文字并点亮站点
+    const cargo = document.getElementById('cargoBox');
+    const stations = document.querySelectorAll('.station');
+    const labels = ['.sg', 'TOK', 'AST', 'HIR', 'MIR', '.exe'];
+    let step = 0;
+    setInterval(() => {
+      step = (step + 1) % 6;
+      cargo.textContent = labels[step];
+      cargo.style.left = `calc(${step} * (100% - 52px) / 5)`;
+      stations.forEach((s, i) => s.classList.toggle('lit', i === step));
+    }, 1400);
+    stations[0].classList.add('lit');
+  </script>
+</body>
+</html>

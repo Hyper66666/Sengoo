@@ -9,18 +9,22 @@ import std::regex;
 import std::log;
 
 def main() -> i64 {
-    let level = log_set_level(2);
-    let re = regex_compile("^sengoo$");
-    if re.is_ok {
-        let pattern = re.value;
-        let matched = pattern.is_match("sengoo");
-        pattern.drop();
-        if level.is_ok && matched.is_ok && matched.value {
-            print(22);
-            0
-        } else {
-            1
-        }
+    match log_set_level(2) {
+        Ok(_) => {},
+        Err(_) => return 1,
+    }
+    let pattern = match regex_compile("^sengoo$") {
+        Ok(value) => value,
+        Err(_) => return 1,
+    };
+    let matched = match pattern.is_match("sengoo") {
+        Ok(value) => value,
+        Err(_) => return 1,
+    };
+    pattern.drop();
+    if matched {
+        print(22);
+        0
     } else {
         1
     }

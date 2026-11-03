@@ -84,6 +84,20 @@ fn collect_calls_in_expr(expr: &Expr, calls: &mut Vec<String>) {
                 collect_calls_in_expr(else_expr, calls);
             }
         }
+        ExprKind::IfLet {
+            expr,
+            then_branch,
+            else_branch,
+            ..
+        } => {
+            collect_calls_in_expr(expr, calls);
+            for stmt in &then_branch.stmts {
+                collect_calls_in_stmt(stmt, calls);
+            }
+            if let Some(else_expr) = else_branch.as_deref() {
+                collect_calls_in_expr(else_expr, calls);
+            }
+        }
         ExprKind::While { cond, body } => {
             collect_calls_in_expr(cond, calls);
             for stmt in &body.stmts {
@@ -116,6 +130,14 @@ fn collect_calls_in_expr(expr: &Expr, calls: &mut Vec<String>) {
         ExprKind::Array(elements) | ExprKind::Tuple(elements) => {
             for elem in elements {
                 collect_calls_in_expr(elem, calls);
+            }
+        }
+        ExprKind::VecBang { elements, count } => {
+            for elem in elements {
+                collect_calls_in_expr(elem, calls);
+            }
+            if let Some(count) = count.as_deref() {
+                collect_calls_in_expr(count, calls);
             }
         }
         ExprKind::Struct { fields, base, .. } => {

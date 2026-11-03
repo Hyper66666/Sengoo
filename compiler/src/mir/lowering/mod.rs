@@ -134,6 +134,8 @@ struct DropBinding {
     local: Local,
     field_path: Vec<u32>,
     drop_func: String,
+    live_flag: Option<Local>,
+    initialized_block: Option<usize>,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -238,6 +240,7 @@ struct LoweringContext<'a> {
     drop_scope_markers: Vec<usize>,
     moved_drop_locals: HashSet<Local>,
     moved_drop_fields: HashSet<(Local, Vec<u32>)>,
+    borrowed_locals: HashSet<Local>,
 }
 
 impl<'a> LoweringContext<'a> {

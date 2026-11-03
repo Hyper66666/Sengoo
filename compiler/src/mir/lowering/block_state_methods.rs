@@ -50,6 +50,14 @@ impl<'a> LoweringContext<'a> {
         }
     }
 
+    pub(super) fn mark_local_borrowed(&mut self, local: Local) {
+        self.borrowed_locals.insert(local);
+    }
+
+    pub(super) fn is_local_borrowed(&self, local: Local) -> bool {
+        self.borrowed_locals.contains(&local)
+    }
+
     /// 获取局部变量的MIR类型。
     pub(super) fn hir_type_to_mir(&self, ty: &crate::hir::HIRType) -> MIRType {
         crate::mir::type_mapping_helpers::hir_type_to_mir_with_structs_and_enums(

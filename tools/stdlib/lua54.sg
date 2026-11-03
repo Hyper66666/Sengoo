@@ -29,9 +29,9 @@ def lua54_last_error_len() -> i64 {
 def lua54_last_error_copy_raw(buffer_ptr: i64, capacity: i64) -> Result<i64, i64> {
     let copied = sengoo_lua54_last_error_copy(buffer_ptr, capacity);
     if copied >= 0 {
-        Result { is_ok: true, value: copied, error: 0 }
+        Ok(copied)
     } else {
-        Result { is_ok: false, value: 0, error: sengoo_lua54_last_error_code() }
+        Err(sengoo_lua54_last_error_code())
     }
 }
 
@@ -46,9 +46,9 @@ def lua54_last_error_clear() -> bool {
 def lua54_open_raw(path_ptr: i64) -> Result<Lua54, i64> {
     let handle = sengoo_lua54_open(path_ptr);
     if handle != 0 {
-        Result { is_ok: true, value: Lua54 { handle: handle }, error: 0 }
+        Ok(Lua54 { handle: handle })
     } else {
-        Result { is_ok: false, value: Lua54 { handle: 0 }, error: sengoo_lua54_last_error_code() }
+        Err(sengoo_lua54_last_error_code())
     }
 }
 
@@ -72,9 +72,9 @@ impl Lua54 {
     def call_i64_raw(self, func_name_ptr: i64, argc: i64, argv_ptr: i64, out_value_ptr: i64) -> Result<i64, i64> {
         let status = sengoo_lua54_call_i64(self.handle, func_name_ptr, argc, argv_ptr, out_value_ptr);
         if status == 0 {
-            Result { is_ok: true, value: status, error: 0 }
+            Ok(status)
         } else {
-            Result { is_ok: false, value: 0, error: status }
+            Err(status)
         }
     }
 
@@ -86,9 +86,9 @@ impl Lua54 {
         let value = sengoo_lua54_call_i64_value(self.handle, func_name_ptr, argc, a0, a1, a2, a3);
         let error = sengoo_lua54_last_error_code();
         if error == 0 {
-            Result { is_ok: true, value: value, error: 0 }
+            Ok(value)
         } else {
-            Result { is_ok: false, value: 0, error: error }
+            Err(error)
         }
     }
 

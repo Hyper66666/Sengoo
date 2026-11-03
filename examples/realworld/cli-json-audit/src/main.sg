@@ -13,34 +13,47 @@ import std::log;
 import std::status;
 
 def audit_score() -> i64 {
-    let input_path = if arg_exists(0) { "data/sample.json"; } else { "data/sample.json"; };
+    let _has_arg = arg_exists(0);
+    let input_path = "data/sample.json";
     let out_dir = "target/realworld-audit";
     let out_file = "target/realworld-audit/report.txt";
     let log_level_set = log_set_level(LOG_INFO()).unwrap_or(false);
+    if not log_level_set { return 1; };
     let log_cleared = log_test_sink_clear();
+    if not log_cleared { return 1; };
     let log_written = log_write(LOG_INFO(), "cli-json-audit started").unwrap_or(false);
+    if not log_written { return 1; };
     let made_dir = dir_create_all(out_dir).unwrap_or(false);
-    let input_exists = file_exists(input_path);
+    if not made_dir { return 1; };
+    if not file_exists(input_path) { return 1; };
     let input_len = file_len(input_path).unwrap_or(0);
+    if input_len <= 0 { return 1; };
     let buffer = ffi_buffer_new(128).unwrap_or(Buffer { handle: 0 });
     let read_len = file_read_into(input_path, buffer).unwrap_or(0);
+    if read_len != input_len { return 1; };
     let doc = json_parse("[10,20,30]").unwrap_or(JsonDoc { handle: 0 });
     let root = doc.root();
     let item_count = root.array_len().unwrap_or(0);
+    if item_count != 3 { return 1; };
     let first = root.array_get(0).unwrap_or(JsonValue { doc_handle: 0, node_id: 0 });
     let first_score = first.number_i64().unwrap_or(0);
+    if first_score != 10 { return 1; };
     let values = vec_new_i64();
     values.push(first_score);
     values.push(input_len);
     values.push(read_len);
     let total = values.get(0).unwrap_or(0) + values.get(1).unwrap_or(0) + values.get(2).unwrap_or(0);
-    let contains_read = values.contains(read_len);
+    if not values.contains(read_len) { return 1; };
+    if total <= 20 { return 1; };
     let status_len = status_name_copy(STATUS_OK(), buffer).unwrap_or(0);
+    if status_len <= 0 { return 1; };
     let wrote_report = file_write_str(out_file, "audit ok\n").unwrap_or(0);
+    if wrote_report <= 0 { return 1; };
     let appended_report = file_append_str(out_file, "items checked\n").unwrap_or(0);
-    let report_exists = file_exists(out_file);
-    let report_removed = file_remove(out_file);
-    if made_dir and input_exists and input_len > 0 and read_len == input_len and item_count == 3 and first_score == 10 and contains_read and total > 20 and log_level_set and log_cleared and log_written and status_len > 0 and wrote_report > 0 and appended_report > 0 and report_exists and report_removed { 0; } else { 1; };
+    if appended_report <= 0 { return 1; };
+    if not file_exists(out_file) { return 1; };
+    if not file_remove(out_file) { return 1; };
+    0;
 }
 
 def main() -> i64 {

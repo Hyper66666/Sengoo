@@ -174,54 +174,6 @@ impl TypeChecker {
         Ok(self.env.unit_ty())
     }
 
-    /// 检查for循环，验证迭代器类型和模式匹配。
-    pub(super) fn check_for(
-        &mut self,
-        pattern: &Pattern,
-        iter: &Expr,
-        body: &Block,
-    ) -> TyResult<Ty> {
-        let elem_ty = match &iter.kind {
-            ExprKind::Range { start, end, .. } => {
-                let range_ty = self.env.int_ty(IntKind::I64);
-                if let Some(start) = start.as_deref() {
-                    let start_ty = self.check_expr(start)?;
-                    self.infer.unify(&start_ty, &range_ty)?;
-                }
-                if let Some(end) = end.as_deref() {
-                    let end_ty = self.check_expr(end)?;
-                    self.infer.unify(&end_ty, &range_ty)?;
-                }
-                range_ty
-            }
-            _ => {
-                let iter_ty = self.check_expr(iter)?;
-                match &iter_ty.kind {
-                    TyKind::Array(elem, _) | TyKind::Slice(elem) => (**elem).clone(),
-                    _ => {
-                        return Err(TypeckError::Other(
-                            "for loop expects an array, slice, or range iterable".to_string(),
-                        ));
-                    }
-                }
-            }
-        };
-
-        self.env.push_scope();
-
-        let var_name = match &pattern.kind {
-            crate::ast::pattern::PatternKind::Ident(name) => name.name.clone(),
-            crate::ast::pattern::PatternKind::Wildcard => "_loop".to_string(),
-            _ => "_loop".to_string(),
-        };
-
-        self.env.insert_var(var_name, elem_ty);
-        self.check_block(body)?;
-        self.env.pop_scope();
-
-        Ok(self.env.unit_ty())
-    }
-
     /// 检查loop循环体类型。
     pub(super) fn check_loop(&mut self, body: &Block) -> TyResult<Ty> {
         self.check_block(body)?;

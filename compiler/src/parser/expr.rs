@@ -1,5 +1,6 @@
 //! 表达式解析器，负责将词法token序列解析为表达式AST节点。
 mod aggregates;
+mod bang;
 mod control_flow;
 
 use crate::ast::*;
@@ -174,6 +175,9 @@ impl<'source> Parser<'source> {
                 }
                 TokenKind::Ident => {
                     let path = self.parse_path()?;
+                    if self.is_bang_form() {
+                        return self.parse_bang_form(path);
+                    }
                     ExprKind::Path(path)
                 }
                 TokenKind::SelfLowerKw => {
@@ -434,6 +438,9 @@ impl<'source> Parser<'source> {
                 // 解析标识符：变量引用、函数调用或结构体构造。
                 TokenKind::Ident => {
                     let path = self.parse_path()?;
+                    if self.is_bang_form() {
+                        return self.parse_bang_form(path);
+                    }
                     if let Some(token) = self.current() {
                         match &token.kind {
                             TokenKind::LBrace => {

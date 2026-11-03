@@ -39,9 +39,9 @@ def proto_last_error_copy_raw(buffer_ptr: i64, capacity: i64) -> i64 {
 def proto_last_error_copy(buffer: Buffer) -> Result<i64, i64> {
     let copied = proto_last_error_copy_raw(buffer.ptr(), buffer.len());
     if copied >= 0 {
-        Result { is_ok: true, value: copied, error: 0 }
+        Ok(copied)
     } else {
-        Result { is_ok: false, value: 0, error: sengoo_proto_last_error_code() }
+        Err(sengoo_proto_last_error_code())
     }
 }
 
@@ -56,9 +56,9 @@ def proto_user_event(id: i64, name: &str, ts: i64) -> ProtoUserEvent {
 def proto_user_event_encode_raw(event: ProtoUserEvent, out_buffer: i64, out_capacity: i64) -> Result<i64, i64> {
     let written = sengoo_proto_user_event_encode(event.id, event.name_ptr, event.ts, out_buffer, out_capacity);
     if written >= 0 {
-        Result { is_ok: true, value: written, error: 0 }
+        Ok(written)
     } else {
-        Result { is_ok: false, value: 0, error: written }
+        Err(written)
     }
 }
 
@@ -69,22 +69,22 @@ def proto_user_event_encode(event: ProtoUserEvent, out: Buffer) -> Result<i64, i
 def proto_user_event_decode_raw(input_ptr: i64, input_len: i64, out_id: i64, out_name_buffer: i64, out_name_capacity: i64, out_ts: i64) -> Result<i64, i64> {
     let copied = sengoo_proto_user_event_decode(input_ptr, input_len, out_id, out_name_buffer, out_name_capacity, out_ts);
     if copied >= 0 {
-        Result { is_ok: true, value: copied, error: 0 }
+        Ok(copied)
     } else {
-        Result { is_ok: false, value: 0, error: copied }
+        Err(copied)
     }
 }
 
 def proto_user_event_decode(input: Buffer, input_len: i64) -> Result<ProtoDecodedUserEvent, i64> {
     if input_len <= 0 {
         let handle = sengoo_proto_user_event_decode_open(input.ptr(), 0);
-        Result { is_ok: false, value: ProtoDecodedUserEvent { handle: handle }, error: sengoo_proto_last_error_code() }
+        Err(sengoo_proto_last_error_code())
     } else {
         let handle = sengoo_proto_user_event_decode_open(input.ptr(), input_len);
         if handle != 0 {
-            Result { is_ok: true, value: ProtoDecodedUserEvent { handle: handle }, error: 0 }
+            Ok(ProtoDecodedUserEvent { handle: handle })
         } else {
-            Result { is_ok: false, value: ProtoDecodedUserEvent { handle: 0 }, error: sengoo_proto_last_error_code() }
+            Err(sengoo_proto_last_error_code())
         }
     }
 }
@@ -105,9 +105,9 @@ impl ProtoDecodedUserEvent {
     def name_copy(self, out: Buffer) -> Result<i64, i64> {
         let copied = sengoo_proto_user_event_decoded_name_copy(self.handle, out.ptr(), out.len());
         if copied >= 0 {
-            Result { is_ok: true, value: copied, error: 0 }
+            Ok(copied)
         } else {
-            Result { is_ok: false, value: 0, error: sengoo_proto_last_error_code() }
+            Err(sengoo_proto_last_error_code())
         }
     }
 

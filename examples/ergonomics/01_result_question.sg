@@ -3,22 +3,32 @@
 // Postfix `?` propagates Result errors from helper calls.
 //
 // Run: sgc run examples/ergonomics/01_result_question.sg
+// Expected output: 2
 
-struct Result<T, E> {
-    is_ok: bool,
-    value: T,
-    error: E,
+enum Result<T, E> {
+    Ok(T),
+    Err(E),
 }
 
 def ok_i64(v: i64) -> Result<i64, i64> {
-    Result { is_ok: true, value: v, error: 0 }
+    Ok(v)
 }
 
 def step() -> Result<i64, i64> {
     ok_i64(1)
 }
 
-def main() -> Result<i64, i64> {
+def evaluate() -> Result<i64, i64> {
     let x = step()?;
     ok_i64(x + 1)
+}
+
+def main() -> i64 {
+    match evaluate() {
+        Ok(value) => {
+            print(value);
+            0
+        },
+        Err(error) => error,
+    }
 }

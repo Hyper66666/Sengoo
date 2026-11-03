@@ -72,9 +72,10 @@
   matrix row is Platform-specific (not Supported).
 - [x] 5.4 TLS composes with handlers, keep-alive, and streaming in at least
   one end-to-end test on a proven host.
-  `real_sgc_tls_router_keep_alive_streaming_composes_with_verified_ca` builds
-  a Sengoo router/stream server, trusts only the fixture CA, verifies
-  `localhost`, and serves two requests through one keep-alive TLS client.
+  `http_server_tls_router_keep_alive_and_streaming_compose` plus
+  `real_sgc_tls_router_keep_alive_streaming_composes_with_verified_ca` prove
+  router, keep-alive, and chunked streaming over one verified-CA TLS
+  connection.
 
 ## 6. Docs and matrix
 

@@ -66,6 +66,9 @@ pub(super) fn lower_function(
         ctx.mir_fn.set_local_debug_name(local, param.name.clone());
         ctx.local_names.insert(param.name.clone(), local);
         ctx.bind_local_symbol(param.symbol, local);
+        if param.is_borrowed || param.ty.is_ref() {
+            ctx.mark_local_borrowed(local);
+        }
         if let Some((_, MIRType::Struct { name, .. })) = ctx.mir_fn.locals.get(i + 1) {
             ctx.type_names.insert(local, name.clone());
         }

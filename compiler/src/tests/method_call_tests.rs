@@ -25,11 +25,9 @@ def main() -> i64 {
         result.unwrap_or_default()
     );
     let err_msg = result.unwrap_err().to_string();
-    // The error may come from the TypeChecker (Chinese: "没有方法") or from
-    // MIR lowering ("method ... not found"). Either is acceptable.
     assert!(
-        err_msg.contains("nonexistent"),
-        "Error message should mention the method name 'nonexistent', got: {}",
+        err_msg.contains("has no method nonexistent") || err_msg.contains("undefined method"),
+        "Error message should name the missing method in English, got: {}",
         err_msg
     );
 }
@@ -53,11 +51,9 @@ def main() -> i64 {
         result.unwrap_or_default()
     );
     let err_msg = result.unwrap_err().to_string();
-    // The error may come from the TypeChecker (Chinese: "没有方法") or from
-    // MIR lowering ("method ... not found"). Either is acceptable.
     assert!(
-        err_msg.contains("missing_method"),
-        "Error message should mention the method name 'missing_method', got: {}",
+        err_msg.contains("has no method missing_method") || err_msg.contains("undefined method"),
+        "Error message should name the missing method in English, got: {}",
         err_msg
     );
 }

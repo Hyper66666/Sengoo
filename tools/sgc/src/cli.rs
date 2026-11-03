@@ -10,8 +10,8 @@ use crate::{
     frontend_trace_enabled, parse_frontend_jobs_arg,
     portable_backends::{build_bytecode, build_wasm, run_bytecode, run_wasm},
     propagate_run_exit_code, reflection_options_from_cli, resolve_daemon_addr, resolve_test_root,
-    set_error_format, ContractChecksMode, DaemonDispatchOutcome, ErrorFormat, FrontendJobs,
-    ReflectionMode, RunEngine, TestOptions, TestOutputFormat, DEFAULT_DAEMON_ADDR,
+    set_error_format, set_verbose_output, ContractChecksMode, DaemonDispatchOutcome, ErrorFormat,
+    FrontendJobs, ReflectionMode, RunEngine, TestOptions, TestOutputFormat, DEFAULT_DAEMON_ADDR,
 };
 
 pub(crate) const SGC_VERSION: &str = concat!(
@@ -31,6 +31,10 @@ pub(crate) struct Cli {
     /// Error output format.
     #[arg(long = "error-format", global = true, value_enum, default_value_t = ErrorFormat::Text)]
     error_format: ErrorFormat,
+
+    /// Print compiler instrumentation (cache, workset, frontend, toolchain).
+    #[arg(short = 'v', long = "verbose", global = true)]
+    verbose: bool,
 
     /// Native runtime source policy for this compiler process.
     #[arg(
@@ -351,6 +355,7 @@ pub(crate) enum BenchCommands {
 pub(crate) async fn run() -> Result<()> {
     let cli = Cli::parse();
     set_error_format(cli.error_format);
+    set_verbose_output(cli.verbose);
     initialize_native_runtime_mode(cli.runtime_mode)?;
     dispatch(cli.command).await
 }

@@ -136,6 +136,19 @@ fn scan_future_poll_expr(
             });
             then_wake && else_wake
         }
+        ExprKind::IfLet {
+            expr,
+            then_branch,
+            else_branch,
+            ..
+        } => {
+            let wake_registered = scan_future_poll_expr(expr, facts, wake_registered);
+            let then_wake = scan_future_poll_block(then_branch, facts, wake_registered);
+            let else_wake = else_branch.as_ref().map_or(wake_registered, |else_branch| {
+                scan_future_poll_expr(else_branch, facts, wake_registered)
+            });
+            then_wake && else_wake
+        }
         ExprKind::While { cond, body } => {
             let wake_registered = scan_future_poll_expr(cond, facts, wake_registered);
             scan_future_poll_block(body, facts, wake_registered);
@@ -188,6 +201,16 @@ fn scan_future_poll_expr(
             let mut wake_registered = wake_registered;
             for element in elements {
                 wake_registered = scan_future_poll_expr(element, facts, wake_registered);
+            }
+            wake_registered
+        }
+        ExprKind::VecBang { elements, count } => {
+            let mut wake_registered = wake_registered;
+            for element in elements {
+                wake_registered = scan_future_poll_expr(element, facts, wake_registered);
+            }
+            if let Some(count) = count {
+                wake_registered = scan_future_poll_expr(count, facts, wake_registered);
             }
             wake_registered
         }
@@ -503,7 +526,7 @@ impl TypeChecker {
                     let method_generic_meta =
                         self.bind_type_params_with_meta(&method.type_params)?;
                     let mut param_types = Vec::new();
-                    let has_self = method.self_param.is_some();
+                    let self_param = method.self_param;
 
                     for param in &method.params {
                         let ty = self.check_type(&param.ty)?;
@@ -525,14 +548,14 @@ impl TypeChecker {
                     }
                     let sig = if has_default {
                         MethodSig::with_default(
-                            has_self,
+                            self_param,
                             param_types,
                             ret_ty,
                             method_generic_meta.iter().map(|meta| meta.var_id).collect(),
                         )
                     } else {
                         MethodSig::new(
-                            has_self,
+                            self_param,
                             param_types,
                             ret_ty,
                             method_generic_meta.iter().map(|meta| meta.var_id).collect(),
@@ -893,10 +916,10 @@ impl TypeChecker {
             self.env.push_scope();
             let method_generic_meta = self.bind_type_params_with_meta(&item.type_params)?;
             let mut param_types = Vec::new();
-            let mut has_self = item.self_param.is_some();
+            let mut self_param = item.self_param;
             for param in &item.params {
                 if param.name.name == "self" {
-                    has_self = true;
+                    self_param.get_or_insert(SelfParam::Owned);
                 } else {
                     let ty = self.check_type(&param.ty)?;
                     param_types.push(ty);
@@ -910,7 +933,7 @@ impl TypeChecker {
             impl_info.add_method(
                 item.name.name.clone(),
                 FunctionTy::with_generic_params(
-                    has_self,
+                    self_param,
                     param_types,
                     ret_ty,
                     method_generic_meta.iter().map(|meta| meta.var_id).collect(),
@@ -1012,7 +1035,7 @@ impl TypeChecker {
                             impl_info.add_method(
                                 method_name.clone(),
                                 FunctionTy::with_generic_params(
-                                    method_sig.has_self,
+                                    method_sig.self_param,
                                     param_types,
                                     return_type,
                                     method_sig.generic_params.clone(),

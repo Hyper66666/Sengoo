@@ -9,10 +9,14 @@ pub(super) fn lower_match_expr(
     let scrutinee_local = ctx.lower_expr(scrutinee);
     let scrutinee_ty = ctx.get_local_type(scrutinee_local).clone();
     let has_guards = arms.iter().any(|arm| arm.guard.is_some());
+    let owns_enum_scrutinee =
+        matches!(scrutinee_ty, MIRType::Enum { .. }) && !ctx.is_local_borrowed(scrutinee_local);
 
     match scrutinee_ty {
-        MIRType::Enum { .. } if !has_guards => lower_enum_match_expr(ctx, scrutinee_local, arms),
-        _ => lower_non_enum_match_expr(ctx, scrutinee_local, arms),
+        MIRType::Enum { .. } if !has_guards && owns_enum_scrutinee => {
+            lower_enum_match_expr(ctx, scrutinee_local, arms)
+        }
+        _ => lower_non_enum_match_expr(ctx, scrutinee_local, arms, owns_enum_scrutinee),
     }
 }
 
@@ -47,7 +51,9 @@ fn lower_guarded_arm_header(
     });
 
     ctx.set_current_block(guard_block);
-    ctx.lower_pattern_bindings(&arm.pat, scrutinee_local);
+    // Guard evaluation must not consume an enum payload: if the guard fails,
+    // a later arm still needs the original scrutinee.
+    ctx.lower_pattern_bindings(&arm.pat, scrutinee_local, false);
     let guard_ok = ctx.lower_expr(arm.guard.as_ref().expect("guarded arm"));
     ctx.set_terminator(Terminator::If {
         cond: guard_ok,
@@ -61,6 +67,10 @@ pub(super) fn lower_enum_match_expr(
     scrutinee_local: Local,
     arms: &[HIRMatchArm],
 ) -> Local {
+    // Every enum match consumes its by-value scrutinee. Individual arm scopes
+    // below account for the selected payload, so the enclosing enum must not
+    // be dropped again at function exit.
+    ctx.mark_drop_local_moved(scrutinee_local);
     let discr_local = ctx.add_local(None, LocalKind::Temp, MIR_I64);
     ctx.push_inst(Instruction::Discriminant {
         destination: discr_local,
@@ -82,9 +92,13 @@ pub(super) fn lower_enum_match_expr(
 
     let mut incoming_values: Vec<(Local, usize)> = Vec::new();
     for (i, arm) in arms.iter().enumerate() {
+        let saved_bindings = ctx.save_pattern_bindings(&arm.pat);
         ctx.set_current_block(arm_blocks[i]);
-        ctx.lower_pattern_bindings(&arm.pat, scrutinee_local);
+        ctx.push_drop_scope();
+        ctx.lower_pattern_bindings(&arm.pat, scrutinee_local, true);
         let arm_result = ctx.lower_expr(&arm.body);
+        ctx.pop_drop_scope(Some(arm_result));
+        ctx.restore_pattern_bindings(saved_bindings);
         let arm_end = ctx.current_block();
 
         if ctx
@@ -106,16 +120,28 @@ pub(super) fn lower_non_enum_match_expr(
     ctx: &mut LoweringContext<'_>,
     scrutinee_local: Local,
     arms: &[HIRMatchArm],
+    owns_enum_scrutinee: bool,
 ) -> Local {
+    if owns_enum_scrutinee {
+        ctx.mark_drop_local_moved(scrutinee_local);
+    }
     let join_block = ctx.new_block();
     let mut incoming_values: Vec<(Local, usize)> = Vec::new();
 
     for (i, arm) in arms.iter().enumerate() {
         let is_last = i == arms.len() - 1;
+        let saved_bindings = ctx.save_pattern_bindings(&arm.pat);
 
         if is_last && arm.guard.is_none() {
-            ctx.lower_pattern_bindings(&arm.pat, scrutinee_local);
+            if owns_enum_scrutinee {
+                ctx.push_drop_scope();
+            }
+            ctx.lower_pattern_bindings(&arm.pat, scrutinee_local, owns_enum_scrutinee);
             let arm_result = ctx.lower_expr(&arm.body);
+            if owns_enum_scrutinee {
+                ctx.pop_drop_scope(Some(arm_result));
+            }
+            ctx.restore_pattern_bindings(saved_bindings);
             let arm_end = ctx.current_block();
             if ctx
                 .mir_fn
@@ -139,10 +165,17 @@ pub(super) fn lower_non_enum_match_expr(
         }
 
         ctx.set_current_block(body_block);
-        if arm.guard.is_none() {
-            ctx.lower_pattern_bindings(&arm.pat, scrutinee_local);
+        if owns_enum_scrutinee {
+            ctx.push_drop_scope();
+            ctx.lower_pattern_bindings(&arm.pat, scrutinee_local, true);
+        } else if arm.guard.is_none() {
+            ctx.lower_pattern_bindings(&arm.pat, scrutinee_local, false);
         }
         let arm_result = ctx.lower_expr(&arm.body);
+        if owns_enum_scrutinee {
+            ctx.pop_drop_scope(Some(arm_result));
+        }
+        ctx.restore_pattern_bindings(saved_bindings);
         let arm_end = ctx.current_block();
         if ctx
             .mir_fn
@@ -166,7 +199,11 @@ pub(super) fn lower_non_enum_match_expr(
 fn phi_join(ctx: &mut LoweringContext<'_>, incoming_values: Vec<(Local, usize)>) -> Local {
     if let Some((first_value, _)) = incoming_values.first().copied() {
         let result_ty = ctx.get_local_type(first_value).clone();
-        if is_void_like(&result_ty) {
+        if is_void_like(&result_ty)
+            || incoming_values
+                .iter()
+                .any(|(value, _)| is_void_like(ctx.get_local_type(*value)))
+        {
             ctx.add_local(None, LocalKind::Temp, MIR_UNIT)
         } else {
             let result = ctx.add_local(None, LocalKind::Temp, result_ty);

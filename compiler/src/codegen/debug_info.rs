@@ -424,6 +424,7 @@ impl Codegen {
             }
             MIRType::Struct { name, fields } => self.debug_aggregate_metadata(id, name, fields),
             MIRType::Enum {
+                name: _,
                 discr_type,
                 variants: _,
             } => {

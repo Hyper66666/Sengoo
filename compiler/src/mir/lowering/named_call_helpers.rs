@@ -246,10 +246,163 @@ pub(super) fn lower_named_call(
 }
 
 fn is_option_mir_type(ty: &MIRType) -> bool {
-    matches!(ty, MIRType::Struct { name, fields }
-        if (name == "Option" || name.starts_with("Option_"))
-            && matches!(fields.first(), Some((_, MIRType::Bool)))
-            && fields.len() == 2)
+    match ty {
+        MIRType::Struct { name, fields } => {
+            (name == "Option" || name.starts_with("Option_"))
+                && matches!(fields.first(), Some((_, MIRType::Bool)))
+                && fields.len() == 2
+        }
+        MIRType::Enum { name, variants, .. } => {
+            (name == "Option" || name.starts_with("Option_")) && variants.len() == 2
+        }
+        _ => false,
+    }
+}
+
+#[derive(Debug, Clone)]
+enum OptionLayout {
+    LegacyStruct {
+        value_ty: MIRType,
+    },
+    Enum {
+        none_discriminant: u32,
+        some_discriminant: u32,
+        value_ty: MIRType,
+    },
+}
+
+fn option_layout(ctx: &LoweringContext<'_>, option_ty: &MIRType) -> Option<OptionLayout> {
+    match option_ty {
+        MIRType::Struct { name, fields }
+            if (name == "Option" || name.starts_with("Option_"))
+                && matches!(fields.first(), Some((_, MIRType::Bool))) =>
+        {
+            Some(OptionLayout::LegacyStruct {
+                value_ty: fields.get(1)?.1.clone(),
+            })
+        }
+        MIRType::Enum { name, .. } if name == "Option" || name.starts_with("Option_") => {
+            let enum_def = ctx.options.enum_defs.get(name).or_else(|| {
+                ctx.options
+                    .enum_defs
+                    .iter()
+                    .filter(|(decl, _)| name.starts_with(&format!("{decl}_")))
+                    .max_by_key(|(decl, _)| decl.len())
+                    .map(|(_, def)| def)
+            })?;
+            let none_discriminant = enum_def.variant_discriminant("None")?;
+            let some_discriminant = enum_def.variant_discriminant("Some")?;
+            let value_ty = crate::mir::enum_defs::EnumDef::instance_variant_payload(
+                option_ty,
+                some_discriminant,
+            )?;
+            Some(OptionLayout::Enum {
+                none_discriminant,
+                some_discriminant,
+                value_ty,
+            })
+        }
+        _ => None,
+    }
+}
+
+fn lower_option_none_value(
+    ctx: &mut LoweringContext<'_>,
+    option_ty: MIRType,
+    layout: &OptionLayout,
+) -> Local {
+    match layout {
+        OptionLayout::LegacyStruct { value_ty } => {
+            let is_some = ctx.lower_literal(&HIRLiteral::Bool(false));
+            let value = super::try_expr_helpers::default_value_for_type(ctx, value_ty);
+            let result = ctx.add_local(None, LocalKind::Temp, option_ty.clone());
+            ctx.push_inst(Instruction::Aggregate {
+                destination: result,
+                fields: vec![is_some, value],
+                ty: option_ty,
+            });
+            ctx.mark_drop_local_moved(value);
+            result
+        }
+        OptionLayout::Enum {
+            none_discriminant, ..
+        } => {
+            let result = ctx.add_local(None, LocalKind::Temp, option_ty.clone());
+            ctx.push_inst(Instruction::EnumConstruct {
+                destination: result,
+                discriminant: *none_discriminant,
+                payload: None,
+                enum_type: option_ty,
+            });
+            result
+        }
+    }
+}
+
+fn lower_option_from_flag(
+    ctx: &mut LoweringContext<'_>,
+    option_ty: MIRType,
+    layout: &OptionLayout,
+    is_some: Local,
+    value: Local,
+) -> Local {
+    match layout {
+        OptionLayout::LegacyStruct { .. } => {
+            let result = ctx.add_local(None, LocalKind::Temp, option_ty.clone());
+            ctx.push_inst(Instruction::Aggregate {
+                destination: result,
+                fields: vec![is_some, value],
+                ty: option_ty,
+            });
+            ctx.mark_drop_local_moved(value);
+            result
+        }
+        OptionLayout::Enum {
+            none_discriminant,
+            some_discriminant,
+            ..
+        } => {
+            let some_block = ctx.new_block();
+            let none_block = ctx.new_block();
+            let join_block = ctx.new_block();
+            ctx.set_terminator(Terminator::If {
+                cond: is_some,
+                then_block: some_block,
+                else_block: none_block,
+            });
+
+            ctx.set_current_block(some_block);
+            let some = ctx.add_local(None, LocalKind::Temp, option_ty.clone());
+            ctx.push_inst(Instruction::EnumConstruct {
+                destination: some,
+                discriminant: *some_discriminant,
+                payload: Some(value),
+                enum_type: option_ty.clone(),
+            });
+            let some_end = ctx.current_block();
+            ctx.set_terminator(Terminator::Goto(join_block));
+
+            ctx.set_current_block(none_block);
+            let none = ctx.add_local(None, LocalKind::Temp, option_ty.clone());
+            ctx.push_inst(Instruction::EnumConstruct {
+                destination: none,
+                discriminant: *none_discriminant,
+                payload: None,
+                enum_type: option_ty.clone(),
+            });
+            let none_end = ctx.current_block();
+            ctx.set_terminator(Terminator::Goto(join_block));
+
+            ctx.set_current_block(join_block);
+            let result = ctx.add_local(None, LocalKind::Temp, option_ty);
+            ctx.push_inst(Instruction::Phi {
+                destination: result,
+                incoming: vec![(some, some_end), (none, none_end)],
+            });
+            ctx.mark_drop_local_moved(value);
+            result
+        }
+    }
 }
 
 fn lower_option_none_call(
@@ -261,34 +414,12 @@ fn lower_option_none_call(
             .push("option_none<T>: expected concrete Option<T> return type".to_string());
         return ctx.add_local(None, LocalKind::Temp, MIR_UNIT);
     };
-    let MIRType::Struct { name, fields } = &option_ty else {
+    let Some(layout) = option_layout(ctx, &option_ty) else {
         ctx.errors
             .push("option_none<T>: expected concrete Option<T> return type".to_string());
         return ctx.add_local(None, LocalKind::Temp, MIR_UNIT);
     };
-    if !(name == "Option" || name.starts_with("Option_"))
-        || !matches!(fields.first(), Some((_, MIRType::Bool)))
-    {
-        ctx.errors
-            .push("option_none<T>: malformed Option<T> return type".to_string());
-        return ctx.add_local(None, LocalKind::Temp, MIR_UNIT);
-    }
-    let Some((_, value_ty)) = fields.get(1) else {
-        ctx.errors
-            .push("option_none<T>: malformed Option<T> return type".to_string());
-        return ctx.add_local(None, LocalKind::Temp, MIR_UNIT);
-    };
-
-    let is_some = ctx.lower_literal(&HIRLiteral::Bool(false));
-    let value = super::try_expr_helpers::default_value_for_type(ctx, value_ty);
-    let result = ctx.add_local(None, LocalKind::Temp, option_ty.clone());
-    ctx.push_inst(Instruction::Aggregate {
-        destination: result,
-        fields: vec![is_some, value],
-        ty: option_ty,
-    });
-    ctx.mark_drop_local_moved(value);
-    result
+    lower_option_none_value(ctx, option_ty, &layout)
 }
 
 fn lower_raw_hashset_remove_call(
@@ -453,17 +584,16 @@ fn lower_raw_hashmap_remove_call(
     let option_ty = expected_return_type
         .cloned()
         .unwrap_or_else(|| ctx.mir_fn.return_type.clone());
-    let MIRType::Struct { fields, .. } = &option_ty else {
+    let Some(layout) = option_layout(ctx, &option_ty) else {
         ctx.errors
             .push("raw_hashmap_remove<K,V>: expected Option<V>".to_string());
         return ctx.add_local(None, LocalKind::Temp, MIR_UNIT);
     };
-    let Some((_, value_ty)) = fields.get(1) else {
-        ctx.errors
-            .push("raw_hashmap_remove<K,V>: malformed Option<V>".to_string());
-        return ctx.add_local(None, LocalKind::Temp, MIR_UNIT);
+    let value_ty = match &layout {
+        OptionLayout::LegacyStruct { value_ty } | OptionLayout::Enum { value_ty, .. } => {
+            value_ty.clone()
+        }
     };
-    let value_ty = value_ty.clone();
     let value = super::try_expr_helpers::default_value_for_type(ctx, &value_ty);
     let value_slot = materialize_rc_payload_source(ctx, value, &value_ty);
     let value_ptr = ctx.add_local(None, LocalKind::Temp, MIRType::Ptr(Box::new(value_ty)));
@@ -491,14 +621,7 @@ fn lower_raw_hashmap_remove_call(
         left: status,
         right: zero,
     });
-    let result = ctx.add_local(None, LocalKind::Temp, option_ty.clone());
-    ctx.push_inst(Instruction::Aggregate {
-        destination: result,
-        fields: vec![is_some, value_slot],
-        ty: option_ty,
-    });
-    ctx.mark_drop_local_moved(value_slot);
-    result
+    lower_option_from_flag(ctx, option_ty, &layout, is_some, value_slot)
 }
 
 fn lower_raw_vec_iter_next_call(
@@ -510,12 +633,15 @@ fn lower_raw_vec_iter_next_call(
     let option_ty = expected_return_type
         .cloned()
         .unwrap_or_else(|| ctx.mir_fn.return_type.clone());
-    let MIRType::Struct { fields, .. } = &option_ty else {
+    let Some(layout) = option_layout(ctx, &option_ty) else {
         ctx.errors
             .push("raw_vec_iter_next<T>: expected concrete Option<&T>".to_string());
         return ctx.add_local(None, LocalKind::Temp, MIR_UNIT);
     };
-    let Some((_, ref_ty @ MIRType::Ref(_))) = fields.get(1) else {
+    let ref_ty = match &layout {
+        OptionLayout::LegacyStruct { value_ty } | OptionLayout::Enum { value_ty, .. } => value_ty,
+    };
+    let ref_ty @ MIRType::Ref(_) = ref_ty else {
         ctx.errors
             .push("raw_vec_iter_next<T>: expected concrete Option<&T>".to_string());
         return ctx.add_local(None, LocalKind::Temp, MIR_UNIT);
@@ -551,13 +677,7 @@ fn lower_raw_vec_iter_next_call(
         left: address,
         right: zero,
     });
-    let result = ctx.add_local(None, LocalKind::Temp, option_ty.clone());
-    ctx.push_inst(Instruction::Aggregate {
-        destination: result,
-        fields: vec![is_some, borrowed],
-        ty: option_ty,
-    });
-    result
+    lower_option_from_flag(ctx, option_ty, &layout, is_some, borrowed)
 }
 
 fn lower_raw_vec_get_call(
@@ -601,19 +721,17 @@ fn lower_raw_vec_take_call(
     let option_ty = expected_return_type
         .cloned()
         .unwrap_or_else(|| ctx.mir_fn.return_type.clone());
-    let MIRType::Struct { fields, .. } = &option_ty else {
+    let Some(layout) = option_layout(ctx, &option_ty) else {
         ctx.errors.push(format!(
             "{runtime_function}: concrete Option<T> return type could not be resolved"
         ));
         return ctx.add_local(None, LocalKind::Temp, MIR_UNIT);
     };
-    let Some((_, value_ty)) = fields.get(1) else {
-        ctx.errors.push(format!(
-            "{runtime_function}: malformed Option<T> return type"
-        ));
-        return ctx.add_local(None, LocalKind::Temp, MIR_UNIT);
+    let value_ty = match &layout {
+        OptionLayout::LegacyStruct { value_ty } | OptionLayout::Enum { value_ty, .. } => {
+            value_ty.clone()
+        }
     };
-    let value_ty = value_ty.clone();
     let value = super::try_expr_helpers::default_value_for_type(ctx, &value_ty);
     let value_slot = materialize_rc_payload_source(ctx, value, &value_ty);
     let value_ptr = ctx.add_local(None, LocalKind::Temp, MIRType::Ptr(Box::new(value_ty)));
@@ -651,14 +769,7 @@ fn lower_raw_vec_take_call(
         left: status,
         right: ok_status,
     });
-    let result = ctx.add_local(None, LocalKind::Temp, option_ty.clone());
-    ctx.push_inst(Instruction::Aggregate {
-        destination: result,
-        fields: vec![is_some, value_slot],
-        ty: option_ty,
-    });
-    ctx.mark_drop_local_moved(value_slot);
-    result
+    lower_option_from_flag(ctx, option_ty, &layout, is_some, value_slot)
 }
 
 fn lower_raw_vec_value_call(

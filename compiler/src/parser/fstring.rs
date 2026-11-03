@@ -126,6 +126,21 @@ mod tests {
     }
 
     #[test]
+    fn lowers_debug_spec_to_format_placeholder() {
+        let source = "def main() -> i64 { let s = f\"{p:?}\"; 0 }";
+        let exprs = first_fn_body_exprs(source);
+        let (template, args) = expect_format_call(&exprs[0]);
+        assert_eq!(template, "{:?}");
+        assert_eq!(args.len(), 1);
+        let span = args[0].span;
+        assert_eq!(
+            &source[span.lo as usize..span.hi as usize],
+            "p",
+            "debug spec should not be part of the interpolation expression span"
+        );
+    }
+
+    #[test]
     fn lowers_simple_interpolation_to_format_call() {
         let exprs = first_fn_body_exprs("def main() -> i64 { let s = f\"x={x}\"; 0 }");
         let (template, args) = expect_format_call(&exprs[0]);

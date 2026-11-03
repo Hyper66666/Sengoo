@@ -98,7 +98,7 @@ fn drop_glue_inserts_straight_line_string_drop_without_flags() {
     let mir = compile_with_owned_string(
         r#"
 def main() -> i64 {
-    let text: String = string_from_str("hello").value;
+    let text: String = string_from_str("hello").unwrap_or(String { handle: 0 });
     0
 }
 "#,
@@ -123,7 +123,7 @@ def may_fail() -> Result<i64, i64> {
 }
 
 def checked() -> Result<i64, i64> {
-    let text: String = string_from_str("before").value;
+    let text: String = string_from_str("before").unwrap_or(String { handle: 0 });
     let value = may_fail()?;
     result_ok_i64(value)
 }
@@ -162,7 +162,7 @@ fn drop_flags_guard_contract_abort_path_for_initialized_binding() {
 def checked(x: i64) -> i64
 ensures result > x
 {
-    let text: String = string_from_str("abort").value;
+    let text: String = string_from_str("abort").unwrap_or(String { handle: 0 });
     x - 1
 }
 "#
@@ -205,7 +205,7 @@ def may_fail() -> Result<i64, i64> {
 
 def checked() -> Result<i64, i64> {
     let value = may_fail()?;
-    let text: String = string_from_str("after").value;
+    let text: String = string_from_str("after").unwrap_or(String { handle: 0 });
     result_ok_i64(value)
 }
 "#,
@@ -226,8 +226,8 @@ fn drop_glue_drops_multiple_bindings_in_reverse_order() {
     let mir = compile_with_owned_string(
         r#"
 def main() -> i64 {
-    let first: String = string_from_str("first").value;
-    let second: String = string_from_str("second").value;
+    let first: String = string_from_str("first").unwrap_or(String { handle: 0 });
+    let second: String = string_from_str("second").unwrap_or(String { handle: 0 });
     0
 }
 "#,
@@ -266,7 +266,7 @@ fn moved_owned_binding_is_excluded_from_drop_glue() {
     let mir = compile_with_owned_string(
         r#"
 def main() -> i64 {
-    let first: String = string_from_str("first").value;
+    let first: String = string_from_str("first").unwrap_or(String { handle: 0 });
     let second: String = first;
     0
 }
@@ -292,8 +292,8 @@ struct Pair {
 
 def main() -> i64 {
     let pair = Pair {
-        left: string_from_str("left").value,
-        right: string_from_str("right").value,
+        left: string_from_str("left").unwrap_or(String { handle: 0 }),
+        right: string_from_str("right").unwrap_or(String { handle: 0 }),
     };
     0
 }
@@ -394,8 +394,8 @@ struct Pair {
 
 def main() -> i64 {
     let pair = Pair {
-        left: string_from_str("left").value,
-        right: string_from_str("right").value,
+        left: string_from_str("left").unwrap_or(String { handle: 0 }),
+        right: string_from_str("right").unwrap_or(String { handle: 0 }),
     };
     let moved = pair.left;
     0
@@ -435,8 +435,8 @@ def consume(value: String) -> i64 {
 
 def main() -> i64 {
     let pair = Pair {
-        left: string_from_str("left").value,
-        right: string_from_str("right").value,
+        left: string_from_str("left").unwrap_or(String { handle: 0 }),
+        right: string_from_str("right").unwrap_or(String { handle: 0 }),
     };
     consume(pair.left)
 }
@@ -467,8 +467,8 @@ struct Pair {
 
 def take_left() -> String {
     let pair = Pair {
-        left: string_from_str("left").value,
-        right: string_from_str("right").value,
+        left: string_from_str("left").unwrap_or(String { handle: 0 }),
+        right: string_from_str("right").unwrap_or(String { handle: 0 }),
     };
     pair.left
 }
@@ -499,11 +499,11 @@ struct Pair {
 
 def main() -> i64 {
     let mut pair = Pair {
-        left: string_from_str("left").value,
-        right: string_from_str("right").value,
+        left: string_from_str("left").unwrap_or(String { handle: 0 }),
+        right: string_from_str("right").unwrap_or(String { handle: 0 }),
     };
     let moved = pair.left;
-    pair.left = string_from_str("replacement").value;
+    pair.left = string_from_str("replacement").unwrap_or(String { handle: 0 });
     0
 }
 "#,
@@ -531,8 +531,8 @@ fn assignment_moved_owned_binding_is_excluded_from_drop_glue() {
     let mir = compile_with_owned_string(
         r#"
 def main() -> i64 {
-    let first: String = string_from_str("first").value;
-    let mut second: String = string_from_str("second").value;
+    let first: String = string_from_str("first").unwrap_or(String { handle: 0 });
+    let mut second: String = string_from_str("second").unwrap_or(String { handle: 0 });
     second = first;
     0
 }
@@ -558,7 +558,7 @@ fn conditional_init_drops_at_branch_exit_without_function_flag() {
         r#"
 def choose(flag: bool) -> i64 {
     if flag {
-        let text: String = string_from_str("branch").value;
+        let text: String = string_from_str("branch").unwrap_or(String { handle: 0 });
         text.len()
     } else {
         0
@@ -585,7 +585,7 @@ fn returned_owned_binding_is_not_dropped_before_return() {
     let mir = compile_with_owned_string(
         r#"
 def make_text() -> String {
-    let text: String = string_from_str("return").value;
+    let text: String = string_from_str("return").unwrap_or(String { handle: 0 });
     text
 }
 "#,
@@ -608,7 +608,7 @@ def consume(value: String) -> i64 {
 }
 
 def main() -> i64 {
-    let text: String = string_from_str("call").value;
+    let text: String = string_from_str("call").unwrap_or(String { handle: 0 });
     consume(text)
 }
 "#,
@@ -627,8 +627,8 @@ fn method_owned_argument_is_excluded_from_caller_drop_glue() {
     let mir = compile_with_owned_string(
         r#"
 def main() -> i64 {
-    let left: String = string_from_str("left").value;
-    let right: String = string_from_str("right").value;
+    let left: String = string_from_str("left").unwrap_or(String { handle: 0 });
+    let right: String = string_from_str("right").unwrap_or(String { handle: 0 });
     if left.eq(right) {
         1
     } else {
@@ -651,7 +651,7 @@ fn explicit_drop_method_consumes_receiver_for_drop_glue() {
     let mir = compile_with_owned_string(
         r#"
 def main() -> i64 {
-    let text: String = string_from_str("drop").value;
+    let text: String = string_from_str("drop").unwrap_or(String { handle: 0 });
     text.drop();
     0
 }
@@ -701,7 +701,7 @@ fn explicit_return_runs_drop_glue_for_live_owned_binding() {
     let mir = compile_with_owned_string(
         r#"
 def choose(flag: bool) -> i64 {
-    let text: String = string_from_str("return").value;
+    let text: String = string_from_str("return").unwrap_or(String { handle: 0 });
     if flag {
         return text.len();
     }
@@ -1093,14 +1093,10 @@ impl Drop for Resource {
     }
 }
 
-struct Result<T, E> {
-    is_ok: bool,
-    value: T,
-    error: E,
-}
+enum Result<T, E> { Ok(T), Err(E) }
 
 def may_fail() -> Result<i64, i64> {
-    Result { is_ok: false, value: 0, error: 9 }
+    Err(9)
 }
 
 def checked(flag: bool) -> Result<i64, i64> {
@@ -1111,7 +1107,7 @@ def checked(flag: bool) -> Result<i64, i64> {
     } else {
         0
     };
-    Result { is_ok: true, value: 0, error: 0 }
+    Ok(0)
 }
 "#,
     )
@@ -1200,14 +1196,10 @@ impl Drop for Resource {
     }
 }
 
-struct Result<T, E> {
-    is_ok: bool,
-    value: T,
-    error: E,
-}
+enum Result<T, E> { Ok(T), Err(E) }
 
 def may_fail() -> Result<i64, i64> {
-    Result { is_ok: false, value: 0, error: 9 }
+    Err(9)
 }
 
 def main() -> i64 {
@@ -1216,10 +1208,9 @@ def main() -> i64 {
         let value = may_fail()?;
         value + resource.handle
     };
-    if outcome.is_ok {
-        outcome.value
-    } else {
-        0
+    match outcome {
+        Ok(value) => value,
+        Err(_) => 0,
     }
 }
 "#,
@@ -1328,11 +1319,13 @@ def main() -> i64 {
         .iter()
         .find(|f| f.name == "route" || f.name.ends_with("route"))
         .expect("expected route function");
-    // Parent route should not Drop Bundle.label; ownership transferred.
+    // Parent must not run an unguarded Drop: ownership transferred on both
+    // arms. Flagged drop glue may still mention String_Drop_drop, but both
+    // branches clear the live flag so the call is unreachable.
+    let parent_drops = string_drop_calls(route).len();
     assert!(
-        string_drop_calls(route).is_empty()
-            && named_drop_calls(route, "String_Drop_drop").is_empty(),
-        "parent must not drop aggregate moved on both branches:\n{:?}",
+        parent_drops == 0 || (has_guard_terminator(route) && bool_assigns(route, false) >= 2),
+        "parent must not unguarded-drop aggregate moved on both branches:\n{:?}",
         route
     );
 }
@@ -1425,7 +1418,7 @@ def main() -> i64 {
 fn borrowed_result_predicate_does_not_drop_owned_success_payload() {
     let ir = compile_to_ir(
         r#"
-struct Result<T, E> { is_ok: bool, value: T, error: E }
+enum Result<T, E> { Ok(T), Err(E) }
 struct Owned { handle: i64 }
 
 impl Drop for Owned {
@@ -1433,13 +1426,17 @@ impl Drop for Owned {
 }
 
 impl<T, E> Result<T, E> {
-    def is_err(&self) -> bool { !self.is_ok }
+    def is_err(&self) -> bool {
+        match self { Ok(_) => false, Err(_) => true }
+    }
 }
 
 def inspect_then_move(result: Result<Owned, i64>) -> i64 {
     let failed = result.is_err();
-    let payload = result.value;
-    if failed { 0 } else { payload.handle }
+    match result {
+        Ok(payload) => if failed { 0 } else { payload.handle },
+        Err(_) => 0,
+    }
 }
 
 def main() -> i64 { 0 }

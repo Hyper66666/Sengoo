@@ -518,9 +518,9 @@ def main() -> i64 {
     );
     let err = result.unwrap_err().to_string();
     assert!(
-        err.contains("参数数量错误")
+        err.contains("argument count mismatch")
             || err.contains("ArgumentCountMismatch")
-            || err.contains("期望 1 个, 找到 0 个"),
+            || err.contains("expected 1, found 0"),
         "error should report argument count mismatch, got: {}",
         err
     );

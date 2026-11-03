@@ -17,26 +17,16 @@ impl<'source> Parser<'source> {
         let lo = self.current_span().lo;
         self.expect(TokenKind::IfKw)?;
 
+        if self.check(TokenKind::LetKw) {
+            return self.parse_if_let_expr(lo);
+        }
+
         let prev = self.in_condition_context;
         self.in_condition_context = true;
         let cond = self.parse_expr()?;
         self.in_condition_context = prev;
         let then_branch = self.parse_block()?;
-
-        let else_branch = if self.consume(TokenKind::ElseKw).is_some() {
-            if self.check(TokenKind::IfKw) {
-                Some(Box::new(self.parse_if_expr()?))
-            } else {
-                let lo = self.current_span().lo;
-                let block = self.parse_block()?;
-                Some(Box::new(Expr::new(
-                    ExprKind::Block(block),
-                    self.span_at(lo),
-                )))
-            }
-        } else {
-            None
-        };
+        let else_branch = self.parse_optional_else_branch()?;
 
         Ok(Expr::new(
             ExprKind::If {
@@ -46,6 +36,40 @@ impl<'source> Parser<'source> {
             },
             self.span_at(lo),
         ))
+    }
+
+    fn parse_if_let_expr(&mut self, lo: u32) -> Result<Expr> {
+        self.expect(TokenKind::LetKw)?;
+        let pattern = self.parse_pattern()?;
+        self.expect(TokenKind::Assign)?;
+        let prev = self.in_condition_context;
+        self.in_condition_context = true;
+        let expr = self.parse_expr()?;
+        self.in_condition_context = prev;
+        let then_branch = self.parse_block()?;
+        let else_branch = self.parse_optional_else_branch()?;
+        Ok(Expr::if_let_expr(
+            pattern,
+            expr,
+            then_branch,
+            else_branch,
+            self.span_at(lo),
+        ))
+    }
+
+    fn parse_optional_else_branch(&mut self) -> Result<Option<Box<Expr>>> {
+        if self.consume(TokenKind::ElseKw).is_none() {
+            return Ok(None);
+        }
+        if self.check(TokenKind::IfKw) {
+            return Ok(Some(Box::new(self.parse_if_expr()?)));
+        }
+        let lo = self.current_span().lo;
+        let block = self.parse_block()?;
+        Ok(Some(Box::new(Expr::new(
+            ExprKind::Block(block),
+            self.span_at(lo),
+        ))))
     }
 
     /// 解析while条件循环表达式。

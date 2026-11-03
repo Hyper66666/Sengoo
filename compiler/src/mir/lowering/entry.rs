@@ -61,6 +61,10 @@ fn lower_hir_with_options_scoped(
         collect_concrete_named_types_with_impl_variants(items, &known_named_types);
     let enum_defs = build_enum_defs(items, &struct_defs);
     let concrete_type_registry = ConcreteTypeRegistry::new(&struct_defs, &concrete_named_types);
+    // Keep enum declarations visible to nested type binders (method
+    // specialization sees only struct_defs otherwise) for this lowering run.
+    let _scoped_enum_defs =
+        crate::mir::type_mapping_helpers::ScopedEnumDefs::install(enum_defs.clone());
     let options = options.with_enum_defs(enum_defs);
     let (trait_method_order, dyn_param_traits) =
         build_dyn_dispatch_metadata(items, &trait_defs, &struct_defs, &options.enum_defs);

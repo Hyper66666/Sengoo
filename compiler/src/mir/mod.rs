@@ -220,8 +220,11 @@ pub enum MIRType {
         fields: Vec<(String, MIRType)>,
     },
     /// 枚举类型
-    /// 表示为 (判别值类型, [(变体索引, 变体类型)])
+    /// 表示为 (实例名, 判别值类型, [(变体索引, 变体类型)])
     Enum {
+        /// Monomorphised instance name, e.g. `Option_i64`. Empty for anonymous
+        /// enums synthesised by the compiler.
+        name: String,
         /// 判别值类型（通常是整数）
         discr_type: Box<MIRType>,
         /// 变体信息：(判别值, 变体数据类型)
@@ -268,11 +271,33 @@ impl MIRType {
         MIRType::Tuple(types)
     }
 
-    /// 创建枚举类型
+    /// 创建枚举类型（匿名实例）
     pub fn enum_type(discr_type: MIRType, variants: Vec<(u32, Option<MIRType>)>) -> Self {
         MIRType::Enum {
+            name: String::new(),
             discr_type: Box::new(discr_type),
             variants,
+        }
+    }
+
+    /// 创建具名枚举实例类型
+    pub fn named_enum_type(
+        name: impl Into<String>,
+        discr_type: MIRType,
+        variants: Vec<(u32, Option<MIRType>)>,
+    ) -> Self {
+        MIRType::Enum {
+            name: name.into(),
+            discr_type: Box::new(discr_type),
+            variants,
+        }
+    }
+
+    /// Instance name of an enum type, if it has one.
+    pub fn enum_instance_name(&self) -> Option<&str> {
+        match self {
+            MIRType::Enum { name, .. } if !name.is_empty() => Some(name.as_str()),
+            _ => None,
         }
     }
 

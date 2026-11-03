@@ -6,9 +6,9 @@ extern "C" {
 def hash_sha256_bytes(data_ptr: i64, data_len: i64, out: Buffer) -> Result<i64, i64> {
     let digest_len = sengoo_hash_sha256(data_ptr, data_len, out.handle, out.len());
     if digest_len >= 0 {
-        Result { is_ok: true, value: digest_len, error: 0 }
+        Ok(digest_len)
     } else {
-        Result { is_ok: false, value: 0, error: status_from_raw_ffi(digest_len) }
+        Err(status_from_raw_ffi(digest_len))
     }
 }
 

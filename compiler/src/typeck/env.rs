@@ -2,6 +2,8 @@
 //!
 //! 管理符号表和作用域。
 
+use crate::ast::Expr;
+use crate::lexer::Span;
 use crate::typeck::interner::TyInterner;
 use crate::typeck::r#trait::type_key;
 use crate::typeck::ty::{Ty, TyKind, TyVarId};
@@ -134,9 +136,17 @@ pub struct TypeEnv {
     resolved_method_return_types: HashMap<(u32, u32), Ty>,
     /// Concrete return type selected for a generic function call.
     resolved_call_return_types: HashMap<u32, Ty>,
+    /// Concrete enum instance selected for a payload-free variant expression.
+    /// These variants have no argument from which HIR can recover generic
+    /// arguments, so the expected type chosen during checking is retained by
+    /// the expression's full span.
+    resolved_enum_variant_types: HashMap<(u32, u32), Ty>,
     resolved_struct_literal_types: HashMap<(u32, u32), Ty>,
     /// Fully-qualified symbol selected for an associated trait function call.
     resolved_associated_functions: HashMap<u32, String>,
+    /// Iterator-protocol `for` loops rewritten to `loop` + `match next()`.
+    desugared_for_loops: HashMap<(u32, u32), Expr>,
+    next_synthetic_span: u32,
 }
 
 #[derive(Debug, Clone)]
@@ -158,8 +168,11 @@ impl TypeEnv {
             struct_field_types: HashMap::new(),
             resolved_method_return_types: HashMap::new(),
             resolved_call_return_types: HashMap::new(),
+            resolved_enum_variant_types: HashMap::new(),
             resolved_struct_literal_types: HashMap::new(),
             resolved_associated_functions: HashMap::new(),
+            desugared_for_loops: HashMap::new(),
+            next_synthetic_span: 2_000_000_000,
         };
         // 创建全局作用域
         env.push_scope();
@@ -416,6 +429,12 @@ impl TypeEnv {
         }
     }
 
+    pub fn legacy_handle_method_borrows_receiver(&self, ty: &Ty, method: &str) -> bool {
+        method != "into_iter"
+            && (self.is_legacy_idempotent_handle_type(ty)
+                || matches!(&ty.kind, TyKind::Adt { name, .. } if name == "String"))
+    }
+
     fn type_contains_drop_owned_value_inner(
         &self,
         ty: &Ty,
@@ -548,6 +567,15 @@ impl TypeEnv {
         self.resolved_call_return_types.get(&call_site)
     }
 
+    pub fn record_enum_variant_type(&mut self, site: crate::lexer::Span, ty: Ty) {
+        self.resolved_enum_variant_types
+            .insert((site.lo, site.hi), ty);
+    }
+
+    pub fn resolved_enum_variant_type(&self, site: crate::lexer::Span) -> Option<&Ty> {
+        self.resolved_enum_variant_types.get(&(site.lo, site.hi))
+    }
+
     pub fn record_struct_literal_type(&mut self, site: crate::lexer::Span, ty: Ty) {
         self.resolved_struct_literal_types
             .insert((site.lo, site.hi), ty);
@@ -559,6 +587,20 @@ impl TypeEnv {
 
     pub fn record_associated_function(&mut self, call_site: u32, name: String) {
         self.resolved_associated_functions.insert(call_site, name);
+    }
+
+    pub fn fresh_synthetic_span(&mut self) -> Span {
+        let lo = self.next_synthetic_span;
+        self.next_synthetic_span = self.next_synthetic_span.saturating_add(2);
+        Span::new(lo, lo + 1)
+    }
+
+    pub fn record_desugared_for(&mut self, site: Span, expr: Expr) {
+        self.desugared_for_loops.insert((site.lo, site.hi), expr);
+    }
+
+    pub fn desugared_for(&self, site: Span) -> Option<&Expr> {
+        self.desugared_for_loops.get(&(site.lo, site.hi))
     }
 
     pub fn resolved_associated_function(&self, call_site: u32) -> Option<&str> {
