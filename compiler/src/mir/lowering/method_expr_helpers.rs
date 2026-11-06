@@ -8,7 +8,15 @@ pub(super) fn lower_method_call_expr(
     args: &[HIRExpr],
     expected_return_type: Option<&HIRType>,
 ) -> Local {
-    let receiver_local = ctx.lower_expr(receiver);
+    // Preserve an addressable field path until receiver ABI selection. Loading
+    // the field first would silently mutate a temporary copy of nested state.
+    let receiver_local = if let Some(field_ref) =
+        super::pointer_expr_helpers::try_lower_addressable_field_ref(ctx, receiver)
+    {
+        field_ref
+    } else {
+        ctx.lower_expr(receiver)
+    };
     let arg_locals: Vec<Local> = args.iter().map(|a| ctx.lower_expr(a)).collect();
     let receiver_ty = ctx.get_local_type(receiver_local).clone();
     let consumes_receiver =

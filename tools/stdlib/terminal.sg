@@ -1,0 +1,149 @@
+extern "C" {
+    fn sengoo_terminal_open() -> i64;
+    fn sengoo_terminal_is_tty(handle: i64) -> i64;
+    fn sengoo_terminal_enter_raw(handle: i64) -> i64;
+    fn sengoo_terminal_enter_fullscreen(handle: i64) -> i64;
+    fn sengoo_terminal_leave_fullscreen(handle: i64) -> i64;
+    fn sengoo_terminal_set_mouse(handle: i64, enabled: i64) -> i64;
+    fn sengoo_terminal_restore(handle: i64) -> i64;
+    fn sengoo_terminal_discard_input(handle: i64) -> i64;
+    fn sengoo_terminal_clear_after_cursor(handle: i64) -> i64;
+    fn sengoo_terminal_write(handle: i64, bytes: i64, length: i64) -> i64;
+    fn sengoo_terminal_read_event(handle: i64, timeout_ms: i64) -> i64;
+    fn sengoo_terminal_event_field(handle: i64, field: i64) -> i64;
+    fn sengoo_terminal_event_text(handle: i64) -> i64;
+    fn sengoo_terminal_close(handle: i64) -> i64;
+    fn sengoo_terminal_live_handle_count() -> i64;
+    fn sengoo_terminal_copy_text(bytes: i64, length: i64) -> i64;
+    fn sengoo_terminal_clipboard_has_image() -> i64;
+    fn sengoo_terminal_clipboard_image_save(path: i64, length: i64, maximum: i64) -> i64;
+    fn sengoo_terminal_clipboard_text() -> i64;
+    fn sengoo_terminal_clipboard_files() -> i64;
+}
+
+struct Terminal {
+    handle: i64,
+}
+
+struct TerminalEvent {
+    kind: i64,
+    code: i64,
+    modifiers: i64,
+    width: i64,
+    height: i64,
+    data: String,
+}
+
+// kind 6 on TerminalEvent. Snapshot this before reading another event.
+// action: 1 press, 2 release, 3 motion, 4 wheel. button: 0 none,
+// 1 left, 2 middle, 3 right, 4/5 extra. Coordinates are zero-based cells.
+// Wheel deltas use 120 units per detent; positive x is right, positive y up.
+struct TerminalMouseEvent {
+    column: i64,
+    row: i64,
+    button: i64,
+    action: i64,
+    scroll_x: i64,
+    scroll_y: i64,
+    clicks: i64,
+    modifiers: i64,
+}
+
+impl !Send for Terminal {
+}
+
+impl !Sync for Terminal {
+}
+
+def terminal_open() -> Result<Terminal, i64> {
+    let raw = sengoo_terminal_open();
+    if raw > 0 { Result { is_ok: true, value: Terminal { handle: raw }, error: 0 }; } else { Result { is_ok: false, value: Terminal { handle: 0 }, error: status_from_raw_ffi(raw) }; };
+}
+
+def terminal_status(raw: i64) -> Result<bool, i64> {
+    if raw >= 0 { Result { is_ok: true, value: raw != 0, error: 0 }; } else { Result { is_ok: false, value: false, error: status_from_raw_ffi(raw) }; };
+}
+
+// Windows clipboard text, independent of the terminal mode. Strict UTF-8,
+// maximum 64 KiB; embedded NUL is rejected. No user-visible helper window.
+def terminal_copy_text(text: &String) -> Result<bool, i64> {
+    terminal_status(sengoo_terminal_copy_text(sengoo_string_as_str_ptr(text.handle), text.len()));
+}
+
+// Explicit user-paste operations only. No terminal mode or clipboard contents
+// are modified. Image save creates a new PNG; it never overwrites a file.
+def terminal_clipboard_has_image() -> Result<bool, i64> { terminal_status(sengoo_terminal_clipboard_has_image()) }
+def terminal_clipboard_image_save(path: &String, maximum: i64) -> Result<bool, i64> {
+    terminal_status(sengoo_terminal_clipboard_image_save(sengoo_string_as_str_ptr(path.handle), path.len(), maximum))
+}
+def terminal_clipboard_text() -> Result<String, i64> {
+    let raw = sengoo_terminal_clipboard_text();
+    if raw > 0 { Result { is_ok: true, value: String { handle: raw }, error: 0 } } else { Result { is_ok: false, value: String { handle: 0 }, error: status_from_raw_ffi(raw) } }
+}
+// A JSON array of CF_HDROP original paths, captured in one clipboard snapshot.
+// Empty array means no dropped files; at most 32 paths and 1 MiB total UTF-8.
+def terminal_clipboard_files() -> Result<String, i64> {
+    let raw = sengoo_terminal_clipboard_files();
+    if raw > 0 { Result { is_ok: true, value: String { handle: raw }, error: 0 } } else { Result { is_ok: false, value: String { handle: 0 }, error: status_from_raw_ffi(raw) } }
+}
+
+impl Terminal {
+    def is_tty(&self) -> bool {
+        sengoo_terminal_is_tty(self.handle) > 0;
+    }
+    def enter_raw(&self) -> Result<bool, i64> {
+        terminal_status(sengoo_terminal_enter_raw(self.handle));
+    }
+    def enter_fullscreen(&self) -> Result<bool, i64> {
+        terminal_status(sengoo_terminal_enter_fullscreen(self.handle));
+    }
+    def leave_fullscreen(&self) -> Result<bool, i64> {
+        terminal_status(sengoo_terminal_leave_fullscreen(self.handle));
+    }
+    def set_mouse(&self, enabled: bool) -> Result<bool, i64> {
+        terminal_status(sengoo_terminal_set_mouse(self.handle, if enabled { 1 } else { 0 }));
+    }
+    def mouse(&self) -> TerminalMouseEvent {
+        TerminalMouseEvent {
+            column: sengoo_terminal_event_field(self.handle, 5),
+            row: sengoo_terminal_event_field(self.handle, 6),
+            button: sengoo_terminal_event_field(self.handle, 7),
+            action: sengoo_terminal_event_field(self.handle, 8),
+            scroll_x: sengoo_terminal_event_field(self.handle, 9),
+            scroll_y: sengoo_terminal_event_field(self.handle, 10),
+            clicks: sengoo_terminal_event_field(self.handle, 11),
+            modifiers: sengoo_terminal_event_field(self.handle, 2),
+        }
+    }
+    def restore(&self) -> Result<bool, i64> {
+        terminal_status(sengoo_terminal_restore(self.handle));
+    }
+    def discard_input(&self) -> Result<bool, i64> {
+        terminal_status(sengoo_terminal_discard_input(self.handle));
+    }
+    def clear_after_cursor(&self) -> Result<bool, i64> {
+        terminal_status(sengoo_terminal_clear_after_cursor(self.handle));
+    }
+    def width(&self) -> i64 {
+        sengoo_terminal_event_field(self.handle, 3);
+    }
+    def height(&self) -> i64 {
+        sengoo_terminal_event_field(self.handle, 4);
+    }
+    def write(&self, text: &str) -> Result<bool, i64> {
+        terminal_status(sengoo_terminal_write(self.handle, sengoo_stdlib_str_ptr(text), text.len()));
+    }
+    def read_event(&self, timeout_ms: i64) -> Result<TerminalEvent, i64> {
+        let kind = sengoo_terminal_read_event(self.handle, timeout_ms);
+        if kind < 0 { return Result { is_ok: false, value: TerminalEvent { kind: 0, code: 0, modifiers: 0, width: 0, height: 0, data: String { handle: 0 } }, error: status_from_raw_ffi(kind) }; };
+        let text = sengoo_terminal_event_text(self.handle);
+        if text <= 0 { return Result { is_ok: false, value: TerminalEvent { kind: 0, code: 0, modifiers: 0, width: 0, height: 0, data: String { handle: 0 } }, error: status_from_raw_ffi(text) }; };
+        Result { is_ok: true, value: TerminalEvent { kind: kind, code: sengoo_terminal_event_field(self.handle, 1), modifiers: sengoo_terminal_event_field(self.handle, 2), width: self.width(), height: self.height(), data: String { handle: text } }, error: 0 };
+    }
+}
+
+impl Drop for Terminal {
+    def drop(&mut self) {
+        if self.handle != 0 { sengoo_terminal_close(self.handle); };
+    }
+}

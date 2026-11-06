@@ -48,6 +48,28 @@ for application input. `prepare` accepts exactly one statement. Bind indices are
 one-based, column indices zero-based. Binding methods support `null`, `i64`, `f64`,
 `text`, and `blob(&Buffer)`; SQLite copies bound string/binary data before returning.
 
+`changes() -> Result<i64,i64>` returns SQLite's direct change count for the most
+recent INSERT/UPDATE/DELETE; trigger side effects do not inflate this count.
+`last_insert_rowid()` preserves the full signed i64 value, including negative
+rowids. Both observe this connection and follow the active-transaction guard.
+`backup_to(path)` uses SQLite's online backup API to copy a consistent main
+database to a persistent file, including committed WAL data. The destination
+must differ from the source; `:memory:` is rejected. The configured busy timeout
+also applies to destination locking. Backup is synchronous and can report
+busy/I/O; it does not publish an atomic renamed archive. Use a separate temporary
+destination and an application-controlled final rename when needed.
+
+`set_context(key,value)` stores a private owned string on this connection.
+Keys contain 1–128 UTF-8 bytes, values 0–4096; NUL is rejected and there are at
+most 64 keys. Updating a key replaces its owned value. The SQL scalar
+`sengoo_context(key)` reads a value, returning SQL NULL when missing. It can be
+used by triggers and cannot change context through SQL. Set context before
+starting a transaction; connection mutation remains rejected during an active
+transaction. Context survives while a statement retains its connection, is
+freed on final connection cleanup, and is excluded from database backups.
+It is application metadata, not a secret store or a sandbox against code that
+owns the connection API.
+
 `step()` returns `true` for a current row and `false` for completion. Accessors
 `integer`, `number`, `text`, `blob`, and `is_null` validate the current row and
 column type. Text/binary outputs are independent owned values and survive the

@@ -758,6 +758,7 @@ impl<'source> Parser<'source> {
                     | TokenKind::FalseKw
                     | TokenKind::NullKw
                     | TokenKind::Ident
+                    | TokenKind::SelfLowerKw
                     | TokenKind::LParen
                     | TokenKind::LBrace
                     | TokenKind::LBracket

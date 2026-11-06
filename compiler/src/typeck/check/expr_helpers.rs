@@ -638,14 +638,22 @@ impl TypeChecker {
         Ok(self.env.unit_ty())
     }
 
-    fn ensure_assignable_target(&self, target: &Expr) -> TyResult<()> {
+    fn ensure_assignable_target(&mut self, target: &Expr) -> TyResult<()> {
         let binding = match &target.kind {
             ExprKind::Ident(ident) => Some((ident.name.as_str(), ident.span)),
             ExprKind::Path(path) => path
                 .as_simple()
                 .map(|ident| (ident.name.as_str(), ident.span)),
             ExprKind::Index { base, .. } | ExprKind::Field { base, .. } => {
+                let base_ty = self.check_expr(base)?;
+                if matches!(base_ty.kind, TyKind::Ref(_, _)) {
+                    return Self::ensure_mutable_projection(&base_ty, target);
+                }
                 return self.ensure_assignable_target(base);
+            }
+            ExprKind::Unary { op: UnOp::Deref, operand } => {
+                let operand_ty = self.check_expr(operand)?;
+                return Self::ensure_mutable_projection(&operand_ty, target);
             }
             _ => None,
         };
@@ -669,6 +677,22 @@ impl TypeChecker {
             span.lo,
             span.hi,
         ))
+    }
+
+    fn ensure_mutable_projection(ty: &Ty, target: &Expr) -> TyResult<()> {
+        let mut current = ty;
+        while let TyKind::Ref(mutable, inner) = &current.kind {
+            if !mutable {
+                let (lo, hi) = expression_subject_span(target);
+                return Err(TypeckError::diagnostic(
+                    "immutable-reference-assignment",
+                    "cannot assign through an immutable reference; use `&mut`".to_string(),
+                    lo, hi,
+                ));
+            }
+            current = inner;
+        }
+        Ok(())
     }
 
     pub(super) fn check_index(&mut self, base: &Expr, index: &Expr) -> TyResult<Ty> {
@@ -739,6 +763,10 @@ impl TypeChecker {
 
     pub(super) fn check_field(&mut self, base: &Expr, name: &Ident) -> TyResult<Ty> {
         let base_ty = self.check_expr(base)?;
+        let mut base_ty = &base_ty;
+        while let TyKind::Ref(_, inner) = &base_ty.kind {
+            base_ty = inner;
+        }
 
         match &base_ty.kind {
             TyKind::Tuple(types) => tuple_field_index(&name.name)

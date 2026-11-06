@@ -166,7 +166,15 @@ fn lower_function_with_self(
         if let Some(ty) = &self_type {
             // self 参数的类型是 impl 块的目标类型
             let self_param = if _self_param.is_ref() {
-                HIRParam::borrowed("self".to_string(), SymbolId::INVALID, ty.clone())
+                // Mutable methods must receive the original storage. The
+                // Drop impl's legacy ABI is normalized in lower_impl, where
+                // the trait identity is available.
+                let receiver_ty = if _self_param.is_mut() {
+                    HIRType::reference(true, ty.clone())
+                } else {
+                    ty.clone()
+                };
+                HIRParam::borrowed("self".to_string(), SymbolId::INVALID, receiver_ty)
             } else {
                 HIRParam::new("self".to_string(), SymbolId::INVALID, ty.clone())
             };
@@ -683,13 +691,19 @@ fn lower_impl(impl_decl: &ast::Impl, type_env: &TypeEnv) -> Result<HIRImpl, Stri
         .items
         .iter()
         .filter_map(|fn_decl| {
-            lower_function_with_self(
+            let mut lowered = lower_function_with_self(
                 fn_decl,
                 type_env,
                 Some(target_type.clone()),
                 type_prefix.clone(),
             )
-            .ok()
+            .ok()?;
+            if trait_name.as_deref() == Some("Drop") && fn_decl.name.name == "drop" {
+                if let Some(receiver) = lowered.params.first_mut() {
+                    receiver.ty = target_type.clone();
+                }
+            }
+            Some(lowered)
         })
         .collect();
 

@@ -6,7 +6,20 @@ pub(super) fn lower_ref_expr(ctx: &mut LoweringContext<'_>, expr: &HIRExpr) -> L
     }
 
     let expr_local = ctx.lower_expr(expr);
-    let expr_ty = ctx.get_local_type(expr_local).clone();
+    borrow_local(ctx, expr_local)
+}
+
+pub(super) fn borrow_local(ctx: &mut LoweringContext<'_>, local: Local) -> Local {
+    let expr_ty = ctx.get_local_type(local).clone();
+    // Params and expression temporaries are SSA values. Spill a value receiver
+    // before taking its address; user bindings already have stable storage.
+    let expr_local = if local.kind == LocalKind::User {
+        local
+    } else {
+        let storage = ctx.add_local(None, LocalKind::User, expr_ty.clone());
+        ctx.push_inst(Instruction::Store { destination: storage, value: local });
+        storage
+    };
 
     let ptr_ty = MIRType::Ptr(Box::new(expr_ty));
     let ptr_local = ctx.add_local(None, LocalKind::Temp, ptr_ty);
@@ -31,10 +44,19 @@ pub(super) fn try_lower_addressable_field_ref(
     expr: &HIRExpr,
 ) -> Option<Local> {
     if let HIRExpr::Field { base, field } = expr {
-        let base_local = ctx.lower_expr(base);
+        let base_local = match base.as_ref() {
+            HIRExpr::Field { .. } => try_lower_addressable_field_ref(ctx, base)?,
+            HIRExpr::Deref(inner) | HIRExpr::Unary(hir::HIRUnaryOp::Deref, inner) => ctx.lower_expr(inner),
+            HIRExpr::Var { .. } => ctx.lower_expr(base),
+            _ => return None,
+        };
         let base_ty = ctx.get_local_type(base_local).clone();
-        if base_local.kind == LocalKind::User {
-            let field_info = match &base_ty {
+        let aggregate_ty = match &base_ty {
+            MIRType::Ptr(inner) | MIRType::Ref(inner) => inner.as_ref(),
+            _ if base_local.kind == LocalKind::User => &base_ty,
+            _ => return None,
+        };
+            let field_info = match aggregate_ty {
                 MIRType::Struct { fields, .. } => fields
                     .iter()
                     .position(|(name, _)| name == field)
@@ -56,7 +78,6 @@ pub(super) fn try_lower_addressable_field_ref(
                 });
                 return Some(ptr_local);
             }
-        }
     }
     None
 }

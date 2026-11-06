@@ -20,6 +20,11 @@ pub(super) fn lower_assign_expr(
         _ => ctx.lower_expr(value),
     };
 
+    if lower_borrowed_assignment(ctx, target, value_local) {
+        ctx.mark_drop_expr_moved(value);
+        return ctx.add_local(None, LocalKind::Temp, MIR_UNIT);
+    }
+
     match target {
         HIRExpr::Var { name, symbol } => {
             let target_local = ctx.resolve_local(name, *symbol);
@@ -86,6 +91,74 @@ pub(super) fn lower_assign_expr(
     }
 
     ctx.add_local(None, LocalKind::Temp, MIR_UNIT)
+}
+
+/// Rebuild the value behind a reference, then write it back through the
+/// original pointer. The borrowed aggregate itself never owns a second Drop.
+fn lower_borrowed_assignment(
+    ctx: &mut LoweringContext<'_>, target: &HIRExpr, value: Local,
+) -> bool {
+    fn root_and_fields<'a>(expr: &'a HIRExpr, fields: &mut Vec<String>) -> &'a HIRExpr {
+        if let HIRExpr::Field { base, field } = expr {
+            let root = root_and_fields(base, fields);
+            fields.push(field.clone());
+            root
+        } else { expr }
+    }
+    let mut fields = Vec::new();
+    let root = root_and_fields(target, &mut fields);
+    let (root, explicit_deref) = match root {
+        HIRExpr::Deref(inner) | HIRExpr::Unary(hir::HIRUnaryOp::Deref, inner) => (inner.as_ref(), true),
+        expr => (expr, false),
+    };
+    if fields.is_empty() && !explicit_deref { return false; }
+    let HIRExpr::Var { name, symbol } = root else { return false; };
+    let pointer = ctx.resolve_local(name, *symbol);
+    let aggregate_ty = match ctx.get_local_type(pointer) {
+        MIRType::Ref(inner) | MIRType::Ptr(inner) => (**inner).clone(),
+        _ => return false,
+    };
+    let mut field_ty = aggregate_ty.clone();
+    let mut path = Vec::new();
+    for field in fields {
+        let (index, next) = match &field_ty {
+            MIRType::Struct { fields, .. } => match fields.iter().enumerate().find(|(_, (name, _))| name == &field) {
+                Some((index, (_, ty))) => (index, ty.clone()),
+                None => return false,
+            },
+            MIRType::Tuple(items) => match field.parse::<usize>().ok().and_then(|index| items.get(index).map(|ty| (index, ty.clone()))) {
+                Some(info) => info,
+                None => return false,
+            },
+            _ => return false,
+        };
+        path.push(index as u32);
+        field_ty = next;
+    }
+    let snapshot = ctx.add_local(None, LocalKind::Temp, aggregate_ty);
+    ctx.push_inst(Instruction::Load { destination: snapshot, source: pointer });
+    let mut old_value = snapshot;
+    for index in &path {
+        let ty = match ctx.get_local_type(old_value) {
+            MIRType::Struct { fields, .. } => fields[*index as usize].1.clone(),
+            MIRType::Tuple(items) => items[*index as usize].clone(),
+            _ => return false,
+        };
+        let field = ctx.add_local(None, LocalKind::Temp, ty);
+        ctx.push_inst(Instruction::Extract { destination: field, value: old_value, index: *index });
+        old_value = field;
+    }
+    ctx.record_drop_binding_if_needed(old_value);
+    ctx.drop_local_now_if_initialized(old_value);
+    ctx.mark_drop_local_moved(old_value);
+    let rebuilt = if path.is_empty() { value } else {
+        match ctx.rebuild_drop_place_with_value(snapshot, &path, value) {
+            Some(rebuilt) => rebuilt,
+            None => return false,
+        }
+    };
+    ctx.push_inst(Instruction::Store { destination: pointer, value: rebuilt });
+    true
 }
 
 pub(super) fn lower_assign_op_expr(

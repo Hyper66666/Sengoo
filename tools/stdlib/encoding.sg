@@ -12,6 +12,26 @@ def encoding_base64_encode_buffer(buffer: Buffer, used_len: i64, out: Buffer) ->
     }
 }
 
+// Opt-in large input encoding implemented in Sengoo. Non-final chunks are a
+// multiple of three bytes, so concatenation introduces no interior padding.
+// On Err discard out; the caller must not send partially converted bytes.
+def encoding_base64_encode_buffer_bounded(buffer: &Buffer, used_len: i64, max_bytes: i64, out: &mut Buffer) -> Result<i64, i64> {
+    if max_bytes < 1 or max_bytes > 16777216 or used_len < 0 or used_len > buffer.used_len() or buffer.raw_handle() == out.raw_handle() { return Result { is_ok: false, value: 0, error: 2 }; };
+    let length = ((used_len + 2) / 3) * 4;
+    if used_len > max_bytes or out.len() < length { return Result { is_ok: false, value: 0, error: 13 }; };
+    if not out.clear() { return Result { is_ok: false, value: 0, error: 3 }; };
+    if used_len == 0 { return Result { is_ok: true, value: 0, error: 0 }; };
+    let chunk = ffi_buffer_new(87380)?; let mut offset = 0;
+    while offset < used_len {
+        let size = if used_len - offset > 65535 { 65535 } else { used_len - offset };
+        let copied = sengoo_encoding_base64_encode(buffer.ptr() + offset, size, chunk.raw_handle(), chunk.len());
+        if copied < 0 { return Result { is_ok: false, value: 0, error: status_from_raw_ffi(copied) }; };
+        out.append_copy(&chunk, 0, copied)?;
+        offset = offset + size;
+    };
+    Result { is_ok: true, value: length, error: 0 }
+}
+
 def encoding_hex_encode_buffer(buffer: Buffer, used_len: i64, out: Buffer) -> Result<i64, i64> {
     let encoded_len = sengoo_encoding_hex_encode(buffer.ptr(), used_len, out.handle, out.len());
     if encoded_len >= 0 {

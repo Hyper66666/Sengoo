@@ -8,6 +8,7 @@ extern "C" {
     fn sgcli_new(name: i64, version: i64, description: i64) -> i64;
     fn sgcli_close(handle: i64) -> i64;
     fn sgcli_command(handle: i64, name: i64, help: i64) -> i64;
+    fn sgcli_subcommand(handle: i64, parent: i64, name: i64, help: i64) -> i64;
     fn sgcli_option(handle: i64, scope: i64, name: i64, short_name: i64, kind: i64, repeat: i64, required: i64, help: i64) -> i64;
     fn sgcli_positionals(handle: i64, minimum: i64, maximum: i64) -> i64;
     fn sgcli_error(handle: i64) -> i64;
@@ -90,6 +91,9 @@ impl CliApp {
     }
     def command(&mut self, name: &str, help: &str) -> Result<bool, i64> {
         cli_status(sgcli_command(self.handle, sengoo_stdlib_str_ptr(name), sengoo_stdlib_str_ptr(help)));
+    }
+    def subcommand(&mut self, parent: &str, name: &str, help: &str) -> Result<bool, i64> {
+        cli_status(sgcli_subcommand(self.handle, sengoo_stdlib_str_ptr(parent), sengoo_stdlib_str_ptr(name), sengoo_stdlib_str_ptr(help)));
     }
     def positionals(&mut self, minimum: i64, maximum: i64) -> Result<bool, i64> {
         cli_status(sgcli_positionals(self.handle, minimum, maximum));

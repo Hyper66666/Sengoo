@@ -1,0 +1,4 @@
+- [x] Reproduce the invalid LLVM from a minimal conditional-return program.
+- [x] Correct type joining and MIR continuing-value selection.
+- [x] Run `cargo test -p sgc --test conditional_return` (1 passed, Windows x64).
+- [x] Run affected compiler MIR tests (1 passed) and OpenSpec strict validation.

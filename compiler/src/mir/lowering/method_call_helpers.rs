@@ -169,8 +169,7 @@ fn resolve_method_call_target_with_expected(
     .map(|name| (name, true))
 }
 
-/// Load a pointer receiver into a by-value local so the call ABI matches
-/// method definitions, which always take `self` by value.
+/// Load a pointer receiver when the concrete callee uses a by-value ABI.
 fn load_deref_receiver(ctx: &mut LoweringContext<'_>, receiver_local: Local) -> Local {
     let receiver_ty = ctx.get_local_type(receiver_local).clone();
     let (MIRType::Ptr(inner) | MIRType::Ref(inner)) = &receiver_ty else {
@@ -292,7 +291,15 @@ pub(super) fn lower_method_call_from_locals_with_expected(
             return ctx.add_local(None, LocalKind::Temp, MIR_UNIT);
         }
     };
-    let receiver_local = if receiver_needs_load {
+    let receiver_is_ref = ctx.function_sig(&resolved_func_name)
+        .is_some_and(|sig| sig.receiver_is_ref);
+    let receiver_local = if receiver_is_ref {
+        if matches!(ctx.get_local_type(receiver_local), MIRType::Ptr(_) | MIRType::Ref(_)) {
+            receiver_local
+        } else {
+            super::pointer_expr_helpers::borrow_local(ctx, receiver_local)
+        }
+    } else if receiver_needs_load {
         load_deref_receiver(ctx, receiver_local)
     } else {
         receiver_local
@@ -530,6 +537,7 @@ mod tests {
         function_sigs.insert(
             "Point_sum".to_string(),
             FunctionSig {
+                receiver_is_ref: false,
                 env: Vec::new(),
                 param_count: 1,
                 ret_type: MIR_I64,
@@ -576,6 +584,7 @@ mod tests {
         function_sigs.insert(
             "Point_sum".to_string(),
             FunctionSig {
+                receiver_is_ref: false,
                 env: Vec::new(),
                 param_count: 1,
                 ret_type: MIRType::Struct {

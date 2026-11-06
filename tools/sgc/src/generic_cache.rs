@@ -65,7 +65,7 @@ pub(crate) fn generic_instance_cache_path(build_dir: &Path, stem: &str) -> PathB
 
 pub(crate) fn load_generic_instance_cache(path: &Path) -> Option<GenericInstanceCacheMetadata> {
     let bytes = fs::read(path).ok()?;
-    serde_json::from_slice(&bytes).ok()
+    crate::cache::deserialize_compiler_cache(&bytes)
 }
 
 pub(crate) fn save_generic_instance_cache(
@@ -75,7 +75,7 @@ pub(crate) fn save_generic_instance_cache(
     if let Some(parent) = path.parent() {
         fs::create_dir_all(parent).into_diagnostic()?;
     }
-    let bytes = serde_json::to_vec_pretty(metadata)
+    let bytes = crate::cache::serialize_compiler_cache(metadata)
         .map_err(|e| miette::miette!("failed to serialize generic instance cache: {}", e))?;
     fs::write(path, bytes)
         .into_diagnostic()

@@ -36,11 +36,34 @@ def exercise_cli() -> Result<i64, i64> {
     Result { is_ok: true, value: 0, error: 0 };
 }
 
+def exercise_nested_cli() -> Result<i64, i64> {
+    let mut app = cli_app("tool", "0.1", "Nested commands")?;
+    app.command("config", "Configuration")?;
+    app.subcommand("config", "profile", "Profiles")?;
+    app.subcommand("config profile", "show", "Show profile")?;
+    app.command_string_option("config", "root", "r", false, true, "Inherited root")?;
+    app.command_int_option("config profile show", "limit", "l", false, false, "Limit")?;
+    let args: Vec<String> = vec_new();
+    args.push(string_from_str("config")?);
+    args.push(string_from_str("profile")?);
+    args.push(string_from_str("show")?);
+    args.push(string_from_str("--root=data")?);
+    args.push(string_from_str("--limit=-9")?);
+    let parsed = app.parse_from(&args)?;
+    let path = parsed.command()?;
+    assert_eq_str(path.as_str(), "config profile show", "cli.sg", 54);
+    assert_eq_i64(parsed.integer("limit", 0)?, -9, "cli.sg", 55);
+    let root = parsed.string("root", 0)?;
+    assert_eq_str(root.as_str(), "data", "cli.sg", 57);
+    Result { is_ok: true, value: 0, error: 0 };
+}
+
 def main() -> i64 {
     let baseline = sengoo_string_live_handle_count();
     let result = exercise_cli();
     if not result.is_ok() { println(result.error); };
     assert_true(result.is_ok(), "cli.sg", 43);
+    assert_true(exercise_nested_cli().is_ok(), "cli.sg", 65);
     assert_eq_i64(sgcli_live_handles(), 0, "cli.sg", 44);
     assert_eq_i64(sengoo_string_live_handle_count(), baseline, "cli.sg", 45);
     0;

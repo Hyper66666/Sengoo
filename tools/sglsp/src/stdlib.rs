@@ -31,6 +31,12 @@ const STDLIB_SOURCES: &[(&str, &str)] = &[
     ("option", include_str!("../../stdlib/option.sg")),
     ("path", include_str!("../../stdlib/path.sg")),
     ("process", include_str!("../../stdlib/process.sg")),
+    ("terminal", include_str!("../../stdlib/terminal.sg")),
+    ("ipc", include_str!("../../stdlib/ipc.sg")),
+    ("pty", include_str!("../../stdlib/pty.sg")),
+    ("unicode", include_str!("../../stdlib/unicode.sg")),
+    ("unicode_tables", include_str!("../../stdlib/unicode_tables.sg")),
+    ("system", include_str!("../../stdlib/system.sg")),
     ("proto", include_str!("../../stdlib/proto.sg")),
     ("random", include_str!("../../stdlib/random.sg")),
     ("regex", include_str!("../../stdlib/regex.sg")),
@@ -59,6 +65,9 @@ fn stdlib_source(module: &str) -> Option<&'static str> {
 
 fn stdlib_dependencies(module: &str) -> &'static [&'static str] {
     match module {
+        "terminal" | "ipc" | "pty" | "system" => &["ffi", "string", "status"],
+        "unicode" => &["unicode_tables", "string", "status"],
+        "hash" => &["ffi", "string", "status"],
         "collections" => &["ffi"],
         "string" => &["ffi"],
         "option" => &["result"],
@@ -66,7 +75,7 @@ fn stdlib_dependencies(module: &str) -> &'static [&'static str] {
         "ffi" => &["option", "result"],
         "json" | "status" => &["ffi"],
         "fmt" => &["strconv", "status"],
-        "math" | "regex" | "log" | "config" | "hash" | "encoding" | "compress" | "fs" | "time" => {
+        "math" | "regex" | "log" | "config" | "encoding" | "compress" | "fs" | "time" => {
             &["status"]
         }
         "http" => &["ffi", "status"],
@@ -422,6 +431,20 @@ import std::status;
         assert!(collection_names.contains(&("next", "trait method")));
         assert!(collection_names.contains(&("RcValue", "trait")));
         assert!(collection_names.contains(&("rc", "trait method")));
+    }
+
+    #[test]
+    fn stdlib_symbols_include_local_ipc_and_fullscreen_mouse() {
+        let symbols = stdlib_symbols_for_content("import std::ipc;\nimport std::terminal;\nimport std::unicode;\nimport std::hash;\n");
+        let names = symbols.iter().map(|symbol| symbol.name.as_str()).collect::<Vec<_>>();
+        for expected in ["IpcListener", "IpcStream", "ipc_listen", "ipc_connect", "try_accept", "poll", "TerminalMouseEvent", "enter_fullscreen", "leave_fullscreen", "set_mouse", "mouse", "Buffer", "terminal_copy_text", "UnicodeGraphemeState", "unicode_next_grapheme", "unicode_previous_grapheme", "unicode_display_width", "hash_sha256_file"] {
+            assert!(names.contains(&expected), "missing {expected}");
+        }
+    }
+
+    #[test]
+    fn stdlib_symbols_include_owned_pseudoconsole() {
+        assert_symbols_for_content("import std::pty;\n", &["PtyCommand", "PtyProcess", "pty_command", "pty_available", "inherit_env", "env_remove", "read", "write", "resize", "try_wait", "terminate_tree", "reap", "close_input", "Buffer", "String"]);
     }
 
     #[test]

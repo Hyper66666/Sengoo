@@ -44,6 +44,28 @@ static int cli_name(const char *s) {
     for(;*s;++s)if(!((*s>='a'&&*s<='z')||(*s>='A'&&*s<='Z')||(*s>='0'&&*s<='9')||*s=='-'))return 0;
     return 1;
 }
+/* Command paths are canonical ASCII segments separated by one space. */
+static int cli_command_path(const char *s) {
+    if(!s||!*s||strlen(s)>1024)return 0;int depth=1,segment=0;
+    for(;*s;s++){
+        if(*s==' '){if(!segment||++depth>16)return 0;segment=0;continue;}
+        if(!segment&&*s=='-')return 0;
+        if(!((*s>='a'&&*s<='z')||(*s>='A'&&*s<='Z')||(*s>='0'&&*s<='9')||*s=='-'))return 0;
+        segment++;
+    }return segment>0;
+}
+static int cli_scope_contains(const char *ancestor,const char *descendant) {
+    if(!ancestor||!*ancestor)return 1;if(!descendant)return 0;
+    size_t n=strlen(ancestor);return !strncmp(ancestor,descendant,n)&&(descendant[n]==0||descendant[n]==' ');
+}
+static CliCommand *cli_registered_command(CliApp *a,const char *path) {
+    for(size_t i=0;i<a->ncommands;i++)if(!strcmp(a->commands[i].name,path))return &a->commands[i];return NULL;
+}
+static int cli_direct_child(const char *path,const char *parent) {
+    const char *space=strrchr(path,' ');
+    if(!parent||!*parent)return !space;
+    return space&&(size_t)(space-path)==strlen(parent)&&!strncmp(path,parent,(size_t)(space-path));
+}
 static long long cli_owned_string(const char *s) { return sengoo_string_from_bytes_copy((long long)(intptr_t)s,(long long)strlen(s)); }
 long long sgcli_new(long long name,long long version,long long description) {
     CliApp *a=(CliApp*)calloc(1,sizeof(*a));if(!a)return -14;
@@ -62,12 +84,23 @@ long long sgcli_close(long long id) {
 }
 long long sgcli_command(long long id,long long name,long long help) {
     CliApp *a=cli_app(id);if(!a)return -3;const char *s=(const char*)(intptr_t)name;
-    if(!cli_name(s))return cli_fail(a,"invalid subcommand name",s);
+    if(!cli_command_path(s))return cli_fail(a,"invalid subcommand path",s);
+    const char *space=strrchr(s,' ');
+    if(space){char parent[1025];memcpy(parent,s,(size_t)(space-s));parent[space-s]=0;
+        if(!cli_registered_command(a,parent))return cli_fail(a,"unknown parent subcommand",parent);}
     for(size_t i=0;i<a->ncommands;++i)if(!strcmp(a->commands[i].name,s))return cli_fail(a,"duplicate subcommand",s);
     char *n=cli_copy(s),*h=cli_copy((const char*)(intptr_t)help);
     if(!n||!h){free(n);free(h);return -14;}
     CliCommand *p=(CliCommand*)realloc(a->commands,(a->ncommands+1)*sizeof(*p));
     if(!p){free(n);free(h);return -14;}a->commands=p;p[a->ncommands++]=(CliCommand){n,h};return 0;
+}
+long long sgcli_subcommand(long long id,long long parent,long long name,long long help) {
+    CliApp *a=cli_app(id);if(!a)return -3;
+    const char *p=(const char*)(intptr_t)parent,*n=(const char*)(intptr_t)name;
+    if(!p||!cli_name(n)||!cli_registered_command(a,p))return cli_fail(a,"invalid or unknown parent subcommand",p);
+    size_t plen=strlen(p),nlen=strlen(n);if(plen>1023||nlen>1023-plen)return cli_fail(a,"subcommand path is too long",n);
+    char path[1025];memcpy(path,p,plen);path[plen]=' ';memcpy(path+plen+1,n,nlen+1);
+    return sgcli_command(id,(long long)(intptr_t)path,help);
 }
 long long sgcli_option(long long id,long long scope,long long name,long long short_name,long long kind,long long repeat,long long required,long long help) {
     CliApp *a=cli_app(id);if(!a)return -3;
@@ -76,7 +109,7 @@ long long sgcli_option(long long id,long long scope,long long name,long long sho
     if(!strcmp(n,"help")||!strcmp(n,"version")||!strcmp(s,"h"))return cli_fail(a,"reserved built-in option",n);
     if(*sc){int found=0;for(size_t i=0;i<a->ncommands;++i)if(!strcmp(a->commands[i].name,sc))found=1;if(!found)return cli_fail(a,"unknown subcommand",sc);}
     for(size_t i=0;i<a->noptions;++i){CliOption *o=&a->options[i];
-        if((!*sc||!*o->scope||!strcmp(sc,o->scope)) && (!strcmp(n,o->name)||(*s&&!strcmp(s,o->short_name))))return cli_fail(a,"duplicate option",n);
+        if((cli_scope_contains(sc,o->scope)||cli_scope_contains(o->scope,sc)) && (!strcmp(n,o->name)||(*s&&!strcmp(s,o->short_name))))return cli_fail(a,"duplicate option",n);
     }
     CliOption o={cli_copy(n),cli_copy(s),cli_copy(sc),cli_copy((const char*)(intptr_t)help),(int)kind,repeat!=0,required!=0};
     if(!o.name||!o.short_name||!o.scope||!o.help){free(o.name);free(o.short_name);free(o.scope);free(o.help);return -14;}
@@ -167,7 +200,7 @@ long long sgcli_parse(long long id,long long mid) {
             const char *start=arg+(arg[1]=='-'?2:1),*equal=strchr(start,'=');size_t len=equal?(size_t)(equal-start):strlen(start);
             CliOption *option=NULL;
             for(size_t j=0;j<a->noptions;++j){CliOption *o=&a->options[j];
-                if(*o->scope&&(!m->command||strcmp(o->scope,m->command)))continue;
+                if(!cli_scope_contains(o->scope,m->command))continue;
                 const char *candidate=arg[1]=='-'?o->name:o->short_name;
                 if(*candidate&&strlen(candidate)==len&&!strncmp(candidate,start,len)){option=o;break;}
             }
@@ -187,9 +220,13 @@ long long sgcli_parse(long long id,long long mid) {
             if(!cli_value(m,option->name,text,option->kind,value))return -14;
         } else {
             int command=0;
-            if(!positional&&!m->command&&m->npositions==0) {
-                for(size_t j=0;j<a->ncommands;++j)if(!strcmp(a->commands[j].name,arg)){m->command=cli_copy(arg);if(!m->command)return -14;command=1;break;}
-                if(a->ncommands&&!command)return cli_fail(a,"unknown subcommand",arg);
+            if(!positional&&m->npositions==0) {
+                int children=0;
+                for(size_t j=0;j<a->ncommands;++j){CliCommand *candidate=&a->commands[j];
+                    if(!cli_direct_child(candidate->name,m->command))continue;children=1;
+                    const char *leaf=strrchr(candidate->name,' ');leaf=leaf?leaf+1:candidate->name;
+                    if(!strcmp(leaf,arg)){char *selected=cli_copy(candidate->name);if(!selected)return -14;free(m->command);m->command=selected;command=1;break;}}
+                if(children&&!command)return cli_fail(a,"unknown subcommand",arg);
             }
             if(!command){
                 char *v=cli_copy(arg);if(!v)return -14;
@@ -200,7 +237,7 @@ long long sgcli_parse(long long id,long long mid) {
     }
     if(cli_count(m,"help")||cli_count(m,"version"))return 0;
     for(size_t j=0;j<a->noptions;++j){CliOption *o=&a->options[j];
-        if(o->required&&(!*o->scope||(m->command&&!strcmp(m->command,o->scope)))&&!cli_count(m,o->name))return cli_fail(a,"missing required option",o->name);
+        if(o->required&&cli_scope_contains(o->scope,m->command)&&!cli_count(m,o->name))return cli_fail(a,"missing required option",o->name);
     }
     if(m->npositions<(uint64_t)a->minpos||m->npositions>(uint64_t)a->maxpos)return cli_fail(a,"incorrect positional argument count",NULL);
     return 0;

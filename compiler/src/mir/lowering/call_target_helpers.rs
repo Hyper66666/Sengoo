@@ -105,6 +105,7 @@ mod tests {
         let function_sigs = HashMap::from([(
             "worker".to_string(),
             FunctionSig {
+                receiver_is_ref: false,
                 ret_type: MIR_BOOL,
                 param_count: 0,
                 env: Vec::new(),

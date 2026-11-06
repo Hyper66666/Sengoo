@@ -128,7 +128,17 @@ impl<'a> LoweringContext<'a> {
             MIRType::Int(_) | MIRType::UInt(_) => {
                 self.emit_runtime_print_call(sink.i64_func(), value_local)
             }
-            MIRType::Bool => self.emit_runtime_print_call(sink.bool_func(), value_local),
+            MIRType::Bool => {
+                // Runtime ABI 1 receives an i64, whereas MIR booleans are i1.
+                // Passing i1 directly leaves upper argument bits unspecified.
+                let widened = self.add_local(None, LocalKind::Temp, MIR_I64);
+                self.push_inst(Instruction::Cast {
+                    destination: widened,
+                    value: value_local,
+                    to: MIR_I64,
+                });
+                self.emit_runtime_print_call(sink.bool_func(), widened);
+            }
             MIRType::Float(_) => self.emit_runtime_print_call(sink.f64_func(), value_local),
             MIRType::Ptr(_) | MIRType::Ref(_) => {
                 self.emit_runtime_print_call(sink.str_func(), value_local)

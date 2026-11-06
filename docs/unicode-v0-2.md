@@ -32,6 +32,10 @@ this document is the authoritative Supported subset for the integrating SHA.
 - `string_from_utf8(buffer, used_len)` — strict; malformed input → `STATUS_INVALID_UTF8`.
 - `string_from_buffer(buffer, used_len)` — compatibility wrapper; **same** strict UTF-8
   behavior (no silent lossy acceptance).
+- `string_from_utf8_lossy(buffer, used_len)` — additive development API; explicit
+  replacement of maximal malformed subsequences with U+FFFD. It preserves valid
+  spans and embedded NUL. See [diagnostic text and clocks](diagnostic-text-clock.md)
+  for the independent regression and platform evidence.
 
 ## Indexing clarity
 

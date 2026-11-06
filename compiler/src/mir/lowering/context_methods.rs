@@ -60,6 +60,7 @@ impl<'a> LoweringContext<'a> {
             drop_scope_markers: Vec::new(),
             moved_drop_locals: HashSet::new(),
             moved_drop_fields: HashSet::new(),
+            destructor_receiver: None,
             exit_drop_bindings: HashMap::new(),
         }
     }
@@ -92,8 +93,8 @@ impl<'a> LoweringContext<'a> {
 
         self.insert_function_sig(
             specialized.name.clone(),
-            build_hir_function_sig_with_enums(
-                &specialized.return_type,
+            build_hir_method_sig_with_enums(
+                &specialized,
                 param_count,
                 self.struct_defs,
                 &self.options.enum_defs,

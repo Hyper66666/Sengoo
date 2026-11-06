@@ -59,9 +59,40 @@ def main() -> i64 {
         0
     }
 }
+
 "#,
     )
     .expect("stdlib owned string should typecheck");
+}
+
+#[test]
+fn borrowed_owned_string_as_str_typechecks_and_lowers() {
+    let program = r#"
+def shared(text: &String) -> i64 { text.as_str().len() }
+def exclusive(text: &mut String) -> i64 { text.as_str().len() }
+def main() -> i64 {
+    let text = string_from_str("native").value;
+    let mut other = string_from_str("borrow").value;
+    shared(&text) + exclusive(&mut other)
+}
+"#;
+    typecheck_with_stdlib(program).expect("as_str must accept borrowed String receivers");
+    let source = format!("{}\n{program}", load_stdlib(&["option.sg", "result.sg", "ffi.sg", "string.sg"]));
+    let ir = compile_to_ir(&source).expect("borrowed as_str must use existing pointer-aware MIR lowering");
+    assert!(ir.contains("@sengoo_string_as_str_ptr"));
+}
+
+#[test]
+fn borrowed_owned_string_as_str_does_not_escape_local_owner() {
+    let error = typecheck_fails_with_stdlib(r#"
+def bad() -> &str {
+    let text = string_from_str("local").value;
+    let alias = &text;
+    alias.as_str()
+}
+"#);
+    assert!(error.contains("borrow") || error.contains("Borrow"), "{error}");
+    assert!(!error.contains("MethodNotFound"), "receiver should resolve before borrow rejection: {error}");
 }
 
 #[test]

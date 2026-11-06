@@ -1,0 +1,142 @@
+// Unicode 17.0.0 extended grapheme clusters (UAX #29 GB3..GB999), pure Sengoo.
+// Pinned property data and conformance tests are in unicode-data/17.0.0/.
+// This does not alter the existing String scalar/UTF-8 APIs or runtime ABI.
+struct UnicodeGraphemeState {
+    started: bool,
+    previous: i64,
+    regional_run: i64,
+    pictographic_run: bool,
+    previous_zwj_pictographic: bool,
+    indic_state: i64,
+}
+
+def unicode_grapheme_state() -> UnicodeGraphemeState {
+    UnicodeGraphemeState { started: false, previous: 0, regional_run: 0, pictographic_run: false, previous_zwj_pictographic: false, indic_state: 0 }
+}
+
+def unicode_valid_scalar(cp: i64) -> bool { cp >= 0 && cp <= 1114111 && !(cp >= 55296 && cp <= 57343) }
+def unicode_scalar_bytes(cp: i64) -> i64 { if cp < 128 { 1 } else { if cp < 2048 { 2 } else { if cp < 65536 { 3 } else { 4 } } } }
+def unicode_grapheme_property(cp: i64) -> i64 {
+    // Hangul LV/LVT have a regular algorithmic decomposition.
+    if cp >= 44032 && cp <= 55203 { if (cp - 44032) % 28 == 0 { 12 } else { 13 } }
+    else { unicode_gcb_data(cp) }
+}
+def unicode_is_control_property(property: i64) -> bool { property == 1 || property == 2 || property == 3 }
+
+impl UnicodeGraphemeState {
+    // True means a new extended grapheme starts before this scalar. State can
+    // persist across transport chunks; callers must first decode strict UTF-8.
+    def push(&mut self, cp: i64) -> Result<bool, i64> {
+        if !unicode_valid_scalar(cp) { return Result { is_ok: false, value: false, error: 2 }; }
+        let next = unicode_grapheme_property(cp);
+        let previous = self.previous;
+        let indic = unicode_incb_data(cp);
+        let pictographic = unicode_pictographic_data(cp) != 0;
+        let mut boundary = !self.started;
+        if self.started {
+            boundary = true;
+            if previous == 1 && next == 2 { boundary = false; }
+            else if unicode_is_control_property(previous) || unicode_is_control_property(next) { boundary = true; }
+            else if previous == 9 && (next == 9 || next == 10 || next == 12 || next == 13) { boundary = false; }
+            else if (previous == 12 || previous == 10) && (next == 10 || next == 11) { boundary = false; }
+            else if (previous == 13 || previous == 11) && next == 11 { boundary = false; }
+            else if next == 4 || next == 5 || next == 8 || previous == 7 { boundary = false; }
+            else if indic == 1 && self.indic_state == 2 { boundary = false; }
+            else if previous == 5 && self.previous_zwj_pictographic && pictographic { boundary = false; }
+            else if previous == 6 && next == 6 && self.regional_run % 2 == 1 { boundary = false; }
+        }
+        self.previous_zwj_pictographic = next == 5 && self.pictographic_run;
+        if next != 4 { self.pictographic_run = pictographic; }
+        if indic == 1 { self.indic_state = 1; }
+        else if indic == 2 && self.indic_state > 0 { self.indic_state = 2; }
+        else if indic != 3 { self.indic_state = 0; }
+        if next == 6 { self.regional_run = if previous == 6 { self.regional_run + 1 } else { 1 }; }
+        else { self.regional_run = 0; }
+        self.previous = next; self.started = true;
+        Result { is_ok: true, value: boundary, error: 0 }
+    }
+}
+
+// Cursor offsets are UTF-8 bytes and must already be grapheme boundaries.
+// String is borrowed and retains embedded NUL; no C-string conversion occurs.
+def unicode_next_grapheme(text: &String, cursor: i64) -> Result<i64, i64> {
+    let length = text.len();
+    if cursor < 0 || cursor > length { return Result { is_ok: false, value: 0, error: 2 }; }
+    if cursor == length { return Result { is_ok: true, value: length, error: 0 }; }
+    let iter = text.chars(); let mut state = unicode_grapheme_state();
+    let mut offset = 0; let mut found = cursor == 0; let mut answer = length;
+    loop {
+        let item = iter.next_codepoint(); if !item.is_some { break; }
+        let boundary = state.push(item.value);
+        if !boundary.is_ok { iter.free(); return Result { is_ok: false, value: 0, error: boundary.error }; }
+        if boundary.value {
+            if offset == cursor { found = true; }
+            if offset > cursor { answer = offset; break; }
+        }
+        offset = offset + unicode_scalar_bytes(item.value);
+    }
+    iter.free();
+    Result { is_ok: found, value: if found { answer } else { 0 }, error: if found { 0 } else { 2 } }
+}
+
+def unicode_previous_grapheme(text: &String, cursor: i64) -> Result<i64, i64> {
+    let length = text.len();
+    if cursor < 0 || cursor > length { return Result { is_ok: false, value: 0, error: 2 }; }
+    if cursor == 0 { return Result { is_ok: true, value: 0, error: 0 }; }
+    let iter = text.chars(); let mut state = unicode_grapheme_state();
+    let mut offset = 0; let mut previous = 0; let mut found = cursor == length;
+    loop {
+        let item = iter.next_codepoint(); if !item.is_some { break; }
+        let boundary = state.push(item.value);
+        if !boundary.is_ok { iter.free(); return Result { is_ok: false, value: 0, error: boundary.error }; }
+        if boundary.value {
+            if offset == cursor { found = true; break; }
+            if offset > cursor { break; }
+            previous = offset;
+        }
+        offset = offset + unicode_scalar_bytes(item.value);
+    }
+    iter.free();
+    Result { is_ok: found, value: if found { previous } else { 0 }, error: if found { 0 } else { 2 } }
+}
+
+def unicode_text_scalar_cells(cp: i64) -> i64 {
+    let property = unicode_grapheme_property(cp);
+    if unicode_is_control_property(property) || property == 4 || property == 5 || property == 8 || unicode_ignorable_data(cp) != 0 { 0 }
+    else { if unicode_wide_data(cp) != 0 { 2 } else { 1 } }
+}
+// Deterministic terminal policy: ambiguous-width narrow, EAW W/F two cells,
+// combining/default-ignorables zero, emoji presentation two. This is not font
+// shaping, sanitization, tab expansion, bidi reordering or a cursor terminal.
+def unicode_scalar_cells(cp: i64) -> Result<i64, i64> {
+    if !unicode_valid_scalar(cp) { return Result { is_ok: false, value: 0, error: 2 }; }
+    let width = if unicode_emoji_presentation_data(cp) != 0 { 2 } else { unicode_text_scalar_cells(cp) };
+    Result { is_ok: true, value: width, error: 0 }
+}
+def unicode_cluster_cells(width: i64, emoji: bool, vs15: bool, vs16: bool, eligible: bool, regional: bool, keycap: bool) -> i64 {
+    if regional || keycap || vs16 && eligible || emoji && !vs15 { 2 } else { width }
+}
+def unicode_display_width(text: &String) -> Result<i64, i64> {
+    let iter = text.chars(); let mut state = unicode_grapheme_state(); let mut total = 0;
+    let mut width = 0; let mut emoji = false; let mut vs15 = false; let mut vs16 = false;
+    let mut eligible = false; let mut regional = false; let mut keycap = false;
+    loop {
+        let item = iter.next_codepoint(); if !item.is_some { break; }
+        let cp = item.value; let boundary = state.push(cp);
+        if !boundary.is_ok { iter.free(); return Result { is_ok: false, value: 0, error: boundary.error }; }
+        if boundary.value {
+            total = total + unicode_cluster_cells(width, emoji, vs15, vs16, eligible, regional, keycap);
+            width = 0; emoji = false; vs15 = false; vs16 = false; eligible = false; regional = false; keycap = false;
+        }
+        let scalar = unicode_text_scalar_cells(cp); if scalar > width { width = scalar; }
+        if unicode_emoji_presentation_data(cp) != 0 { emoji = true; }
+        if unicode_pictographic_data(cp) != 0 || cp == 35 || cp == 42 || cp >= 48 && cp <= 57 { eligible = true; }
+        if cp == 65038 { vs15 = true; }
+        if cp == 65039 { vs16 = true; }
+        if cp >= 127462 && cp <= 127487 { regional = true; }
+        if cp == 8419 && eligible { keycap = true; }
+    }
+    iter.free();
+    total = total + unicode_cluster_cells(width, emoji, vs15, vs16, eligible, regional, keycap);
+    Result { is_ok: true, value: total, error: 0 }
+}

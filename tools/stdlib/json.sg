@@ -1,7 +1,12 @@
 extern "C" {
     fn sengoo_json_parse_text(data: i64, len: i64) -> i64;
     fn sengoo_json_parse_buffer(buffer: i64, input_len: i64) -> i64;
+    fn sengoo_json_parse_text_bounded(data: i64, len: i64, max_bytes: i64) -> i64;
+    fn sengoo_json_parse_buffer_bounded(buffer: i64, input_len: i64, max_bytes: i64) -> i64;
     fn sengoo_json_doc_object_new() -> i64;
+    fn sengoo_json_doc_object_new_bounded(max_bytes: i64) -> i64;
+    fn sengoo_json_bounded_live_documents() -> i64;
+    fn sengoo_json_bounded_reserved_bytes() -> i64;
     fn sengoo_json_doc_close(handle: i64) -> i64;
     fn sengoo_json_doc_root(handle: i64) -> i64;
     fn sengoo_json_doc_serialize(handle: i64, buffer: i64) -> i64;
@@ -9,12 +14,16 @@ extern "C" {
     fn sengoo_json_doc_new_object(handle: i64) -> i64;
     fn sengoo_json_doc_new_array(handle: i64) -> i64;
     fn sengoo_json_doc_new_string(handle: i64, value: i64) -> i64;
+    fn sengoo_json_doc_new_string_bytes(handle: i64, value: i64, length: i64) -> i64;
     fn sengoo_json_doc_new_bool(handle: i64, value: i64) -> i64;
     fn sengoo_json_doc_new_number(handle: i64, value: f64) -> i64;
     fn sengoo_json_doc_new_i64(handle: i64, value: i64) -> i64;
     fn sengoo_json_doc_new_null(handle: i64) -> i64;
+    fn sengoo_json_doc_copy(destination: i64, source: i64, node: i64) -> i64;
     fn sengoo_json_value_kind(doc_handle: i64, node_id: i64) -> i64;
     fn sengoo_json_object_has(doc_handle: i64, node_id: i64, key: i64) -> i64;
+    fn sengoo_json_object_len(doc_handle: i64, node_id: i64) -> i64;
+    fn sengoo_json_object_key(doc_handle: i64, node_id: i64, index: i64) -> i64;
     fn sengoo_json_object_get(doc_handle: i64, node_id: i64, key: i64) -> i64;
     fn sengoo_json_object_set(doc_handle: i64, node_id: i64, key: i64, value_doc_handle: i64, value_node_id: i64) -> i64;
     fn sengoo_json_array_len(doc_handle: i64, node_id: i64) -> i64;
@@ -125,6 +134,20 @@ def json_parse(text: &str) -> Result<JsonDoc, i64> {
     json_doc_result(sengoo_json_parse_text(sengoo_stdlib_str_ptr(text), text.len()))
 }
 
+// Explicit 1..16MiB document admission; copy and serialization retain this cap.
+def json_parse_bounded(text: &str, max_bytes: i64) -> Result<JsonDoc, i64> {
+    json_doc_result(sengoo_json_parse_text_bounded(sengoo_stdlib_str_ptr(text),text.len(),max_bytes))
+}
+
+// Borrowed buffer; input must fit its initialized used length, not just capacity.
+def json_parse_buffer_bounded(buffer: &Buffer, input_len: i64, max_bytes: i64) -> Result<JsonDoc, i64> {
+    json_doc_result(sengoo_json_parse_buffer_bounded(buffer.raw_handle(),input_len,max_bytes))
+}
+
+def json_doc_object_bounded(max_bytes: i64) -> Result<JsonDoc, i64> {
+    json_doc_result(sengoo_json_doc_object_new_bounded(max_bytes))
+}
+
 def json_parse_buffer(buffer: Buffer, input_len: i64) -> Result<JsonDoc, i64> {
     json_doc_result(sengoo_json_parse_buffer(buffer.handle, input_len))
 }
@@ -174,6 +197,16 @@ impl JsonDoc {
         json_value_result(self.handle, sengoo_json_doc_new_string(self.handle, sengoo_stdlib_str_ptr(value)))
     }
 
+    // Borrowed string view; use new_string_owned to preserve embedded NUL.
+    def new_string_bytes(self, value: &str) -> Result<JsonValue, i64> {
+        json_value_result(self.handle,sengoo_json_doc_new_string_bytes(self.handle,sengoo_stdlib_str_ptr(value),value.len()))
+    }
+
+    // The owned String stores its exact length independently of its C view.
+    def new_string_owned(self, value: &String) -> Result<JsonValue, i64> {
+        json_value_result(self.handle,sengoo_json_doc_new_string_bytes(self.handle,sengoo_string_as_str_ptr(value.handle),value.len()))
+    }
+
     def new_bool(self, value: bool) -> Result<JsonValue, i64> {
         json_value_result(self.handle, sengoo_json_doc_new_bool(self.handle, if value { 1 } else { 0 }))
     }
@@ -188,6 +221,14 @@ impl JsonDoc {
 
     def new_null(self) -> Result<JsonValue, i64> {
         json_value_result(self.handle, sengoo_json_doc_new_null(self.handle))
+    }
+
+    /// Independent deep copy, including exact integers and embedded NUL.
+    /// Accepts this or another live document; errors leave this document intact.
+    /// Legacy 1MiB, or the explicit destination document limit, applies.
+    /// Both retain 64-depth/4096-node limits; bounded copies roll back charges.
+    def copy(self, value: JsonValue) -> Result<JsonValue, i64> {
+        json_value_result(self.handle, sengoo_json_doc_copy(self.handle, value.doc_handle, value.node_id))
     }
 }
 
@@ -214,6 +255,27 @@ impl JsonValue {
 
     def object_has(self, key: &str) -> bool {
         self.object_has_raw(sengoo_stdlib_str_ptr(key))
+    }
+
+    def object_len(self) -> Result<i64, i64> {
+        json_i64_result(sengoo_json_object_len(self.doc_handle, self.node_id))
+    }
+
+    def object_key(self, index: i64) -> Result<String, i64> {
+        json_string_result(sengoo_json_object_key(self.doc_handle, self.node_id, index))
+    }
+
+    // Keys have independent ownership and survive source document destruction.
+    def object_keys(self) -> Result<JsonDoc, i64> {
+        let count = self.object_len()?;
+        let out = json_parse("[]")?;
+        let mut index = 0;
+        while index < count {
+            let key = self.object_key(index)?;
+            out.root().array_push(out.new_string(key.as_str())?)?;
+            index = index + 1;
+        };
+        Result { is_ok: true, value: out, error: 0 }
     }
 
     def object_get_raw(self, key_ptr: i64) -> Result<JsonValue, i64> {

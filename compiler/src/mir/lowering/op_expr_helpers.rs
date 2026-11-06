@@ -231,6 +231,16 @@ pub(super) fn lower_unary_expr(
             let expr_local = ctx.lower_expr(operand);
             let expr_ty = ctx.get_local_type(expr_local).clone();
 
+            // Drop body self is already the reference to its ABI-local
+            // storage. Keep existing explicit &self / &mut self patterns a
+            // reborrow, rather than constructing an extra pointer layer.
+            if ctx.destructor_receiver.is_some()
+                && matches!(operand, HIRExpr::Var { name, .. } if name == "self")
+                && matches!(expr_ty, MIRType::Ref(_) | MIRType::Ptr(_))
+            {
+                return expr_local;
+            }
+
             let ptr_ty = MIRType::Ptr(Box::new(expr_ty));
             let ptr_local = ctx.add_local(None, LocalKind::Temp, ptr_ty);
             ctx.push_inst(Instruction::AddrOf {
@@ -286,6 +296,12 @@ pub(super) fn lower_binary_expr(
     left: &HIRExpr,
     right: &HIRExpr,
 ) -> Local {
+    if matches!(op, hir::HIRBinaryOp::LogAnd) {
+        return lower_logical_and_expr(ctx, left, right);
+    }
+    if matches!(op, hir::HIRBinaryOp::LogOr) {
+        return lower_logical_or_expr(ctx, left, right);
+    }
     let left_local = ctx.lower_expr(left);
     let right_local = ctx.lower_expr(right);
     let mir_op = ctx.lower_bin_op(op);
@@ -578,16 +594,9 @@ pub(super) fn lower_logical_and_expr(
     left: &HIRExpr,
     right: &HIRExpr,
 ) -> Local {
-    let left_local = ctx.lower_expr(left);
-    let right_local = ctx.lower_expr(right);
-    let local = ctx.add_local(None, LocalKind::Temp, MIR_BOOL);
-    ctx.push_inst(Instruction::Binary {
-        destination: local,
-        op: MirBinOp::LogAnd,
-        left: left_local,
-        right: right_local,
-    });
-    local
+    let then_branch = HIRBody::with_expr(right.clone());
+    let else_branch = HIRBody::with_expr(HIRExpr::Lit(HIRLiteral::Bool(false)));
+    lower_if_expr(ctx, left, &then_branch, Some(&else_branch))
 }
 
 pub(super) fn lower_logical_or_expr(
@@ -595,16 +604,9 @@ pub(super) fn lower_logical_or_expr(
     left: &HIRExpr,
     right: &HIRExpr,
 ) -> Local {
-    let left_local = ctx.lower_expr(left);
-    let right_local = ctx.lower_expr(right);
-    let local = ctx.add_local(None, LocalKind::Temp, MIR_BOOL);
-    ctx.push_inst(Instruction::Binary {
-        destination: local,
-        op: MirBinOp::LogOr,
-        left: left_local,
-        right: right_local,
-    });
-    local
+    let then_branch = HIRBody::with_expr(HIRExpr::Lit(HIRLiteral::Bool(true)));
+    let else_branch = HIRBody::with_expr(right.clone());
+    lower_if_expr(ctx, left, &then_branch, Some(&else_branch))
 }
 
 #[cfg(test)]
@@ -873,7 +875,7 @@ mod tests {
     }
 
     #[test]
-    fn lower_logical_and_expr_emits_logand_binary() {
+    fn lower_logical_and_expr_emits_conditional_phi() {
         let (
             mut mir_fn,
             mut lambda_counter,
@@ -906,12 +908,12 @@ mod tests {
         assert_eq!(ctx.get_local_type(result), &MIR_BOOL);
         assert!(ctx.mir_fn.instructions.iter().any(|inst| matches!(
             inst,
-            Instruction::Binary { destination, op: MirBinOp::LogAnd, .. } if *destination == result
+            Instruction::Phi { destination, incoming } if *destination == result && incoming.len() == 2
         )));
     }
 
     #[test]
-    fn lower_logical_or_expr_emits_logor_binary() {
+    fn lower_logical_or_expr_emits_conditional_phi() {
         let (
             mut mir_fn,
             mut lambda_counter,
@@ -944,7 +946,7 @@ mod tests {
         assert_eq!(ctx.get_local_type(result), &MIR_BOOL);
         assert!(ctx.mir_fn.instructions.iter().any(|inst| matches!(
             inst,
-            Instruction::Binary { destination, op: MirBinOp::LogOr, .. } if *destination == result
+            Instruction::Phi { destination, incoming } if *destination == result && incoming.len() == 2
         )));
     }
 }

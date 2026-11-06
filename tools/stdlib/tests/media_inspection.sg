@@ -1,0 +1,78 @@
+import std::media;
+
+def expect(condition: bool, label: &str) -> Result<bool,i64> {
+    if not condition { println(label); return Result { is_ok:false, value:false, error:99 }; };
+    Result { is_ok:true, value:true, error:0 }
+}
+def set_byte(bytes: &mut Buffer, index: i64, value: i64) -> Result<bool,i64> {
+    let next = ffi_buffer_new(bytes.capacity())?;
+    next.append_copy(bytes,0,index)?; next.push_u8(value)?; next.append_copy(bytes,index+1,bytes.used_len()-index-1)?;
+    *bytes = next; Result { is_ok:true, value:true, error:0 }
+}
+def png_header() -> Result<Buffer,i64> {
+    let b = ffi_buffer_new(33)?;
+    b.push_u8(137)?; b.push_u8(80)?; b.push_u8(78)?; b.push_u8(71)?; b.push_u8(13)?; b.push_u8(10)?; b.push_u8(26)?; b.push_u8(10)?;
+    b.push_u8(0)?; b.push_u8(0)?; b.push_u8(0)?; b.push_u8(13)?;
+    b.push_u8(73)?; b.push_u8(72)?; b.push_u8(68)?; b.push_u8(82)?;
+    b.push_u8(0)?; b.push_u8(0)?; b.push_u8(0)?; b.push_u8(1)?;
+    b.push_u8(0)?; b.push_u8(0)?; b.push_u8(0)?; b.push_u8(1)?;
+    b.push_u8(8)?; b.push_u8(6)?; b.push_u8(0)?; b.push_u8(0)?; b.push_u8(0)?;
+    b.push_u8(31)?; b.push_u8(21)?; b.push_u8(196)?; b.push_u8(137)?;
+    Result { is_ok:true, value:b, error:0 }
+}
+def crc_png(bytes: &mut Buffer) -> Result<bool,i64> {
+    let crc = media_crc32(bytes,12,17)?;
+    set_byte(bytes,29,(crc >> 24) & 255)?; set_byte(bytes,30,(crc >> 16) & 255)?; set_byte(bytes,31,(crc >> 8) & 255)?; set_byte(bytes,32,crc & 255)?;
+    Result { is_ok:true, value:true, error:0 }
+}
+def jpeg_header(marker: i64, precision: i64) -> Result<Buffer,i64> {
+    let b = ffi_buffer_new(15)?;
+    b.push_u8(255)?; b.push_u8(216)?; b.push_u8(255)?; b.push_u8(marker)?;
+    b.push_u8(0)?; b.push_u8(11)?; b.push_u8(precision)?;
+    b.push_u8(0)?; b.push_u8(2)?; b.push_u8(0)?; b.push_u8(3)?;
+    b.push_u8(1)?; b.push_u8(1)?; b.push_u8(17)?; b.push_u8(0)?;
+    Result { is_ok:true, value:b, error:0 }
+}
+def tests() -> Result<bool,i64> {
+    let mut png = png_header()?; let p = media_inspect(&png,33,1)?;
+    expect(p.kind == 1 and p.status == 1 and p.width == 1 and p.height == 1 and not p.full_validated and p.mime_type() == "image/png", "PNG golden IHDR only")?;
+    expect(media_inspect(&png,32,1)?.status == 4, "PNG bounded scan")?;
+    set_byte(&mut png,32,0)?; expect(media_inspect(&png,33,1)?.status == 2, "PNG CRC rejects corruption")?;
+    crc_png(&mut png)?; set_byte(&mut png,19,0)?; crc_png(&mut png)?;
+    expect(media_inspect(&png,33,1)?.status == 2, "PNG zero width")?;
+    set_byte(&mut png,19,2)?; crc_png(&mut png)?; expect(media_inspect(&png,33,1)?.status == 4, "PNG pixel ceiling")?;
+    set_byte(&mut png,16,128)?; crc_png(&mut png)?; expect(media_inspect(&png,33,100)?.status == 2, "PNG dimensions outside format range")?;
+    png = png_header()?; set_byte(&mut png,24,3)?; crc_png(&mut png)?; expect(media_inspect(&png,33,1)?.status == 2, "PNG illegal bit depth")?;
+    let truncated = ffi_buffer_new(32)?; truncated.append_copy(&png,0,32)?; expect(media_inspect(&truncated,100,100)?.status == 2, "PNG truncated IHDR")?;
+    let baseline = jpeg_header(192,8)?; let j = media_inspect(&baseline,100,100)?;
+    expect(j.kind == 2 and j.status == 1 and j.width == 3 and j.height == 2 and not j.full_validated, "JPEG baseline dimensions")?;
+    let progressive = jpeg_header(194,12)?; expect(media_inspect(&progressive,100,100)?.status == 1, "JPEG progressive header")?;
+    let unsupported = jpeg_header(195,8)?; expect(media_inspect(&unsupported,100,100)?.status == 3, "JPEG unsupported SOF remains explicit")?;
+    expect(media_inspect(&baseline,10,100)?.status == 4 and media_inspect(&baseline,100,5)?.status == 4, "JPEG scan and pixel ceilings")?;
+    let mut bad = jpeg_header(192,12)?; expect(media_inspect(&bad,100,100)?.status == 2, "JPEG baseline requires precision8")?;
+    bad = jpeg_header(192,8)?; set_byte(&mut bad,5,1)?; expect(media_inspect(&bad,100,100)?.status == 2, "JPEG invalid segment size")?;
+    let chopped = ffi_buffer_new(10)?; chopped.append_copy(&baseline,0,10)?; expect(media_inspect(&chopped,100,100)?.status == 2, "JPEG truncated segment")?;
+    let app = ffi_buffer_new(21)?; app.push_u8(255)?; app.push_u8(216)?; app.push_u8(255)?; app.push_u8(224)?; app.push_u8(0)?; app.push_u8(4)?; app.push_u8(7)?; app.push_u8(9)?; app.append_copy(&baseline,2,13)?;
+    expect(media_inspect(&app,21,100)?.status == 1 and media_inspect(&app,7,100)?.status == 4, "JPEG skips APP payload within bound")?;
+    expect(media_inspect_with_limits(&app,21,1,100,100)?.status == 4 and media_inspect_with_limits(&app,21,2,100,100)?.status == 1, "JPEG exact caller segment ceiling")?;
+    expect(media_inspect_with_limits(&baseline,100,10,2,100)?.status == 4, "JPEG caller dimension ceiling")?;
+    png = png_header()?; set_byte(&mut png,23,2)?; crc_png(&mut png)?;
+    expect(media_inspect_with_limits(&png,33,10,1,100)?.status == 4, "PNG caller dimension ceiling")?;
+    expect(not media_inspect_with_limits(&app,21,0,100,100).is_ok and not media_inspect_with_limits(&app,21,65537,100,100).is_ok and not media_inspect_with_limits(&app,21,2,0,100).is_ok, "Explicit segment and dimension validation")?;
+    let pdf = ffi_buffer_from_bytes("prefix%PDF-1.7\n/Type /Page /Encrypt")?; let d = media_inspect(&pdf,100,100)?;
+    expect(d.kind == 3 and d.status == 1 and d.header_offset == 6 and d.version_major == 1 and d.version_minor == 7 and d.width == 0 and not d.full_validated, "PDF header reports version only")?;
+    let v2 = ffi_buffer_from_bytes("%PDF-2.0\r\n")?; expect(media_inspect(&v2,100,100)?.status == 1, "PDF2 header")?;
+    let future = ffi_buffer_from_bytes("%PDF-9.9\n")?; expect(media_inspect(&future,100,100)?.status == 3, "PDF future version explicit")?;
+    let short = ffi_buffer_from_bytes("%PDF-1.")?; expect(media_inspect(&short,100,100)?.status == 2, "PDF truncated version")?;
+    let fake = ffi_buffer_from_bytes("photo.png /Type /Page /Encrypt")?; expect(media_inspect(&fake,100,100)?.kind == 0, "No extension or page substring inference")?;
+    let boundary = ffi_buffer_new(1028)?; let mut prefix = 0;
+    while prefix < 1019 { boundary.push_u8(32)?; prefix = prefix + 1; };
+    boundary.append_copy(&v2,0,9)?;
+    expect(media_inspect(&boundary,1028,100)?.header_offset == 1019 and media_inspect(&boundary,1024,100)?.status == 4, "PDF search and scan boundaries distinct")?;
+    let outside = ffi_buffer_new(1029)?; outside.push_u8(32)?; outside.append_copy(&boundary,0,1028)?;
+    expect(media_inspect(&outside,1029,100)?.kind == 0, "PDF prefix outside first1024 not searched")?;
+    expect(media_inspect(&fake,5,100)?.status == 4 and not media_inspect(&fake,0,100).is_ok and not media_inspect(&fake,100,0).is_ok, "Explicit limit validation")?;
+    let cap = pdf_capabilities(); expect(cap.header_metadata and not cap.page_count and not cap.encryption_query and not cap.text_extract and not cap.render, "PDF capabilities are header-only")?;
+    println("media headers: PNG CRC/dimensions, JPEG markers, bounds, PDF truthful capabilities passed"); Result { is_ok:true, value:true, error:0 }
+}
+def main() -> i64 { let result = tests(); if not result.is_ok { return result.error; }; 0 }

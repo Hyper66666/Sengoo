@@ -1,0 +1,14 @@
+import std::terminal;
+
+def main() -> i64 {
+    let opened = terminal_open(); if not opened.is_ok() { return 1; };
+    let backtab = opened.value.read_event(1000);
+    if not backtab.is_ok() or backtab.value.kind != 1 or backtab.value.code != 9 or backtab.value.modifiers != 1 { return 2; };
+    let tab = opened.value.read_event(1000);
+    if not tab.is_ok() or tab.value.kind != 1 or tab.value.code != 9 or tab.value.modifiers != 0 or tab.value.data.as_str() != "\t" { return 3; };
+    let next = opened.value.read_event(1000);
+    if not next.is_ok() or next.value.kind != 1 or next.value.code != 120 or next.value.data.as_str() != "x" { return 4; };
+    let ended = opened.value.read_event(1000);
+    if not ended.is_ok() or ended.value.kind != 5 { return 5; };
+    println("public terminal BackTab/Tab/next-byte/EOF passed"); 0
+}

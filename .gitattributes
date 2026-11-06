@@ -14,3 +14,6 @@ bench/frontend-memory-baseline.json text eol=lf
 # Preserve the pinned upstream amalgamation and its checksums byte-for-byte.
 packages/sgsqlite/native/vendor/sqlite-amalgamation-3540100/** -text -whitespace
 
+# Unicode generator verifies these upstream bytes against pinned SHA-256 hashes.
+tools/stdlib/unicode-data/17.0.0/** -text -whitespace
+

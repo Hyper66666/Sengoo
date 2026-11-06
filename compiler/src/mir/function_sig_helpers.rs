@@ -13,6 +13,7 @@ pub(crate) fn build_function_sig(
     FunctionSig {
         ret_type,
         param_count,
+        receiver_is_ref: false,
         env,
     }
 }
@@ -33,4 +34,22 @@ pub(crate) fn build_hir_function_sig_with_enums(
         param_count,
         vec![],
     )
+}
+
+pub(crate) fn build_hir_method_sig_with_enums(
+    method: &hir::HIRFunction,
+    param_count: usize,
+    struct_defs: &HashMap<String, &hir::HIRStruct>,
+    enum_defs: &EnumDefMap,
+) -> FunctionSig {
+    let mut sig = build_hir_function_sig_with_enums(
+        &method.return_type,
+        param_count,
+        struct_defs,
+        enum_defs,
+    );
+    sig.receiver_is_ref = method.params.first().is_some_and(|param| {
+        param.name == "self" && matches!(param.ty.kind, hir::HIRTypeKind::Ref(..))
+    });
+    sig
 }

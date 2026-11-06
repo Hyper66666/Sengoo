@@ -161,7 +161,15 @@ impl TypeChecker {
         };
 
         self.infer.unify(&then_ty, &else_ty)?;
-        Ok(then_ty)
+        // A conditional return does not make its false path diverge. `!`
+        // coerces to the other branch's type; an omitted else is always ().
+        // Returning the then type here previously hid bool/() mismatches in
+        // an enclosing conditional and let undefined unit values reach Phi.
+        if else_branch.is_none() || then_ty.is_never() {
+            Ok(else_ty)
+        } else {
+            Ok(then_ty)
+        }
     }
 
     /// 检查while循环，验证条件为bool型。

@@ -9,8 +9,10 @@
 extern long long sengoo_string_from_bytes_copy(long long,long long);
 extern long long sengoo_ffi_buffer_from_bytes(long long,long long);
 
+typedef struct SgContext {char *key,*value;size_t key_len,value_len;struct SgContext *next;} SgContext;
 typedef struct SgDb {
     long long id,refs,tx;int exposed,internal;
+    int busy_ms;SgContext *context;
     sqlite3 *db;struct SgDb *next;
 } SgDb;
 typedef struct SgStmt {
@@ -72,7 +74,30 @@ static int sq_access(SgDb *c,long long tx) {
 static void sq_release(SgDb *c) {
     if(--c->refs)return;
     SgDb **p=&sq_dbs;while(*p&&*p!=c)p=&(*p)->next;if(*p)*p=c->next;
-    sqlite3_close_v2(c->db);free(c);
+    sqlite3_close_v2(c->db);
+    while(c->context){SgContext *entry=c->context;c->context=entry->next;free(entry->key);free(entry->value);free(entry);}
+    free(c);
+}
+static int sq_utf8(const unsigned char *p,size_t size) {
+    for(size_t i=0;i<size;){unsigned c=p[i++];int n;
+        if(!c)return 0;if(c<128)continue;
+        if(c>=0xc2&&c<=0xdf){n=1;c&=31;}else if(c>=0xe0&&c<=0xef){n=2;c&=15;}
+        else if(c>=0xf0&&c<=0xf4){n=3;c&=7;}else return 0;
+        if(size-i<(size_t)n)return 0;
+        for(int j=0;j<n;j++){unsigned next=p[i++];if((next&0xc0)!=0x80)return 0;c=(c<<6)|(next&63);}
+        if((n==1&&c<128)||(n==2&&c<2048)||(n==3&&c<65536)||c>0x10ffff||(c>=0xd800&&c<=0xdfff))return 0;
+    }return 1;
+}
+static void sq_context_value(sqlite3_context *result,int argc,sqlite3_value **arguments) {
+    (void)argc;SgDb *c=sqlite3_user_data(result);
+    if(sqlite3_value_type(arguments[0])!=SQLITE_TEXT){sqlite3_result_null(result);return;}
+    const unsigned char *key=sqlite3_value_text(arguments[0]);int length=sqlite3_value_bytes(arguments[0]);
+    if(!key){sqlite3_result_error_nomem(result);return;}
+    if(length<1||length>128||!sq_utf8(key,(size_t)length)){sqlite3_result_error(result,"invalid connection context key",-1);return;}
+    for(SgContext *entry=c->context;entry;entry=entry->next)if(entry->key_len==(size_t)length&&!memcmp(entry->key,key,(size_t)length)){
+        sqlite3_result_text(result,entry->value,(int)entry->value_len,SQLITE_TRANSIENT);return;
+    }
+    sqlite3_result_null(result);
 }
 static int sq_authorize(void *context,int operation,const char *a,const char *b,const char *db,const char *trigger) {
     (void)a;(void)b;(void)db;(void)trigger;SgDb *c=(SgDb*)context;
@@ -88,6 +113,8 @@ long long sgsqlite_open(long long path) {
     int rc=sqlite3_open_v2((const char*)(intptr_t)path,&c->db,SQLITE_OPEN_READWRITE|SQLITE_OPEN_CREATE|SQLITE_OPEN_NOMUTEX,NULL);
     if(rc!=SQLITE_OK){long long r=sq_sql_error(c,rc);sqlite3_close(c->db);free(c);return r;}
     sqlite3_extended_result_codes(c->db,1);
+    rc=sqlite3_create_function_v2(c->db,"sengoo_context",1,SQLITE_UTF8|SQLITE_INNOCUOUS,c,sq_context_value,NULL,NULL,NULL);
+    if(rc!=SQLITE_OK){long long r=sq_sql_error(c,rc);sqlite3_close(c->db);free(c);return r;}
     sqlite3_set_authorizer(c->db,sq_authorize,c);
     c->id=sq_identity();if(!c->id){sqlite3_close(c->db);free(c);return -13;}
     c->refs=1;c->exposed=1;c->next=sq_dbs;sq_dbs=c;return c->id;
@@ -99,7 +126,56 @@ long long sgsqlite_busy_timeout(long long id,long long milliseconds) {
     sq_clear();SgDb *c=sq_db(id);if(!c)return -3;
     if(!sq_access(c,0))return -7;
     if(milliseconds<0||milliseconds>INT_MAX)return sq_fail(2,SQLITE_RANGE,"busy timeout must fit a nonnegative i32");
-    int rc=sqlite3_busy_timeout(c->db,(int)milliseconds);return rc==SQLITE_OK?0:sq_sql_error(c,rc);
+    int rc=sqlite3_busy_timeout(c->db,(int)milliseconds);if(rc==SQLITE_OK)c->busy_ms=(int)milliseconds;
+    return rc==SQLITE_OK?0:sq_sql_error(c,rc);
+}
+long long sgsqlite_set_context(long long id,long long key,long long key_length,long long value,long long value_length) {
+    sq_clear();SgDb *c=sq_db(id);if(!c)return -3;if(!sq_access(c,0))return -7;
+    if(!key||(value_length&&!value)||key_length<1||key_length>128||value_length<0||value_length>4096)
+        return sq_fail(2,SQLITE_RANGE,"context key/value exceeds 128/4096 UTF-8 bytes");
+    const char *key_text=(const char*)(intptr_t)key,*value_text=value?(const char*)(intptr_t)value:"";
+    if(!sq_utf8((const unsigned char*)key_text,(size_t)key_length)||!sq_utf8((const unsigned char*)value_text,(size_t)value_length))
+        return sq_fail(20,SQLITE_MISMATCH,"context requires UTF-8 without NUL");
+    SgContext *entry=c->context;size_t count=0;
+    for(;entry;entry=entry->next){if(entry->key_len==(size_t)key_length&&!memcmp(entry->key,key_text,(size_t)key_length))break;count++;}
+    if(!entry&&count>=64)return sq_fail(13,SQLITE_TOOBIG,"connection context supports at most 64 keys");
+    char *copy=malloc((size_t)value_length+1);if(!copy)return sq_fail(14,SQLITE_NOMEM,"context allocation failed");
+    memcpy(copy,value_text,(size_t)value_length);copy[value_length]=0;
+    if(entry){free(entry->value);entry->value=copy;entry->value_len=(size_t)value_length;return 0;}
+    entry=calloc(1,sizeof(*entry));char *key_copy=malloc((size_t)key_length+1);
+    if(!entry||!key_copy){free(copy);free(entry);free(key_copy);return sq_fail(14,SQLITE_NOMEM,"context allocation failed");}
+    memcpy(key_copy,key_text,(size_t)key_length);key_copy[key_length]=0;
+    entry->key=key_copy;entry->key_len=(size_t)key_length;entry->value=copy;entry->value_len=(size_t)value_length;
+    entry->next=c->context;c->context=entry;return 0;
+}
+long long sgsqlite_changes(long long id) {
+    sq_clear();SgDb *c=sq_db(id);if(!c)return 0;if(!sq_access(c,0))return 0;return sqlite3_changes64(c->db);
+}
+long long sgsqlite_last_insert_rowid(long long id) {
+    sq_clear();SgDb *c=sq_db(id);if(!c)return 0;if(!sq_access(c,0))return 0;return sqlite3_last_insert_rowid(c->db);
+}
+long long sgsqlite_backup_to(long long id,long long path) {
+    sq_clear();SgDb *c=sq_db(id);if(!c)return -3;if(!sq_access(c,0))return -7;
+    if(!path||!*(const char*)(intptr_t)path||!strcmp((const char*)(intptr_t)path,":memory:"))
+        return sq_fail(2,SQLITE_MISUSE,"backup requires a persistent file path");
+    sqlite3 *destination=NULL;
+    int rc=sqlite3_open_v2((const char*)(intptr_t)path,&destination,SQLITE_OPEN_READWRITE|SQLITE_OPEN_CREATE|SQLITE_OPEN_NOMUTEX,NULL);
+    if(rc!=SQLITE_OK){long long status=sq_fail(sq_map(rc),rc,destination?sqlite3_errmsg(destination):sqlite3_errstr(rc));sqlite3_close(destination);return status;}
+    const char *source_path=sqlite3_db_filename(c->db,"main"),*destination_path=sqlite3_db_filename(destination,"main");
+    if(source_path&&*source_path&&destination_path&&
+#ifdef _WIN32
+        !_stricmp(source_path,destination_path)
+#else
+        !strcmp(source_path,destination_path)
+#endif
+    ){sqlite3_close(destination);return sq_fail(2,SQLITE_MISUSE,"backup destination must differ from the source");}
+    sqlite3_busy_timeout(destination,c->busy_ms);
+    sqlite3_backup *backup=sqlite3_backup_init(destination,"main",c->db,"main");
+    if(backup){rc=sqlite3_backup_step(backup,-1);int finish=sqlite3_backup_finish(backup);if(rc==SQLITE_DONE)rc=finish;}
+    else rc=sqlite3_errcode(destination);
+    long long status=0;
+    if(rc!=SQLITE_OK){int extended=sqlite3_extended_errcode(destination);status=sq_fail(sq_map(rc),extended==SQLITE_OK?rc:extended,sqlite3_errmsg(destination));}
+    sqlite3_close(destination);return status;
 }
 static long long sq_execute(SgDb *c,long long tx,long long sql) {
     if(!sq_access(c,tx))return -7;if(!sql)return sq_fail(2,SQLITE_MISUSE,"SQL text is null");

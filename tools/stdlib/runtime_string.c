@@ -35,6 +35,43 @@ typedef struct {
 static SengooStringSlot* g_string_slots = NULL;
 static size_t g_string_slot_count = 0;
 static size_t g_string_slot_capacity = 0;
+static long long g_string_iter_live_count;
+long long sengoo_string_iter_live_handle_count(void) { return g_string_iter_live_count; }
+enum { SENGOO_TEXT_ITER_BYTES = 1, SENGOO_TEXT_ITER_SPLIT = 2 };
+typedef struct { void* pointer; long long handle; int kind; } SengooTextIterSlot;
+static SengooTextIterSlot* g_text_iter_slots;
+static size_t g_text_iter_slot_count, g_text_iter_slot_capacity;
+long long sengoo_string_iter_slot_count(void) { return (long long)g_text_iter_slot_count; }
+static SengooTextIterSlot* sengoo_text_iter_slot(long long handle, int kind) {
+    if (handle <= 0) return NULL;
+    for (size_t i = 0; i < g_text_iter_slot_count; i++)
+        if (g_text_iter_slots[i].handle == handle && g_text_iter_slots[i].kind == kind) return &g_text_iter_slots[i];
+    return NULL;
+}
+static long long sengoo_text_iter_register(void* pointer, int kind) {
+    size_t index = 0;
+    while (index < g_text_iter_slot_count && g_text_iter_slots[index].pointer) index++;
+    if (index == g_text_iter_slot_count && index == g_text_iter_slot_capacity) {
+        size_t capacity = g_text_iter_slot_capacity ? g_text_iter_slot_capacity * 2 : 8;
+        if (capacity < g_text_iter_slot_capacity || capacity > SIZE_MAX / sizeof(SengooTextIterSlot)) return 0;
+        SengooTextIterSlot* slots = realloc(g_text_iter_slots, capacity * sizeof(*slots));
+        if (!slots) return 0;
+        g_text_iter_slots = slots; g_text_iter_slot_capacity = capacity;
+    }
+    long long handle = sengoo_opaque_handle_new(pointer);
+    if (handle <= 0) return 0;
+    if (index == g_text_iter_slot_count) g_text_iter_slot_count++;
+    g_text_iter_slots[index] = (SengooTextIterSlot){pointer, handle, kind}; g_string_iter_live_count++;
+    return handle;
+}
+static void* sengoo_text_iter_take(long long handle, int kind, int* valid) {
+    SengooTextIterSlot* slot = sengoo_text_iter_slot(handle, kind);
+    *valid = slot != NULL;
+    if (!slot || !slot->pointer) return NULL;
+    void* pointer = slot->pointer;
+    if (sengoo_opaque_handle_take(handle) != pointer) { *valid = 0; return NULL; }
+    slot->pointer = NULL; g_string_iter_live_count--; return pointer;
+}
 
 static size_t sengoo_string_capacity_for_len(size_t len) {
     return len + 1;
@@ -229,21 +266,19 @@ static long long sengoo_string_iter_new_from_bytes(const char* data, size_t len)
     }
     iter->len = len;
     iter->offset = 0;
-    return sengoo_ptr_to_handle(iter);
+    long long handle = sengoo_text_iter_register(iter, SENGOO_TEXT_ITER_BYTES);
+    if (!handle) { free(iter->data); free(iter); }
+    return handle;
 }
 
 static SengooStringIter* sengoo_string_iter_from_handle(long long handle) {
-    if (handle <= 0) {
-        return NULL;
-    }
-    return (SengooStringIter*)sengoo_handle_to_ptr(handle);
+    SengooTextIterSlot* slot = sengoo_text_iter_slot(handle, SENGOO_TEXT_ITER_BYTES);
+    return slot ? (SengooStringIter*)slot->pointer : NULL;
 }
 
 static SengooStringSplitIter* sengoo_string_split_iter_from_handle(long long handle) {
-    if (handle <= 0) {
-        return NULL;
-    }
-    return (SengooStringSplitIter*)sengoo_handle_to_ptr(handle);
+    SengooTextIterSlot* slot = sengoo_text_iter_slot(handle, SENGOO_TEXT_ITER_SPLIT);
+    return slot ? (SengooStringSplitIter*)slot->pointer : NULL;
 }
 
 static int sengoo_owned_string_reserve(SengooOwnedString* owned, size_t min_capacity) {
@@ -725,10 +760,10 @@ int sengoo_string_chars_iter_next_char(long long iter_handle, int fallback) {
 }
 
 long long sengoo_string_iter_free_status(long long iter_handle) {
-    SengooStringIter* iter = sengoo_string_iter_from_handle(iter_handle);
-    if (!iter) {
-        return -(long long)SENGOO_STATUS_INVALID_HANDLE;
-    }
+    if (!iter_handle) return SENGOO_STATUS_OK;
+    int valid;
+    SengooStringIter* iter = sengoo_text_iter_take(iter_handle, SENGOO_TEXT_ITER_BYTES, &valid);
+    if (!iter) return valid ? SENGOO_STATUS_OK : -SENGOO_STATUS_INVALID_HANDLE;
     free(iter->data);
     free(iter);
     return SENGOO_STATUS_OK;
@@ -770,7 +805,9 @@ long long sengoo_string_split_iter_new(long long handle, long long delimiter_ptr
     iter->delimiter_len = delimiter_len;
     iter->offset = 0;
     iter->finished = delimiter_len == 0 ? 1 : 0;
-    return sengoo_ptr_to_handle(iter);
+    long long token = sengoo_text_iter_register(iter, SENGOO_TEXT_ITER_SPLIT);
+    if (!token) { free(iter->data); free(iter->delimiter); free(iter); }
+    return token;
 }
 
 long long sengoo_string_split_iter_done(long long iter_handle) {
@@ -820,10 +857,10 @@ long long sengoo_string_split_iter_next(long long iter_handle) {
 }
 
 long long sengoo_string_split_iter_free_status(long long iter_handle) {
-    SengooStringSplitIter* iter = sengoo_string_split_iter_from_handle(iter_handle);
-    if (!iter) {
-        return -(long long)SENGOO_STATUS_INVALID_HANDLE;
-    }
+    if (!iter_handle) return SENGOO_STATUS_OK;
+    int valid;
+    SengooStringSplitIter* iter = sengoo_text_iter_take(iter_handle, SENGOO_TEXT_ITER_SPLIT, &valid);
+    if (!iter) return valid ? SENGOO_STATUS_OK : -SENGOO_STATUS_INVALID_HANDLE;
     free(iter->data);
     free(iter->delimiter);
     free(iter);

@@ -1,0 +1,46 @@
+import std::args;
+import std::file;
+import std::ffi;
+import std::string;
+
+extern "C" { fn sengoo_string_live_handle_count() -> i64; }
+
+// Fixture vectors are length-delimited binary, never interpreted as C strings.
+def vectors() -> Result<i64, i64> {
+    let path_buffer = ffi_buffer_new(32768)?;
+    let path_length = arg_copy(0, path_buffer)?;
+    let path = string_from_utf8(path_buffer, path_length)?;
+    let data = ffi_buffer_new(16777216)?;
+    file_read_into(path.as_str(), data)?;
+    let input = ffi_buffer_new(256)?;
+    let actual = ffi_buffer_new(768)?;
+    let mut offset = 0;
+    let mut count = 0;
+    while offset < data.used_len() {
+        let input_length = data.get_u8(offset)?;
+        let output_length = data.get_u8(offset + 1)?;
+        offset = offset + 2;
+        input.clear(); actual.clear();
+        input.append_copy(&data, offset, input_length)?;
+        offset = offset + input_length;
+        let decoded = string_from_utf8_lossy(input, input_length)?;
+        if decoded.copy_to_buffer(actual)? != output_length { println(count); return Result { is_ok: false, value: 0, error: 10 }; };
+        let mut index = 0;
+        while index < output_length {
+            if actual.get_u8(index)? != data.get_u8(offset + index)? { println(count); return Result { is_ok: false, value: 0, error: 10 }; };
+            index = index + 1;
+        };
+        offset = offset + output_length;
+        count = count + 1;
+    };
+    println(count);
+    Result { is_ok: true, value: 0, error: 0 }
+}
+
+def main() -> i64 {
+    let baseline = sengoo_string_live_handle_count();
+    let result = vectors();
+    if not result.is_ok() { println(result.error); return 1; };
+    if sengoo_string_live_handle_count() != baseline { println("String resource leak"); return 1; };
+    result.value
+}

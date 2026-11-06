@@ -180,6 +180,12 @@ fn validate_installed_runtime_bridge(
         "runtime_collections.c",
         "runtime_json.c",
         "runtime_process.c",
+        "runtime_terminal.c",
+        "runtime_ipc.c",
+        "runtime_pty.c",
+        "runtime_hash_file.c",
+        "runtime_file_snapshot.c",
+        "runtime_system.c",
         "runtime_string.c",
         "runtime_shared.h",
     ];

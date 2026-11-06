@@ -20,6 +20,7 @@ mod http_client;
 mod http_server;
 mod tcp;
 mod tls;
+mod byte_stream;
 mod udp;
 mod websocket;
 pub use http_client::{
@@ -50,6 +51,10 @@ use http_server::{
     HttpServerMiddleware, HttpServerMiddlewareKind, HttpServerRoute, HttpServerRouteKind,
 };
 pub use tcp::{sengoo_tcp_close, sengoo_tcp_connect, sengoo_tcp_recv, sengoo_tcp_send};
+pub use byte_stream::{sengoo_net_stream_start, sengoo_net_stream_start_ca,
+    sengoo_net_stream_start_bounded, sengoo_net_stream_start_ca_bounded,
+    sengoo_net_stream_live_request_bytes, sengoo_net_stream_read, sengoo_net_stream_request_started, sengoo_net_stream_cancel,
+    sengoo_net_stream_close, sengoo_net_stream_live_workers, sengoo_net_stream_live_handles};
 pub(crate) use tls::TlsStream;
 pub use udp::{
     sengoo_udp_bind, sengoo_udp_close, sengoo_udp_connect, sengoo_udp_recv, sengoo_udp_send,

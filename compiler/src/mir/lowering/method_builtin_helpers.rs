@@ -113,10 +113,16 @@ pub(super) fn try_lower_string_as_str_method_call(
         return None;
     }
 
-    if !matches!(ctx.get_local_type(receiver_local), MIRType::Struct { name, .. } if name == "String")
-    {
-        return None;
-    }
+    let receiver_local = match ctx.get_local_type(receiver_local).clone() {
+        MIRType::Struct { name, .. } if name == "String" => receiver_local,
+        MIRType::Ptr(inner) | MIRType::Ref(inner)
+            if matches!(inner.as_ref(), MIRType::Struct { name, .. } if name == "String") => {
+                let loaded = ctx.add_local(None, LocalKind::Temp, *inner);
+                ctx.push_inst(Instruction::Load { destination: loaded, source: receiver_local });
+                loaded
+            }
+        _ => return None,
+    };
 
     let handle = ctx.add_local(None, LocalKind::Temp, MIR_I64);
     ctx.push_inst(Instruction::Extract {

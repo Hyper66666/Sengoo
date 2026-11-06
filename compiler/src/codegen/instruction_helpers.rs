@@ -485,7 +485,17 @@ impl Codegen {
                     return Ok(());
                 }
 
-                let dest = self.local_name(*destination);
+                let dest_ty = self.get_local_type(mir_fn, *destination).clone();
+                let value_ty = self.get_local_type(mir_fn, *value).clone();
+                let stores_through_reference = matches!(
+                    &dest_ty,
+                    MIRType::Ptr(inner) | MIRType::Ref(inner) if **inner == value_ty
+                );
+                let dest = if stores_through_reference {
+                    self.operand_value(*destination, mir_fn)
+                } else {
+                    self.local_name(*destination)
+                };
 
                 let val = self.operand_value(*value, mir_fn);
 
@@ -613,9 +623,13 @@ impl Codegen {
 
                         if fields.is_empty() {
                             self.emit_indent();
-
-                            self.ir
-                                .push_str(&format!("{} = alloca {}\n", dest, llvm_ty));
+                            // Aggregate temporaries are values, including zero-
+                            // field named structs. alloca would define a pointer
+                            // and break stores, returns and by-value calls.
+                            self.ir.push_str(&format!(
+                                "{} = select i1 true, {} zeroinitializer, {} zeroinitializer\n",
+                                dest, llvm_ty, llvm_ty
+                            ));
                         } else {
                             let mut current = "undef".to_string();
 
@@ -1184,11 +1198,14 @@ impl Codegen {
             } => {
                 let dest = self.local_name(*destination);
 
-                let base_reg = self.local_name(*base);
-
-                let base_ty = self.get_local_type(mir_fn, *base);
-
-                let base_llvm = self.mir_type_to_llvm_cached(base_ty);
+                let base_ty = self.get_local_type(mir_fn, *base).clone();
+                let (base_reg, aggregate_ty) = match base_ty {
+                    MIRType::Ptr(inner) | MIRType::Ref(inner) => {
+                        (self.operand_value(*base, mir_fn), *inner)
+                    }
+                    ty => (self.local_name(*base), ty),
+                };
+                let base_llvm = self.mir_type_to_llvm_cached(&aggregate_ty);
 
                 self.emit_indent();
 

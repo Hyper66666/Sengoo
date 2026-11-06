@@ -21,6 +21,12 @@ extern "C" {
     fn sengoo_unicode_provenance_copy(buffer: i64, capacity: i64) -> i64;
     fn sengoo_ffi_buffer_ptr(buffer_handle: i64) -> i64;
     fn sengoo_ffi_buffer_len(buffer_handle: i64) -> i64;
+    fn sengoo_ffi_buffer_new(capacity: i64) -> i64;
+    fn sengoo_ffi_buffer_used_len(buffer_handle: i64) -> i64;
+    fn sengoo_ffi_buffer_is_utf8(buffer_handle: i64) -> i64;
+    fn sengoo_ffi_buffer_get_u8(buffer_handle: i64, index: i64) -> i64;
+    fn sengoo_ffi_buffer_append(buffer_handle: i64, bytes_ptr: i64, len: i64) -> i64;
+    fn sengoo_ffi_last_error_code() -> i64;
     fn sengoo_string_clone_status(handle: i64) -> i64;
     fn sengoo_string_push_str_status(handle: i64, value_ptr: i64) -> i64;
     fn sengoo_string_concat_str_status(handle: i64, value_ptr: i64) -> i64;
@@ -51,6 +57,8 @@ extern "C" {
     fn sengoo_string_chars_iter_next_or_default(iter_handle: i64, fallback: i64) -> i64;
     fn sengoo_string_chars_iter_next_char(iter_handle: i64, fallback: char) -> char;
     fn sengoo_string_iter_free_status(iter_handle: i64) -> i64;
+    fn sengoo_string_iter_live_handle_count() -> i64;
+    fn sengoo_string_iter_slot_count() -> i64;
     fn sengoo_string_split_iter_new(handle: i64, delimiter_ptr: i64) -> i64;
     fn sengoo_string_split_iter_done(iter_handle: i64) -> i64;
     fn sengoo_string_split_iter_next(iter_handle: i64) -> i64;
@@ -313,6 +321,47 @@ def string_from_utf8(buffer: Buffer, used_len: i64) -> Result<String, i64> {
     }
 }
 
+/// Decode bytes as UTF-8, replacing each maximal ill-formed subsequence with
+/// U+FFFD. Valid text (including embedded NUL) is copied unchanged. This is an
+/// explicit opt-in for diagnostic/binary boundaries; strict constructors stay strict.
+/// Only initialized bytes may be read. The input is not modified or consumed.
+def string_from_utf8_lossy(buffer: Buffer, used_len: i64) -> Result<String, i64> {
+    let initialized = sengoo_ffi_buffer_used_len(buffer.handle);
+    if initialized < 0 { return string_result_err(0 - initialized); };
+    if used_len < 0 or used_len > initialized { return string_result_err(2); };
+    if used_len == initialized and sengoo_ffi_buffer_is_utf8(buffer.handle) != 0 { return string_from_utf8(buffer, used_len); };
+    if used_len > 3074457345618258602 { return string_result_err(13); };
+    let raw = sengoo_ffi_buffer_new(used_len * 3);
+    if raw == 0 { return string_result_err(sengoo_ffi_last_error_code()); };
+    let output = Buffer { handle: raw };
+    let bytes = sengoo_ffi_buffer_ptr(buffer.handle);
+    let mut offset = 0;
+    let mut valid_start = 0;
+    while offset < used_len {
+        let first = string_copy_result(sengoo_ffi_buffer_get_u8(buffer.handle, offset))?;
+        if first < 128 { offset = offset + 1; continue; };
+        let width = if first >= 194 and first <= 223 { 2 } else { if first >= 224 and first <= 239 { 3 } else { if first >= 240 and first <= 244 { 4 } else { 1 } } };
+        let mut prefix = 1;
+        let mut valid = width > 1;
+        while valid and prefix < width {
+            if prefix >= used_len - offset { valid = false; } else {
+                let next = string_copy_result(sengoo_ffi_buffer_get_u8(buffer.handle, offset + prefix))?;
+                let low = if prefix == 1 and first == 224 { 160 } else { if prefix == 1 and first == 240 { 144 } else { 128 } };
+                let high = if prefix == 1 and first == 237 { 159 } else { if prefix == 1 and first == 244 { 143 } else { 191 } };
+                if next < low or next > high { valid = false; } else { prefix = prefix + 1; };
+            };
+        };
+        if valid { offset = offset + width; } else {
+            if offset > valid_start { string_copy_result(sengoo_ffi_buffer_append(output.handle, bytes + valid_start, offset - valid_start))?; (); };
+            string_copy_result(sengoo_ffi_buffer_append(output.handle, sengoo_stdlib_str_ptr("�"), 3))?;
+            offset = offset + prefix;
+            valid_start = offset;
+        };
+    };
+    if offset > valid_start { string_copy_result(sengoo_ffi_buffer_append(output.handle, bytes + valid_start, offset - valid_start))?; (); };
+    string_from_utf8(output, sengoo_ffi_buffer_used_len(output.handle))
+}
+
 def unicode_version_copy(buffer: Buffer) -> Result<i64, i64> {
     string_copy_result(sengoo_unicode_version_copy(
         sengoo_ffi_buffer_ptr(buffer.handle),
@@ -486,7 +535,7 @@ impl Iterator for StringBytesIter {
         }
     }
 
-    def free(self) -> bool {
+    def free(&self) -> bool {
         sengoo_string_iter_free_status(self.handle) >= 0
     }
 }
@@ -513,7 +562,7 @@ impl StringCharsIter {
         }
     }
 
-    def free(self) -> bool {
+    def free(&self) -> bool {
         sengoo_string_iter_free_status(self.handle) >= 0
     }
 }
@@ -534,7 +583,17 @@ impl Iterator for StringSplitIter {
         }
     }
 
-    def free(self) -> bool {
+    def free(&self) -> bool {
         sengoo_string_split_iter_free_status(self.handle) >= 0
     }
+}
+
+impl Drop for StringBytesIter {
+    def drop(&mut self) { sengoo_string_iter_free_status(self.handle); self.handle = 0; }
+}
+impl Drop for StringCharsIter {
+    def drop(&mut self) { sengoo_string_iter_free_status(self.handle); self.handle = 0; }
+}
+impl Drop for StringSplitIter {
+    def drop(&mut self) { sengoo_string_split_iter_free_status(self.handle); self.handle = 0; }
 }

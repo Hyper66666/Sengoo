@@ -4,19 +4,77 @@ use std::fs;
 use std::hash::{Hash, Hasher};
 use std::io;
 use std::path::{Path, PathBuf};
+use std::sync::OnceLock;
 use std::thread;
 use std::time::Duration;
 
 use crate::{BuildCacheMetadata, FrontendSessionStoreV4, RunCacheMetadata};
 
+/// Cache identity follows the running compiler's bytes, including dirty builds
+/// with the same package version and Git revision. Paths and mtimes are not
+/// identities: moving the same tool is safe, replacing its contents is not.
+fn executable_content_identity(path: &Path) -> Result<String> {
+    use sha2::{Digest, Sha256};
+    use std::io::Read;
+    let mut file = fs::File::open(path).into_diagnostic()?;
+    let mut hash = Sha256::new();
+    let mut buffer = [0u8; 64 * 1024];
+    loop {
+        let count = file.read(&mut buffer).into_diagnostic()?;
+        if count == 0 {
+            break;
+        }
+        hash.update(&buffer[..count]);
+    }
+    Ok(format!("sha256:{:x}", hash.finalize()))
+}
+
+fn compiler_identity() -> Result<&'static str> {
+    static IDENTITY: OnceLock<std::result::Result<String, String>> = OnceLock::new();
+    IDENTITY
+        .get_or_init(|| {
+            // /proc/self/exe retains the mapped inode after an on-disk replacement.
+            #[cfg(target_os = "linux")]
+            let path = Ok(PathBuf::from("/proc/self/exe"));
+            #[cfg(not(target_os = "linux"))]
+            let path = std::env::current_exe();
+            path.map_err(|error: std::io::Error| error.to_string())
+                .and_then(|path| {
+                    executable_content_identity(&path).map_err(|error| error.to_string())
+                })
+        })
+        .as_ref()
+        .map(String::as_str)
+        .map_err(|error| miette::miette!("cannot establish compiler cache identity: {error}"))
+}
+
+pub(crate) fn deserialize_compiler_cache<T: serde::de::DeserializeOwned>(
+    bytes: &[u8],
+) -> Option<T> {
+    let metadata: serde_json::Value = serde_json::from_slice(bytes).ok()?;
+    if metadata.get("compiler_identity")?.as_str()? != compiler_identity().ok()? {
+        return None;
+    }
+    serde_json::from_value(metadata).ok()
+}
+
+pub(crate) fn serialize_compiler_cache<T: serde::Serialize>(metadata: &T) -> Result<Vec<u8>> {
+    let mut value = serde_json::to_value(metadata).into_diagnostic()?;
+    let object = value
+        .as_object_mut()
+        .ok_or_else(|| miette::miette!("compiler cache metadata must be an object"))?;
+    object.insert("compiler_identity".into(), compiler_identity()?.into());
+    serde_json::to_vec_pretty(&value).into_diagnostic()
+}
+
 pub(crate) fn load_run_cache(path: &Path) -> Option<RunCacheMetadata> {
     let bytes = fs::read(path).ok()?;
-    serde_json::from_slice(&bytes).ok()
+    deserialize_compiler_cache(&bytes)
 }
 
 pub(crate) fn load_build_cache(path: &Path) -> Option<BuildCacheMetadata> {
     let bytes = fs::read(path).ok()?;
-    serde_json::from_slice(&bytes).ok()
+    deserialize_compiler_cache(&bytes)
 }
 
 pub(crate) fn frontend_session_store_path(build_dir: &Path, stem: &str) -> PathBuf {
@@ -52,7 +110,7 @@ pub(crate) fn load_frontend_session_store(path: &Path) -> Option<FrontendSession
         (None, None) => path,
     };
     let bytes = fs::read(candidate).ok()?;
-    serde_json::from_slice(&bytes).ok()
+    deserialize_compiler_cache(&bytes)
 }
 
 fn metadata_temp_path(path: &Path) -> PathBuf {
@@ -121,13 +179,13 @@ fn write_metadata_file(path: &Path, bytes: &[u8], label: &str) -> Result<()> {
 }
 
 pub(crate) fn save_run_cache(path: &Path, metadata: &RunCacheMetadata) -> Result<()> {
-    let bytes = serde_json::to_vec_pretty(metadata)
+    let bytes = serialize_compiler_cache(metadata)
         .map_err(|e| miette::miette!("failed to serialize run cache metadata: {}", e))?;
     write_metadata_file(path, &bytes, "run cache metadata")
 }
 
 pub(crate) fn save_build_cache(path: &Path, metadata: &BuildCacheMetadata) -> Result<()> {
-    let bytes = serde_json::to_vec_pretty(metadata)
+    let bytes = serialize_compiler_cache(metadata)
         .map_err(|e| miette::miette!("failed to serialize build cache metadata: {}", e))?;
     write_metadata_file(path, &bytes, "build cache metadata")
 }
@@ -136,7 +194,7 @@ pub(crate) fn save_frontend_session_store(
     path: &Path,
     metadata: &FrontendSessionStoreV4,
 ) -> Result<()> {
-    let bytes = serde_json::to_vec_pretty(metadata)
+    let bytes = serialize_compiler_cache(metadata)
         .map_err(|e| miette::miette!("failed to serialize frontend session metadata: {}", e))?;
     if let Err(primary_err) = write_metadata_file(path, &bytes, "frontend session metadata") {
         let fallback = frontend_session_store_fallback_path(path);
@@ -168,6 +226,65 @@ mod tests {
             "sengoo-cache-{label}-{}-{unique}",
             std::process::id()
         ))
+    }
+
+    #[test]
+    fn compiler_identity_uses_content_not_path_size_or_timestamp() {
+        let root = temp_test_dir("compiler-content");
+        fs::create_dir_all(&root).unwrap();
+        let first = root.join("compiler-a");
+        let second = root.join("compiler-b");
+        fs::write(&first, b"compiler build A").unwrap();
+        fs::copy(&first, &second).unwrap();
+        let identity = executable_content_identity(&first).unwrap();
+        assert_eq!(identity, executable_content_identity(&second).unwrap());
+        fs::write(&second, b"compiler build B").unwrap();
+        assert_eq!(
+            fs::metadata(&first).unwrap().len(),
+            fs::metadata(&second).unwrap().len()
+        );
+        assert_ne!(identity, executable_content_identity(&second).unwrap());
+        let _ = fs::remove_dir_all(root);
+    }
+
+    #[test]
+    fn cache_without_current_compiler_identity_is_never_reused() {
+        let old = serde_json::json!({"compiler_version": env!("CARGO_PKG_VERSION"), "root_module": "main"});
+        assert!(deserialize_compiler_cache::<FrontendSessionStoreV4>(
+            &serde_json::to_vec(&old).unwrap()
+        )
+        .is_none());
+        let bytes = serialize_compiler_cache(&old).unwrap();
+        assert!(deserialize_compiler_cache::<FrontendSessionStoreV4>(&bytes).is_some());
+        let mut foreign: serde_json::Value = serde_json::from_slice(&bytes).unwrap();
+        foreign["compiler_identity"] = "sha256:different-build-with-same-version".into();
+        assert!(deserialize_compiler_cache::<FrontendSessionStoreV4>(
+            &serde_json::to_vec(&foreign).unwrap()
+        )
+        .is_none());
+    }
+
+    #[test]
+    fn build_run_and_generic_loaders_reject_foreign_compiler_metadata() {
+        let root = temp_test_dir("all-cache-domains");
+        fs::create_dir_all(&root).unwrap();
+        let path = root.join("metadata.json");
+        let mut metadata = serde_json::json!({
+            "source_hash": 1, "opt_level": 2, "emit_llvm": true,
+            "requested_engine": "native", "resolved_engine": "native", "runtime_c": null,
+            "llvm_ir_path": "main.ll", "executable_path": null, "output_path": "main.ll",
+            "compiler_version": env!("CARGO_PKG_VERSION"), "target_triple": "native"
+        });
+        fs::write(&path, serialize_compiler_cache(&metadata).unwrap()).unwrap();
+        assert!(load_build_cache(&path).is_some());
+        assert!(load_run_cache(&path).is_some());
+        assert!(crate::generic_cache::load_generic_instance_cache(&path).is_some());
+        metadata["compiler_identity"] = "sha256:old-compiler".into();
+        fs::write(&path, serde_json::to_vec(&metadata).unwrap()).unwrap();
+        assert!(load_build_cache(&path).is_none());
+        assert!(load_run_cache(&path).is_none());
+        assert!(crate::generic_cache::load_generic_instance_cache(&path).is_none());
+        let _ = fs::remove_dir_all(root);
     }
 
     #[test]
@@ -208,13 +325,19 @@ mod tests {
         fs::create_dir_all(fallback.parent().unwrap()).unwrap();
         fs::write(
             &primary,
-            br#"{"compiler_version":"primary","root_module":"m"}"#,
+            serialize_compiler_cache(
+                &serde_json::json!({"compiler_version":"primary","root_module":"m"}),
+            )
+            .unwrap(),
         )
         .unwrap();
         std::thread::sleep(Duration::from_millis(20));
         fs::write(
             &fallback,
-            br#"{"compiler_version":"fallback","root_module":"m"}"#,
+            serialize_compiler_cache(
+                &serde_json::json!({"compiler_version":"fallback","root_module":"m"}),
+            )
+            .unwrap(),
         )
         .unwrap();
 

@@ -7,6 +7,22 @@
 
 use crate::{Parser, TypeChecker};
 
+#[test]
+fn drop_receiver_forwarding_preserves_a_pointer_inside_legacy_value_abi() {
+    let ir = crate::compile_to_ir(r#"
+struct SelfOwner { marker: i64 }
+def self_owner_helper(owner: &mut SelfOwner) { owner.marker = owner.marker + 1; (); }
+impl Drop for SelfOwner {
+    def drop(&mut self) { self_owner_helper(self); self_owner_helper(&mut self); (); }
+}
+def main() -> i64 { let owner = SelfOwner { marker: 42 }; 0 }
+"#).expect("destructor forwarding should compile");
+    let calls = ir.lines().filter(|line| line.contains("call") && line.contains("@self_owner_helper(")).collect::<Vec<_>>();
+    assert_eq!(calls.len(), 2, "{ir}");
+    for line in calls { assert!(line.contains("%SelfOwner*"), "helper expects a pointer, got {line}"); }
+    assert!(ir.contains("define void @SelfOwner_Drop_drop(%SelfOwner "), "drop ABI must remain by-value: {ir}");
+}
+
 fn typecheck(source: &str) -> Result<(), String> {
     let parsed = Parser::parse(source).expect("source should parse");
     let mut checker = TypeChecker::new();

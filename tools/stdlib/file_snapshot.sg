@@ -1,0 +1,52 @@
+// Bounded immutable byte copy with a retained Windows local-file/path guard.
+// Synchronous I/O: callers must not infer a TUI latency or cancellation bound.
+extern "C" {
+    fn sengoo_file_snapshot_available() -> i64;
+    fn sengoo_file_snapshot_live_handle_count() -> i64;
+    fn sengoo_file_snapshot_live_bytes() -> i64;
+    fn sengoo_file_snapshot_open(path: i64, length: i64, max_bytes: i64) -> i64;
+    fn sengoo_file_snapshot_length(handle: i64) -> i64;
+    fn sengoo_file_snapshot_text(handle: i64, field: i64) -> i64;
+    fn sengoo_file_snapshot_modified_ms(handle: i64) -> i64;
+    fn sengoo_file_snapshot_copy_bytes(handle: i64, buffer: i64) -> i64;
+    fn sengoo_file_snapshot_still_matches(handle: i64) -> i64;
+    fn sengoo_file_snapshot_close(handle: i64) -> i64;
+}
+
+struct FileSnapshot { handle: i64, }
+impl !Send for FileSnapshot {}
+impl !Sync for FileSnapshot {}
+
+def file_snapshot_available() -> bool { sengoo_file_snapshot_available() > 0 }
+def file_snapshot_count_result(raw: i64) -> Result<i64,i64> {
+    Result { is_ok: raw >= 0, value: if raw >= 0 { raw } else { 0 }, error: if raw < 0 { status_from_raw_ffi(raw) } else { 0 } }
+}
+def file_snapshot_string_result(raw: i64) -> Result<String,i64> {
+    Result { is_ok: raw > 0, value: String { handle: if raw > 0 { raw } else { 0 } }, error: if raw <= 0 { status_from_raw_ffi(raw) } else { 0 } }
+}
+def file_snapshot_open(path: &str, max_bytes: i64) -> Result<FileSnapshot,i64> {
+    let raw = sengoo_file_snapshot_open(sengoo_stdlib_str_ptr(path), path.len(), max_bytes);
+    Result { is_ok: raw > 0, value: FileSnapshot { handle: if raw > 0 { raw } else { 0 } }, error: if raw <= 0 { status_from_raw_ffi(raw) } else { 0 } }
+}
+impl FileSnapshot {
+    def len(&self) -> Result<i64,i64> { file_snapshot_count_result(sengoo_file_snapshot_length(self.handle)) }
+    def sha256(&self) -> Result<String,i64> { file_snapshot_string_result(sengoo_file_snapshot_text(self.handle,0)) }
+    def identity(&self) -> Result<String,i64> { file_snapshot_string_result(sengoo_file_snapshot_text(self.handle,1)) }
+    def path(&self) -> Result<String,i64> { file_snapshot_string_result(sengoo_file_snapshot_text(self.handle,2)) }
+    // Volume GUID absolute path; hold this owner while using the pinned name.
+    def pinned_path(&self) -> Result<String,i64> { file_snapshot_string_result(sengoo_file_snapshot_text(self.handle,3)) }
+    def modified_unix_ms(&self) -> Result<i64,i64> { file_snapshot_count_result(sengoo_file_snapshot_modified_ms(self.handle)) }
+    def copy_bytes(&self, out: &mut Buffer) -> Result<i64,i64> { file_snapshot_count_result(sengoo_file_snapshot_copy_bytes(self.handle,out.raw_handle())) }
+    def still_matches(&self) -> Result<bool,i64> {
+        let raw = sengoo_file_snapshot_still_matches(self.handle);
+        Result { is_ok: raw >= 0, value: raw > 0, error: if raw < 0 { status_from_raw_ffi(raw) } else { 0 } }
+    }
+    // close consumes the native owner even if OS close reports an error.
+    def close(&mut self) -> Result<bool,i64> {
+        let raw = sengoo_file_snapshot_close(self.handle); self.handle = 0;
+        Result { is_ok: raw >= 0, value: raw >= 0, error: if raw < 0 { status_from_raw_ffi(raw) } else { 0 } }
+    }
+}
+impl Drop for FileSnapshot {
+    def drop(&mut self) { if self.handle != 0 { sengoo_file_snapshot_close(self.handle); }; self.handle = 0; }
+}

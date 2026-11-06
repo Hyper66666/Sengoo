@@ -59,7 +59,29 @@ The low-level `option(command, name, short, kind,
 repeated, required, help)` registers a command-specific option; kind 0 means
 flag, 1 string, 2 i64. Register the command with `command(name, help)` first.
 Options in a command apply after that subcommand. Global options apply before
-and after it. Only one subcommand level is supported.
+and after it. `subcommand(parent,name,help)` adds a child beneath a registered
+parent. Command paths use single spaces, for example `"config profile show"`;
+`command(path,help)` also accepts a complete path once its parent is registered.
+Paths contain up to 16 ASCII-name segments and 1024 bytes. Register ancestors
+before descendants. `CliMatches.command()` returns the complete selected path,
+preserving the previous single-level result for existing applications.
+
+Options registered on an ancestor apply after that ancestor and throughout its
+descendants; required ancestor options are checked at the final selected path.
+An option for a leaf is accepted only after entering that leaf. Ancestors cannot
+reuse an inherited long or short option name. Siblings can register independent
+options with the same names. An unknown child is an error while a command still
+has children; use `--` to begin literal positionals. A parent command can itself
+be selected without a child, and built-in help still bypasses required options.
+Help lists registered full paths in stable registration order.
+
+```sengoo
+app.command("config", "Configuration")?;
+app.subcommand("config", "profile", "Profiles")?;
+app.subcommand("config profile", "show", "Show profile")?;
+app.command_int_option("config profile show", "limit", "l", false, false, "Limit")?;
+// tool config profile show --limit=-3
+```
 
 `positionals(minimum, maximum)` enforces positional bounds. `parse_args()` reads
 process arguments excluding argv[0]; `parse_from(&Vec<String>)` uses the same

@@ -35,6 +35,14 @@ def exercise_sqlite() -> Result<i64, i64> {
     insert.bind_i64(1, 9007199254740993)?;
     insert.bind_text(2, "世界'; DROP TABLE items; --")?;
     assert_false(insert.step()?, "sqlite.sg", 37);
+    assert_eq_i64(database.changes()?, 1, "sqlite.sg", 38);
+    assert_eq_i64(database.last_insert_rowid()?, 9007199254740993, "sqlite.sg", 39);
+    database.set_context("instance_id", "owner-世界")?;
+    let mut context = database.prepare("SELECT sengoo_context('instance_id'), sengoo_context('missing')")?;
+    assert_true(context.step()?, "sqlite.sg", 41);
+    let owner = context.text(0)?;
+    assert_eq_str(owner.as_str(), "owner-世界", "sqlite.sg", 43);
+    assert_true(context.is_null(1)?, "sqlite.sg", 44);
     let mut query = database.prepare("SELECT id, name FROM items")?;
     assert_true(query.step()?, "sqlite.sg", 39);
     assert_eq_i64(query.integer(0)?, 9007199254740993, "sqlite.sg", 40);

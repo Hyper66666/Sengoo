@@ -406,6 +406,18 @@ and linked tests as evidence. Important current surfaces include:
 - `std::assert`
 - `std::status`
 
+Additive development APIs and their Windows x64 evidence are documented in
+[process and terminal I/O](process-terminal-runtime.md),
+[local byte IPC](local-terminal-ipc.md), and
+[Unicode graphemes and file hashing](unicode-graphemes-and-file-hash.md).
+[String iterator ownership](string-iterator-ownership.md) records automatic
+snapshot cleanup and the compatibility of explicit free. These documents
+identify the required development toolchain separately from published releases.
+[Owning Windows pseudoconsole I/O](windows-owned-pty.md) documents the additive
+interactive-child API; rendering and terminal emulation remain application code.
+[Diagnostic UTF-8 and monotonic time](diagnostic-text-clock.md) document explicit
+lossy decoding and elapsed-time clocks; strict UTF-8 and calendar APIs remain compatible.
+
 ## Versioning Policy
 
 Reference version `0.2.x` tracks the active toolchain line. A release that

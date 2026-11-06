@@ -30,6 +30,21 @@ fn assert_helper_allows_callsite_injection(
 }
 
 impl TypeChecker {
+    // Argument coercion is directional: a mutable loan can be reborrowed as a
+    // shared loan for a call. Do not relax general unification (which would
+    // also accept &T where &mut T is required, or change nested type identity).
+    fn unify_call_argument(&mut self, expected: &Ty, actual: &Ty) -> TyResult<()> {
+        let expected = self.infer.apply_subst(expected);
+        let actual = self.infer.apply_subst(actual);
+        if let (TyKind::Ref(false, expected_inner), TyKind::Ref(true, actual_inner)) =
+            (&expected.kind, &actual.kind)
+        {
+            self.infer.unify(expected_inner, actual_inner)?;
+        } else {
+            self.infer.unify(&expected, &actual)?;
+        }
+        Ok(())
+    }
     fn resolve_associated_projection(&mut self, ty: &Ty) -> TyResult<Ty> {
         let kind = match &ty.kind {
             TyKind::AssocProjection {
@@ -1159,7 +1174,7 @@ impl TypeChecker {
                 if self.is_dyn_unsize_coercion(&expected_ty, &actual_ty) {
                     continue;
                 }
-                self.infer.unify(&expected_ty, &actual_ty)?;
+                self.unify_call_argument(&expected_ty, &actual_ty)?;
             }
 
             let is_async_call = direct_fn_name
@@ -1304,7 +1319,7 @@ impl TypeChecker {
                 }
             };
             for (expected, actual) in method_ty.param_types.iter().zip(actual_types.iter()) {
-                self.infer.unify(expected, actual)?;
+                self.unify_call_argument(expected, actual)?;
             }
             let trait_args = impl_info
                 .trait_args
@@ -1358,7 +1373,7 @@ impl TypeChecker {
             }
             for (expected, arg) in method_ty.param_types.iter().zip(args) {
                 let actual = self.check_expr_with_expected(arg, expected)?;
-                self.infer.unify(expected, &actual)?;
+                self.unify_call_argument(expected, &actual)?;
             }
             let resolved_return = self.infer.apply_subst(&method_ty.return_type);
             if let Some(expected) = expected_return {
@@ -1412,7 +1427,7 @@ impl TypeChecker {
             }
         };
         for (expected, actual) in method_ty.param_types.iter().zip(actual_types.iter()) {
-            self.infer.unify(expected, actual)?;
+            self.unify_call_argument(expected, actual)?;
         }
         let trait_args = impl_info
             .trait_args
@@ -1659,7 +1674,7 @@ impl TypeChecker {
                 }
                 for (expected, actual) in method_sig.param_types.iter().zip(arg_types.iter()) {
                     let expected = self.infer.apply_subst(expected);
-                    self.infer.unify(&expected, actual)?;
+                    self.unify_call_argument(&expected, actual)?;
                 }
                 return Ok(self.infer.apply_subst(&method_sig.return_type));
             }
@@ -1682,9 +1697,10 @@ impl TypeChecker {
             return Ok(self.env.int_ty(crate::typeck::ty::IntKind::I64));
         }
 
-        if matches!(&receiver_ty.kind, TyKind::Adt { name, .. } if name == "String")
-            && method_name == "as_str"
-        {
+        let borrowed_string = matches!(&receiver_ty.kind, TyKind::Ref(_, inner)
+            if matches!(&inner.kind, TyKind::Adt { name, .. } if name == "String"));
+        if (matches!(&receiver_ty.kind, TyKind::Adt { name, .. } if name == "String")
+            || borrowed_string) && method_name == "as_str" {
             if !args.is_empty() {
                 return Err(TypeckError::ArgumentCountMismatch {
                     expected: 0,
@@ -1757,7 +1773,7 @@ impl TypeChecker {
             }
 
             for (expected, actual) in fn_ty.param_types.iter().zip(arg_types.iter()) {
-                self.infer.unify(expected, actual)?;
+                self.unify_call_argument(expected, actual)?;
             }
 
             return self.resolve_associated_projection(&self.infer.apply_subst(&fn_ty.return_type));
@@ -1769,7 +1785,7 @@ impl TypeChecker {
             self.select_generic_bound_method_candidate(&receiver_ty, method_name, args.len())?
         {
             for (expected, actual) in fn_ty.param_types.iter().zip(arg_types.iter()) {
-                self.infer.unify(expected, actual)?;
+                self.unify_call_argument(expected, actual)?;
             }
             return self.resolve_associated_projection(&self.infer.apply_subst(&fn_ty.return_type));
         }
@@ -1783,7 +1799,7 @@ impl TypeChecker {
             call_span,
         )? {
             for (expected, actual) in fn_ty.param_types.iter().zip(arg_types.iter()) {
-                self.infer.unify(expected, actual)?;
+                self.unify_call_argument(expected, actual)?;
             }
             let resolved =
                 self.resolve_associated_projection(&self.infer.apply_subst(&fn_ty.return_type))?;

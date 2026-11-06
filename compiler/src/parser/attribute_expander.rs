@@ -854,9 +854,9 @@ fn skip_visibility(bytes: &[u8], mut cursor: usize) -> usize {
 fn skip_keyword(bytes: &[u8], cursor: usize, keyword: &[u8]) -> usize {
     let pos = skip_ws_and_comments(bytes, cursor);
     if starts_with_keyword(bytes, pos, keyword) {
-        pos + keyword.len()
+        skip_ws_and_comments(bytes, pos + keyword.len())
     } else {
-        cursor
+        pos
     }
 }
 
@@ -1101,6 +1101,56 @@ struct Always {}
         let processed = process_surface_attributes(source).expect("cfg filter should succeed");
         assert!(!processed.contains("ImpossibleTarget"));
         assert!(processed.contains("Always"));
+    }
+
+    #[test]
+    fn attribute_scanning_preserves_async_modifiers_when_hash_is_in_a_string() {
+        let source = r##"
+pub async def helper() -> i64 { await sleep(1); 7 }
+def marker() -> &str { "#" }
+async def main() -> i64 { await helper() }
+"##;
+        let processed = process_surface_attributes(source).expect("hash literal is ordinary data");
+        assert!(processed.contains("pub async def helper"), "{processed}");
+        let parsed = crate::Parser::parse(source).expect("async modifiers must remain present");
+        let names: Vec<_> = parsed
+            .decls
+            .iter()
+            .filter_map(|decl| match &decl.kind {
+                crate::ast::DeclKind::Function(function) if function.is_async => {
+                    Some(function.name.name.as_str())
+                }
+                _ => None,
+            })
+            .collect();
+        assert_eq!(names, ["helper", "main"]);
+        crate::TypeChecker::new()
+            .check_program(&parsed)
+            .expect("await remains inside async functions");
+    }
+
+    #[test]
+    fn attributes_and_comment_separated_modifiers_preserve_function_identity() {
+        let source = r#"
+#[cfg(any(target_os = "windows", target_os = "linux", target_os = "macos"))]
+pub async /* modifier separator */ def helper() -> i64 { await sleep(1); 7 }
+async def main() -> i64 { await helper() }
+"#;
+        let parsed = crate::Parser::parse(source).expect("active cfg preserves async function");
+        let helper = parsed
+            .decls
+            .iter()
+            .find_map(|decl| match &decl.kind {
+                crate::ast::DeclKind::Function(function) if function.name.name == "helper" => {
+                    Some(function)
+                }
+                _ => None,
+            })
+            .expect("helper retained");
+        assert!(helper.is_async);
+        crate::TypeChecker::new()
+            .check_program(&parsed)
+            .expect("configured async helper checks");
     }
 
     #[test]

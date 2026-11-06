@@ -1,0 +1,21 @@
+import std::terminal;
+
+// Type-check the complete public surface without reading the user's clipboard.
+def clipboard_surface() -> i64 {
+    let image = terminal_clipboard_has_image();
+    let text = terminal_clipboard_text();
+    let paths = terminal_clipboard_files();
+    if image.is_ok && text.is_ok && paths.is_ok { return text.value.len() + paths.value.len(); }
+    return 0;
+}
+
+def main() -> i64 {
+    let invalid = string_new();
+    invalid.push_char('x'); invalid.push_char('\0'); invalid.push_char('y');
+    let result = terminal_clipboard_image_save(&invalid, 1024);
+    if result.is_ok { return 1; }
+    // Windows invalid/NUL rejection precedes opening the clipboard. Other
+    // platforms expose the same additive API with an unsupported result.
+    if result.error != 2 && result.error != 8 { return 2; }
+    return 0;
+}

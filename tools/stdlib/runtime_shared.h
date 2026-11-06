@@ -135,6 +135,9 @@ SengooFfiBuffer* sengoo_ffi_buffer_from_handle(long long handle);
 long long sengoo_copy_bytes_to_managed_buffer(long long buffer_handle, const char* bytes, size_t len);
 long long sengoo_buffer_live_handle_count(void);
 long long sengoo_string_live_handle_count(void);
+/* Shared SHA-256 compression core; file hashing streams into this existing
+ * implementation instead of maintaining a second crypto algorithm. */
+void sengoo_internal_sha256_transform(uint32_t state[8], const uint8_t block[64]);
 long long sengoo_stream_cursor_from_buffer(long long buffer_handle);
 long long sengoo_stream_cursor_with_capacity(long long capacity);
 long long sengoo_stream_cursor_position(long long cursor_handle);

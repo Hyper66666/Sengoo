@@ -620,7 +620,7 @@ impl BorrowChecker {
                 };
                 if self
                     .move_path_ty(&full_path)
-                    .is_some_and(|ty| !Self::type_can_escape_borrow(&ty))
+                    .is_some_and(|ty| !self.type_can_escape_borrow(&ty))
                 {
                     return;
                 }
@@ -719,8 +719,44 @@ impl BorrowChecker {
         }
     }
 
-    fn type_can_escape_borrow(ty: &Ty) -> bool {
-        matches!(ty.kind, TyKind::Ref(..)) || Self::type_has_scope_bound_borrow(ty)
+    fn type_can_escape_borrow(&self, ty: &Ty) -> bool {
+        self.type_can_escape_borrow_inner(ty, &mut HashSet::new())
+    }
+
+    fn type_can_escape_borrow_inner(&self, ty: &Ty, visiting: &mut HashSet<String>) -> bool {
+        if Self::type_has_scope_bound_borrow(ty) {
+            return true;
+        }
+        match &ty.kind {
+            TyKind::Ref(..) | TyKind::Var(..) | TyKind::AssocProjection { .. } => true,
+            TyKind::Tuple(items) => items
+                .iter()
+                .any(|item| self.type_can_escape_borrow_inner(item, visiting)),
+            TyKind::Array(item, _) | TyKind::Slice(item) | TyKind::Future(item) => {
+                self.type_can_escape_borrow_inner(item, visiting)
+            }
+            TyKind::Adt { name, args } => {
+                if args
+                    .iter()
+                    .any(|arg| self.type_can_escape_borrow_inner(arg, visiting))
+                {
+                    return true;
+                }
+                // Resolve named fields too: a non-generic wrapper can contain
+                // a reference even though its type argument list is empty.
+                if !visiting.insert(name.clone()) {
+                    return true;
+                }
+                let result = self._env.struct_field_types_for(ty).map_or(true, |fields| {
+                    fields
+                        .iter()
+                        .any(|(_, field)| self.type_can_escape_borrow_inner(field, visiting))
+                });
+                visiting.remove(name);
+                result
+            }
+            _ => false,
+        }
     }
 
     fn move_path_is_movable_owning_value(&self, path: &MovePath) -> bool {
@@ -1117,7 +1153,7 @@ impl BorrowChecker {
                 let result_can_carry_borrow = self
                     ._env
                     .resolved_call_return_type(expr.span.lo)
-                    .is_some_and(Self::type_can_escape_borrow);
+                    .is_some_and(|ty| self.type_can_escape_borrow(ty));
                 if result_can_carry_borrow {
                     self.track_borrows_in_expr(name, func);
                     for arg in args {
@@ -1147,10 +1183,20 @@ impl BorrowChecker {
                         }
                     }
                 }
-                // Do not treat non-borrowing method results (for example
-                // `view.len() -> i64`) as aliases of the receiver.
-                for arg in args {
-                    self.track_borrows_in_expr(name, arg);
+                // Argument loans are temporary when the resolved result cannot
+                // carry a borrow. In particular, read(&mut buffer) -> Result<i64,
+                // i64> does not make the numeric result an alias of buffer.
+                // Calls still check overlapping argument loans in check_expr.
+                // Keep unknown return shapes conservative.
+                let result_can_carry_borrow = self
+                    ._env
+                    .resolved_method_return_type(expr.span)
+                    .map(|ty| self.type_can_escape_borrow(ty))
+                    .unwrap_or(true);
+                if result_can_carry_borrow {
+                    for arg in args {
+                        self.track_borrows_in_expr(name, arg);
+                    }
                 }
             }
             ExprKind::Assign { target, value } | ExprKind::AssignOp { target, value, .. } => {

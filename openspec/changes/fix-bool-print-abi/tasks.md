@@ -1,0 +1,5 @@
+- [x] Reproduce wrong bool output independently of control flow using transport probe.
+- [x] Lower booleans through an explicit i64 cast for both output sinks.
+- [x] Verify compiler IR unit test checks exact i64 runtime call type.
+- [x] Verify native stdout/stderr at O0 and O2 with `print_bool_abi`.
+- [ ] Rebuild CLI candidate and validate OpenSpec.

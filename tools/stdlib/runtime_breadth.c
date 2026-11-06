@@ -439,7 +439,7 @@ static uint32_t sengoo_sha256_rotr(uint32_t value, uint32_t bits) {
     return (value >> bits) | (value << (32 - bits));
 }
 
-static void sengoo_sha256_transform(uint32_t state[8], const uint8_t block[64]) {
+void sengoo_internal_sha256_transform(uint32_t state[8], const uint8_t block[64]) {
     uint32_t w[64];
     for (int i = 0; i < 16; ++i) {
         w[i] = ((uint32_t)block[i * 4] << 24) | ((uint32_t)block[i * 4 + 1] << 16) |
@@ -484,14 +484,15 @@ static void sengoo_sha256_transform(uint32_t state[8], const uint8_t block[64]) 
     state[7] += h;
 }
 
-long long sengoo_hash_sha256(
+static long long sengoo_hash_sha256_with_limit(
     long long data_ptr,
     long long data_len,
     long long out_buffer,
-    long long out_capacity
+    long long out_capacity,
+    long long input_limit
 ) {
     const uint8_t* data = (const uint8_t*)(intptr_t)data_ptr;
-    if (!data || data_len < 0 || data_len > SENGOO_BREADTH_MAX_INPUT) {
+    if (!data || data_len < 0 || data_len > input_limit) {
         return sengoo_breadth_fail(SENGOO_STATUS_INVALID_ARGUMENT);
     }
     uint32_t state[8] = {0x6a09e667, 0xbb67ae85, 0x3c6ef372, 0xa54ff53a,
@@ -501,7 +502,7 @@ long long sengoo_hash_sha256(
     unsigned long long total_bits = (unsigned long long)data_len * 8ULL;
     while (offset + 64 <= (size_t)data_len) {
         memcpy(block, data + offset, 64);
-        sengoo_sha256_transform(state, block);
+        sengoo_internal_sha256_transform(state, block);
         offset += 64;
     }
     size_t rem = (size_t)data_len - offset;
@@ -511,13 +512,13 @@ long long sengoo_hash_sha256(
     }
     block[rem] = 0x80;
     if (rem >= 56) {
-        sengoo_sha256_transform(state, block);
+        sengoo_internal_sha256_transform(state, block);
         memset(block, 0, sizeof(block));
     }
     for (int i = 0; i < 8; ++i) {
         block[63 - i] = (uint8_t)(total_bits >> (i * 8));
     }
-    sengoo_sha256_transform(state, block);
+    sengoo_internal_sha256_transform(state, block);
     char hex[65];
     for (int i = 0; i < 8; ++i) {
         snprintf(hex + i * 8, 9, "%08x", state[i]);
@@ -528,6 +529,38 @@ long long sengoo_hash_sha256(
     }
     sengoo_breadth_last_error = SENGOO_STATUS_OK;
     return 64;
+}
+
+long long sengoo_hash_sha256(
+    long long data_ptr,
+    long long data_len,
+    long long out_buffer,
+    long long out_capacity
+) {
+    return sengoo_hash_sha256_with_limit(data_ptr, data_len, out_buffer,
+                                        out_capacity, SENGOO_BREADTH_MAX_INPUT);
+}
+
+// Existing callers retain their 64-KiB boundary. Larger untrusted inputs must
+// use this opt-in interface with an explicit upper bound, capped at 16 MiB.
+long long sengoo_hash_sha256_bounded(
+    long long data_ptr,
+    long long data_len,
+    long long max_bytes,
+    long long out_buffer,
+    long long out_capacity
+) {
+    if (max_bytes < 1 || max_bytes > 16LL * 1024 * 1024 || data_len < 0) {
+        return sengoo_breadth_fail(SENGOO_STATUS_INVALID_ARGUMENT);
+    }
+    if (data_len > max_bytes) {
+        return sengoo_breadth_fail(SENGOO_STATUS_OVERFLOW);
+    }
+    if (out_capacity < 64) {
+        return sengoo_breadth_fail(SENGOO_STATUS_BUFFER_TOO_SMALL);
+    }
+    return sengoo_hash_sha256_with_limit(data_ptr, data_len, out_buffer,
+                                        out_capacity, max_bytes);
 }
 
 static const char sengoo_base64_table[] =

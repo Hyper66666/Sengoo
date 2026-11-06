@@ -1,0 +1,25 @@
+import std::json;
+
+def detached_keys() -> Result<JsonDoc, i64> {
+    let source = json_parse("{\"中文😀\":1,\"escaped\\u006bey\":true}")?;
+    let keys = source.root().object_keys()?;
+    source.root().object_set("later", source.new_null()?)?;
+    Result { is_ok: true, value: keys, error: 0 }
+}
+
+def main() -> i64 {
+    let keys = detached_keys();
+    if not keys.is_ok() { return 1; };
+    if keys.value.root().array_len().unwrap_or(0) != 2 { return 2; };
+    if keys.value.root().array_get(0).value.string_value().unwrap_or(string_new()).as_str() != "中文😀" { return 3; };
+    if keys.value.root().array_get(1).value.string_value().unwrap_or(string_new()).as_str() != "escapedkey" { return 4; };
+    let empty = json_parse("{}").unwrap_or(JsonDoc { handle: 0 });
+    if empty.root().object_len().unwrap_or(-1) != 0 { return 5; };
+    if empty.root().object_key(0).is_ok() or empty.root().object_key(-1).is_ok() { return 6; };
+    let wrong = json_parse("[]").unwrap_or(JsonDoc { handle: 0 });
+    if wrong.root().object_len().is_ok() or wrong.root().object_key(0).is_ok() { return 7; };
+    let invalid = JsonValue { doc_handle: 0, node_id: 0 };
+    if invalid.object_len().is_ok() or invalid.object_key(0).is_ok() { return 8; };
+    println("independent JSON object enumeration passed");
+    0
+}

@@ -1315,10 +1315,9 @@ impl TypeChecker {
             } => {
                 let ty =
                     self.check_method_call(receiver, method, args, Some(expected), expr.span)?;
-                if matches!(
-                    method.name.as_str(),
-                    "get" | "front" | "back" | "iter" | "iter_keys"
-                ) {
+                if Self::type_is_fully_concrete(&ty)
+                    || matches!(method.name.as_str(), "get" | "front" | "back" | "iter" | "iter_keys")
+                {
                     self.env.record_method_return_type(expr.span, ty.clone());
                 }
                 Ok(ty)
@@ -1357,10 +1356,9 @@ impl TypeChecker {
                 args,
             } => {
                 let ty = self.check_method_call(receiver, method, args, None, expr.span)?;
-                if matches!(
-                    method.name.as_str(),
-                    "get" | "front" | "back" | "iter" | "iter_keys"
-                ) {
+                if Self::type_is_fully_concrete(&ty)
+                    || matches!(method.name.as_str(), "get" | "front" | "back" | "iter" | "iter_keys")
+                {
                     self.env.record_method_return_type(expr.span, ty.clone());
                 }
                 Ok(ty)

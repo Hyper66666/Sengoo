@@ -1,0 +1,35 @@
+import std::file_snapshot;
+import std::file;
+import std::args;
+
+def ensure(value: bool, label: &str) -> Result<bool,i64> {
+    if not value { println(label); return Result { is_ok:false, value:false, error:99 }; };
+    Result { is_ok:true, value:true, error:0 }
+}
+def snapshot_drop(path: &str) -> Result<bool,i64> {
+    let snapshot = file_snapshot_open(path,3)?;
+    let mut bytes = ffi_buffer_new(3)?;
+    ensure(snapshot.copy_bytes(&mut bytes)? == 3 and bytes.used_len() == 3 and bytes.get_u8(1)? == 0, "binary copy is exact")?;
+    ensure(snapshot.sha256()?.as_str() == "59b271ae1bbcb1d31d41929817f4b16fb439eb4f31520b5ad1d5ce98920a7138", "digest from returned bytes")?;
+    ensure(snapshot.identity()?.len() > 0 and snapshot.modified_unix_ms()? > 0 and snapshot.still_matches()?, "same handle identity/metadata")?;
+    let pinned = snapshot.pinned_path()?;
+    ensure(str_starts_with(pinned.as_str(),"\\\\?\\Volume{"), "pinned volume path")?;
+    let writer = file_write_str(path,"changed");
+    ensure(not writer.is_ok, "guard refuses writer while held")?;
+    Result { is_ok:true, value:true, error:0 }
+}
+def main_tests() -> Result<bool,i64> {
+    let count = arg_len(0)?; let buffer = ffi_buffer_new(count+1)?; let read = arg_copy(0,buffer)?; let path = string_from_buffer(buffer,read)?;
+    ensure(file_snapshot_available(), "Windows snapshot capability")?;
+    let handles = sengoo_file_snapshot_live_handle_count(); let bytes = sengoo_file_snapshot_live_bytes();
+    let mut index = 0; while index < 32 { snapshot_drop(path.as_str())?; index=index+1; };
+    ensure(sengoo_file_snapshot_live_handle_count() == handles and sengoo_file_snapshot_live_bytes() == bytes,"Drop releases bytes and OS guards")?;
+    let short = file_snapshot_open(path.as_str(),2); ensure(not short.is_ok and short.error == 13,"one byte over cap fails")?;
+    let snapshot = file_snapshot_open(path.as_str(),3)?; let moved = snapshot;
+    ensure(moved.len()? == 3,"snapshot move retains owner")?;
+    let mut exact = moved; exact.close()?;
+    ensure(not exact.len().is_ok and sengoo_file_snapshot_live_handle_count()==handles,"explicit close neutralizes Drop")?;
+    file_write_str(path.as_str(),"after-close")?;
+    println("snapshot SG: borrowed bytes, move/Drop/close, failure cleanup and guarded writes passed"); Result { is_ok:true, value:true, error:0 }
+}
+def main() -> i64 { let result = main_tests(); if not result.is_ok { return result.error; }; 0 }

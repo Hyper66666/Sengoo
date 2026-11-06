@@ -1,0 +1,15 @@
+import std::json;
+import std::string;
+
+def reproduce() -> Result<bool,i64> {
+    let text = string_from_str("\"")?;
+    let chunk = str_repeat("a",65536);
+    let mut count = 0;
+    while count < 16 { text.push_str(chunk)?; count = count + 1; };
+    text.push_str("\"")?;
+    let parsed = json_parse(text.as_str());
+    if parsed.is_ok or parsed.error != 10 { return Result { is_ok:false,value:false,error:99 }; };
+    println("legacy JSON reproducer: >1MiB input rejected with unchanged parse limit");
+    Result { is_ok:true,value:true,error:0 }
+}
+def main() -> i64 { let result = reproduce(); if result.is_ok { 0 } else { result.error } }

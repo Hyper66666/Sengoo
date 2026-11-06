@@ -6,7 +6,7 @@ status = "development; current-candidate host evidence is tracked in docs/develo
 [[package]]
 name = "sgcli"
 version = "0.1.0"
-purpose = "Options, positional values, one-level subcommands and deterministic help"
+purpose = "Options, positional values, bounded hierarchical subcommands and deterministic help"
 source = "sgcli"
 maintenance = "official, development"
 example = "../examples/realworld/file-csv-index"
@@ -22,7 +22,7 @@ example = "../examples/realworld/file-csv-index"
 [[package]]
 name = "sgsqlite"
 version = "0.1.0"
-purpose = "Owned SQLite 3.54.1 connections, statements and transactions"
+purpose = "Owned SQLite 3.54.1 connections, statements, transactions, connection context and backup"
 source = "sgsqlite"
 maintenance = "official, development"
 example = "../examples/realworld/file-csv-index"

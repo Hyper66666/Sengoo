@@ -28,6 +28,20 @@ extern "C" {
     fn sengoo_process_handle_kill(handle: i64) -> i64;
     fn sengoo_process_handle_exit_code(handle: i64) -> i64;
     fn sengoo_process_handle_close(handle: i64) -> i64;
+    fn sengoo_process_command_spawn_piped(handle: i64) -> i64;
+    fn sengoo_process_command_spawn_detached(handle: i64, identity_buffer: i64) -> i64;
+    fn sengoo_process_identity_matches(pid: i64, creation_identity: i64) -> i64;
+    fn sengoo_process_handle_try_wait(handle: i64) -> i64;
+    fn sengoo_process_handle_tree_quiescent(handle: i64) -> i64;
+    fn sengoo_process_handle_read(handle: i64, stream: i64, buffer: i64) -> i64;
+    fn sengoo_process_handle_stream_eof(handle: i64, stream: i64) -> i64;
+    fn sengoo_process_handle_write_stdin(handle: i64, buffer: i64, used_len: i64) -> i64;
+    fn sengoo_process_handle_try_write_stdin(handle: i64, buffer: i64, used_len: i64) -> i64;
+    fn sengoo_process_handle_close_stdin(handle: i64) -> i64;
+    fn sengoo_process_handle_terminate_tree(handle: i64) -> i64;
+    fn sengoo_process_handle_reap(handle: i64, timeout_ms: i64) -> i64;
+    fn sengoo_process_live_handle_count() -> i64;
+    fn sengoo_process_live_resource_count() -> i64;
 }
 
 struct ProcessCommand {
@@ -40,6 +54,22 @@ struct ProcessOutput {
 
 struct ProcessHandle {
     handle: i64,
+}
+
+// Plain launch evidence; owns no process handle and Drop never kills the child.
+struct ProcessLaunchReceipt {
+    pid: i64,
+    creation_identity: i64,
+}
+
+def process_identity_matches(pid: i64, creation_identity: i64) -> Result<bool, i64> {
+    process_status_bool_result(sengoo_process_identity_matches(pid, creation_identity))
+}
+
+impl ProcessLaunchReceipt {
+    def is_running(&self) -> Result<bool, i64> {
+        process_identity_matches(self.pid, self.creation_identity)
+    }
 }
 
 impl !Send for ProcessCommand {}
@@ -228,6 +258,25 @@ impl ProcessCommand {
         process_handle_result(sengoo_process_command_spawn(self.handle))
     }
 
+    def spawn_piped(&self) -> Result<ProcessHandle, i64> {
+        process_handle_result(sengoo_process_command_spawn_piped(self.handle));
+    }
+    // Explicit detached launch: no caller stdio/handles or launcher-owned
+    // kill job. Windows only; a parent job that forbids breakaway is an error.
+    def spawn_detached(&self) -> Result<ProcessLaunchReceipt, i64> {
+        let identity = ffi_buffer_new(8)?;
+        let raw = sengoo_process_command_spawn_detached(self.handle, identity.raw_handle());
+        if raw <= 0 { return Result { is_ok: false, value: ProcessLaunchReceipt { pid: 0, creation_identity: 0 }, error: status_from_raw_ffi(raw) }; };
+        let mut birth = 0;
+        let mut multiplier = 1;
+        let mut index = 0;
+        while index < 8 {
+            birth = birth + identity.get_u8(index)? * multiplier;
+            if index < 7 { multiplier = multiplier * 256; };
+            index = index + 1;
+        };
+        Result { is_ok: true, value: ProcessLaunchReceipt { pid: raw, creation_identity: birth }, error: 0 }
+    }
     def close(self) -> bool {
         sengoo_process_command_close(self.handle) == 0
     }
@@ -240,6 +289,41 @@ impl Drop for ProcessCommand {
 }
 
 impl ProcessHandle {
+    def try_wait(&self) -> Result<bool, i64> {
+        process_status_bool_result(sengoo_process_handle_try_wait(self.handle));
+    }
+    def tree_quiescent(&self) -> Result<bool, i64> {
+        process_status_bool_result(sengoo_process_handle_tree_quiescent(self.handle))
+    }
+    def read_stdout(&self, out: &mut Buffer) -> Result<i64, i64> {
+        process_status_i64_result(sengoo_process_handle_read(self.handle, 1, out.raw_handle()));
+    }
+    def read_stderr(&self, out: &mut Buffer) -> Result<i64, i64> {
+        process_status_i64_result(sengoo_process_handle_read(self.handle, 2, out.raw_handle()));
+    }
+    def stdout_eof(&self) -> Result<bool, i64> {
+        process_status_bool_result(sengoo_process_handle_stream_eof(self.handle, 1));
+    }
+    def stderr_eof(&self) -> Result<bool, i64> {
+        process_status_bool_result(sengoo_process_handle_stream_eof(self.handle, 2));
+    }
+    def write_stdin(&self, data: &Buffer, used_len: i64) -> Result<i64, i64> {
+        process_status_i64_result(sengoo_process_handle_write_stdin(self.handle, data.raw_handle(), used_len));
+    }
+    // Alias with explicit nonblocking intent: partial count or 0 backpressure.
+    def try_write_stdin(&self, data: &Buffer, used_len: i64) -> Result<i64, i64> {
+        process_status_i64_result(sengoo_process_handle_try_write_stdin(self.handle, data.raw_handle(), used_len));
+    }
+    def close_stdin(&self) -> Result<bool, i64> {
+        process_status_bool_result(sengoo_process_handle_close_stdin(self.handle));
+    }
+    def terminate_tree(&self) -> Result<bool, i64> {
+        process_status_bool_result(sengoo_process_handle_terminate_tree(self.handle));
+    }
+    def reap(&self, timeout_ms: i64) -> Result<i64, i64> {
+        process_status_i64_result(sengoo_process_handle_reap(self.handle, timeout_ms));
+    }
+
     def wait(self, timeout_ms: i64) -> Result<i64, i64> {
         process_status_i64_result(sengoo_process_handle_wait(self.handle, timeout_ms))
     }

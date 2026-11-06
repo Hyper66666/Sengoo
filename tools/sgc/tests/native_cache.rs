@@ -69,9 +69,10 @@ fn cached_build_and_run_relink_when_a_transitive_native_header_changes() {
     };
     build();
     assert_eq!(Command::new(&executable).status().unwrap().code(), Some(41));
+    let unchanged = build();
     assert!(
-        build().contains("build cache hit"),
-        "unchanged native inputs should reuse the executable"
+        unchanged.contains("build cache hit"),
+        "unchanged native inputs should reuse the executable:\n{unchanged}"
     );
     let modified = fs::metadata(&header).unwrap().modified().unwrap();
     fs::write(&header, "#define VALUE 42\n").unwrap();

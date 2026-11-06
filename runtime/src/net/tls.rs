@@ -27,6 +27,18 @@ pub enum TlsStream {
     Rustls(Box<StreamOwned<ClientConnection, TcpStream>>),
 }
 
+impl TlsStream {
+    pub(super) fn socket(&self) -> &TcpStream {
+        match self {
+            Self::Plain(socket) => socket,
+            #[cfg(windows)]
+            Self::Native(stream) => stream.get_ref(),
+            #[cfg(not(windows))]
+            Self::Rustls(stream) => &stream.sock,
+        }
+    }
+}
+
 impl Read for TlsStream {
     fn read(&mut self, buf: &mut [u8]) -> std::io::Result<usize> {
         match self {
@@ -85,13 +97,29 @@ pub(crate) fn set_test_disable_native_roots(disabled: bool) {
 }
 
 pub fn connect_tls(tcp: TcpStream, host: &str) -> Result<TlsStream, NetErrorCode> {
+    connect_tls_with_root(tcp, host, None)
+}
+
+/// Adds one explicitly supplied DER trust anchor for this connection only.
+/// Certificate chain and hostname verification remain enabled.
+pub(super) fn connect_tls_with_root(
+    tcp: TcpStream,
+    host: &str,
+    root: Option<&[u8]>,
+) -> Result<TlsStream, NetErrorCode> {
     if host.is_empty() {
         return Err(NetErrorCode::InvalidArgument);
     }
 
     #[cfg(windows)]
     {
-        let connector = TlsConnector::new().map_err(|_| NetErrorCode::TlsUnavailable)?;
+        let mut builder = TlsConnector::builder();
+        if let Some(der) = root {
+            builder.add_root_certificate(
+                native_tls::Certificate::from_der(der).map_err(|_| NetErrorCode::TlsCertInvalid)?,
+            );
+        }
+        let connector = builder.build().map_err(|_| NetErrorCode::TlsUnavailable)?;
         let tls = connector
             .connect(host, tcp)
             .map_err(classify_native_handshake_error)?;
@@ -100,7 +128,7 @@ pub fn connect_tls(tcp: TcpStream, host: &str) -> Result<TlsStream, NetErrorCode
 
     #[cfg(not(windows))]
     {
-        let config = build_rustls_config()?;
+        let config = build_rustls_config_with_root(root)?;
         let server_name = ServerName::try_from(host.to_ascii_lowercase())
             .map_err(|_| NetErrorCode::InvalidArgument)?;
         let conn = ClientConnection::new(Arc::new(config), server_name)
@@ -131,19 +159,37 @@ fn classify_native_tls_error(err: &native_tls::Error) -> NetErrorCode {
 #[cfg(windows)]
 fn classify_native_tls_message(message: &str) -> NetErrorCode {
     let lower = message.to_ascii_lowercase();
-    if lower.contains("hostname") || lower.contains("cn_no_match") {
+    if lower.contains("hostname") || lower.contains("cn_no_match") || lower.contains("-2146762481")
+    {
         NetErrorCode::TlsHostnameMismatch
-    } else if lower.contains("cert") || lower.contains("trust") || lower.contains("chain") {
+    } else if lower.contains("cert")
+        || lower.contains("trust")
+        || lower.contains("chain")
+        || ["-2146762487", "-2146762486", "-2146869244", "-2146762495"]
+            .iter()
+            .any(|code| lower.contains(code))
+    {
         NetErrorCode::TlsCertInvalid
     } else {
         NetErrorCode::TlsHandshake
     }
 }
 
-#[cfg(not(windows))]
+#[cfg(all(test, not(windows)))]
 fn build_rustls_config() -> Result<ClientConfig, NetErrorCode> {
+    build_rustls_config_with_root(None)
+}
+
+#[cfg(not(windows))]
+fn build_rustls_config_with_root(extra_root: Option<&[u8]>) -> Result<ClientConfig, NetErrorCode> {
     let mut root_store = RootCertStore::empty();
     let mut loaded_any = false;
+    if let Some(der) = extra_root {
+        root_store
+            .add(rustls::pki_types::CertificateDer::from(der.to_vec()))
+            .map_err(|_| NetErrorCode::TlsCertInvalid)?;
+        loaded_any = true;
+    }
 
     #[cfg(test)]
     let load_native_roots = !TEST_DISABLE_NATIVE_ROOTS.load(Ordering::SeqCst);

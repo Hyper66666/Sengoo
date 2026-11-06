@@ -3,6 +3,7 @@ extern "C" {
     fn sengoo_file_exists(path: i64) -> i64;
     fn sengoo_file_len(path: i64) -> i64;
     fn sengoo_file_read_into(path: i64, out_buffer: i64, out_capacity: i64) -> i64;
+    fn sengoo_ffi_buffer_commit_used_len(buffer_handle: i64, used_len: i64) -> i64;
     fn sengoo_file_write_str(path: i64, data: i64, len: i64) -> i64;
     fn sengoo_file_append_str(path: i64, data: i64, len: i64) -> i64;
     fn sengoo_file_remove(path: i64) -> i64;
@@ -72,7 +73,9 @@ def file_read_into_raw(path_ptr: i64, buffer_ptr: i64, capacity: i64) -> Result<
 }
 
 def file_read_into(path: &str, buffer: Buffer) -> Result<i64, i64> {
-    file_read_into_raw(sengoo_stdlib_str_ptr(path), buffer.ptr(), buffer.len())
+    let copied = file_read_into_raw(sengoo_stdlib_str_ptr(path), buffer.ptr(), buffer.len())?;
+    file_status_i64_result(sengoo_ffi_buffer_commit_used_len(buffer.handle, copied))?;
+    Result { is_ok: true, value: copied, error: 0 }
 }
 
 def file_write_str_raw(path_ptr: i64, data_ptr: i64, len: i64) -> Result<i64, i64> {

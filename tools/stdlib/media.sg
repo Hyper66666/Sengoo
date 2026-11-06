@@ -1,0 +1,148 @@
+// Pure bounded byte-header inspection. Success never implies full decoding.
+def MEDIA_KIND_UNKNOWN() -> i64 { 0 }
+def MEDIA_KIND_PNG() -> i64 { 1 }
+def MEDIA_KIND_JPEG() -> i64 { 2 }
+def MEDIA_KIND_PDF() -> i64 { 3 }
+def MEDIA_STATUS_UNKNOWN() -> i64 { 0 }
+def MEDIA_STATUS_HEADER() -> i64 { 1 }
+def MEDIA_STATUS_MALFORMED() -> i64 { 2 }
+def MEDIA_STATUS_UNSUPPORTED() -> i64 { 3 }
+def MEDIA_STATUS_LIMIT() -> i64 { 4 }
+
+struct MediaInspection {
+    kind: i64,
+    status: i64,
+    width: i64,
+    height: i64,
+    version_major: i64,
+    version_minor: i64,
+    header_offset: i64,
+    full_validated: bool,
+}
+struct PdfCapabilities {
+    header_metadata: bool,
+    page_count: bool,
+    encryption_query: bool,
+    text_extract: bool,
+    render: bool,
+}
+def pdf_capabilities() -> PdfCapabilities {
+    PdfCapabilities { header_metadata: true, page_count: false, encryption_query: false, text_extract: false, render: false }
+}
+def media_info(kind: i64, status: i64) -> MediaInspection {
+    MediaInspection { kind: kind, status: status, width: 0, height: 0, version_major: -1, version_minor: -1, header_offset: -1, full_validated: false }
+}
+def media_result(value: MediaInspection) -> Result<MediaInspection,i64> { Result { is_ok: true, value: value, error: 0 } }
+def media_failure(code: i64) -> Result<MediaInspection,i64> { Result { is_ok: false, value: media_info(0,0), error: code } }
+impl MediaInspection {
+    def mime_type(&self) -> &str {
+        if self.kind == 1 { return "image/png"; };
+        if self.kind == 2 { return "image/jpeg"; };
+        if self.kind == 3 { return "application/pdf"; };
+        "application/octet-stream"
+    }
+    def header_recognized(&self) -> bool { self.status == 1 }
+}
+def media_be16(bytes: &Buffer, start: i64) -> Result<i64,i64> { Result { is_ok: true, value: bytes.get_u8(start)? * 256 + bytes.get_u8(start+1)?, error: 0 } }
+def media_be32(bytes: &Buffer, start: i64) -> Result<i64,i64> {
+    Result { is_ok: true, value: bytes.get_u8(start)? * 16777216 + bytes.get_u8(start+1)? * 65536 + bytes.get_u8(start+2)? * 256 + bytes.get_u8(start+3)?, error: 0 }
+}
+def media_crc32(bytes: &Buffer, start: i64, length: i64) -> Result<i64,i64> {
+    let mut crc = 4294967295;
+    let mut position = start;
+    while position < start + length {
+        crc = crc ^ bytes.get_u8(position)?;
+        let mut bit = 0;
+        while bit < 8 {
+            if (crc & 1) == 1 { crc = (crc >> 1) ^ 3988292384; } else { crc = crc >> 1; };
+            bit = bit + 1;
+        };
+        position = position + 1;
+    };
+    Result { is_ok: true, value: crc ^ 4294967295, error: 0 }
+}
+def media_png(bytes: &Buffer, scan: i64, dimension: i64, pixels: i64) -> Result<MediaInspection,i64> {
+    let mut info = media_info(1,2);
+    if bytes.used_len() < 33 { return media_result(info); };
+    if scan < 33 { info.status = 4; return media_result(info); };
+    if media_be32(bytes,8)? != 13 or media_be32(bytes,12)? != 1229472850 { return media_result(info); };
+    if media_crc32(bytes,12,17)? != media_be32(bytes,29)? { return media_result(info); };
+    info.width = media_be32(bytes,16)?; info.height = media_be32(bytes,20)?;
+    if info.width == 0 or info.height == 0 or info.width > 2147483647 or info.height > 2147483647 { return media_result(info); };
+    if info.width > dimension or info.height > dimension or info.width > pixels / info.height { info.status = 4; return media_result(info); };
+    let depth = bytes.get_u8(24)?; let color = bytes.get_u8(25)?;
+    let mut valid = false;
+    if color == 0 { valid = depth == 1 or depth == 2 or depth == 4 or depth == 8 or depth == 16; };
+    if color == 2 or color == 4 or color == 6 { valid = depth == 8 or depth == 16; };
+    if color == 3 { valid = depth == 1 or depth == 2 or depth == 4 or depth == 8; };
+    if not valid or bytes.get_u8(26)? != 0 or bytes.get_u8(27)? != 0 or bytes.get_u8(28)? > 1 { return media_result(info); };
+    info.status = 1; info.header_offset = 0; media_result(info)
+}
+def media_jpeg_sof(marker: i64) -> bool {
+    marker == 192 or marker == 193 or marker == 194 or marker == 195 or marker == 197 or marker == 198 or marker == 199 or marker == 201 or marker == 202 or marker == 203 or marker == 205 or marker == 206 or marker == 207
+}
+def media_jpeg(bytes: &Buffer, scan: i64, max_segments: i64, dimension: i64, pixels: i64) -> Result<MediaInspection,i64> {
+    let mut info = media_info(2,2);
+    let length = bytes.used_len(); let mut position = 2; let mut segments = 0;
+    while position < length {
+        if position >= scan or segments >= max_segments { info.status = 4; return media_result(info); };
+        if bytes.get_u8(position)? != 255 { return media_result(info); };
+        while position < length and position < scan and bytes.get_u8(position)? == 255 { position = position + 1; };
+        if position >= scan { info.status = 4; return media_result(info); };
+        if position >= length { return media_result(info); };
+        let marker = bytes.get_u8(position)?; position = position + 1; segments = segments + 1;
+        if marker == 0 or marker == 216 or marker == 217 or marker == 218 { return media_result(info); };
+        if marker == 1 or (marker >= 208 and marker <= 215) { return media_result(info); };
+        if length - position < 2 { return media_result(info); };
+        if scan - position < 2 { info.status = 4; return media_result(info); };
+        let count = media_be16(bytes,position)?;
+        if count < 2 or count > length - position { return media_result(info); };
+        if count > scan - position { info.status = 4; return media_result(info); };
+        if media_jpeg_sof(marker) {
+            if count < 8 { return media_result(info); };
+            let precision = bytes.get_u8(position+2)?; let components = bytes.get_u8(position+7)?;
+            if components == 0 or count != 8 + components * 3 { return media_result(info); };
+            info.height = media_be16(bytes,position+3)?; info.width = media_be16(bytes,position+5)?;
+            if info.width == 0 or info.height == 0 { return media_result(info); };
+            if info.width > dimension or info.height > dimension or info.width > pixels / info.height { info.status = 4; return media_result(info); };
+            if marker != 192 and marker != 193 and marker != 194 { info.status = 3; return media_result(info); };
+            if precision != 8 and precision != 12 { return media_result(info); };
+            if marker == 192 and precision != 8 { return media_result(info); };
+            info.status = 1; info.header_offset = 0; return media_result(info);
+        };
+        position = position + count;
+    };
+    media_result(info)
+}
+def media_pdf(bytes: &Buffer, offset: i64, scan: i64) -> Result<MediaInspection,i64> {
+    let mut info = media_info(3,2); info.header_offset = offset;
+    if bytes.used_len() - offset < 9 { return media_result(info); };
+    if scan - offset < 9 { info.status = 4; return media_result(info); };
+    let major = bytes.get_u8(offset+5)?; let minor = bytes.get_u8(offset+7)?; let end = bytes.get_u8(offset+8)?;
+    if major < 48 or major > 57 or bytes.get_u8(offset+6)? != 46 or minor < 48 or minor > 57 or (end != 10 and end != 13) { return media_result(info); };
+    info.version_major = major - 48; info.version_minor = minor - 48;
+    if (major == 49 and minor <= 55) or (major == 50 and minor == 48) { info.status = 1; } else { info.status = 3; };
+    media_result(info)
+}
+// scan_bytes bounds header parsing; max_pixels is an explicit decompression-risk
+// ceiling, not a promise that this module decodes pixels or knows PDF pages.
+def media_inspect(bytes: &Buffer, scan_bytes: i64, max_pixels: i64) -> Result<MediaInspection,i64> {
+    media_inspect_with_limits(bytes,scan_bytes,4096,2147483647,max_pixels)
+}
+
+// Explicit segment and single-dimension limits for policy-sensitive consumers.
+def media_inspect_with_limits(bytes: &Buffer, scan_bytes: i64, max_jpeg_segments: i64, max_dimension: i64, max_pixels: i64) -> Result<MediaInspection,i64> {
+    let length = bytes.used_len();
+    if length < 0 or scan_bytes < 1 or scan_bytes > 1048576 or max_jpeg_segments < 1 or max_jpeg_segments > 65536 or max_dimension < 1 or max_dimension > 2147483647 or max_pixels < 1 { return media_failure(2); };
+    if length >= 8 and scan_bytes >= 8 {
+        if bytes.get_u8(0)? == 137 and bytes.get_u8(1)? == 80 and bytes.get_u8(2)? == 78 and bytes.get_u8(3)? == 71 and bytes.get_u8(4)? == 13 and bytes.get_u8(5)? == 10 and bytes.get_u8(6)? == 26 and bytes.get_u8(7)? == 10 { return media_png(bytes,scan_bytes,max_dimension,max_pixels); };
+    };
+    if length >= 2 and scan_bytes >= 2 and bytes.get_u8(0)? == 255 and bytes.get_u8(1)? == 216 { return media_jpeg(bytes,scan_bytes,max_jpeg_segments,max_dimension,max_pixels); };
+    let limit = if scan_bytes < 1024 { scan_bytes } else { 1024 };
+    let mut position = 0;
+    while position + 5 <= length and position + 5 <= limit {
+        if bytes.get_u8(position)? == 37 and bytes.get_u8(position+1)? == 80 and bytes.get_u8(position+2)? == 68 and bytes.get_u8(position+3)? == 70 and bytes.get_u8(position+4)? == 45 { return media_pdf(bytes,position,scan_bytes); };
+        position = position + 1;
+    };
+    media_result(media_info(0,if length > scan_bytes { 4 } else { 0 }))
+}

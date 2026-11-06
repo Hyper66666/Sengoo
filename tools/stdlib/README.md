@@ -23,14 +23,19 @@ runtime wrappers, and examples can depend on only the surfaces they need.
 - `regex.sg`: bounded regex compile/match helpers (`runtime_breadth.c`).
 - `log.sg`: level-based logging with deterministic test sink output.
 - `config.sg`: bounded INI/TOML subset parse/get helpers.
-- `hash.sg`: SHA-256 hex digest helpers.
-- `encoding.sg`: base64 and hex encode helpers for byte buffers.
+- `hash.sg`: SHA-256 hex digest helpers and bounded streaming file hashing.
+- `encoding.sg`: base64 and hex encode helpers for byte buffers, plus explicit
+  bounded large-buffer Base64; see [limits and evidence](../../docs/bounded-base64-encoding.md).
 - `compress.sg`: deterministic one-shot gzip/gunzip Buffer helpers backed by a bounded stored-deflate subset.
 - `fs.sg`: glob listing, file copy/remove wrappers, and file-watch support detection.
 - `http.sg`: stable HTTP client surface over the existing runtime HTTP ABI.
 - `status.sg`: stable stdlib status categories plus category name/message copy helpers for fallible runtime APIs.
 - `json.sg`: runtime-backed JSON parse/query/build/serialize helpers using document/value handles and managed `Buffer` outputs.
+  Explicit bounded documents opt into 1..16 MiB limits and aggregate admission;
+  see [contract and evidence](../../docs/bounded-json-documents.md).
 - `file.sg`: runtime-backed file helpers for existence checks, byte length, metadata, string write/append, removal, copy/move with explicit overwrite selection, and reading into managed `Buffer` handles.
+- `file_snapshot.sg`: owned bounded local Windows file copies, same-handle metadata/SHA-256 and retained path guards; see [contract and host evidence](../../docs/bounded-file-media.md).
+- `media.sg`: pure Sengoo bounded PNG/JPEG/PDF header facts with explicit limits and header-only PDF capabilities; see [limits and evidence](../../docs/bounded-file-media.md).
 - `dir.sg`: runtime-backed directory helpers for existence checks, idempotent single-directory creation, recursive creation, deterministic listing, bounded recursive walking, and empty-directory removal.
 - `io.sg`: runtime-backed synchronous standard I/O helpers for Buffer-backed stdin reads, exact stdout/stderr writes, and stream flushing.
 - `stream.sg`: synchronous `Reader`/`Writer` traits, in-memory `Cursor`, fd adapters, and bounded `read_to_end` / `write_all` / `copy_stream` helpers (v0.2 production profile).
@@ -38,13 +43,18 @@ runtime wrappers, and examples can depend on only the surfaces they need.
 - `time.sg`: runtime-backed clock and sleep helpers plus UTC `YYYY-MM-DDTHH:MM:SSZ` format/parse helpers.
 - `random.sg`: runtime-backed deterministic pseudo-random helpers for seeding, non-negative i64 values, half-open i64 ranges, and booleans.
 - `path.sg`: runtime-backed path helpers for platform separator discovery, conservative absolute checks, joining, parent/file-name/stem/extension extraction, and lexical normalization into managed `Buffer` handles.
-- `process.sg`: runtime-backed process metadata helpers, synchronous shell-free fixed-arity child execution, and command-builder handles for dynamic argv, cwd/env overrides, output capture, and timeouts.
+- `process.sg`: runtime-backed process metadata helpers, synchronous shell-free fixed-arity child execution, and command-builder handles for dynamic argv, cwd/env overrides, output capture, and timeouts. Windows explicit detached launches return PID/birth evidence without a kill owner; see [launch contract](../../docs/detached-process-launch.md).
+- `terminal.sg`: owning terminal input, raw/fullscreen modes, mouse and resize events, restoration and bounded Windows clipboard text/image/file snapshots.
+- `ipc.sg`: bounded same-user, same-logon Windows listener/stream byte transport with checked owning handles.
+- `pty.sg`: owning Windows pseudoconsole commands with controlled argv/cwd/environment, bounded byte I/O, resize, status and job-tree cleanup; see [the API and host evidence](../../docs/windows-owned-pty.md).
+- `unicode.sg`: pure Sengoo Unicode17 extended-grapheme boundaries and deterministic terminal cell-width policy; generated property tables and licensed data are vendored.
 - `args.sg`: runtime-backed command-line argument helpers for user argument count, existence checks, byte lengths, and managed `Buffer` copy. The executable/source path is not exposed as argument index `0`.
 - `db.sg`, `ffi.sg`, `lua54.sg`, `net.sg`, `proto.sg`: Sengoo-side wrappers over the runtime reflection drivers.
 - `runtime.c`: anchor/core C runtime support used by stdlib/runtime smoke
   paths. Large domain bridges live in sibling sources:
   `runtime_breadth.c`, `runtime_collections.c`, `runtime_json.c`,
-  `runtime_process.c`, `runtime_stream.c`, and `runtime_string.c`, with shared declarations in
+  `runtime_process.c`, `runtime_terminal.c`, `runtime_ipc.c`, `runtime_pty.c`,
+  `runtime_hash_file.c`, `runtime_stream.c`, and `runtime_string.c`, with shared declarations in
   `runtime_shared.h`.
 
 ## Source Imports
@@ -292,8 +302,13 @@ copies up to the buffer capacity or through one newline; EOF without bytes is a
 successful `0` byte read. `io_stdout_write(data)` and `io_stderr_write(data)`
 write exactly the provided string bytes without appending newlines, while
 `io_stdout_flush()` and `io_stderr_flush()` expose fallible stream flushing.
-Async I/O, terminal control, file descriptor APIs, and owned-string stdin
-helpers remain deferred.
+The additive development `std::terminal` module handles raw/fullscreen input,
+resize, mouse, restoration, Windows clipboard output and explicit bounded
+text/image/file paste snapshots; it does not provide a
+renderer or editor. `std::process` supplies independent nonblocking piped child
+I/O. See [native process and terminal foundation](../../docs/process-terminal-runtime.md).
+These additions require the current development toolchain; they are not a
+claim about a previously published v0.2 binary.
 
 ## Path Helpers
 

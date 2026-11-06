@@ -20,6 +20,11 @@ sources=(
   runtime_collections.c
   runtime_json.c
   runtime_process.c
+  runtime_terminal.c
+  runtime_ipc.c
+  runtime_pty.c
+  runtime_hash_file.c
+  runtime_system.c
   runtime_stream.c
   runtime_string.c
 )

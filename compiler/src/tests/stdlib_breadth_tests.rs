@@ -93,6 +93,7 @@ fn config_hash_encoding_modules_compile() {
             "result.sg",
             "ffi.sg",
             "status.sg",
+            "string.sg",
             "config.sg",
             "hash.sg",
             "encoding.sg",

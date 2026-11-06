@@ -205,6 +205,14 @@ Get-ChildItem -LiteralPath $stdlibSource -File | Where-Object {
     Copy-Item -LiteralPath $_.FullName -Destination (Join-Path $stdlibDir $_.Name)
 }
 
+# The generated Unicode module is distributed with its pinned source data and
+# license so an installed toolchain preserves the table provenance offline.
+$unicodeDataSource = Join-Path $stdlibSource "unicode-data"
+if (-not (Test-Path -LiteralPath (Join-Path $unicodeDataSource "17.0.0/LICENSE.txt"))) {
+    throw "missing vendored Unicode license: $unicodeDataSource"
+}
+Copy-Item -LiteralPath $unicodeDataSource -Destination (Join-Path $stdlibDir "unicode-data") -Recurse
+
 $runtimeLibraryName = if (Is-WindowsHost) { "sengoo_runtime.lib" } else { "libsengoo_runtime.a" }
 $runtimeLibrarySource = Join-Path $CargoTargetDir "staticlib/$runtimeLibraryName"
 if (-not (Test-Path -LiteralPath $runtimeLibrarySource)) {

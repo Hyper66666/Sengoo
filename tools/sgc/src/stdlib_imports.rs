@@ -10,6 +10,8 @@ const STDLIB_SOURCE_ORDER: &[&str] = &[
     "result",
     "math",
     "string",
+    "unicode_tables",
+    "unicode",
     "error",
     "assert",
     "ffi",
@@ -25,6 +27,8 @@ const STDLIB_SOURCE_ORDER: &[&str] = &[
     "encoding",
     "compress",
     "file",
+    "file_snapshot",
+    "media",
     "dir",
     "fs",
     "io",
@@ -34,6 +38,10 @@ const STDLIB_SOURCE_ORDER: &[&str] = &[
     "random",
     "path",
     "process",
+    "terminal",
+    "ipc",
+    "pty",
+    "system",
     "args",
     "db",
     "lua54",
@@ -60,12 +68,19 @@ fn source_module_needs_result_family(module: &str) -> bool {
             | "db"
             | "ffi"
             | "file"
+            | "file_snapshot"
+            | "media"
             | "dir"
             | "io"
             | "stream"
             | "env"
             | "path"
             | "process"
+            | "terminal"
+            | "ipc"
+            | "pty"
+            | "system"
+            | "unicode"
             | "args"
             | "fmt"
             | "regex"
@@ -85,6 +100,10 @@ fn source_module_needs_result_family(module: &str) -> bool {
 
 fn source_module_direct_dependencies(module: &str) -> &'static [&'static str] {
     match module {
+        "terminal" | "ipc" | "pty" | "system" | "file_snapshot" => &["ffi", "string", "status"],
+        "media" => &["ffi", "string", "status"],
+        "unicode" => &["unicode_tables", "string", "status"],
+        "hash" => &["ffi", "string", "status"],
         "collections" | "json" | "status" => &["ffi", "string"],
         "math" => &["option", "status"],
         "string" => &["ffi"],
@@ -92,7 +111,7 @@ fn source_module_direct_dependencies(module: &str) -> &'static [&'static str] {
         "stream" => &["status", "ffi", "io", "file", "net"],
         "path" | "dir" => &["status", "string"],
         "fmt" => &["strconv", "status"],
-        "regex" | "log" | "config" | "hash" | "encoding" | "compress" | "fs" => &["status"],
+        "regex" | "log" | "config" | "encoding" | "compress" | "fs" => &["status"],
         "async" => &["status", "result"],
         "http" => &["ffi", "status", "string"],
         // Keep the broad async module out of net's transitive surface. The

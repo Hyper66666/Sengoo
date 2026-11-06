@@ -1,0 +1,51 @@
+import std::json;
+import std::file;
+import std::string;
+import std::ffi;
+import std::args;
+
+def check(condition: bool, code: i64) -> Result<bool,i64> {
+    Result { is_ok:condition,value:condition,error:if condition { 0 } else { code } }
+}
+def tests() -> Result<i64,i64> {
+    let path_bytes = ffi_buffer_new(arg_len(0)?)?;
+    arg_copy(0,path_bytes)?;
+    let path = string_from_bytes_raw(path_bytes.ptr(),path_bytes.used_len())?;
+    let size = file_size(path.as_str())?;
+    let input = ffi_buffer_new(size+1)?;
+    let count = file_read_into(path.as_str(),input)?;
+    check(count == size and count > 1048576,101)?;
+    check(not json_parse_buffer(input,count).is_ok,102)?;
+    let before = sengoo_json_bounded_live_documents();
+    {
+        let doc = json_parse_buffer_bounded(&input,count,count)?;
+        let text = doc.root().string_value()?;
+        check(str_contains(text.as_str(),"世界😀"),103)?;
+        let encoded = doc.serialize_string()?;
+        check(encoded.len() == count,104)?;
+        check(not json_parse_bounded(encoded.as_str(),count-1).is_ok,105)?;
+        let dest = json_doc_object_bounded(count+32)?;
+        let copied = dest.copy(doc.root())?;
+        dest.root().object_set("copy",copied)?;
+        let composed = dest.serialize_string()?;
+        let reparsed = json_parse_bounded(composed.as_str(),count+32)?;
+        let value = reparsed.root().object_get("copy")?.string_value()?;
+        check(value == text,106)?;
+        let small = json_doc_object_bounded(32)?;
+        let mut iteration = 0;
+        while iteration < 32 { check(not small.copy(doc.root()).is_ok,107)?; iteration = iteration+1; };
+        let zero_bytes = ffi_buffer_new(3)?;
+        zero_bytes.push_u8(120)?; zero_bytes.push_u8(0)?; zero_bytes.push_u8(121)?;
+        let zero = string_from_bytes_raw(zero_bytes.ptr(),3)?;
+        let exact = small.new_string_owned(&zero)?;
+        small.root().object_set("nul",exact)?;
+        let small_text = small.serialize_string()?;
+        check(str_contains(small_text.as_str(),"\\u0000"),108)?;
+        check(not json_parse_buffer_bounded(&input,count+1,count+1).is_ok,109)?;
+        check(not json_doc_object_bounded(0).is_ok and not json_doc_object_bounded(16777217).is_ok,110)?;
+    };
+    check(sengoo_json_bounded_live_documents() == before and sengoo_json_bounded_reserved_bytes() == 0,111)?;
+    println("bounded JSON SG: >1MiB UTF-8, borrowed input, copy, serialize, NUL, rollback and Drop passed");
+    Result { is_ok:true,value:0,error:0 }
+}
+def main() -> i64 { let result = tests(); if not result.is_ok { println(result.error); return result.error; }; 0 }

@@ -1,0 +1,38 @@
+import std::encoding;
+import std::ffi;
+import std::string;
+
+def ensure(value: bool, message: &str) -> Result<bool, i64> {
+    if not value { println(message); return Result { is_ok: false, value: false, error: 99 }; };
+    Result { is_ok: true, value: true, error: 0 }
+}
+
+def tests() -> Result<bool, i64> {
+    let input = ffi_buffer_from_bytes("abc")?; let mut out = ffi_buffer_new(4)?;
+    ensure(encoding_base64_encode_buffer_bounded(&input, 3, 3, &mut out)? == 4 and string_from_buffer(out,4)?.as_str() == "YWJj", "RFC4648 small vector")?;
+    let empty = ffi_buffer_new(0)?; let mut empty_out = ffi_buffer_new(0)?;
+    ensure(encoding_base64_encode_buffer_bounded(&empty, 0, 1, &mut empty_out)? == 0, "empty input uses no native dereference")?;
+    let bytes = ffi_buffer_new(65537)?; let mut count = 0;
+    while count < 65537 { bytes.push_u8(0)?; count = count + 1; };
+    let legacy = ffi_buffer_new(87384)?;
+    ensure(encoding_base64_encode_buffer(bytes,65536,legacy).is_ok(), "legacy exact 64KiB is preserved")?;
+    ensure(encoding_base64_encode_buffer(bytes,65537,legacy).error == 2, "legacy one byte over still returns invalid argument")?;
+    let mut large = ffi_buffer_new(87384)?;
+    ensure(encoding_base64_encode_buffer_bounded(&bytes,65537,65537,&mut large)? == 87384, "explicit bounded encoding crosses the old limit")?;
+    let encoded = string_from_buffer(large,87384)?;
+    let iter = encoded.bytes(); count = 0;
+    loop { let item = iter.next(); if not item.is_some { break; }; ensure(item.value == if count < 87383 { 65 } else { 61 }, "independent all-zero reference includes exactly one final padding byte")?; count = count + 1; }; iter.free();
+    let mut small = ffi_buffer_new(3)?; let mut valid_out = ffi_buffer_new(4)?;
+    ensure(encoding_base64_encode_buffer_bounded(&input,3,2,&mut valid_out).error == 13, "explicit input maximum is enforced")?;
+    ensure(encoding_base64_encode_buffer_bounded(&input,3,3,&mut small).error == 13, "output capacity is checked before conversion")?;
+    ensure(encoding_base64_encode_buffer_bounded(&input,3,0,&mut valid_out).error == 2, "zero maximum is invalid")?;
+    ensure(encoding_base64_encode_buffer_bounded(&input,3,16777217,&mut valid_out).error == 2, "maximum above16MiB is invalid")?;
+    ensure(encoding_base64_encode_buffer_bounded(&input,4,4,&mut valid_out).error == 2, "uninitialized input bytes cannot be encoded")?;
+    let raw = ffi_buffer_new(3)?; raw.push_u8(120)?; raw.push_u8(0)?; raw.push_u8(121)?; let mut binary = ffi_buffer_new(4)?;
+    encoding_base64_encode_buffer_bounded(&raw,3,3,&mut binary)?;
+    ensure(string_from_buffer(binary,4)?.as_str() == "eAB5", "embedded NUL remains an exact binary byte")?;
+    println("bounded Base64: vectors, legacy64KiB, cross-chunk padding, initialized bytes, capacities and binary NUL passed");
+    Result { is_ok: true, value: true, error: 0 }
+}
+
+def main() -> i64 { let result = tests(); if not result.is_ok() { println(result.error); return 1; }; 0 }

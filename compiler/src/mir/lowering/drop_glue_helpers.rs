@@ -110,6 +110,9 @@ impl<'a> LoweringContext<'a> {
     }
 
     pub(super) fn record_drop_binding_if_needed(&mut self, local: Local) {
+        if self.destructor_receiver == Some(local) {
+            return;
+        }
         // Legacy handle params are skipped here: by-value `self`/`String` args
         // are still lowered as handle *copies* for many stdlib methods (`len`,
         // `as_str`, …). Auto-Drop on those params would free the live object
@@ -498,6 +501,7 @@ impl<'a> LoweringContext<'a> {
         self.insert_function_sig(
             helper_name.clone(),
             FunctionSig {
+                receiver_is_ref: false,
                 ret_type: MIR_UNIT,
                 param_count: 1,
                 env: Vec::new(),
@@ -525,6 +529,7 @@ impl<'a> LoweringContext<'a> {
         helper_ctx.insert_function_sig(
             helper_name.clone(),
             FunctionSig {
+                receiver_is_ref: false,
                 ret_type: MIR_UNIT,
                 param_count: 1,
                 env: Vec::new(),

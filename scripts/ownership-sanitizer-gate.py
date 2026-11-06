@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Instrument generated ownership code and the seven split C runtime sources.
+"""Instrument generated ownership code and the split C runtime sources.
 
 This is a required gate: missing tools, inactive instrumentation, failed probes,
 sanitizer reports, resource leaks, and compiler errors all return a nonzero code.
@@ -26,7 +26,7 @@ import tempfile
 
 RUNTIME_SOURCES = (
     "runtime.c", "runtime_breadth.c", "runtime_collections.c", "runtime_json.c",
-    "runtime_process.c", "runtime_stream.c", "runtime_string.c",
+    "runtime_process.c", "runtime_terminal.c", "runtime_ipc.c", "runtime_pty.c", "runtime_hash_file.c", "runtime_system.c", "runtime_stream.c", "runtime_string.c",
 )
 PROBE_C = r"""
 #include <stdint.h>
@@ -312,7 +312,7 @@ def main() -> int:
             if failures:
                 raise RuntimeError(f"generated ownership cases failed: {', '.join(failures)}; artifacts retained in {directory}")
             report["ok"] = True
-        print("generated ownership + seven split runtime sanitizer gate: passed")
+        print("generated ownership + split runtime sanitizer gate: passed")
     except Exception as error:
         report["error"] = str(error)
         print(f"ownership sanitizer gate failed: {error}", file=sys.stderr)

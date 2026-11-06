@@ -1,0 +1,81 @@
+// Same-user, same-logon local byte transport. Windows x64 implementation.
+// Names: 1..120 ASCII letters/digits/._-; no filesystem or remote paths.
+extern "C" {
+    fn sengoo_ipc_listen(bytes: i64, length: i64) -> i64;
+    fn sengoo_ipc_connect(bytes: i64, length: i64) -> i64;
+    fn sengoo_ipc_listener_try_accept(handle: i64) -> i64;
+    fn sengoo_ipc_stream_read(handle: i64, buffer: i64) -> i64;
+    fn sengoo_ipc_stream_write(handle: i64, buffer: i64, length: i64) -> i64;
+    fn sengoo_ipc_stream_poll(handle: i64, events: i64, timeout_ms: i64) -> i64;
+    fn sengoo_ipc_stream_eof(handle: i64) -> i64;
+    fn sengoo_ipc_stream_peer_pid(handle: i64) -> i64;
+    fn sengoo_ipc_listener_close(handle: i64) -> i64;
+    fn sengoo_ipc_stream_close(handle: i64) -> i64;
+    fn sengoo_ipc_live_handle_count() -> i64;
+}
+struct IpcListener { handle: i64, }
+struct IpcStream { handle: i64, }
+impl !Send for IpcListener {}
+impl !Sync for IpcListener {}
+impl !Send for IpcStream {}
+impl !Sync for IpcStream {}
+
+def ipc_listen(name: &str) -> Result<IpcListener, i64> {
+    let raw = sengoo_ipc_listen(sengoo_stdlib_str_ptr(name), name.len());
+    if raw > 0 { Result { is_ok: true, value: IpcListener { handle: raw }, error: 0 }; }
+    else { Result { is_ok: false, value: IpcListener { handle: 0 }, error: status_from_raw_ffi(raw) }; };
+}
+// Connect never waits for a busy/missing endpoint; retry policy belongs to the caller.
+def ipc_connect(name: &str) -> Result<IpcStream, i64> {
+    let raw = sengoo_ipc_connect(sengoo_stdlib_str_ptr(name), name.len());
+    if raw > 0 { Result { is_ok: true, value: IpcStream { handle: raw }, error: 0 }; }
+    else { Result { is_ok: false, value: IpcStream { handle: 0 }, error: status_from_raw_ffi(raw) }; };
+}
+def ipc_count_result(raw: i64) -> Result<i64, i64> {
+    if raw >= 0 { Result { is_ok: true, value: raw, error: 0 }; }
+    else { Result { is_ok: false, value: 0, error: status_from_raw_ffi(raw) }; };
+}
+impl IpcListener {
+    // Success with handle=0 means no peer is waiting. Check stream.is_open().
+    def try_accept(&self) -> Result<IpcStream, i64> {
+        let raw = sengoo_ipc_listener_try_accept(self.handle);
+        if raw >= 0 { Result { is_ok: true, value: IpcStream { handle: raw }, error: 0 }; }
+        else { Result { is_ok: false, value: IpcStream { handle: 0 }, error: status_from_raw_ffi(raw) }; };
+    }
+    def close(&mut self) -> Result<bool, i64> {
+        let raw = sengoo_ipc_listener_close(self.handle); self.handle = 0;
+        Result { is_ok: raw >= 0, value: raw >= 0, error: if raw < 0 { status_from_raw_ffi(raw) } else { 0 } };
+    }
+}
+impl IpcStream {
+    def is_open(&self) -> bool { self.handle > 0; }
+    // 0 bytes with eof=false is temporary lack of data. Every read sets used_len.
+    def read(&self, out: &mut Buffer) -> Result<i64, i64> {
+        ipc_count_result(sengoo_ipc_stream_read(self.handle, out.raw_handle()));
+    }
+    // Accepted bytes are copied into a bounded queue before return. A busy
+    // queue returns 0. poll(2, timeout_ms) confirms the queued write completed.
+    def write(&self, data: &Buffer, length: i64) -> Result<i64, i64> {
+        ipc_count_result(sengoo_ipc_stream_write(self.handle, data.raw_handle(), length));
+    }
+    // Interests: 1 readable, 2 writable, 3 either. Result bits: 1 data,
+    // 2 write queue empty, 4 EOF. A timeout returns 0; maximum wait is 60s.
+    def poll(&self, events: i64, timeout_ms: i64) -> Result<i64, i64> {
+        ipc_count_result(sengoo_ipc_stream_poll(self.handle, events, timeout_ms));
+    }
+    def eof(&self) -> Result<bool, i64> {
+        let raw = sengoo_ipc_stream_eof(self.handle);
+        Result { is_ok: raw >= 0, value: raw > 0, error: if raw < 0 { status_from_raw_ffi(raw) } else { 0 } };
+    }
+    def peer_pid(&self) -> Result<i64, i64> { ipc_count_result(sengoo_ipc_stream_peer_pid(self.handle)); }
+    def close(&mut self) -> Result<bool, i64> {
+        let raw = sengoo_ipc_stream_close(self.handle); self.handle = 0;
+        Result { is_ok: raw >= 0, value: raw >= 0, error: if raw < 0 { status_from_raw_ffi(raw) } else { 0 } };
+    }
+}
+impl Drop for IpcListener {
+    def drop(&mut self) { if self.handle != 0 { sengoo_ipc_listener_close(self.handle); }; }
+}
+impl Drop for IpcStream {
+    def drop(&mut self) { if self.handle != 0 { sengoo_ipc_stream_close(self.handle); }; }
+}

@@ -69,8 +69,9 @@ fn test_print_bool_generates_correct_runtime_call() {
     let source = r#"def main() -> i64 { print(true); 0 }"#;
     let ir = compile_to_ir(source).expect("print(true) should compile successfully");
     assert!(
-        ir.contains("@sengoo_print_bool("),
-        "Expected IR to contain '@sengoo_print_bool(', got:\n{}",
+        ir.contains("call void @sengoo_print_bool(i64")
+            && !ir.contains("call void @sengoo_print_bool(i1"),
+        "Boolean output must obey the runtime i64 ABI, got:\n{}",
         ir
     );
 }

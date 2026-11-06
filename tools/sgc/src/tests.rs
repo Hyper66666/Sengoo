@@ -544,6 +544,12 @@ fn runtime_source_bundle_discovers_anchor_and_existing_split_sources() {
         "runtime_collections.c",
         "runtime_json.c",
         "runtime_process.c",
+        "runtime_terminal.c",
+        "runtime_ipc.c",
+        "runtime_pty.c",
+        "runtime_hash_file.c",
+        "runtime_file_snapshot.c",
+        "runtime_system.c",
         "runtime_stream.c",
         "runtime_shared.h",
     ] {
@@ -566,6 +572,12 @@ fn runtime_source_bundle_discovers_anchor_and_existing_split_sources() {
             "runtime_collections.c",
             "runtime_json.c",
             "runtime_process.c",
+            "runtime_terminal.c",
+            "runtime_ipc.c",
+            "runtime_pty.c",
+            "runtime_hash_file.c",
+        "runtime_file_snapshot.c",
+            "runtime_system.c",
             "runtime_stream.c",
         ]
     );

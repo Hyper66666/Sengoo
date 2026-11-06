@@ -678,6 +678,7 @@ long long sengoo_status_message_copy(long long code, long long out_buffer, long 
 }
 
 static long long sengoo_negative_status_from_errno(int err, long long fallback_status) {
+    if (err == EILSEQ) return -SENGOO_STATUS_INVALID_UTF8;
     switch (err) {
         case 0:
             return -fallback_status;
@@ -1095,6 +1096,62 @@ long long sengoo_ffi_buffer_used_len(long long buffer_handle) {
     return (long long)buffer->used_len;
 }
 
+long long sengoo_ffi_buffer_get_u8(long long buffer_handle, long long index) {
+    sengoo_ffi_clear_error_state();
+    SengooFfiBuffer* buffer = sengoo_ffi_buffer_from_handle(buffer_handle);
+    if (!buffer) {
+        return sengoo_ffi_set_error(SENGOO_FFI_ERR_INVALID_HANDLE, "buffer handle not found");
+    }
+    if (index < 0 || (unsigned long long)index >= buffer->used_len) {
+        return sengoo_ffi_set_error(SENGOO_FFI_ERR_INVALID_ARGUMENT, "index outside buffer used length");
+    }
+    return buffer->bytes[(size_t)index];
+}
+
+long long sengoo_ffi_buffer_consume(long long buffer_handle, long long count) {
+    sengoo_ffi_clear_error_state();
+    SengooFfiBuffer* buffer = sengoo_ffi_buffer_from_handle(buffer_handle);
+    if (!buffer) {
+        return sengoo_ffi_set_error(SENGOO_FFI_ERR_INVALID_HANDLE, "buffer handle not found");
+    }
+    if (count < 0 || (unsigned long long)count > buffer->used_len) {
+        return sengoo_ffi_set_error(SENGOO_FFI_ERR_INVALID_ARGUMENT, "prefix outside buffer used length");
+    }
+    size_t remaining = buffer->used_len - (size_t)count;
+    if (remaining > 0 && count > 0) {
+        memmove(buffer->bytes, buffer->bytes + (size_t)count, remaining);
+    }
+    buffer->used_len = remaining;
+    return (long long)remaining;
+}
+
+long long sengoo_ffi_buffer_index_of_bytes(long long buffer_handle, long long needle_handle, long long start) {
+    sengoo_ffi_clear_error_state();
+    SengooFfiBuffer* buffer = sengoo_ffi_buffer_from_handle(buffer_handle);
+    SengooFfiBuffer* needle = sengoo_ffi_buffer_from_handle(needle_handle);
+    if (!buffer || !needle) {
+        return sengoo_ffi_set_error(SENGOO_FFI_ERR_INVALID_HANDLE, "buffer handle not found");
+    }
+    if (start < 0 || (unsigned long long)start > buffer->used_len) {
+        return sengoo_ffi_set_error(SENGOO_FFI_ERR_INVALID_ARGUMENT, "search start outside buffer used length");
+    }
+    if (needle->used_len == 0) {
+        return start;
+    }
+    size_t offset = (size_t)start;
+    if (needle->used_len > buffer->used_len - offset) {
+        return -1;
+    }
+    size_t last = buffer->used_len - needle->used_len;
+    for (; offset <= last; ++offset) {
+        if (buffer->bytes[offset] == needle->bytes[0]
+            && memcmp(buffer->bytes + offset, needle->bytes, needle->used_len) == 0) {
+            return (long long)offset;
+        }
+    }
+    return -1;
+}
+
 long long sengoo_ffi_buffer_commit_used_len(long long buffer_handle, long long used_len) {
     SengooFfiBuffer* buffer = sengoo_ffi_buffer_from_handle(buffer_handle);
     if (!buffer) {
@@ -1183,7 +1240,7 @@ long long sengoo_ffi_buffer_copy_range(long long buffer_handle, long long start,
         return sengoo_ffi_set_error(SENGOO_FFI_ERR_BUFFER, "output capacity too small");
     }
     if (range_len > 0) {
-        memcpy(out->bytes, buffer->bytes + range_start, range_len);
+        memmove(out->bytes, buffer->bytes + range_start, range_len);
     }
     out->used_len = range_len;
     return (long long)range_len;
@@ -1204,7 +1261,7 @@ long long sengoo_ffi_buffer_append(long long buffer_handle, long long src_ptr, l
         return sengoo_ffi_set_error(SENGOO_FFI_ERR_BUFFER, "buffer capacity too small");
     }
     if (append_len > 0) {
-        memcpy(buffer->bytes + buffer->used_len, src, append_len);
+        memmove(buffer->bytes + buffer->used_len, src, append_len);
     }
     buffer->used_len += append_len;
     return (long long)append_len;
@@ -1577,13 +1634,84 @@ long long sengoo_strconv_format_f64(
     return (long long)written;
 }
 
+#ifdef _WIN32
+/* All synchronous file/directory OS boundaries share strict UTF-8 paths.
+ * Return errno-compatible failures so existing status mappings stay stable. */
+static wchar_t* sengoo_fs_windows_path(const char* path) {
+    if (!path || !*path) { errno = EINVAL; return NULL; }
+    size_t length = 0;
+    while (length <= SENGOO_RUNTIME_MAX_PATH_BYTES && path[length]) length++;
+    if (length > SENGOO_RUNTIME_MAX_PATH_BYTES) { errno = ENAMETOOLONG; return NULL; }
+    int count = MultiByteToWideChar(CP_UTF8, MB_ERR_INVALID_CHARS, path, -1, NULL, 0);
+    if (!count) { errno = EILSEQ; return NULL; }
+    wchar_t* wide = (wchar_t*)malloc((size_t)count * sizeof(wchar_t));
+    if (!wide) { errno = ENOMEM; return NULL; }
+    if (!MultiByteToWideChar(CP_UTF8, MB_ERR_INVALID_CHARS, path, -1, wide, count)) {
+        free(wide); errno = EILSEQ; return NULL;
+    }
+    return wide;
+}
+static char* sengoo_fs_utf8_name(const wchar_t* name) {
+    int count = WideCharToMultiByte(CP_UTF8, WC_ERR_INVALID_CHARS, name, -1, NULL, 0, NULL, NULL);
+    if (!count) { errno = EILSEQ; return NULL; }
+    char* utf8 = (char*)malloc((size_t)count);
+    if (!utf8) { errno = ENOMEM; return NULL; }
+    if (!WideCharToMultiByte(CP_UTF8, WC_ERR_INVALID_CHARS, name, -1, utf8, count, NULL, NULL)) {
+        free(utf8); errno = EILSEQ; return NULL;
+    }
+    return utf8;
+}
+static DWORD sengoo_fs_windows_attributes(const char* path) {
+    wchar_t* wide = sengoo_fs_windows_path(path);
+    if (!wide) return INVALID_FILE_ATTRIBUTES;
+    DWORD attributes = GetFileAttributesW(wide);
+    free(wide);
+    return attributes;
+}
+#endif
+static FILE* sengoo_fs_fopen_utf8(const char* path, const char* mode) {
+#ifdef _WIN32
+    wchar_t* wide = sengoo_fs_windows_path(path);
+    if (!wide) return NULL;
+    const wchar_t* wide_mode = !strcmp(mode, "rb") ? L"rb" : (!strcmp(mode, "ab") ? L"ab" : L"wb");
+    FILE* file = _wfopen(wide, wide_mode);
+    free(wide);
+    return file;
+#else
+    return fopen(path, mode);
+#endif
+}
+static int sengoo_fs_remove_utf8(const char* path) {
+#ifdef _WIN32
+    wchar_t* wide = sengoo_fs_windows_path(path);
+    if (!wide) return -1;
+    int result = _wremove(wide);
+    free(wide);
+    return result;
+#else
+    return remove(path);
+#endif
+}
+static long long sengoo_fs_validate_path(const char* path) {
+    /* Leave legacy null/empty status choices to each public entry point. */
+    if (!path || !*path) return 0;
+#ifdef _WIN32
+    wchar_t* wide = sengoo_fs_windows_path(path);
+    if (!wide) return sengoo_negative_status_from_errno(errno, SENGOO_STATUS_IO);
+    free(wide);
+#else
+    (void)path;
+#endif
+    return 0;
+}
+
 long long sengoo_file_exists(long long path_ptr) {
     const char* path = (const char*)(intptr_t)path_ptr;
     if (!path || path[0] == '\0') {
         return 0;
     }
 
-    FILE* file = fopen(path, "rb");
+    FILE* file = sengoo_fs_fopen_utf8(path, "rb");
     if (!file) {
         return 0;
     }
@@ -1598,7 +1726,11 @@ static long long sengoo_regular_file_size_cstr(const char* path) {
 
 #ifdef _WIN32
     struct _stat64 info;
-    if (_stat64(path, &info) != 0) {
+    wchar_t* wide = sengoo_fs_windows_path(path);
+    if (!wide) return sengoo_negative_status_from_errno(errno, SENGOO_STATUS_IO);
+    int status = _wstat64(wide, &info);
+    free(wide);
+    if (status != 0) {
         return sengoo_negative_status_from_errno(errno, SENGOO_STATUS_IO);
     }
     if ((info.st_mode & _S_IFREG) == 0) {
@@ -1634,7 +1766,7 @@ long long sengoo_file_read_into(long long path_ptr, long long out_buffer, long l
         return -SENGOO_STATUS_INVALID_ARGUMENT;
     }
 
-    FILE* file = fopen(path, "rb");
+    FILE* file = sengoo_fs_fopen_utf8(path, "rb");
     if (!file) {
         return sengoo_negative_status_from_errno(errno, SENGOO_STATUS_IO);
     }
@@ -1660,7 +1792,7 @@ static long long sengoo_file_write_mode(
         return -SENGOO_STATUS_INVALID_ARGUMENT;
     }
 
-    FILE* file = fopen(path, mode);
+    FILE* file = sengoo_fs_fopen_utf8(path, mode);
     if (!file) {
         return sengoo_negative_status_from_errno(errno, SENGOO_STATUS_IO);
     }
@@ -1689,7 +1821,7 @@ long long sengoo_file_remove(long long path_ptr) {
         return 1;
     }
 
-    return remove(path);
+    return sengoo_fs_remove_utf8(path);
 }
 
 static int sengoo_path_entry_exists_cstr(const char* path) {
@@ -1698,7 +1830,7 @@ static int sengoo_path_entry_exists_cstr(const char* path) {
     }
 
 #ifdef _WIN32
-    return GetFileAttributesA(path) != INVALID_FILE_ATTRIBUTES ? 1 : 0;
+    return sengoo_fs_windows_attributes(path) != INVALID_FILE_ATTRIBUTES ? 1 : 0;
 #else
     struct stat info;
     return lstat(path, &info) == 0 ? 1 : 0;
@@ -1711,7 +1843,7 @@ static int sengoo_path_is_regular_file_cstr(const char* path) {
     }
 
 #ifdef _WIN32
-    DWORD attributes = GetFileAttributesA(path);
+    DWORD attributes = sengoo_fs_windows_attributes(path);
     return attributes != INVALID_FILE_ATTRIBUTES && !(attributes & FILE_ATTRIBUTE_DIRECTORY) ? 1 : 0;
 #else
     struct stat info;
@@ -1721,8 +1853,11 @@ static int sengoo_path_is_regular_file_cstr(const char* path) {
 
 static int sengoo_paths_refer_to_same_file_cstr(const char* left, const char* right) {
 #ifdef _WIN32
-    HANDLE left_handle = CreateFileA(
-        left,
+    wchar_t* wide_left = sengoo_fs_windows_path(left);
+    wchar_t* wide_right = sengoo_fs_windows_path(right);
+    if (!wide_left || !wide_right) { free(wide_left); free(wide_right); return 0; }
+    HANDLE left_handle = CreateFileW(
+        wide_left,
         0,
         FILE_SHARE_READ | FILE_SHARE_WRITE | FILE_SHARE_DELETE,
         NULL,
@@ -1730,12 +1865,14 @@ static int sengoo_paths_refer_to_same_file_cstr(const char* left, const char* ri
         FILE_ATTRIBUTE_NORMAL,
         NULL
     );
+    free(wide_left);
     if (left_handle == INVALID_HANDLE_VALUE) {
+        free(wide_right);
         return 0;
     }
 
-    HANDLE right_handle = CreateFileA(
-        right,
+    HANDLE right_handle = CreateFileW(
+        wide_right,
         0,
         FILE_SHARE_READ | FILE_SHARE_WRITE | FILE_SHARE_DELETE,
         NULL,
@@ -1743,6 +1880,7 @@ static int sengoo_paths_refer_to_same_file_cstr(const char* left, const char* ri
         FILE_ATTRIBUTE_NORMAL,
         NULL
     );
+    free(wide_right);
     if (right_handle == INVALID_HANDLE_VALUE) {
         CloseHandle(left_handle);
         return 0;
@@ -1771,6 +1909,10 @@ static int sengoo_paths_refer_to_same_file_cstr(const char* left, const char* ri
 long long sengoo_file_copy(long long source_ptr, long long destination_ptr, long long overwrite) {
     const char* source = (const char*)(intptr_t)source_ptr;
     const char* destination = (const char*)(intptr_t)destination_ptr;
+    long long source_status = sengoo_fs_validate_path(source);
+    if (source_status < 0) return source_status;
+    long long destination_status = sengoo_fs_validate_path(destination);
+    if (destination_status < 0) return destination_status;
     if (!sengoo_path_is_regular_file_cstr(source) || !destination || destination[0] == '\0') {
         return source && source[0] != '\0'
             ? -SENGOO_STATUS_NOT_FOUND
@@ -1785,12 +1927,12 @@ long long sengoo_file_copy(long long source_ptr, long long destination_ptr, long
         return -SENGOO_STATUS_INVALID_ARGUMENT;
     }
 
-    FILE* input = fopen(source, "rb");
+    FILE* input = sengoo_fs_fopen_utf8(source, "rb");
     if (!input) {
         return sengoo_negative_status_from_errno(errno, SENGOO_STATUS_IO);
     }
 
-    FILE* output = fopen(destination, "wb");
+    FILE* output = sengoo_fs_fopen_utf8(destination, "wb");
     if (!output) {
         int err = errno;
         fclose(input);
@@ -1826,7 +1968,7 @@ long long sengoo_file_copy(long long source_ptr, long long destination_ptr, long
     }
     if (failed) {
         if (!destination_existed) {
-            remove(destination);
+            sengoo_fs_remove_utf8(destination);
         }
         return -SENGOO_STATUS_IO;
     }
@@ -1836,6 +1978,10 @@ long long sengoo_file_copy(long long source_ptr, long long destination_ptr, long
 long long sengoo_file_move(long long source_ptr, long long destination_ptr, long long overwrite) {
     const char* source = (const char*)(intptr_t)source_ptr;
     const char* destination = (const char*)(intptr_t)destination_ptr;
+    long long source_status = sengoo_fs_validate_path(source);
+    if (source_status < 0) return source_status;
+    long long destination_status = sengoo_fs_validate_path(destination);
+    if (destination_status < 0) return destination_status;
     if (!sengoo_path_is_regular_file_cstr(source) || !destination || destination[0] == '\0') {
         return source && source[0] != '\0'
             ? -SENGOO_STATUS_NOT_FOUND
@@ -1846,7 +1992,16 @@ long long sengoo_file_move(long long source_ptr, long long destination_ptr, long
     }
 
 #ifdef _WIN32
-    return MoveFileExA(source, destination, overwrite ? MOVEFILE_REPLACE_EXISTING : 0)
+    wchar_t* wide_source = sengoo_fs_windows_path(source);
+    if (!wide_source) return sengoo_negative_status_from_errno(errno, SENGOO_STATUS_IO);
+    wchar_t* wide_destination = sengoo_fs_windows_path(destination);
+    if (!wide_destination) {
+        int error = errno; free(wide_source);
+        return sengoo_negative_status_from_errno(error, SENGOO_STATUS_IO);
+    }
+    int moved = MoveFileExW(wide_source, wide_destination, overwrite ? MOVEFILE_REPLACE_EXISTING : 0);
+    free(wide_source); free(wide_destination);
+    return moved
         ? 0
         : -SENGOO_STATUS_IO;
 #else
@@ -1869,7 +2024,9 @@ long long sengoo_file_kind(long long path_ptr) {
     }
 
 #ifdef _WIN32
-    DWORD attributes = GetFileAttributesA(path);
+    long long path_status = sengoo_fs_validate_path(path);
+    if (path_status < 0) return path_status;
+    DWORD attributes = sengoo_fs_windows_attributes(path);
     if (attributes == INVALID_FILE_ATTRIBUTES) {
         return -SENGOO_STATUS_NOT_FOUND;
     }
@@ -1912,7 +2069,11 @@ long long sengoo_file_modified_unix_ms(long long path_ptr) {
 
 #ifdef _WIN32
     WIN32_FILE_ATTRIBUTE_DATA info;
-    if (!GetFileAttributesExA(path, GetFileExInfoStandard, &info)) {
+    wchar_t* wide = sengoo_fs_windows_path(path);
+    if (!wide) return sengoo_negative_status_from_errno(errno, SENGOO_STATUS_IO);
+    int found = GetFileAttributesExW(wide, GetFileExInfoStandard, &info);
+    free(wide);
+    if (!found) {
         return -SENGOO_STATUS_NOT_FOUND;
     }
     ULARGE_INTEGER file_time;
@@ -1940,17 +2101,71 @@ long long sengoo_file_modified_unix_ms(long long path_ptr) {
 #endif
 }
 
+#ifdef _WIN32
+static long long sengoo_env_windows_value(const char* name, char** result) {
+    *result = NULL;
+    int name_length = MultiByteToWideChar(CP_UTF8, MB_ERR_INVALID_CHARS, name, -1, NULL, 0);
+    if (!name_length) return -SENGOO_STATUS_INVALID_UTF8;
+    wchar_t* wide_name = (wchar_t*)malloc((size_t)name_length * sizeof(wchar_t));
+    if (!wide_name) return -SENGOO_STATUS_OUT_OF_MEMORY;
+    if (!MultiByteToWideChar(CP_UTF8, MB_ERR_INVALID_CHARS, name, -1, wide_name, name_length)) {
+        free(wide_name); return -SENGOO_STATUS_INVALID_UTF8;
+    }
+    for (int attempt = 0; attempt < 4; attempt++) {
+        SetLastError(ERROR_SUCCESS);
+        DWORD capacity = GetEnvironmentVariableW(wide_name, NULL, 0);
+        if (!capacity) {
+            DWORD error = GetLastError();
+            free(wide_name);
+            if (error != ERROR_SUCCESS) return error == ERROR_ENVVAR_NOT_FOUND ? -SENGOO_STATUS_NOT_FOUND : -SENGOO_STATUS_IO;
+            *result = (char*)calloc(1, 1);
+            return *result ? 0 : -SENGOO_STATUS_OUT_OF_MEMORY;
+        }
+        if (capacity > 32768) { free(wide_name); return -SENGOO_STATUS_OVERFLOW; }
+        wchar_t* wide_value = (wchar_t*)malloc((size_t)capacity * sizeof(wchar_t));
+        if (!wide_value) { free(wide_name); return -SENGOO_STATUS_OUT_OF_MEMORY; }
+        SetLastError(ERROR_SUCCESS);
+        DWORD count = GetEnvironmentVariableW(wide_name, wide_value, capacity);
+        if (!count && GetLastError() != ERROR_SUCCESS) {
+            DWORD error = GetLastError();
+            free(wide_value); free(wide_name);
+            return error == ERROR_ENVVAR_NOT_FOUND ? -SENGOO_STATUS_NOT_FOUND : -SENGOO_STATUS_IO;
+        }
+        if (count >= capacity) { free(wide_value); continue; }
+        wide_value[count] = 0;
+        int bytes = WideCharToMultiByte(CP_UTF8, WC_ERR_INVALID_CHARS, wide_value, -1, NULL, 0, NULL, NULL);
+        if (!bytes) { free(wide_value); free(wide_name); return -SENGOO_STATUS_INVALID_UTF8; }
+        char* utf8 = (char*)malloc((size_t)bytes);
+        if (!utf8) { free(wide_value); free(wide_name); return -SENGOO_STATUS_OUT_OF_MEMORY; }
+        int converted = WideCharToMultiByte(CP_UTF8, WC_ERR_INVALID_CHARS, wide_value, -1, utf8, bytes, NULL, NULL);
+        free(wide_value); free(wide_name);
+        if (!converted) { free(utf8); return -SENGOO_STATUS_INVALID_UTF8; }
+        *result = utf8;
+        return bytes - 1;
+    }
+    free(wide_name);
+    return -SENGOO_STATUS_IO;
+}
+#endif
+
 long long sengoo_env_var_len(long long name_ptr) {
     const char* name = (const char*)(intptr_t)name_ptr;
     if (!name || name[0] == '\0') {
         return -SENGOO_STATUS_INVALID_ARGUMENT;
     }
 
+#ifdef _WIN32
+    char* value = NULL;
+    long long length = sengoo_env_windows_value(name, &value);
+    free(value);
+    return length;
+#else
     const char* value = getenv(name);
     if (!value) {
         return -SENGOO_STATUS_NOT_FOUND;
     }
     return (long long)strlen(value);
+#endif
 }
 
 long long sengoo_env_var_copy(long long name_ptr, long long out_buffer, long long out_capacity) {
@@ -1960,6 +2175,18 @@ long long sengoo_env_var_copy(long long name_ptr, long long out_buffer, long lon
         return -SENGOO_STATUS_INVALID_ARGUMENT;
     }
 
+#ifdef _WIN32
+    char* value = NULL;
+    long long result = sengoo_env_windows_value(name, &value);
+    if (result < 0) return result;
+    size_t len = (size_t)result;
+    if ((unsigned long long)len > (unsigned long long)out_capacity || (len > 0 && !out)) {
+        free(value); return -SENGOO_STATUS_BUFFER_TOO_SMALL;
+    }
+    if (len > 0) memcpy(out, value, len);
+    free(value);
+    return (long long)len;
+#else
     const char* value = getenv(name);
     if (!value) {
         return -SENGOO_STATUS_NOT_FOUND;
@@ -1973,6 +2200,7 @@ long long sengoo_env_var_copy(long long name_ptr, long long out_buffer, long lon
         memcpy(out, value, len);
     }
     return (long long)len;
+#endif
 }
 
 long long sengoo_env_is_windows(void) {
@@ -2011,6 +2239,21 @@ long long sengoo_time_unix_ms(void) {
         return -1;
     }
     return seconds * 1000LL;
+}
+
+long long sengoo_time_monotonic_ms(void) {
+#ifdef _WIN32
+    /* Boot-relative and unaffected by user/NTP wall-clock adjustments. */
+    ULONGLONG ticks = GetTickCount64();
+    return ticks <= LLONG_MAX ? (long long)ticks : -1;
+#elif defined(CLOCK_MONOTONIC)
+    struct timespec ts;
+    if (clock_gettime(CLOCK_MONOTONIC, &ts) != 0 || ts.tv_sec < 0
+        || (uint64_t)ts.tv_sec > (uint64_t)LLONG_MAX / 1000u) return -1;
+    return (long long)ts.tv_sec * 1000LL + (long long)ts.tv_nsec / 1000000LL;
+#else
+    return -1;
+#endif
 }
 
 long long sengoo_time_sleep_ms(long long ms) {
@@ -2518,13 +2761,22 @@ long long sengoo_path_normalize_string(long long path_ptr) {
     return handle;
 }
 
+#ifdef _WIN32
+static wchar_t* sengoo_dir_windows_path(const char* path) {
+    return sengoo_fs_windows_path(path);
+}
+#endif
+
 static int sengoo_dir_exists_cstr(const char* path) {
     if (!path || path[0] == '\0') {
         return 0;
     }
 
 #ifdef _WIN32
-    DWORD attributes = GetFileAttributesA(path);
+    wchar_t* wide = sengoo_dir_windows_path(path);
+    if (!wide) return 0;
+    DWORD attributes = GetFileAttributesW(wide);
+    free(wide);
     return attributes != INVALID_FILE_ATTRIBUTES && (attributes & FILE_ATTRIBUTE_DIRECTORY) ? 1 : 0;
 #else
     struct stat info;
@@ -2541,7 +2793,11 @@ static int sengoo_dir_create_one_cstr(const char* path) {
     }
 
 #ifdef _WIN32
-    if (_mkdir(path) == 0) {
+    wchar_t* wide = sengoo_dir_windows_path(path);
+    if (!wide) return -1;
+    int created = _wmkdir(wide);
+    free(wide);
+    if (created == 0) {
         return 0;
     }
 #else
@@ -2560,6 +2816,8 @@ long long sengoo_dir_exists(long long path_ptr) {
 
 long long sengoo_dir_create(long long path_ptr) {
     const char* path = (const char*)(intptr_t)path_ptr;
+    long long path_status = sengoo_fs_validate_path(path);
+    if (path_status < 0) return path_status;
     return sengoo_dir_create_one_cstr(path);
 }
 
@@ -2568,6 +2826,8 @@ long long sengoo_dir_create_all(long long path_ptr) {
     if (!path || path[0] == '\0') {
         return -SENGOO_STATUS_INVALID_ARGUMENT;
     }
+    long long path_status = sengoo_fs_validate_path(path);
+    if (path_status < 0) return path_status;
     if (sengoo_dir_exists_cstr(path)) {
         return 0;
     }
@@ -2608,7 +2868,11 @@ long long sengoo_dir_remove(long long path_ptr) {
     }
 
 #ifdef _WIN32
-    return _rmdir(path) == 0 ? 0 : sengoo_negative_status_from_errno(errno, SENGOO_STATUS_IO);
+    wchar_t* wide = sengoo_fs_windows_path(path);
+    if (!wide) return sengoo_negative_status_from_errno(errno, SENGOO_STATUS_IO);
+    int result = _wrmdir(wide);
+    free(wide);
+    return result == 0 ? 0 : sengoo_negative_status_from_errno(errno, SENGOO_STATUS_IO);
 #else
     return rmdir(path) == 0 ? 0 : sengoo_negative_status_from_errno(errno, SENGOO_STATUS_IO);
 #endif
@@ -2685,7 +2949,7 @@ static int sengoo_dir_collect_entries(const char* path, SengooDirEntryList* list
     memset(list, 0, sizeof(*list));
 
 #ifdef _WIN32
-    DWORD attributes = GetFileAttributesA(path);
+    DWORD attributes = sengoo_fs_windows_attributes(path);
     if (attributes == INVALID_FILE_ATTRIBUTES || !(attributes & FILE_ATTRIBUTE_DIRECTORY)) {
         return -1;
     }
@@ -2705,20 +2969,29 @@ static int sengoo_dir_collect_entries(const char* path, SengooDirEntryList* list
     pattern[pos++] = '*';
     pattern[pos] = '\0';
 
-    WIN32_FIND_DATAA find_data;
-    HANDLE handle = FindFirstFileA(pattern, &find_data);
+    wchar_t* wide_pattern = sengoo_fs_windows_path(pattern);
     free(pattern);
+    if (!wide_pattern) return -1;
+    WIN32_FIND_DATAW find_data;
+    HANDLE handle = FindFirstFileW(wide_pattern, &find_data);
+    free(wide_pattern);
     if (handle == INVALID_HANDLE_VALUE) {
         return -1;
     }
 
     do {
-        if (sengoo_dir_entry_list_push(list, find_data.cFileName) != 0) {
+        char* name = sengoo_fs_utf8_name(find_data.cFileName);
+        if (!name) {
+            FindClose(handle); sengoo_dir_entry_list_free(list); return -1;
+        }
+        int pushed = sengoo_dir_entry_list_push(list, name);
+        free(name);
+        if (pushed != 0) {
             FindClose(handle);
             sengoo_dir_entry_list_free(list);
             return -1;
         }
-    } while (FindNextFileA(handle, &find_data));
+    } while (FindNextFileW(handle, &find_data));
     DWORD err = GetLastError();
     FindClose(handle);
     if (err != ERROR_NO_MORE_FILES) {
@@ -2756,6 +3029,8 @@ static int sengoo_dir_collect_entries(const char* path, SengooDirEntryList* list
 
 long long sengoo_dir_entry_count(long long path_ptr) {
     const char* path = (const char*)(intptr_t)path_ptr;
+    long long path_status = sengoo_fs_validate_path(path);
+    if (path_status < 0) return path_status;
     SengooDirEntryList list;
     if (sengoo_dir_collect_entries(path, &list) != 0) {
         return (!path || path[0] == '\0') ? -SENGOO_STATUS_INVALID_ARGUMENT : -SENGOO_STATUS_NOT_FOUND;
@@ -2774,6 +3049,8 @@ long long sengoo_dir_entry_name(long long path_ptr, long long index, long long o
     if (index < 0 || out_capacity < 0) {
         return -SENGOO_STATUS_INVALID_ARGUMENT;
     }
+    long long path_status = sengoo_fs_validate_path(path);
+    if (path_status < 0) return path_status;
 
     SengooDirEntryList list;
     if (sengoo_dir_collect_entries(path, &list) != 0) {
@@ -2911,7 +3188,7 @@ static int sengoo_path_is_dir_nofollow(const char* path) {
         return 0;
     }
 #ifdef _WIN32
-    DWORD attributes = GetFileAttributesA(path);
+    DWORD attributes = sengoo_fs_windows_attributes(path);
     return attributes != INVALID_FILE_ATTRIBUTES
         && (attributes & FILE_ATTRIBUTE_DIRECTORY)
         && !(attributes & FILE_ATTRIBUTE_REPARSE_POINT) ? 1 : 0;
@@ -2974,6 +3251,8 @@ long long sengoo_dir_walk_new(long long root_ptr, long long max_depth) {
     if (!root || root[0] == '\0' || max_depth < 0) {
         return -SENGOO_STATUS_INVALID_ARGUMENT;
     }
+    long long path_status = sengoo_fs_validate_path(root);
+    if (path_status < 0) return path_status;
     if (!sengoo_dir_exists_cstr(root)) {
         return -SENGOO_STATUS_NOT_FOUND;
     }
@@ -3045,7 +3324,7 @@ static int sengoo_path_is_symlink_nofollow(const char* path) {
         return 0;
     }
 #ifdef _WIN32
-    DWORD attributes = GetFileAttributesA(path);
+    DWORD attributes = sengoo_fs_windows_attributes(path);
     return attributes != INVALID_FILE_ATTRIBUTES && (attributes & FILE_ATTRIBUTE_REPARSE_POINT) ? 1 : 0;
 #else
     struct stat info;
@@ -3088,10 +3367,10 @@ static int sengoo_dir_remove_tree_recursive(const char* path, long long depth, S
         return 0;
     }
     if (sengoo_path_is_symlink_nofollow(path)) {
-        return remove(path) == 0 ? 1 : 0;
+        return sengoo_fs_remove_utf8(path) == 0 ? 1 : 0;
     }
     if (!sengoo_path_is_dir_nofollow(path)) {
-        return remove(path) == 0 ? 1 : 0;
+        return sengoo_fs_remove_utf8(path) == 0 ? 1 : 0;
     }
 
     SengooDirEntryList entries;
@@ -3129,6 +3408,8 @@ long long sengoo_dir_remove_tree(long long path_ptr, long long max_depth, long l
     if (!path || path[0] == '\0') {
         return -SENGOO_STATUS_INVALID_ARGUMENT;
     }
+    long long path_status = sengoo_fs_validate_path(path);
+    if (path_status < 0) return path_status;
     if (!sengoo_dir_exists_cstr(path)) {
         return -SENGOO_STATUS_NOT_FOUND;
     }
@@ -3222,6 +3503,10 @@ long long sengoo_dir_copy_tree(
     if (!source || source[0] == '\0' || !destination || destination[0] == '\0') {
         return -SENGOO_STATUS_INVALID_ARGUMENT;
     }
+    long long source_status = sengoo_fs_validate_path(source);
+    if (source_status < 0) return source_status;
+    long long destination_status = sengoo_fs_validate_path(destination);
+    if (destination_status < 0) return destination_status;
     if (!sengoo_path_entry_exists_cstr(source)) {
         return -SENGOO_STATUS_NOT_FOUND;
     }
@@ -3370,7 +3655,27 @@ long long sengoo_process_id(void) {
 
 static char* sengoo_process_current_dir_alloc(void) {
 #ifdef _WIN32
-    return _getcwd(NULL, 0);
+    /* _getcwd encodes through the active ANSI codepage and can lose directory
+     * names. Use the OS UTF-16 value and return strict UTF-8 instead. */
+    for (int attempt = 0; attempt < 4; attempt++) {
+        DWORD capacity = GetCurrentDirectoryW(0, NULL);
+        if (!capacity || capacity > 32768) return NULL;
+        wchar_t* wide = (wchar_t*)malloc((size_t)capacity * sizeof(wchar_t));
+        if (!wide) return NULL;
+        DWORD count = GetCurrentDirectoryW(capacity, wide);
+        if (!count) { free(wide); return NULL; }
+        if (count >= capacity) { free(wide); continue; }
+        int bytes = WideCharToMultiByte(CP_UTF8, WC_ERR_INVALID_CHARS, wide, -1, NULL, 0, NULL, NULL);
+        if (!bytes) { free(wide); return NULL; }
+        char* utf8 = (char*)malloc((size_t)bytes);
+        if (!utf8) { free(wide); return NULL; }
+        if (!WideCharToMultiByte(CP_UTF8, WC_ERR_INVALID_CHARS, wide, -1, utf8, bytes, NULL, NULL)) {
+            free(utf8); free(wide); return NULL;
+        }
+        free(wide);
+        return utf8;
+    }
+    return NULL;
 #else
     size_t capacity = 256;
     while (capacity <= (size_t)(1024 * 1024)) {
@@ -3660,20 +3965,90 @@ long long sengoo_process_run(
 
 static long long sengoo_runtime_argc = 0;
 static char** sengoo_runtime_argv = NULL;
+static long long sengoo_runtime_args_error = 0;
+
+#ifdef _WIN32
+static char** sengoo_runtime_owned_argv = NULL;
+static int sengoo_runtime_args_cleanup_registered = 0;
+static void sengoo_runtime_args_clear(void) {
+    if (sengoo_runtime_owned_argv) {
+        for (long long i = 0; i < sengoo_runtime_argc; i++) free(sengoo_runtime_owned_argv[i]);
+        free(sengoo_runtime_owned_argv);
+    }
+    sengoo_runtime_owned_argv = NULL;
+    sengoo_runtime_argv = NULL;
+    sengoo_runtime_argc = 0;
+}
+
+static long long sengoo_runtime_args_from_windows(void) {
+    /* CRT main(char**) uses the active ANSI codepage. Parse the actual wide
+     * command line and own UTF-8 copies instead, including empty arguments.
+     * Loading only from System32 avoids current-directory DLL substitution. */
+    HMODULE shell = LoadLibraryExW(L"shell32.dll", NULL, LOAD_LIBRARY_SEARCH_SYSTEM32);
+    if (!shell) return -SENGOO_STATUS_IO;
+    typedef LPWSTR* (WINAPI *SengooWideArguments)(LPCWSTR, int*);
+    SengooWideArguments parse = (SengooWideArguments)(void*)GetProcAddress(shell, "CommandLineToArgvW");
+    if (!parse) { FreeLibrary(shell); return -SENGOO_STATUS_UNSUPPORTED; }
+    int count = 0;
+    LPWSTR* wide = parse(GetCommandLineW(), &count);
+    if (!wide || count <= 0) {
+        if (wide) LocalFree(wide);
+        FreeLibrary(shell);
+        return -SENGOO_STATUS_OUT_OF_MEMORY;
+    }
+    char** utf8 = (char**)calloc((size_t)count + 1, sizeof(char*));
+    long long failure = utf8 ? 0 : -SENGOO_STATUS_OUT_OF_MEMORY;
+    for (int i = 0; utf8 && i < count; i++) {
+        int bytes = WideCharToMultiByte(CP_UTF8, WC_ERR_INVALID_CHARS, wide[i], -1, NULL, 0, NULL, NULL);
+        if (!bytes) { failure = -SENGOO_STATUS_INVALID_UTF8; break; }
+        utf8[i] = (char*)malloc((size_t)bytes);
+        if (!utf8[i]) { failure = -SENGOO_STATUS_OUT_OF_MEMORY; break; }
+        if (!WideCharToMultiByte(CP_UTF8, WC_ERR_INVALID_CHARS, wide[i], -1, utf8[i], bytes, NULL, NULL)) {
+            failure = -SENGOO_STATUS_INVALID_UTF8;
+            break;
+        }
+    }
+    LocalFree(wide);
+    FreeLibrary(shell);
+    if (failure) {
+        if (utf8) { for (int i = 0; i < count; i++) free(utf8[i]); free(utf8); }
+        return failure;
+    }
+    sengoo_runtime_argc = count;
+    sengoo_runtime_argv = utf8;
+    sengoo_runtime_owned_argv = utf8;
+    if (!sengoo_runtime_args_cleanup_registered) {
+        if (atexit(sengoo_runtime_args_clear) != 0) {
+            sengoo_runtime_args_clear();
+            return -SENGOO_STATUS_OUT_OF_MEMORY;
+        }
+        sengoo_runtime_args_cleanup_registered = 1;
+    }
+    return 0;
+}
+#endif
 
 void sengoo_args_init(long long argc, long long argv_ptr) {
+#ifdef _WIN32
+    sengoo_runtime_args_clear();
+#endif
+    sengoo_runtime_args_error = 0;
     if (argc <= 0 || argv_ptr == 0) {
         sengoo_runtime_argc = 0;
         sengoo_runtime_argv = NULL;
         return;
     }
 
+#ifdef _WIN32
+    sengoo_runtime_args_error = sengoo_runtime_args_from_windows();
+#else
     sengoo_runtime_argc = argc;
     sengoo_runtime_argv = (char**)(intptr_t)argv_ptr;
+#endif
 }
 
 static const char* sengoo_user_arg_at(long long index) {
-    if (index < 0 || !sengoo_runtime_argv) {
+    if (index < 0 || !sengoo_runtime_argv || index >= sengoo_runtime_argc - 1) {
         return NULL;
     }
 
@@ -3686,6 +4061,7 @@ static const char* sengoo_user_arg_at(long long index) {
 }
 
 long long sengoo_args_len(void) {
+    if (sengoo_runtime_args_error) return sengoo_runtime_args_error;
     if (sengoo_runtime_argc <= 1) {
         return 0;
     }
@@ -3693,6 +4069,7 @@ long long sengoo_args_len(void) {
 }
 
 long long sengoo_arg_len(long long index) {
+    if (sengoo_runtime_args_error) return sengoo_runtime_args_error;
     const char* arg = sengoo_user_arg_at(index);
     if (!arg) {
         return -SENGOO_STATUS_NOT_FOUND;
@@ -3701,6 +4078,7 @@ long long sengoo_arg_len(long long index) {
 }
 
 long long sengoo_arg_copy(long long index, long long out_buffer, long long out_capacity) {
+    if (sengoo_runtime_args_error) return sengoo_runtime_args_error;
     char* out = (char*)(intptr_t)out_buffer;
     if (out_capacity < 0) {
         return -SENGOO_STATUS_INVALID_ARGUMENT;

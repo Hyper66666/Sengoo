@@ -33,10 +33,10 @@ fn test_same_type_binary_op_compiles_normally() {
 fn test_bool_binary_op_compiles_normally() {
     let source = r#"def main() -> i64 { let a = true; let b = false; let c = a && b; 0 }"#;
     let ir = compile_to_ir(source).expect("bool binary op should compile");
-    // The IR should contain an 'and' instruction for logical AND
+    // Logical AND must branch before evaluating its right operand.
     assert!(
-        ir.contains("and i1") || ir.contains("and i64"),
-        "Expected IR to contain logical AND instruction, got:\n{}",
+        ir.contains("br i1") && ir.contains("phi i1"),
+        "Expected short-circuit control flow for logical AND, got:\n{}",
         ir
     );
 }

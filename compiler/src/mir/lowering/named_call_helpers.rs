@@ -919,6 +919,7 @@ pub(super) fn synthesize_hashmap_owner_drop_if_missing(
     ctx.insert_function_sig(
         drop_name,
         FunctionSig {
+            receiver_is_ref: false,
             ret_type: MIR_UNIT,
             param_count: 1,
             env: Vec::new(),
@@ -1033,6 +1034,7 @@ pub(super) fn synthesize_vec_owner_drop_if_missing(
     ctx.insert_function_sig(
         drop_name,
         FunctionSig {
+            receiver_is_ref: false,
             ret_type: MIR_UNIT,
             param_count: 1,
             env: Vec::new(),
@@ -1158,6 +1160,7 @@ fn synthesize_vec_move_thunk(
     ctx.insert_function_sig(
         name.clone(),
         FunctionSig {
+            receiver_is_ref: false,
             ret_type: MIR_UNIT,
             param_count: 2,
             env: Vec::new(),
@@ -1229,6 +1232,7 @@ fn synthesize_hash_thunk(ctx: &mut LoweringContext<'_>, key_ty: &MIRType, suffix
                 ctx.insert_function_sig(
                     name.clone(),
                     FunctionSig {
+                        receiver_is_ref: false,
                         ret_type: MIR_I64,
                         param_count: 1,
                         env: Vec::new(),
@@ -1254,6 +1258,7 @@ fn synthesize_hash_thunk(ctx: &mut LoweringContext<'_>, key_ty: &MIRType, suffix
     ctx.insert_function_sig(
         name.clone(),
         FunctionSig {
+            receiver_is_ref: false,
             ret_type: MIR_I64,
             param_count: 1,
             env: Vec::new(),
@@ -1341,6 +1346,7 @@ fn synthesize_eq_thunk(ctx: &mut LoweringContext<'_>, key_ty: &MIRType, suffix: 
             ctx.insert_function_sig(
                 name.clone(),
                 FunctionSig {
+                    receiver_is_ref: false,
                     ret_type: MIR_I64,
                     param_count: 2,
                     env: Vec::new(),
@@ -1377,6 +1383,7 @@ fn synthesize_eq_thunk(ctx: &mut LoweringContext<'_>, key_ty: &MIRType, suffix: 
     ctx.insert_function_sig(
         name.clone(),
         FunctionSig {
+            receiver_is_ref: false,
             ret_type: MIR_I64,
             param_count: 2,
             env: Vec::new(),
@@ -1495,6 +1502,7 @@ fn synthesize_compare_thunk(
             ctx.insert_function_sig(
                 name.clone(),
                 FunctionSig {
+                    receiver_is_ref: false,
                     ret_type: MIR_I64,
                     param_count: 2,
                     env: Vec::new(),
@@ -1524,6 +1532,7 @@ fn synthesize_compare_thunk(
     ctx.insert_function_sig(
         name.clone(),
         FunctionSig {
+            receiver_is_ref: false,
             ret_type: MIR_I64,
             param_count: 2,
             env: Vec::new(),
@@ -2065,6 +2074,7 @@ fn synthesize_channel_endpoint_drop_if_missing(
     ctx.insert_function_sig(
         drop_name,
         FunctionSig {
+            receiver_is_ref: false,
             ret_type: MIR_UNIT,
             param_count: 1,
             env: Vec::new(),
@@ -2424,6 +2434,7 @@ pub(super) fn synthesize_rc_owner_drop(
     ctx.insert_function_sig(
         drop_name,
         FunctionSig {
+            receiver_is_ref: false,
             ret_type: MIR_UNIT,
             param_count: 1,
             env: Vec::new(),
@@ -2479,6 +2490,7 @@ pub(super) fn ensure_owned_dyn_drop_helper(
         ctx.insert_function_sig(
             helper.clone(),
             FunctionSig {
+                receiver_is_ref: false,
                 ret_type: MIR_UNIT,
                 param_count: 1,
                 env: Vec::new(),
@@ -2538,6 +2550,7 @@ fn synthesize_rc_drop_thunk(
     thunk_ctx.insert_function_sig(
         thunk_name.clone(),
         FunctionSig {
+            receiver_is_ref: false,
             ret_type: MIR_UNIT,
             param_count: 1,
             env: Vec::new(),
@@ -2585,6 +2598,7 @@ fn synthesize_rc_drop_thunk(
     ctx.insert_function_sig(
         thunk_name.clone(),
         FunctionSig {
+            receiver_is_ref: false,
             ret_type: MIR_UNIT,
             param_count: 1,
             env: Vec::new(),
@@ -2730,6 +2744,7 @@ mod tests {
         let function_sigs = HashMap::from([(
             "worker".to_string(),
             FunctionSig {
+                receiver_is_ref: false,
                 ret_type: MIR_BOOL,
                 param_count: 0,
                 env: Vec::new(),

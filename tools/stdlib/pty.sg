@@ -1,0 +1,111 @@
+// Windows ConPTY byte transport. The caller owns terminal emulation/rendering.
+// Owned String inputs preserve exact UTF-8 length and reject embedded NUL.
+extern "C" {
+    fn sengoo_pty_available() -> i64;
+    fn sengoo_pty_live_handle_count() -> i64;
+    fn sengoo_pty_command_new(bytes: i64, length: i64) -> i64;
+    fn sengoo_pty_command_arg(handle: i64, bytes: i64, length: i64) -> i64;
+    fn sengoo_pty_command_cwd(handle: i64, bytes: i64, length: i64) -> i64;
+    fn sengoo_pty_command_inherit_env(handle: i64, enabled: i64) -> i64;
+    fn sengoo_pty_command_env(handle: i64, name: i64, name_len: i64, value: i64, value_len: i64, remove: i64) -> i64;
+    fn sengoo_pty_command_spawn(handle: i64, columns: i64, rows: i64) -> i64;
+    fn sengoo_pty_command_close(handle: i64) -> i64;
+    fn sengoo_pty_process_read(handle: i64, buffer: i64) -> i64;
+    fn sengoo_pty_process_write(handle: i64, buffer: i64, length: i64) -> i64;
+    fn sengoo_pty_process_poll(handle: i64, events: i64, timeout_ms: i64) -> i64;
+    fn sengoo_pty_process_resize(handle: i64, columns: i64, rows: i64) -> i64;
+    fn sengoo_pty_process_try_wait(handle: i64) -> i64;
+    fn sengoo_pty_process_tree_quiescent(handle: i64) -> i64;
+    fn sengoo_pty_process_exit_code(handle: i64) -> i64;
+    fn sengoo_pty_process_eof(handle: i64) -> i64;
+    fn sengoo_pty_process_terminate_tree(handle: i64) -> i64;
+    fn sengoo_pty_process_reap(handle: i64, timeout_ms: i64) -> i64;
+    fn sengoo_pty_process_close_input(handle: i64) -> i64;
+    fn sengoo_pty_process_close(handle: i64) -> i64;
+}
+struct PtyCommand { handle: i64, }
+struct PtyProcess { handle: i64, }
+impl !Send for PtyCommand {}
+impl !Sync for PtyCommand {}
+impl !Send for PtyProcess {}
+impl !Sync for PtyProcess {}
+
+def pty_available() -> bool { sengoo_pty_available() > 0; }
+def pty_count_result(raw: i64) -> Result<i64, i64> {
+    Result { is_ok: raw >= 0, value: if raw >= 0 { raw } else { 0 }, error: if raw < 0 { status_from_raw_ffi(raw) } else { 0 } };
+}
+def pty_bool_result(raw: i64) -> Result<bool, i64> {
+    Result { is_ok: raw >= 0, value: raw > 0, error: if raw < 0 { status_from_raw_ffi(raw) } else { 0 } };
+}
+def pty_status_result(raw: i64) -> Result<bool, i64> {
+    Result { is_ok: raw >= 0, value: raw >= 0, error: if raw < 0 { status_from_raw_ffi(raw) } else { 0 } };
+}
+def pty_command(executable: &String) -> Result<PtyCommand, i64> {
+    let raw = sengoo_pty_command_new(sengoo_string_as_str_ptr(executable.handle), executable.len());
+    Result { is_ok: raw > 0, value: PtyCommand { handle: if raw > 0 { raw } else { 0 } }, error: if raw <= 0 { status_from_raw_ffi(raw) } else { 0 } };
+}
+impl PtyCommand {
+    def arg(&self, value: &String) -> Result<bool, i64> {
+        pty_status_result(sengoo_pty_command_arg(self.handle, sengoo_string_as_str_ptr(value.handle), value.len()));
+    }
+    def cwd(&self, value: &String) -> Result<bool, i64> {
+        pty_status_result(sengoo_pty_command_cwd(self.handle, sengoo_string_as_str_ptr(value.handle), value.len()));
+    }
+    def inherit_env(&self, enabled: bool) -> Result<bool, i64> {
+        pty_status_result(sengoo_pty_command_inherit_env(self.handle, if enabled { 1 } else { 0 }));
+    }
+    def env(&self, name: &String, value: &String) -> Result<bool, i64> {
+        pty_status_result(sengoo_pty_command_env(self.handle, sengoo_string_as_str_ptr(name.handle), name.len(), sengoo_string_as_str_ptr(value.handle), value.len(), 0));
+    }
+    def env_remove(&self, name: &String) -> Result<bool, i64> {
+        pty_status_result(sengoo_pty_command_env(self.handle, sengoo_string_as_str_ptr(name.handle), name.len(), 0, 0, 1));
+    }
+    def spawn(&self, columns: i64, rows: i64) -> Result<PtyProcess, i64> {
+        let raw = sengoo_pty_command_spawn(self.handle, columns, rows);
+        Result { is_ok: raw > 0, value: PtyProcess { handle: if raw > 0 { raw } else { 0 } }, error: if raw <= 0 { status_from_raw_ffi(raw) } else { 0 } };
+    }
+    def close(&mut self) -> Result<bool, i64> {
+        let raw = sengoo_pty_command_close(self.handle);
+        if raw >= 0 { self.handle = 0; }
+        pty_status_result(raw);
+    }
+}
+impl PtyProcess {
+    // Nonblocking, at most 64KiB; 0 with eof=false means no ready bytes.
+    def read(&self, out: &mut Buffer) -> Result<i64, i64> {
+        pty_count_result(sengoo_pty_process_read(self.handle, out.raw_handle()));
+    }
+    // Copies accepted bytes before return; 0 is queue backpressure.
+    def write(&self, input: &Buffer, length: i64) -> Result<i64, i64> {
+        pty_count_result(sengoo_pty_process_write(self.handle, input.raw_handle(), length));
+    }
+    // Interests: 1 output, 2 input, 4 exit. Results: 1 data, 2 writable,
+    // 4 drained EOF, 8 direct child exited. Timeout 0..60000ms.
+    def poll(&self, events: i64, timeout_ms: i64) -> Result<i64, i64> {
+        pty_count_result(sengoo_pty_process_poll(self.handle, events, timeout_ms));
+    }
+    // Dimensions 1..1000 cells in each direction.
+    def resize(&self, columns: i64, rows: i64) -> Result<bool, i64> {
+        pty_status_result(sengoo_pty_process_resize(self.handle, columns, rows));
+    }
+    def try_wait(&self) -> Result<bool, i64> { pty_bool_result(sengoo_pty_process_try_wait(self.handle)); }
+    // Unlike try_wait this covers every process still in the owned job.
+    def tree_quiescent(&self) -> Result<bool, i64> { pty_bool_result(sengoo_pty_process_tree_quiescent(self.handle)); }
+    def exit_code(&self) -> Result<i64, i64> { pty_count_result(sengoo_pty_process_exit_code(self.handle)); }
+    def eof(&self) -> Result<bool, i64> { pty_bool_result(sengoo_pty_process_eof(self.handle)); }
+    def terminate_tree(&self) -> Result<bool, i64> { pty_status_result(sengoo_pty_process_terminate_tree(self.handle)); }
+    def reap(&self, timeout_ms: i64) -> Result<i64, i64> { pty_count_result(sengoo_pty_process_reap(self.handle, timeout_ms)); }
+    // Cancels queued input before closing. Not an application EOF handshake.
+    def close_input(&self) -> Result<bool, i64> { pty_status_result(sengoo_pty_process_close_input(self.handle)); }
+    def close(&mut self) -> Result<bool, i64> {
+        let raw = sengoo_pty_process_close(self.handle);
+        if raw >= 0 { self.handle = 0; }
+        pty_status_result(raw);
+    }
+}
+impl Drop for PtyCommand {
+    def drop(&mut self) { if self.handle != 0 { sengoo_pty_command_close(self.handle); }; self.handle = 0; }
+}
+impl Drop for PtyProcess {
+    def drop(&mut self) { if self.handle != 0 { sengoo_pty_process_close(self.handle); }; self.handle = 0; }
+}

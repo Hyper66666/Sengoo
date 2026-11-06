@@ -1,6 +1,8 @@
 extern "C" {
     fn sengoo_stdlib_str_ptr(value: &str) -> i64;
     fn sengoo_hash_sha256(data_ptr: i64, data_len: i64, out_buffer: i64, out_capacity: i64) -> i64;
+    fn sengoo_hash_sha256_bounded(data_ptr: i64, data_len: i64, max_bytes: i64, out_buffer: i64, out_capacity: i64) -> i64;
+    fn sengoo_hash_sha256_file(path: i64, path_len: i64, max_bytes: i64) -> i64;
 }
 
 def hash_sha256_bytes(data_ptr: i64, data_len: i64, out: Buffer) -> Result<i64, i64> {
@@ -14,4 +16,24 @@ def hash_sha256_bytes(data_ptr: i64, data_len: i64, out: Buffer) -> Result<i64, 
 
 def hash_sha256_str(value: &str, out: Buffer) -> Result<i64, i64> {
     hash_sha256_bytes(sengoo_stdlib_str_ptr(value), value.len(), out)
+}
+
+// Opt in to inputs above the legacy 64-KiB limit. The explicit limit must be
+// 1..16777216 bytes. Raw byte input includes embedded NUL and is never copied.
+def hash_sha256_bytes_bounded(data_ptr: i64, data_len: i64, max_bytes: i64, out: Buffer) -> Result<i64, i64> {
+    let digest_len = sengoo_hash_sha256_bounded(data_ptr,data_len,max_bytes,out.handle,out.len());
+    if digest_len >= 0 { Result { is_ok:true,value:digest_len,error:0 } }
+    else { Result { is_ok:false,value:0,error:status_from_raw_ffi(digest_len) } }
+}
+
+def hash_sha256_str_bounded(value: &str, max_bytes: i64, out: Buffer) -> Result<i64, i64> {
+    hash_sha256_bytes_bounded(sengoo_stdlib_str_ptr(value),value.len(),max_bytes,out)
+}
+
+// Stream a regular, non-reparse file in bounded 64-KiB chunks. The positive
+// limit applies to total input bytes, not memory. Returns lowercase hex text.
+def hash_sha256_file(path: &str, max_bytes: i64) -> Result<String, i64> {
+    let raw = sengoo_hash_sha256_file(sengoo_stdlib_str_ptr(path), path.len(), max_bytes);
+    if raw > 0 { Result { is_ok: true, value: String { handle: raw }, error: 0 }; }
+    else { Result { is_ok: false, value: String { handle: 0 }, error: status_from_raw_ffi(raw) }; };
 }

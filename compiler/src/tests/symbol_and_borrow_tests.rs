@@ -156,3 +156,134 @@ def main() -> i64 {
         .check_program(&program)
         .expect("one explicit mutable borrow must not conflict with its alias-tracking visit");
 }
+
+#[test]
+fn borrow_check_method_scalar_result_does_not_retain_argument_loan_in_loop() {
+    let source = r#"
+struct Source {}
+impl Source { def read(&self, out: &mut i64) -> i64 { *out } }
+def inspect(value: &i64) -> i64 { *value }
+def main() -> i64 {
+    let source = Source {};
+    let mut buffer = 3;
+    loop {
+        let count = source.read(&mut buffer);
+        if count > 0 { inspect(&buffer); (); };
+        break;
+    };
+    buffer
+}
+"#;
+    let parsed = Parser::parse(source).unwrap();
+    TypeChecker::new()
+        .check_program(&parsed)
+        .expect("scalar method results do not retain a temporary mutable argument loan");
+}
+
+#[test]
+fn borrow_check_method_owned_result_does_not_alias_mutable_argument() {
+    let source = r#"
+struct Observation { count: i64 }
+struct Source {}
+impl Source { def read(&self, out: &mut i64) -> Observation { Observation { count: *out } } }
+def inspect(value: &i64) -> i64 { *value }
+def main() -> i64 {
+    let source = Source {};
+    let mut buffer = 3;
+    loop {
+        let observed = source.read(&mut buffer);
+        if observed.count > 0 { inspect(&buffer); (); };
+        break;
+    };
+    buffer
+}
+"#;
+    let parsed = Parser::parse(source).unwrap();
+    TypeChecker::new()
+        .check_program(&parsed)
+        .expect("a plain owned aggregate result does not borrow the input");
+}
+
+#[test]
+fn borrow_check_method_reference_result_still_retains_argument_loan() {
+    let source = r#"
+struct Source {}
+impl Source { def lend(&self, value: &mut i64) -> &mut i64 { value } }
+def main() -> i64 {
+    let source = Source {};
+    let mut value = 3;
+    let alias = source.lend(&mut value);
+    let conflicting = &value;
+    *alias + *conflicting
+}
+"#;
+    let parsed = Parser::parse(source).unwrap();
+    let error = TypeChecker::new()
+        .check_program(&parsed)
+        .expect_err("a true reference result must retain its input loan");
+    assert!(error.to_string().contains("borrow check failed"), "{error}");
+}
+
+#[test]
+fn borrow_check_method_scalar_result_still_checks_simultaneous_argument_loans() {
+    let source = r#"
+struct Source {}
+impl Source { def read(&self, write: &mut i64, read: &i64) -> i64 { *read } }
+def main() -> i64 {
+    let source = Source {};
+    let mut value = 3;
+    source.read(&mut value, &value)
+}
+"#;
+    let parsed = Parser::parse(source).unwrap();
+    let error = TypeChecker::new()
+        .check_program(&parsed)
+        .expect_err("the call's own mutable and shared arguments still overlap");
+    assert!(error.to_string().contains("borrow check failed"), "{error}");
+}
+
+#[test]
+fn borrow_check_method_wrapped_reference_result_retains_argument_loan() {
+    let source = r#"
+struct Wrapped<T> { value: T }
+struct Source {}
+impl Source {
+    def lend(&self, value: &mut i64) -> Wrapped<&mut i64> { Wrapped { value: value } }
+}
+def main() -> i64 {
+    let source = Source {};
+    let mut value = 3;
+    let alias = source.lend(&mut value);
+    let conflicting = &value;
+    *alias.value + *conflicting
+}
+"#;
+    let parsed = Parser::parse(source).unwrap();
+    let error = TypeChecker::new()
+        .check_program(&parsed)
+        .expect_err("a generic wrapper still carries its reference payload");
+    assert!(error.to_string().contains("borrow check failed"), "{error}");
+}
+
+#[test]
+fn borrow_check_method_struct_reference_field_retains_argument_loan() {
+    let source = r#"
+struct View { borrowed: &mut i64 }
+struct Source {}
+impl Source {
+    def lend(&self, value: &mut i64) -> View { View { borrowed: value } }
+}
+def main() -> i64 {
+    let source = Source {};
+    let mut value = 3;
+    let alias = source.lend(&mut value);
+    let conflicting = &value;
+    *alias.borrowed + *conflicting
+}
+"#;
+    let parsed = Parser::parse(source).unwrap();
+    let error = TypeChecker::new()
+        .check_program(&parsed)
+        .expect_err("non-generic reference fields retain their source loan too");
+    assert!(error.to_string().contains("borrow check failed"), "{error}");
+}

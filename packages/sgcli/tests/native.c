@@ -50,6 +50,43 @@ int main(int argc,char **argv) {
     assert(sgcli_matches_close(m)==0);
     const char *scope[]={"--limit=3","query"};rejected(a,scope,2,"unknown option");
     const char *badcommand[]={"unknown"};rejected(a,badcommand,1,"unknown subcommand");
+    assert(sgcli_close(a)==0);
+    a=sgcli_new(test_pointer("tool"),test_pointer("1"),test_pointer("Command hierarchy"));
+    assert(sgcli_command(a,test_pointer("config"),test_pointer("Configuration"))==0);
+    assert(sgcli_subcommand(a,test_pointer("config"),test_pointer("profile"),test_pointer("Profiles"))==0);
+    assert(sgcli_subcommand(a,test_pointer("config profile"),test_pointer("show"),test_pointer("Show profile"))==0);
+    assert(sgcli_command(a,test_pointer("config profile delete"),test_pointer("Delete profile"))==0);
+    assert(sgcli_command(a,test_pointer("config  invalid"),test_pointer("Bad spacing"))==-2);
+    assert(sgcli_subcommand(a,test_pointer("missing"),test_pointer("show"),test_pointer("Missing parent"))==-2);
+    assert(sgcli_option(a,test_pointer(""),test_pointer("verbose"),test_pointer("v"),0,0,0,test_pointer("Global"))==0);
+    assert(sgcli_option(a,test_pointer("config"),test_pointer("root"),test_pointer("r"),1,0,1,test_pointer("Inherited root"))==0);
+    assert(sgcli_option(a,test_pointer("config profile show"),test_pointer("limit"),test_pointer("l"),2,0,0,test_pointer("Show limit"))==0);
+    assert(sgcli_option(a,test_pointer("config profile delete"),test_pointer("limit"),test_pointer("l"),1,0,0,test_pointer("Sibling independent option"))==0);
+    assert(sgcli_option(a,test_pointer("config profile show"),test_pointer("root"),test_pointer(""),1,0,0,test_pointer("Conflicting ancestor"))==-2);
+    const char *nested[]={"-v","config","--root","data","profile","show","--limit","-42","file.csv"};
+    m=arguments(nested,9);assert(sgcli_parse(a,m)==0);
+    test_string(sgcli_selected_command(m),"config profile show");
+    assert(sgcli_count(m,test_pointer("verbose"))==1&&sgcli_integer(m,test_pointer("limit"),0)==-42);
+    test_string(sgcli_string(m,test_pointer("root"),0),"data");test_string(sgcli_positional(m,0),"file.csv");sgcli_matches_close(m);
+    const char *sibling[]={"config","profile","delete","--root=data","--limit","all"};
+    m=arguments(sibling,6);assert(sgcli_parse(a,m)==0);test_string(sgcli_string(m,test_pointer("limit"),0),"all");sgcli_matches_close(m);
+    const char *unknown_nested[]={"config","profile","missing"};rejected(a,unknown_nested,3,"unknown subcommand");
+    const char *early_leaf_option[]={"config","--limit=1","profile","show"};rejected(a,early_leaf_option,4,"unknown option");
+    const char *inherited_required[]={"config","profile","show"};rejected(a,inherited_required,3,"missing required");
+    const char *literal_command[]={"config","--root=data","--","profile","show"};
+    m=arguments(literal_command,5);assert(sgcli_parse(a,m)==0);test_string(sgcli_selected_command(m),"config");
+    assert(sgcli_positional_count(m)==2);sgcli_matches_close(m);
+    const char *nested_help[]={"config","profile","show","--help"};
+    m=arguments(nested_help,4);assert(sgcli_parse(a,m)==0);test_string(sgcli_selected_command(m),"config profile show");sgcli_matches_close(m);
+    h1=sgcli_help(a);h2=sgcli_help(a);assert(!strcmp((char*)(intptr_t)h1,(char*)(intptr_t)h2));
+    assert(strstr((char*)(intptr_t)h1,"config profile show  Show profile"));free((void*)(intptr_t)h1);free((void*)(intptr_t)h2);
+    assert(sgcli_command(a,test_pointer("deep"),test_pointer("Depth bound"))==0);
+    char deep[256]="deep";
+    for(int level=1;level<16;level++){
+        assert(sgcli_subcommand(a,test_pointer(deep),test_pointer("next"),test_pointer("Level"))==0);
+        memcpy(deep+strlen(deep)," next",6);
+    }
+    assert(sgcli_subcommand(a,test_pointer(deep),test_pointer("overflow"),test_pointer("Too deep"))==-2);
     assert(sgcli_close(a)==0);assert(sgcli_live_handles()==0);
     puts("sgcli native: passed");return 0;
 }

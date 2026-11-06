@@ -103,7 +103,78 @@ struct HttpServerNextRequestOutcome {
 }
 
 extern "C" {
+    fn sengoo_net_stream_start(host: i64, host_len: i64, port: i64, secure: i64, request: i64, request_len: i64, connect_ms: i64, idle_ms: i64, capacity: i64) -> i64;
+    fn sengoo_net_stream_start_ca(host: i64, host_len: i64, port: i64, request: i64, request_len: i64, connect_ms: i64, idle_ms: i64, capacity: i64, root: i64, root_len: i64) -> i64;
+    fn sengoo_net_stream_start_bounded(host: i64, host_len: i64, port: i64, secure: i64, request: i64, request_len: i64, connect_ms: i64, idle_ms: i64, capacity: i64, request_limit: i64) -> i64;
+    fn sengoo_net_stream_start_ca_bounded(host: i64, host_len: i64, port: i64, request: i64, request_len: i64, connect_ms: i64, idle_ms: i64, capacity: i64, root: i64, root_len: i64, request_limit: i64) -> i64;
+    fn sengoo_net_stream_live_request_bytes() -> i64;
+    fn sengoo_net_stream_read(handle: i64, output: i64, capacity: i64) -> i64;
+    fn sengoo_net_stream_cancel(handle: i64) -> i64;
+    fn sengoo_net_stream_request_started(handle: i64) -> i64;
+    fn sengoo_net_stream_close(handle: i64) -> i64;
+    fn sengoo_net_stream_live_workers() -> i64;
+    fn sengoo_net_stream_live_handles() -> i64;
     fn sengoo_http_server_next_request_async__start(handle: i64, timeout_ms: i64) -> i64;
+}
+
+/// Bounded native TCP/TLS byte worker; all HTTP/SSE interpretation stays in SG.
+/// The initial request is copied at start. read_into never waits for network IO.
+struct NetByteStream { handle: i64 }
+impl !Send for NetByteStream {}
+impl !Sync for NetByteStream {}
+
+struct NetStreamRead { ready: bool, eof: bool, count: i64, error: i64 }
+
+/// At most 8 workers/handles. request <=1MiB, queue 4096..1048576 bytes.
+/// connect_timeout_ms is 1..60000, idle_timeout_ms is 1..600000.
+/// TLS uses system trust and hostname verification, without insecure fallback.
+def net_stream_start(host: &str, port: i64, use_tls: bool, request: &str, connect_timeout_ms: i64, idle_timeout_ms: i64, queue_bytes: i64) -> Result<NetByteStream, i64> {
+    let raw = sengoo_net_stream_start(sengoo_stdlib_str_ptr(host), host.len(), port, if use_tls { 1 } else { 0 }, sengoo_stdlib_str_ptr(request), request.len(), connect_timeout_ms, idle_timeout_ms, queue_bytes);
+    Result { is_ok: raw > 0, value: NetByteStream { handle: if raw > 0 { raw } else { 0 } }, error: if raw < 0 { 0 - raw } else { 0 } }
+}
+
+/// Adds one DER certificate as a trust anchor for this connection only.
+/// Does not modify system trust or disable hostname/certificate verification.
+def net_stream_start_ca(host: &str, port: i64, request: &str, connect_timeout_ms: i64, idle_timeout_ms: i64, queue_bytes: i64, root_der: &Buffer) -> Result<NetByteStream, i64> {
+    let raw = sengoo_net_stream_start_ca(sengoo_stdlib_str_ptr(host), host.len(), port, sengoo_stdlib_str_ptr(request), request.len(), connect_timeout_ms, idle_timeout_ms, queue_bytes, root_der.ptr(), root_der.used_len());
+    Result { is_ok: raw > 0, value: NetByteStream { handle: if raw > 0 { raw } else { 0 } }, error: if raw < 0 { 0 - raw } else { 0 } }
+}
+
+/// Explicit per-request limit 1..16777216 bytes; live request copies share
+/// a 64 MiB process budget, held until each worker exits. Rejection is STATUS_LIMIT.
+/// Existing net_stream_start keeps its 1 MiB default. Response queues are unchanged.
+def net_stream_start_bounded(host: &str, port: i64, use_tls: bool, request: &str, connect_timeout_ms: i64, idle_timeout_ms: i64, queue_bytes: i64, request_limit: i64) -> Result<NetByteStream, i64> {
+    let raw = sengoo_net_stream_start_bounded(sengoo_stdlib_str_ptr(host), host.len(), port, if use_tls { 1 } else { 0 }, sengoo_stdlib_str_ptr(request), request.len(), connect_timeout_ms, idle_timeout_ms, queue_bytes, request_limit);
+    Result { is_ok: raw > 0, value: NetByteStream { handle: if raw > 0 { raw } else { 0 } }, error: if raw < 0 { 0 - raw } else { 0 } }
+}
+
+/// Explicit request limit with a per-connection DER CA; no system trust mutation.
+def net_stream_start_ca_bounded(host: &str, port: i64, request: &str, connect_timeout_ms: i64, idle_timeout_ms: i64, queue_bytes: i64, root_der: &Buffer, request_limit: i64) -> Result<NetByteStream, i64> {
+    let raw = sengoo_net_stream_start_ca_bounded(sengoo_stdlib_str_ptr(host), host.len(), port, sengoo_stdlib_str_ptr(request), request.len(), connect_timeout_ms, idle_timeout_ms, queue_bytes, root_der.ptr(), root_der.used_len(), request_limit);
+    Result { is_ok: raw > 0, value: NetByteStream { handle: if raw > 0 { raw } else { 0 } }, error: if raw < 0 { 0 - raw } else { 0 } }
+}
+
+impl NetByteStream {
+    /// Pending: !ready. Bytes: ready && count>0. EOF: ready && eof.
+    /// Failure: ready && error>0. count=0 outside a byte result.
+    /// Buffered bytes precede network errors; cancel discards buffered bytes.
+    def read_into(&self, buffer: Buffer) -> NetStreamRead {
+        let raw = sengoo_net_stream_read(self.handle, buffer.ptr(), buffer.len());
+        sengoo_ffi_buffer_commit_used_len(buffer.raw_handle(), if raw > 0 { raw } else { 0 });
+        NetStreamRead { ready: raw != -100, eof: raw == 0, count: if raw > 0 { raw } else { 0 }, error: if raw < 0 && raw != -100 { 0 - raw } else { 0 } }
+    }
+    /// True once an application request write was attempted (not delivery proof).
+    /// Only a terminal failure plus false proves no request write was attempted.
+    def request_started(&self) -> Result<bool, i64> {
+        let raw = sengoo_net_stream_request_started(self.handle);
+        Result { is_ok: raw >= 0, value: raw == 1, error: if raw < 0 { 0 - raw } else { 0 } }
+    }
+    /// Immediate STATUS_CANCELED (19); wakes waits and interrupts IO without joining.
+    def cancel(&self) -> bool { sengoo_net_stream_cancel(self.handle) != 0 }
+    def close(&self) -> bool { sengoo_net_stream_close(self.handle) == 0 }
+}
+impl Drop for NetByteStream {
+    def drop(&mut self) { sengoo_net_stream_close(self.handle); }
 }
 
 struct WsClient {

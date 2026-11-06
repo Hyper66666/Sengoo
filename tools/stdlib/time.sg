@@ -2,6 +2,7 @@ extern "C" {
     fn sengoo_stdlib_str_ptr(value: &str) -> i64;
     fn sengoo_time_unix_seconds() -> i64;
     fn sengoo_time_unix_ms() -> i64;
+    fn sengoo_time_monotonic_ms() -> i64;
     fn sengoo_time_sleep_ms(ms: i64) -> i64;
     fn sengoo_time_format_unix_ms(unix_ms: i64, buffer_handle: i64, capacity: i64) -> i64;
     fn sengoo_time_parse_unix_ms(text_ptr: i64, text_len: i64) -> i64;
@@ -13,6 +14,13 @@ def time_unix_seconds() -> i64 {
 
 def time_unix_ms() -> i64 {
     sengoo_time_unix_ms()
+}
+
+/// Monotonic milliseconds with an unspecified origin, for deadlines and UI.
+/// Never persist or compare these values across machines or process restarts.
+/// Returns -1 if this host cannot provide a monotonic clock; no wall-clock fallback.
+def time_monotonic_ms() -> i64 {
+    sengoo_time_monotonic_ms()
 }
 
 def time_sleep_ms(ms: i64) -> bool {

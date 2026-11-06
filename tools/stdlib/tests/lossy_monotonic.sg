@@ -1,0 +1,73 @@
+import std::ffi;
+import std::string;
+import std::time;
+
+def check_text(input: Buffer, expected: &str) -> Result<i64, i64> {
+    let decoded = string_from_utf8_lossy(input, input.used_len())?;
+    if decoded.as_str() == expected { return Result { is_ok: true, value: 0, error: 0 }; };
+    println("lossy decoding mismatch");
+    Result { is_ok: true, value: 1, error: 0 }
+}
+
+def run_tests() -> Result<i64, i64> {
+    let mut failures = 0;
+    let input = ffi_buffer_new(64)?;
+    input.copy_from_str("prefix 中文😀 suffix")?;
+    failures = failures + check_text(input, "prefix 中文😀 suffix")?;
+    if string_from_utf8_lossy(input, -1).error != 2 or string_from_utf8_lossy(input, 65).error != 2 { failures = failures + 1; };
+    input.clear();
+    failures = failures + check_text(input, "")?;
+    // Exhaustive single bytes, including NUL, prove binary lengths survive.
+    let mut byte = 0;
+    while byte < 256 {
+        input.clear(); input.push_u8(byte)?;
+        let decoded = string_from_utf8_lossy(input, 1)?;
+        let copy = ffi_buffer_new(4)?;
+        let length = decoded.copy_to_buffer(copy)?;
+        if byte < 128 {
+            if length != 1 or copy.get_u8(0)? != byte { failures = failures + 1; };
+        } else {
+            if length != 3 or copy.get_u8(0)? != 239 or copy.get_u8(1)? != 191 or copy.get_u8(2)? != 189 { failures = failures + 1; };
+            if string_from_utf8(input, 1).error != 20 { failures = failures + 1; };
+        };
+        byte = byte + 1;
+    };
+    input.clear(); input.append_str("start ")?; input.push_u8(226)?; input.push_u8(130)?; input.append_str("(end")?;
+    failures = failures + check_text(input, "start �(end")?;
+    input.clear(); input.push_u8(240)?; input.push_u8(159)?; input.push_u8(146)?;
+    failures = failures + check_text(input, "�")?;
+    input.clear(); input.push_u8(224)?; input.push_u8(128)?; input.push_u8(128)?;
+    failures = failures + check_text(input, "���")?;
+    input.clear(); input.push_u8(237)?; input.push_u8(160)?; input.push_u8(128)?;
+    failures = failures + check_text(input, "���")?;
+    input.clear(); input.push_u8(244)?; input.push_u8(144)?; input.push_u8(128)?; input.push_u8(128)?;
+    failures = failures + check_text(input, "����")?;
+    // Prefix reads do not inspect the initialized but excluded bad suffix.
+    input.clear(); input.append_str("valid")?; input.push_u8(255)?;
+    if string_from_utf8_lossy(input, 5)?.as_str() != "valid" { failures = failures + 1; };
+    input.clear(); input.push_u8(0)?; input.push_u8(255)?; input.append_str("tail")?;
+    let nul = string_from_utf8_lossy(input, input.used_len())?;
+    let copied = ffi_buffer_new(16)?;
+    if nul.copy_to_buffer(copied)? != 8 or copied.get_u8(0)? != 0 or copied.get_u8(4)? != 116 { failures = failures + 1; };
+    let start = time_monotonic_ms();
+    if start < 0 { return Result { is_ok: false, value: 0, error: 8 }; };
+    let mut previous = start;
+    let mut index = 0;
+    while index < 1000 {
+        let current = time_monotonic_ms();
+        if current < previous { failures = failures + 1; };
+        previous = current; index = index + 1;
+    };
+    time_sleep_ms(35);
+    let end = time_monotonic_ms();
+    if end < start + 15 or end > start + 10000 { failures = failures + 1; };
+    if time_unix_ms() <= 0 { failures = failures + 1; };
+    println("lossy UTF-8 and monotonic clock regression complete");
+    Result { is_ok: true, value: failures, error: 0 }
+}
+
+def main() -> i64 {
+    let result = run_tests();
+    if not result.is_ok() { println(result.error); return 1; };
+    result.value
+}

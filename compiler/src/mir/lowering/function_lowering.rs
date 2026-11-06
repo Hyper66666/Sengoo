@@ -59,19 +59,36 @@ pub(super) fn lower_function(
     // in — the program-global base tables stay borrowed and are never cloned.
     ctx.known_functions_overlay = inherited_known_overlay;
     ctx.function_sigs_overlay = inherited_sigs_overlay;
+    ctx.set_current_block(start_block);
 
     // 为函数参数创建局部变量并绑定到符号。
     for (i, param) in fn_item.params.iter().enumerate() {
-        let local = Local::new(i + 1, LocalKind::Param);
+        let parameter = Local::new(i + 1, LocalKind::Param);
+        let is_drop_receiver = fn_item.name.ends_with("_Drop_drop") && param.name == "self";
+        // Automatic drop glue passes values. A destructor is still permitted
+        // to mutate its receiver while releasing fields, so give that value
+        // addressable local storage without changing the destructor ABI.
+        let local = if is_drop_receiver {
+            let storage = ctx.add_local(None, LocalKind::User, ctx.get_local_type(parameter).clone());
+            ctx.push_inst(Instruction::Store { destination: storage, value: parameter });
+            ctx.destructor_receiver = Some(storage);
+            ctx.record_destructor_field_drops(storage);
+            // Source self is borrowed even though the legacy Drop entry ABI
+            // receives a value. Forwarding it must carry the storage address.
+            let reference = ctx.add_local(None, LocalKind::Temp,
+                MIRType::Ref(Box::new(ctx.get_local_type(storage).clone())));
+            ctx.push_inst(Instruction::AddrOf { destination: reference, source: storage });
+            reference
+        } else {
+            parameter
+        };
         ctx.mir_fn.set_local_debug_name(local, param.name.clone());
         ctx.local_names.insert(param.name.clone(), local);
         ctx.bind_local_symbol(param.symbol, local);
         if let Some((_, MIRType::Struct { name, .. })) = ctx.mir_fn.locals.get(i + 1) {
             ctx.type_names.insert(local, name.clone());
         }
-        if fn_item.name.ends_with("_Drop_drop") && param.name == "self" {
-            ctx.record_destructor_field_drops(local);
-        } else if !fn_item.name.ends_with("_Drop_drop")
+        if !fn_item.name.ends_with("_Drop_drop")
             && !param.ty.is_ref()
             && !param.is_borrowed
             && crate::mir::dyn_dispatch::dyn_trait_of_hir_param(&param.ty).is_none()

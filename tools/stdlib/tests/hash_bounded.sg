@@ -1,0 +1,43 @@
+import std::hash;
+import std::ffi;
+import std::string;
+
+def ensure(value: bool, label: &str) -> Result<bool,i64> {
+    if not value { println(label); return Result { is_ok:false,value:false,error:99 }; };
+    Result { is_ok:true,value:true,error:0 }
+}
+
+def digest(text: &str, limit: i64) -> Result<String,i64> {
+    let out = ffi_buffer_new(64)?;
+    ensure(hash_sha256_str_bounded(text,limit,out)? == 64,"hex digest length")?;
+    string_from_bytes_raw(out.ptr(),64)
+}
+
+def tests() -> Result<bool,i64> {
+    ensure(digest("abc",3)?.as_str() == "ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad","small reference vector")?;
+    ensure(digest("",1)?.as_str() == "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855","empty reference vector")?;
+    let value = string_new(); let mut index = 0;
+    while index < 1024 { value.push_str("xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx")?; index = index + 1; };
+    let legacy = ffi_buffer_new(64)?;
+    ensure(hash_sha256_str(value.as_str(),legacy).is_ok,"legacy exact 64 KiB still works")?;
+    value.push_str("x")?;
+    let legacy_over = ffi_buffer_new(64)?;
+    ensure(hash_sha256_str(value.as_str(),legacy_over).error == 2,"legacy one byte over 64 KiB remains invalid")?;
+    ensure(digest(value.as_str(),value.len())?.as_str() == "1abe08ebecf1c18cab71f6fe28aaddf20268f85bad78bb9a72f88ca47c874662","65537-byte independent reference")?;
+    let limited = ffi_buffer_new(64)?;
+    ensure(hash_sha256_str_bounded(value.as_str(),65536,limited).error == 13,"one byte over explicit bound is overflow")?;
+    let zero = ffi_buffer_new(64)?; let excessive = ffi_buffer_new(64)?; let small = ffi_buffer_new(63)?;
+    ensure(hash_sha256_str_bounded("abc",0,zero).error == 2,"zero maximum rejected")?;
+    ensure(hash_sha256_str_bounded("abc",16777217,excessive).error == 2,"maximum above 16 MiB rejected")?;
+    ensure(not hash_sha256_str_bounded("abc",3,small).is_ok,"small digest buffer rejected")?;
+    let megabyte = string_new(); index = 0;
+    while index < 16384 { megabyte.push_str("xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx")?; index = index + 1; };
+    ensure(digest(megabyte.as_str(),1048576)?.as_str() == "8f990ba0b577b51cf009ea049368c16bbda1b21e1b93be07a824758bb253c39b","one MiB independent reference")?;
+    let mut raw = ffi_buffer_new(3)?; raw.push_u8(120)?; raw.push_u8(0)?; raw.push_u8(121)?;
+    let binary = ffi_buffer_new(64)?;
+    hash_sha256_bytes_bounded(raw.ptr(),3,3,binary)?;
+    ensure(string_from_bytes_raw(binary.ptr(),64)?.as_str() == "ce3890a816f5237a17aa7e1436113bbac398dfe216cf965537cd035bdbad900a","raw bytes include embedded NUL")?;
+    println("bounded SHA256: legacy boundary, 65537 bytes, 1 MiB, explicit bounds, buffers and embedded NUL passed");
+    Result { is_ok:true,value:true,error:0 }
+}
+def main()->i64 { let result = tests(); if not result.is_ok { println(result.error); return result.error; }; 0 }

@@ -83,6 +83,36 @@ def option_choice(present: bool) -> Result<i64, i64> {
     Result { is_ok: true, value: ownership_probe_read(selected.handle), error: 0 };
 }
 
+def replace_nested_owner(aggregate: &mut Nested) -> Result<i64, i64> {
+    aggregate.owner = owner(51)?;
+    aggregate.title = string_from_str("replacement-中文")?;
+    Result { is_ok: true, value: 0, error: 0 }
+}
+
+def replace_borrowed_owner(target: &mut Owned, replacement: Owned) {
+    *target = replacement;
+    ();
+}
+
+def replace_explicit_nested_owner(aggregate: &mut Nested, replacement: Owned) {
+    replace_borrowed_owner(&mut (*aggregate).owner, replacement);
+    ();
+}
+
+def borrowed_replacements() -> Result<i64, i64> {
+    let mut aggregate = nested()?;
+    let dropped_before = ownership_probe_dropped();
+    replace_nested_owner(&mut aggregate)?;
+    if ownership_probe_dropped() != dropped_before + 1 { return Result { is_ok: false, value: 0, error: 101 }; };
+    if ownership_probe_read(aggregate.owner.handle) != 51 { return Result { is_ok: false, value: 0, error: 102 }; };
+    let replacement = owner(52)?;
+    replace_explicit_nested_owner(&mut aggregate, replacement);
+    if ownership_probe_dropped() != dropped_before + 2 { return Result { is_ok: false, value: 0, error: 103 }; };
+    if ownership_probe_read(aggregate.owner.handle) != 52 or aggregate.values.len() != 2 { return Result { is_ok: false, value: 0, error: 104 }; };
+    if aggregate.title.as_str() != "replacement-中文" { return Result { is_ok: false, value: 0, error: 105 }; };
+    Result { is_ok: true, value: 0, error: 0 }
+}
+
 def exercise() -> Result<i64, i64> {
     let rejected = propagate(true);
     if rejected.is_ok() or rejected.error != 9 { return Result { is_ok: false, value: 0, error: 94 }; };
@@ -90,6 +120,7 @@ def exercise() -> Result<i64, i64> {
     if branch(true)? != 21 or branch(false)? != 22 { return Result { is_ok: false, value: 0, error: 96 }; };
     if loop_exit()? != 3 { return Result { is_ok: false, value: 0, error: 97 }; };
     if option_choice(true)? != 41 or option_choice(false)? != 42 { return Result { is_ok: false, value: 0, error: 98 }; };
+    borrowed_replacements()?;
     let pair = Pair { left: string_from_str("left")?, right: string_from_str("right")? };
     let moved = pair.left;
     if moved.len() != 4 { return Result { is_ok: false, value: 0, error: 99 }; };
@@ -111,7 +142,7 @@ def main() -> i64 {
     println(strings_after);
     if not result.is_ok() { println(result.error); return 1; };
     if strings_after != strings_before { return 2; };
-    if ownership_probe_live() != 0 or created != 19 or dropped != created { return 3; };
+    if ownership_probe_live() != 0 or created != 26 or dropped != created { return 3; };
     println("ownership-sanitizer: passed");
     0;
 }

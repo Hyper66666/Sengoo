@@ -78,11 +78,19 @@ pub(super) fn lower_if_expr(
 
     ctx.set_current_block(join_block);
     if else_branch.is_some() {
-        let then_ty = ctx.get_local_type(then_val).clone();
-        if is_void_like(&then_ty) {
+        // Only a branch that reaches the join can determine its value type.
+        // In particular, `if c { return x; } else { y }` has y's type.
+        let result_ty = if then_continues {
+            ctx.get_local_type(then_val).clone()
+        } else if else_continues {
+            ctx.get_local_type(else_val).clone()
+        } else {
+            MIR_UNIT
+        };
+        if is_void_like(&result_ty) {
             ctx.add_local(None, LocalKind::Temp, MIR_UNIT)
         } else {
-            let result = ctx.add_local(None, LocalKind::Temp, then_ty);
+            let result = ctx.add_local(None, LocalKind::Temp, result_ty);
             let incoming = [
                 (then_val, then_end, then_continues),
                 (else_val, else_end, else_continues),

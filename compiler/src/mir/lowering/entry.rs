@@ -127,17 +127,18 @@ fn lower_hir_with_options_scoped(
                             trait_defs.get(trait_name.as_str()).copied(),
                             &type_prefix,
                         );
-                        for registration in collected.eager_registrations() {
+                        for eager in &collected.eager_methods {
+                            let method = &eager.function;
                             known_function_sigs.insert(
-                                registration.name.clone(),
-                                build_hir_function_sig_with_enums(
-                                    &registration.return_type,
-                                    registration.explicit_param_count,
+                                method.name.clone(),
+                                build_hir_method_sig_with_enums(
+                                    method,
+                                    eager.explicit_param_count,
                                     &struct_defs,
                                     &options.enum_defs,
                                 ),
                             );
-                            known_functions.insert(registration.name);
+                            known_functions.insert(method.name.clone());
                         }
                         eager_trait_functions.extend(
                             collected
@@ -162,8 +163,8 @@ fn lower_hir_with_options_scoped(
                             known_functions.insert(method.name.clone());
                             known_function_sigs.insert(
                                 method.name.clone(),
-                                build_hir_function_sig_with_enums(
-                                    &method.return_type,
+                                build_hir_method_sig_with_enums(
+                                    method,
                                     explicit_hir_method_param_count(method),
                                     &struct_defs,
                                     &options.enum_defs,

@@ -21,7 +21,9 @@ use crate::mir::build_enum_defs;
 use crate::mir::concrete_type_helpers::{
     collect_concrete_named_types_with_impl_variants, is_terminal_iterator_method,
 };
-use crate::mir::function_sig_helpers::{build_function_sig, build_hir_function_sig_with_enums};
+use crate::mir::function_sig_helpers::{
+    build_function_sig, build_hir_function_sig_with_enums, build_hir_method_sig_with_enums,
+};
 use crate::mir::hir_specialization_helpers::hir_type_is_concrete;
 use crate::mir::impl_specialization_helpers::{
     expand_impl_variants, impl_type_prefix, resolve_inherent_method_specialization,
@@ -140,6 +142,8 @@ struct DropBinding {
 pub(crate) struct FunctionSig {
     pub(crate) ret_type: MIRType,
     pub(crate) param_count: usize,
+    /// The concrete method ABI borrows the receiver's storage.
+    pub(crate) receiver_is_ref: bool,
     /// 函数参数数量（不含环境指针参数）。
     #[allow(dead_code)]
     pub(crate) env: Vec<(String, MIRType)>,
@@ -238,6 +242,7 @@ struct LoweringContext<'a> {
     drop_scope_markers: Vec<usize>,
     moved_drop_locals: HashSet<Local>,
     moved_drop_fields: HashSet<(Local, Vec<u32>)>,
+    destructor_receiver: Option<Local>,
     /// Root ownership at each exit, before later lowering can move another path.
     exit_drop_bindings: HashMap<usize, Vec<DropBinding>>,
 }

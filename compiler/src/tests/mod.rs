@@ -58,6 +58,7 @@ pub mod phi_tests;
 pub mod print_tests;
 pub mod property_tests;
 pub mod recursive_tests;
+pub mod reference_projection_tests;
 pub mod regression_suite_tests;
 pub mod snapshot_tests;
 pub mod stability_property_tests;

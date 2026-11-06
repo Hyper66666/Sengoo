@@ -107,7 +107,7 @@ fn copy_installed_stdlib(install_root: &Path) {
     let source = workspace_root().join("tools").join("stdlib");
     let destination = install_root.join("share").join("sengoo").join("stdlib");
     fs::create_dir_all(&destination).unwrap();
-    for entry in fs::read_dir(source).unwrap() {
+    for entry in fs::read_dir(&source).unwrap() {
         let entry = entry.unwrap();
         let path = entry.path();
         let name = path.file_name().unwrap();
@@ -120,6 +120,18 @@ fn copy_installed_stdlib(install_root: &Path) {
             fs::copy(&path, destination.join(name)).unwrap();
         }
     }
+    fn copy_data(source: &Path, destination: &Path) {
+        fs::create_dir_all(destination).unwrap();
+        for entry in fs::read_dir(source).unwrap() {
+            let entry = entry.unwrap();
+            if entry.file_type().unwrap().is_dir() {
+                copy_data(&entry.path(), &destination.join(entry.file_name()));
+            } else {
+                fs::copy(entry.path(), destination.join(entry.file_name())).unwrap();
+            }
+        }
+    }
+    copy_data(&source.join("unicode-data"), &destination.join("unicode-data"));
 }
 
 fn payload_entry(install_root: &Path, payload: &Path) -> serde_json::Value {
@@ -144,6 +156,12 @@ fn runtime_bridge_paths(install_root: &Path) -> Vec<PathBuf> {
         "runtime_collections.c",
         "runtime_json.c",
         "runtime_process.c",
+        "runtime_terminal.c",
+        "runtime_ipc.c",
+        "runtime_pty.c",
+        "runtime_hash_file.c",
+        "runtime_file_snapshot.c",
+        "runtime_system.c",
         "runtime_string.c",
         "runtime_shared.h",
     ]
@@ -421,6 +439,9 @@ fn fresh_installed_build_and_run_avoid_cargo_and_absolute_runtime_identity() {
     fs::create_dir_all(&fake_home).unwrap();
     fs::create_dir_all(&fake_cargo_home).unwrap();
     copy_installed_stdlib(&install_root);
+    let unicode_license = install_root.join("share/sengoo/stdlib/unicode-data/17.0.0/LICENSE.txt");
+    assert_eq!(format!("{:x}", Sha256::digest(fs::read(&unicode_license).unwrap())),
+        "e7a93b009565cfce55919a381437ac4db883e9da2126fa28b91d12732bc53d96");
 
     let installed_sgc = install_bin.join(if cfg!(windows) { "sgc.exe" } else { "sgc" });
     fs::copy(env!("CARGO_BIN_EXE_sgc"), &installed_sgc).unwrap();
@@ -438,13 +459,50 @@ fn fresh_installed_build_and_run_avoid_cargo_and_absolute_runtime_identity() {
             .map(|path| payload_entry(&install_root, path))
             .collect::<Vec<_>>();
         payloads.push(payload_entry(&install_root, &runtime_library));
+        payloads.push(payload_entry(&install_root, &unicode_license));
         manifest["payloads"] = json!(payloads);
     });
-    fs::write(
-        consumer.join("main.sg"),
-        "import std::status;\n\ndef main() -> i64 { STATUS_OK() }\n",
-    )
-    .unwrap();
+    let transport_source = if cfg!(windows) {
+        format!(r#"
+import std::ipc;
+import std::terminal;
+import std::unicode;
+import std::hash;
+import std::pty;
+def transport() -> i64 {{
+    let terminal = terminal_open();
+    if !terminal.is_ok || terminal.value.enter_fullscreen().is_ok {{ return 31; }}
+    let listener = ipc_listen("installed-transport-{}");
+    if !listener.is_ok {{ return 32; }}
+    let client = ipc_connect("installed-transport-{}");
+    if !client.is_ok {{ return 33; }}
+    let server = listener.value.try_accept();
+    if !server.is_ok || !server.value.is_open() {{ return 34; }}
+    let sample = string_from_str("👨‍👩‍👧‍👦").value;
+    if unicode_display_width(&sample).value != 2 {{ return 36; }}
+    let hash = hash_sha256_file("main.sg", 1048576);
+    if !hash.is_ok || hash.value.len() != 64 {{ return 37; }}
+    let executable = string_from_str("cmd.exe").value;
+    let command = pty_command(&executable);
+    if !command.is_ok {{ return 38; }}
+    let flag = string_from_str("/c").value;
+    let script = string_from_str("exit 0").value;
+    if !command.value.arg(&flag).is_ok || !command.value.arg(&script).is_ok {{ return 39; }}
+    let process = command.value.spawn(80, 24);
+    if !process.is_ok || !process.value.reap(8000).is_ok {{ return 40; }}
+    return 0;
+}}
+def main() -> i64 {{
+    let code = transport();
+    if code != 0 {{ return code; }}
+    if sengoo_ipc_live_handle_count() != 0 || sengoo_terminal_live_handle_count() != 0 || sengoo_pty_live_handle_count() != 0 {{ return 35; }}
+    return 0;
+}}
+"#, std::process::id(), std::process::id())
+    } else {
+        "import std::status;\n\ndef main() -> i64 { STATUS_OK() }\n".to_string()
+    };
+    fs::write(consumer.join("main.sg"), transport_source).unwrap();
     fs::create_dir_all(consumer.join("tests")).unwrap();
     fs::write(
         consumer.join("tests").join("pass.sg"),
@@ -739,6 +797,12 @@ fn installed_check_rejects_incomplete_runtime_bridge() {
         "runtime_breadth.c",
         "runtime_collections.c",
         "runtime_process.c",
+        "runtime_terminal.c",
+        "runtime_ipc.c",
+        "runtime_pty.c",
+        "runtime_hash_file.c",
+        "runtime_file_snapshot.c",
+        "runtime_system.c",
         "runtime_string.c",
         "runtime_shared.h",
     ] {
