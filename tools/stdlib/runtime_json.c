@@ -16,6 +16,7 @@ extern long long sengoo_string_from_bytes_copy(long long bytes_ptr, long long le
 #define SENGOO_JSON_MAX_BYTES SENGOO_RUNTIME_MAX_JSON_BYTES
 #define SENGOO_JSON_MAX_DEPTH 64
 #define SENGOO_JSON_MAX_NODES 4096
+#define SENGOO_JSON_BOUNDED_MAX_NODES 65536
 #define SENGOO_JSON_BOUNDED_MAX_BYTES (16U * 1024U * 1024U)
 #define SENGOO_JSON_BOUNDED_TOTAL_RESERVATION (512U * 1024U * 1024U)
 #define SENGOO_JSON_BOUNDED_MAX_DOCS 64
@@ -58,8 +59,8 @@ typedef struct {
     size_t cap;
     long long root;
     int closed;
-    size_t byte_limit, owned_payload, owned_edges, reservation;
-    int bounded;
+    size_t byte_limit, node_limit, owned_payload, owned_edges, reservation;
+    int bounded, explicit_nodes;
 } SengooJsonDoc;
 
 typedef struct {
@@ -101,8 +102,14 @@ static long long sengoo_json_set_error(long long code, long long offset, const c
     return -code;
 }
 
-static SengooJsonDoc* sengoo_json_doc_allocate(size_t explicit_limit) {
-    size_t reservation = explicit_limit ? 6 * explicit_limit + 4U * 1024U * 1024U : 0;
+static SengooJsonDoc* sengoo_json_doc_allocate(size_t explicit_limit, size_t explicit_nodes) {
+    size_t node_limit = explicit_nodes ? explicit_nodes : SENGOO_JSON_MAX_NODES;
+    /* Include doubled node capacity, minimum-eight container allocations,
+       link capacity and per-node terminators; payload/builders are byte-bound.
+       Preserve the legacy reservation floor and its admission behavior. */
+    size_t structural = node_limit * (2 * sizeof(SengooJsonNode) + 8 * sizeof(SengooJsonMember) + 32);
+    if (structural < 4U * 1024U * 1024U) structural = 4U * 1024U * 1024U;
+    size_t reservation = explicit_limit ? 6 * explicit_limit + structural : 0;
     if (explicit_limit && (sengoo_json_bounded_documents >= SENGOO_JSON_BOUNDED_MAX_DOCS
         || reservation > SENGOO_JSON_BOUNDED_TOTAL_RESERVATION - sengoo_json_bounded_reservation)) {
         sengoo_json_set_error(SENGOO_STATUS_OVERFLOW, -1, "bounded JSON aggregate admission exhausted");
@@ -112,6 +119,8 @@ static SengooJsonDoc* sengoo_json_doc_allocate(size_t explicit_limit) {
     if (!doc) { sengoo_json_set_error(SENGOO_STATUS_OUT_OF_MEMORY,-1,"json document allocation failed"); return NULL; }
     doc->bounded = explicit_limit != 0;
     doc->byte_limit = explicit_limit ? explicit_limit : SENGOO_JSON_MAX_BYTES;
+    doc->node_limit = node_limit;
+    doc->explicit_nodes = explicit_nodes != 0;
     doc->reservation = reservation;
     if (doc->bounded) { sengoo_json_bounded_documents++; sengoo_json_bounded_reservation += reservation; }
     return doc;
@@ -126,7 +135,7 @@ static int sengoo_json_payload_charge(SengooJsonDoc* doc, size_t bytes) {
 }
 static int sengoo_json_edge_charge(SengooJsonDoc* doc) {
     if (!doc->bounded) return 1;
-    if (doc->owned_edges >= SENGOO_JSON_MAX_NODES) {
+    if (doc->owned_edges >= doc->node_limit) {
         sengoo_json_set_error(SENGOO_STATUS_OVERFLOW,-1,"bounded JSON container link limit exceeded"); return 0;
     }
     doc->owned_edges++; return 1;
@@ -134,6 +143,12 @@ static int sengoo_json_edge_charge(SengooJsonDoc* doc) {
 static int sengoo_json_explicit_limit(long long limit) {
     if (limit < 1 || limit > SENGOO_JSON_BOUNDED_MAX_BYTES) {
         sengoo_json_set_error(SENGOO_STATUS_INVALID_ARGUMENT,0,"bounded JSON limit must be 1..16MiB"); return 0;
+    }
+    return 1;
+}
+static int sengoo_json_explicit_nodes(long long limit) {
+    if (limit < 1 || limit > SENGOO_JSON_BOUNDED_MAX_NODES) {
+        sengoo_json_set_error(SENGOO_STATUS_INVALID_ARGUMENT,0,"JSON node limit must be 1..65536"); return 0;
     }
     return 1;
 }
@@ -218,6 +233,7 @@ static int sengoo_json_doc_reserve(SengooJsonDoc* doc, size_t min_cap) {
         }
         next *= 2;
     }
+    if (next > doc->node_limit) next = doc->node_limit;
     SengooJsonNode* nodes = (SengooJsonNode*)realloc(doc->nodes, next * sizeof(SengooJsonNode));
     if (!nodes) {
         return 0;
@@ -232,8 +248,8 @@ static long long sengoo_json_doc_add_node(SengooJsonDoc* doc, int kind) {
     if (!doc) {
         return 0;
     }
-    if (doc->len >= SENGOO_JSON_MAX_NODES) {
-        sengoo_json_set_error(SENGOO_STATUS_PARSE, -1, "json node limit exceeded");
+    if (doc->len >= doc->node_limit) {
+        sengoo_json_set_error(doc->explicit_nodes ? SENGOO_STATUS_OVERFLOW : SENGOO_STATUS_PARSE, -1, "json node limit exceeded");
         return 0;
     }
     if (!sengoo_json_doc_reserve(doc, doc->len + 1)) {
@@ -247,8 +263,8 @@ static long long sengoo_json_doc_add_node(SengooJsonDoc* doc, int kind) {
     return (long long)doc->len;
 }
 
-static SengooJsonDoc* sengoo_json_doc_new_with_root_limit(int root_kind, size_t explicit_limit) {
-    SengooJsonDoc* doc = sengoo_json_doc_allocate(explicit_limit);
+static SengooJsonDoc* sengoo_json_doc_new_with_root_limit(int root_kind, size_t explicit_limit, size_t explicit_nodes) {
+    SengooJsonDoc* doc = sengoo_json_doc_allocate(explicit_limit, explicit_nodes);
     if (!doc) {
         if (!sengoo_json_last_error) sengoo_json_set_error(SENGOO_STATUS_OUT_OF_MEMORY, -1, "json document allocation failed");
         return NULL;
@@ -820,7 +836,7 @@ static long long sengoo_json_parse_value(SengooJsonParser* parser) {
     return node_id;
 }
 
-static long long sengoo_json_parse_bytes_limit(const char* data, size_t len, size_t explicit_limit) {
+static long long sengoo_json_parse_bytes_limit(const char* data, size_t len, size_t explicit_limit, size_t explicit_nodes) {
     sengoo_json_clear_error();
     if (len > (explicit_limit ? explicit_limit : SENGOO_JSON_MAX_BYTES)) {
         sengoo_json_set_error(explicit_limit ? SENGOO_STATUS_OVERFLOW : SENGOO_STATUS_PARSE, 0, "json input byte limit exceeded");
@@ -831,7 +847,7 @@ static long long sengoo_json_parse_bytes_limit(const char* data, size_t len, siz
         return 0;
     }
 
-    SengooJsonDoc* doc = sengoo_json_doc_allocate(explicit_limit);
+    SengooJsonDoc* doc = sengoo_json_doc_allocate(explicit_limit, explicit_nodes);
     if (!doc) {
         if (!sengoo_json_last_error) sengoo_json_set_error(SENGOO_STATUS_OUT_OF_MEMORY, 0, "json document allocation failed");
         return 0;
@@ -857,7 +873,7 @@ long long sengoo_json_parse_text(long long data, long long len) {
         sengoo_json_set_error(SENGOO_STATUS_INVALID_ARGUMENT, 0, "negative json input length");
         return 0;
     }
-    return sengoo_json_parse_bytes_limit((const char*)(intptr_t)data, (size_t)len, 0);
+    return sengoo_json_parse_bytes_limit((const char*)(intptr_t)data, (size_t)len, 0, 0);
 }
 
 long long sengoo_json_parse_buffer(long long buffer_handle, long long input_len) {
@@ -875,14 +891,14 @@ long long sengoo_json_parse_buffer(long long buffer_handle, long long input_len)
         sengoo_json_set_error(SENGOO_STATUS_INVALID_ARGUMENT, 0, "json input length exceeds buffer capacity");
         return 0;
     }
-    return sengoo_json_parse_bytes_limit((const char*)buffer->bytes, (size_t)input_len, 0);
+    return sengoo_json_parse_bytes_limit((const char*)buffer->bytes, (size_t)input_len, 0, 0);
 }
 
 long long sengoo_json_parse_text_bounded(long long data, long long length, long long max_bytes) {
     sengoo_json_clear_error();
     if (!sengoo_json_explicit_limit(max_bytes)) return 0;
     if (length < 0) { sengoo_json_set_error(SENGOO_STATUS_INVALID_ARGUMENT,0,"negative json input length"); return 0; }
-    return sengoo_json_parse_bytes_limit((const char*)(intptr_t)data,(size_t)length,(size_t)max_bytes);
+    return sengoo_json_parse_bytes_limit((const char*)(intptr_t)data,(size_t)length,(size_t)max_bytes,0);
 }
 long long sengoo_json_parse_buffer_bounded(long long buffer_handle, long long length, long long max_bytes) {
     sengoo_json_clear_error();
@@ -894,18 +910,43 @@ long long sengoo_json_parse_buffer_bounded(long long buffer_handle, long long le
     if ((unsigned long long)length > buffer->used_len || buffer->used_len > buffer->capacity) {
         sengoo_json_set_error(SENGOO_STATUS_INVALID_ARGUMENT,0,"json input exceeds initialized buffer bytes"); return 0;
     }
-    return sengoo_json_parse_bytes_limit((const char*)buffer->bytes,(size_t)length,(size_t)max_bytes);
+    return sengoo_json_parse_bytes_limit((const char*)buffer->bytes,(size_t)length,(size_t)max_bytes,0);
+}
+
+long long sengoo_json_parse_text_limits(long long data, long long length, long long max_bytes, long long max_nodes) {
+    sengoo_json_clear_error();
+    if (!sengoo_json_explicit_limit(max_bytes) || !sengoo_json_explicit_nodes(max_nodes)) return 0;
+    if (length < 0) { sengoo_json_set_error(SENGOO_STATUS_INVALID_ARGUMENT,0,"negative json input length"); return 0; }
+    return sengoo_json_parse_bytes_limit((const char*)(intptr_t)data,(size_t)length,(size_t)max_bytes,(size_t)max_nodes);
+}
+
+long long sengoo_json_parse_buffer_limits(long long buffer_handle, long long length, long long max_bytes, long long max_nodes) {
+    sengoo_json_clear_error();
+    if (!sengoo_json_explicit_limit(max_bytes) || !sengoo_json_explicit_nodes(max_nodes)) return 0;
+    if (length < 0) { sengoo_json_set_error(SENGOO_STATUS_INVALID_ARGUMENT,0,"negative json input length"); return 0; }
+    if (length > max_bytes) { sengoo_json_set_error(SENGOO_STATUS_OVERFLOW,0,"json input byte limit exceeded"); return 0; }
+    SengooFfiBuffer* buffer = sengoo_ffi_buffer_from_handle(buffer_handle);
+    if (!buffer) { sengoo_json_set_error(SENGOO_STATUS_INVALID_HANDLE,0,"buffer handle not found"); return 0; }
+    if ((unsigned long long)length > buffer->used_len || buffer->used_len > buffer->capacity) {
+        sengoo_json_set_error(SENGOO_STATUS_INVALID_ARGUMENT,0,"json input exceeds initialized buffer bytes"); return 0;
+    }
+    return sengoo_json_parse_bytes_limit((const char*)buffer->bytes,(size_t)length,(size_t)max_bytes,(size_t)max_nodes);
 }
 
 long long sengoo_json_doc_object_new(void) {
     sengoo_json_clear_error();
-    SengooJsonDoc* doc = sengoo_json_doc_new_with_root_limit(SENGOO_JSON_KIND_OBJECT,0);
+    SengooJsonDoc* doc = sengoo_json_doc_new_with_root_limit(SENGOO_JSON_KIND_OBJECT,0,0);
     return sengoo_json_doc_into_handle(doc);
 }
 long long sengoo_json_doc_object_new_bounded(long long max_bytes) {
     sengoo_json_clear_error();
     if (!sengoo_json_explicit_limit(max_bytes)) return 0;
-    return sengoo_json_doc_into_handle(sengoo_json_doc_new_with_root_limit(SENGOO_JSON_KIND_OBJECT,(size_t)max_bytes));
+    return sengoo_json_doc_into_handle(sengoo_json_doc_new_with_root_limit(SENGOO_JSON_KIND_OBJECT,(size_t)max_bytes,0));
+}
+long long sengoo_json_doc_object_new_limits(long long max_bytes, long long max_nodes) {
+    sengoo_json_clear_error();
+    if (!sengoo_json_explicit_limit(max_bytes) || !sengoo_json_explicit_nodes(max_nodes)) return 0;
+    return sengoo_json_doc_into_handle(sengoo_json_doc_new_with_root_limit(SENGOO_JSON_KIND_OBJECT,(size_t)max_bytes,(size_t)max_nodes));
 }
 
 long long sengoo_json_doc_close(long long handle) {

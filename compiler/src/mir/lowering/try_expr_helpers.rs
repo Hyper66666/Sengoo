@@ -257,6 +257,10 @@ pub(super) fn lower_try_expr(ctx: &mut LoweringContext<'_>, operand: &HIRExpr) -
     };
 
     let flag_local = lower_field_expr(ctx, operand_local, flag_field);
+    // A named wrapper is consumed on both branches: success transfers its
+    // payload and failure transfers its error/container to the caller. Leaving
+    // its drop binding live would close the extracted owner before returning.
+    ctx.mark_drop_expr_moved(operand);
     let cont_block = ctx.new_block();
     let fail_block = ctx.new_block();
 

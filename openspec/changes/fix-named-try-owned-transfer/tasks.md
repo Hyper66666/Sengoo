@@ -1,0 +1,5 @@
+- [x] Reproduce early JSON close with an independent native named Result fixture (integration owner).
+- [x] Correct named try ownership transfer and reuse diagnostics (integration owner).
+- [x] Run compiler try/Drop regressions and native handle-liveness checks (integration owner).
+- [x] Rebuild CLI and verify retry success, cancellation and tool continuation (integration owner).
+- [x] Record exact compiler/source hashes and strict OpenSpec validation (integration owner).

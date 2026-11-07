@@ -45,6 +45,23 @@ def tests() -> Result<i64,i64> {
         check(not json_doc_object_bounded(0).is_ok and not json_doc_object_bounded(16777217).is_ok,110)?;
     };
     check(sengoo_json_bounded_live_documents() == before and sengoo_json_bounded_reserved_bytes() == 0,111)?;
+    {
+        let rich = json_doc_object_limits(131072, 8192)?;
+        let rows = rich.new_array()?; rich.root().object_set("nodes", rows)?;
+        let mut index = 0;
+        while index < 5000 { rows.array_push(rich.new_i64(index)?)?; index = index + 1; };
+        let encoded = rich.serialize_string()?;
+        check(not json_parse(encoded.as_str()).is_ok,112)?;
+        let parsed = json_parse_limits(encoded.as_str(), 131072, 8192)?;
+        check(parsed.root().object_get("nodes")?.array_len()? == 5000 and parsed.root().object_get("nodes")?.array_get(4999)?.number_i64()? == 4999,113)?;
+        let small = json_doc_object_limits(131072, 4096)?;
+        let refused = small.copy(parsed.root());
+        check(not refused.is_ok and refused.error == 13,114)?;
+        let borrowed = json_parse_buffer_limits(&input, count, count, 65536)?;
+        check(str_contains(borrowed.root().string_value()?.as_str(), "世界😀"),115)?;
+        check(not json_parse_limits("{}", 128, 65537).is_ok,116)?;
+    };
+    check(sengoo_json_bounded_live_documents() == before and sengoo_json_bounded_reserved_bytes() == 0,117)?;
     println("bounded JSON SG: >1MiB UTF-8, borrowed input, copy, serialize, NUL, rollback and Drop passed");
     Result { is_ok:true,value:0,error:0 }
 }

@@ -189,6 +189,14 @@ long long sengoo_process_command_new(long long executable_ptr) {
         free(command);
         return 0;
     }
+#ifdef _WIN32
+    /* CreateProcess accepts '/', but cmd.exe reparses argv[0] and can treat
+     * forward slashes as switches before /c. Normalize only the executable;
+     * user arguments (URLs, shell code, patterns) must remain byte-exact. */
+    for (char* cursor = command->executable; *cursor; ++cursor) {
+        if (*cursor == '/') *cursor = '\\';
+    }
+#endif
     long long handle = sengoo_process_owned_new(command, SENGOO_PROCESS_COMMAND);
     if (!handle) { sengoo_process_command_free_fields(command); free(command); }
     return handle;
@@ -455,9 +463,25 @@ static char* sengoo_windows_process_command_line_dyn(SengooProcessCommand* comma
     }
     char* out = command_line;
     out = sengoo_windows_append_arg(out, command->executable);
+    const char* basename = strrchr(command->executable, '\\');
+    basename = basename ? basename + 1 : command->executable;
+    int cmd_payload = (_stricmp(basename, "cmd.exe") == 0 || _stricmp(basename, "cmd") == 0)
+        && command->arg_len >= 2
+        && (_stricmp(command->args[command->arg_len - 2], "/c") == 0
+            || _stricmp(command->args[command->arg_len - 2], "/k") == 0);
     for (size_t i = 0; i < command->arg_len; ++i) {
         *out++ = ' ';
-        out = sengoo_windows_append_arg(out, command->args[i]);
+        if (cmd_payload && i + 1 == command->arg_len) {
+            /* cmd reparses the command tail, not CRT argv. The outer pair is
+             * removed by /s; inner quotes and backslashes belong to the shell
+             * script and must not acquire CRT backslash escaping. */
+            *out++ = '"';
+            size_t length = strlen(command->args[i]);
+            memcpy(out, command->args[i], length); out += length;
+            *out++ = '"';
+        } else {
+            out = sengoo_windows_append_arg(out, command->args[i]);
+        }
     }
     *out = '\0';
     return command_line;

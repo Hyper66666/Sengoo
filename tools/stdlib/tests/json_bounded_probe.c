@@ -90,6 +90,39 @@ int main(void) {
     assert(!sengoo_json_doc_object_new_bounded(1) && sengoo_json_last_error_code()==13);
     for(int i=0;i<64;i++) close_doc(owners[i]);
     assert(!sengoo_json_bounded_live_documents() && !sengoo_json_bounded_reserved_bytes());
+    /* Many small nodes hit the old node cap far below the byte cap. */
+    assert(!sengoo_json_parse_text_limits(1,1,128,0) && sengoo_json_last_error_code()==2);
+    assert(!sengoo_json_parse_text_limits(1,1,128,65537) && sengoo_json_last_error_code()==2);
+    assert(!sengoo_json_parse_text_limits(1,129,128,65536) && sengoo_json_last_error_code()==13);
+    assert(!sengoo_json_parse_buffer_limits(1,129,128,65536) && sengoo_json_last_error_code()==13);
+    assert(!sengoo_json_parse_text_limits(raw("[}"),2,128,65536) && sengoo_json_last_error_code()==10);
+    size_t offset=0; text[offset++]='[';
+    for(int i=0;i<5000;i++) { if(i) text[offset++]=','; memcpy(text+offset,"{\"n\":1}",7); offset+=7; }
+    text[offset++]=']'; text[offset]=0;
+    assert(!sengoo_json_parse_text(raw(text),offset) && sengoo_json_last_error_code()==10);
+    assert(!sengoo_json_parse_text_bounded(raw(text),offset,offset) && sengoo_json_last_error_code()==10);
+    assert(!sengoo_json_parse_text_limits(raw(text),offset,offset,4096) && sengoo_json_last_error_code()==13);
+    doc=sengoo_json_parse_text_limits(raw(text),offset,offset,32768); assert(doc>0);
+    assert(sengoo_json_array_len(doc,sengoo_json_doc_root(doc))==5000);
+    destination=sengoo_json_doc_object_new_limits(offset+64,32768); assert(destination>0);
+    copy=sengoo_json_doc_copy(destination,doc,sengoo_json_doc_root(doc)); assert(copy>0);
+    assert(sengoo_json_object_set(destination,sengoo_json_doc_root(destination),raw("rows"),destination,copy)==1);
+    encoded=sengoo_json_doc_serialize_string(destination); assert(encoded>0 && strlen((char*)(intptr_t)encoded)==offset+9); free((void*)(intptr_t)encoded);
+    small=sengoo_json_doc_object_new_limits(offset+64,4096); assert(small>0);
+    original=sengoo_json_doc_from_handle(small)->len;
+    for(int i=0;i<3;i++) {
+        assert(!sengoo_json_doc_copy(small,doc,sengoo_json_doc_root(doc)) && sengoo_json_last_error_code()==13);
+        SengooJsonDoc* checked=sengoo_json_doc_from_handle(small);
+        assert(checked->len==original && !checked->owned_payload && !checked->owned_edges);
+    }
+    close_doc(small); close_doc(destination); close_doc(doc);
+    test_buffer.bytes=(unsigned char*)text; test_buffer.capacity=offset; test_buffer.used_len=offset;
+    doc=sengoo_json_parse_buffer_limits(700,offset,offset,32768); assert(doc>0); close_doc(doc);
+    edges=sengoo_json_doc_object_new_limits(128,5002); assert(edges>0);
+    array=sengoo_json_doc_new_array(edges); value=sengoo_json_doc_new_null(edges);
+    for(int i=0;i<5002;i++) assert(sengoo_json_array_push(edges,array,edges,value)==1);
+    assert(sengoo_json_array_push(edges,array,edges,value)==-13); close_doc(edges);
+    assert(!sengoo_json_bounded_live_documents() && !sengoo_json_bounded_reserved_bytes());
     for(int i=1;i<256;i++) assert(!handles[i]);
     free(text); puts("bounded JSON native: exact16MiB, pre-read rejection, copy rollback, NUL, cycles, links and aggregate release passed"); return 0;
 }

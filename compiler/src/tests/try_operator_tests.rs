@@ -4,6 +4,44 @@ use crate::compile_to_ir;
 use crate::typeck::typeck;
 use crate::Parser;
 
+#[test]
+fn named_result_question_transfers_its_owned_payload_before_cleanup() {
+    let ir = compile_to_ir(
+        r#"
+struct Result<T, E> { is_ok: bool, value: T, error: E }
+struct Owner { marker: i64 }
+impl Drop for Owner { def drop(&mut self) { print(self.marker); } }
+def forward(input: Result<Owner, i64>) -> Result<Owner, i64> {
+    let pending = input;
+    let owner = pending?;
+    Result { is_ok: true, value: owner, error: 0 }
+}
+
+
+def main() -> i64 { 0 }
+"#,
+    ).expect("named result propagation should compile");
+    let forward = ir.split("; Function: forward\n").nth(1).unwrap()
+        .split("\n}\n").next().unwrap();
+    assert!(!forward.contains("@Result_Owner_i64_Drop_drop("),
+        "both success extraction and failure propagation transfer the named container; it must not close the transferred owner:\n{forward}");
+}
+
+#[test]
+fn named_result_question_rejects_reusing_the_consumed_owner() {
+    let error = compile_to_ir(r#"
+struct Result<T, E> { is_ok: bool, value: T, error: E }
+struct Owner { marker: i64 }
+impl Drop for Owner { def drop(&mut self) {} }
+def consume(input: Result<Owner, i64>) -> Result<i64, i64> {
+    let owner = input?;
+    Result { is_ok: true, value: input.value.marker + owner.marker, error: 0 }
+}
+def main() -> i64 { 0 }
+"#).expect_err("owning named question-mark operands must be consumed");
+    assert!(format!("{error:?}").contains("use-after-move"), "{error:?}");
+}
+
 fn typeck_ok(source: &str) {
     let mut parser = Parser::new(source);
     let program = parser.parse_program().expect("parse");

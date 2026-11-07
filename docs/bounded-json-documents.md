@@ -28,6 +28,19 @@ container links across the document. Repeated references cannot grow arrays or
 objects without bound. Serialization detects cycles and depth excess in these
 documents, even when the graph was assembled by public builder operations.
 
+For structured documents containing many small values, the additional
+development APIs `json_parse_limits(text, max_bytes, max_nodes)`,
+`json_parse_buffer_limits(&buffer, input_len, max_bytes, max_nodes)` and
+`json_doc_object_limits(max_bytes, max_nodes)` explicitly admit1..65,536
+nodes and container links. Existing constructors retain4,096. Explicit node
+exhaustion returns13; malformed JSON remains10. These APIs retain depth64,
+copy rollback, byte-bounded serialization and initialized-buffer checks.
+Their reservation is `6*max_bytes + max(4MiB,
+max_nodes*(2*sizeof(Node)+8*sizeof(Member)+32))`, covering doubled capacity,
+minimum container allocations, links and terminators within the same512MiB
+and64-document aggregate gate. API availability requires a matching stdlib
+and native bridge; runtime ABI/version and legacy interfaces are unchanged.
+
 Each extended document reserves `6 * max_bytes + 4 MiB` from an aggregate
 512 MiB admission budget; at most 64 such documents may live. This conservative
 reservation covers bounded internal payload/capacity/temporary expansion and

@@ -1,0 +1,5 @@
+- [x] Reproduce cmd failure with a forward-slash program path outside the CLI (integration owner).
+- [x] Normalize Windows executable copies and preserve cmd command-tail quotes (integration owner).
+- [x] Run the real native process_terminal_probe, including URL/quote preservation and resource cleanup (integration owner).
+- [x] Complete adjacent Sengoo CLI executor and candidate end-to-end regression (integration owner).
+- [x] Record exact source hashes, compatibility limits and OpenSpec strict validation (integration owner).

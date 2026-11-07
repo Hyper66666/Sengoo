@@ -1,0 +1,2 @@
+- [x] Compiler: position omitted-else value mismatches and include repair context.
+- [x] Verification: 1,157 compiler library tests, including diagnostic span/function/hint and explicit-unit/early-return cases; CLI O2 candidate built and passed its focused native/console gates (see verification.md).

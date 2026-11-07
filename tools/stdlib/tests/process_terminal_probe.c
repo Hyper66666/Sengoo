@@ -46,6 +46,12 @@ long long sengoo_time_unix_ms(void) { return 0; }
 #ifdef _WIN32
 int sengoo_size_add(size_t* total, size_t value) { if (*total > SIZE_MAX - value) return 1; *total += value; return 0; }
 char* sengoo_windows_append_arg(char* out, const char* text) {
+    /* Match production's minimal quoting. Quoting cmd switches changes the
+     * command processor grammar and would invalidate this standalone probe. */
+    if (*text && !strpbrk(text, " \t\"")) {
+        while (*text) *out++ = *text++;
+        return out;
+    }
     *out++ = '"'; size_t backslashes = 0;
     for (;;) {
         if (*text == '\\') { backslashes++; text++; continue; }
@@ -100,6 +106,25 @@ static void drain(long long child, size_t expected_out, size_t expected_err) {
     assert(sengoo_process_handle_close(child) == 0);
     assert(sengoo_process_handle_try_wait(child) == -SENGOO_STATUS_INVALID_HANDLE);
 }
+#ifdef _WIN32
+static void windows_forward_executable_test(void) {
+    wchar_t directory[32768]; char executable[32768];
+    UINT length = GetSystemDirectoryW(directory, 32000); assert(length && length < 32000);
+    wcscat(directory, L"\\cmd.exe");
+    assert(WideCharToMultiByte(CP_UTF8, WC_ERR_INVALID_CHARS, directory, -1,
+                              executable, sizeof(executable), NULL, NULL));
+    for (char* p = executable; *p; ++p) if (*p == '\\') *p = '/';
+    long long command = sengoo_process_command_new(raw(executable)); assert(command > 0);
+    assert(sengoo_process_command_arg(command, raw("/d")) == 1);
+    assert(sengoo_process_command_arg(command, raw("/s")) == 1);
+    assert(sengoo_process_command_arg(command, raw("/c")) == 1);
+    assert(sengoo_process_command_arg(command, raw("echo FORWARD_PATH_OK \"quoted value\" https://fixture/a/b")) == 1);
+    long long child = sengoo_process_command_spawn_piped(command); assert(child > 0);
+    sengoo_process_command_close(command);
+    drain(child, strlen("FORWARD_PATH_OK \"quoted value\" https://fixture/a/b\r\n"), 0);
+    puts("Windows forward-slash executable / cmd argv passed");
+}
+#endif
 static void unicode_environment_test(const char* self) {
     char path[32768], executable[32768];
 #ifdef _WIN32
@@ -431,6 +456,9 @@ static int probe_main(int argc, char** argv) {
         for (;;) pause_ms(100);
     }
     parser_tests();
+#ifdef _WIN32
+    windows_forward_executable_test();
+#endif
     unicode_environment_test(argv[0]);
     real_tty_test(argv[0]);
     drain(spawn_child(argv[0], "--flood"), 128 * 4096, 128 * 4096);

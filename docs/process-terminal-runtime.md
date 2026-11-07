@@ -11,6 +11,14 @@ non-Send/non-Sync `ProcessHandle`. Unlike legacy `spawn`, it leaves the builder
 usable. It passes argv directly, with no shell interpretation. An application
 that wants a shell must select one explicitly.
 
+On Windows, executable path separators are normalized to backslashes in the
+owned builder copy. This avoids cmd.exe treating a forward-slash argv0 as
+switches. Explicit cmd `/c` or `/k` with a final command payload uses command
+processor quoting, retaining inner quotes and URL slashes rather than CRT
+backslash escaping. Other program argv and POSIX paths keep their existing
+behavior. `tools/stdlib/tests/process_terminal_probe.c` and the adjacent CLI's
+executor fixture cover real Windows launches, including a Unicode cwd.
+
 | Method | Result |
 | --- | --- |
 | `try_wait()` | `Result<bool,i64>`: false running, true exited and reaped |

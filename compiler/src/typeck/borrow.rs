@@ -509,8 +509,11 @@ impl BorrowChecker {
                     self.check_expr(end);
                 }
             }
+            ExprKind::Try(body) => {
+                self.check_expr(body);
+                self.maybe_move_string_arg(body);
+            }
             ExprKind::Lambda { body, .. }
-            | ExprKind::Try(body)
             | ExprKind::Await(body)
             | ExprKind::Paren(body) => self.check_expr(body),
             ExprKind::TryBlock(block) => self.check_block(block),

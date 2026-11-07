@@ -5,6 +5,9 @@ extern "C" {
     fn sengoo_json_parse_buffer_bounded(buffer: i64, input_len: i64, max_bytes: i64) -> i64;
     fn sengoo_json_doc_object_new() -> i64;
     fn sengoo_json_doc_object_new_bounded(max_bytes: i64) -> i64;
+    fn sengoo_json_parse_text_limits(data: i64, len: i64, max_bytes: i64, max_nodes: i64) -> i64;
+    fn sengoo_json_parse_buffer_limits(buffer: i64, len: i64, max_bytes: i64, max_nodes: i64) -> i64;
+    fn sengoo_json_doc_object_new_limits(max_bytes: i64, max_nodes: i64) -> i64;
     fn sengoo_json_bounded_live_documents() -> i64;
     fn sengoo_json_bounded_reserved_bytes() -> i64;
     fn sengoo_json_doc_close(handle: i64) -> i64;
@@ -146,6 +149,20 @@ def json_parse_buffer_bounded(buffer: &Buffer, input_len: i64, max_bytes: i64) -
 
 def json_doc_object_bounded(max_bytes: i64) -> Result<JsonDoc, i64> {
     json_doc_result(sengoo_json_doc_object_new_bounded(max_bytes))
+}
+
+// Opt-in budgets: 1..16MiB bytes, 1..65536 nodes/container links. Existing
+// constructors retain 4096 nodes. Resource exhaustion is13; malformed JSON10.
+def json_parse_limits(text: &str, max_bytes: i64, max_nodes: i64) -> Result<JsonDoc, i64> {
+    json_doc_result(sengoo_json_parse_text_limits(sengoo_stdlib_str_ptr(text), text.len(), max_bytes, max_nodes))
+}
+
+def json_parse_buffer_limits(buffer: &Buffer, input_len: i64, max_bytes: i64, max_nodes: i64) -> Result<JsonDoc, i64> {
+    json_doc_result(sengoo_json_parse_buffer_limits(buffer.raw_handle(), input_len, max_bytes, max_nodes))
+}
+
+def json_doc_object_limits(max_bytes: i64, max_nodes: i64) -> Result<JsonDoc, i64> {
+    json_doc_result(sengoo_json_doc_object_new_limits(max_bytes, max_nodes))
 }
 
 def json_parse_buffer(buffer: Buffer, input_len: i64) -> Result<JsonDoc, i64> {

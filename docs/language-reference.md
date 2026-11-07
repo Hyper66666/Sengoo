@@ -204,6 +204,12 @@ and unused fallback cleanup, successive `?` cleanup, and inactive
 representation remains unchanged. `Result<(), i64>` uses an empty aggregate
 for its unit value rather than an invalid LLVM `void` field.
 
+Question-mark extraction also consumes owning named `Result` and `Option`
+operands. Their active payload transfers to the extracted value or propagated
+error; the old wrapper cannot release it or be reused. Regression evidence:
+`compiler/src/tests/try_operator_tests.rs` and
+`tools/stdlib/tests/try_owned_result.sg` (native JSON liveness and exact cleanup).
+
 After a user `Drop` body returns, remaining owned fields are destroyed
 automatically. Explicit field `.drop()`, `.free()` and `.close()` calls retain
 their existing cleanup contract and suppress a second automatic field cleanup.
@@ -417,6 +423,14 @@ identify the required development toolchain separately from published releases.
 interactive-child API; rendering and terminal emulation remain application code.
 [Diagnostic UTF-8 and monotonic time](diagnostic-text-clock.md) document explicit
 lossy decoding and elapsed-time clocks; strict UTF-8 and calendar APIs remain compatible.
+
+For node-rich network metadata, use `json_parse_limits(text, max_bytes,
+max_nodes)` with explicit application bounds. The legacy parser retains its
+4096-node limit and error-10 compatibility; explicit budget exhaustion returns
+13, while malformed JSON returns 10. Budgets remain capped at 16 MiB and 65536
+nodes, with aggregate admission enforced. The independent native regression
+`tools/stdlib/tests/json_event_metadata.sg` verifies rich metadata, error
+classification and exact repeated document/reservation cleanup.
 
 ## Versioning Policy
 

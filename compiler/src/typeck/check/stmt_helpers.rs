@@ -160,7 +160,19 @@ impl TypeChecker {
             None => self.env.unit_ty(),
         };
 
-        self.infer.unify(&then_ty, &else_ty)?;
+        self.infer.unify(&then_ty, &else_ty).map_err(|err| {
+            if else_branch.is_none() && matches!(err, TypeckError::TypeMismatch { .. }) {
+                let span = then_branch.stmts.last().map(|stmt| stmt.span).unwrap_or(then_branch.span);
+                TypeckError::Diagnostic {
+                    code: "if-without-else-value",
+                    message: format!("{err}; an if without else must produce (); end the branch with () or add an else branch"),
+                    span_lo: span.lo,
+                    span_hi: span.hi,
+                }
+            } else {
+                err
+            }
+        })?;
         // A conditional return does not make its false path diverge. `!`
         // coerces to the other branch's type; an omitted else is always ().
         // Returning the then type here previously hid bool/() mismatches in

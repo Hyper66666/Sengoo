@@ -154,7 +154,20 @@ impl TypeChecker {
             })
         };
         self.expected_return_types.pop();
-        let body_ty = body_result?;
+        let body_ty = body_result.map_err(|error| match error {
+            TypeckError::Diagnostic {
+                code: "if-without-else-value",
+                message,
+                span_lo,
+                span_hi,
+            } => TypeckError::Diagnostic {
+                code: "if-without-else-value",
+                message: format!("in function `{}`: {message}", fn_decl.name.name),
+                span_lo,
+                span_hi,
+            },
+            other => other,
+        })?;
 
         let is_main_with_implicit_return = fn_decl.name.name == "main"
             && matches!(body_ty.kind, TyKind::Unit)

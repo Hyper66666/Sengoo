@@ -1,0 +1,41 @@
+import std::json;
+import std::string;
+
+def metadata_check(valid: bool, code: i64) -> Result<bool, i64> {
+    Result { is_ok: valid, value: valid, error: if valid { 0 } else { code } }
+}
+
+def metadata_round_trip() -> Result<bool, i64> {
+    let document = json_doc_object_limits(1048576, 65536)?;
+    let rows = document.new_array()?; document.root().object_set("usage", rows)?;
+    let mut index = 0;
+    while index < 600 {
+        let row = document.new_object()?; rows.array_push(row)?;
+        let mut field = 0;
+        while field < 7 { let key = string_new(); key.push_i64(field)?; row.object_set(key.as_str(), document.new_i64(index)?)?; field = field + 1; };
+        index = index + 1;
+    };
+    let serialized = document.serialize_string()?;
+    let legacy = json_parse(serialized.as_str());
+    metadata_check(not legacy.is_ok() and legacy.error == 10, 101)?;
+    let decoded = json_parse_limits(serialized.as_str(), 1048576, 65536)?;
+    metadata_check(decoded.root().object_get("usage")?.array_len()? == 600, 102)?;
+    metadata_check(decoded.root().object_get("usage")?.array_get(599)?.object_get("6")?.number_i64()? == 599, 103)?;
+    let limited = json_parse_limits(serialized.as_str(), 1048576, 4096);
+    metadata_check(not limited.is_ok() and limited.error == 13, 104)?;
+    let malformed = json_parse_limits("{broken", 1048576, 65536);
+    metadata_check(not malformed.is_ok() and malformed.error == 10, 105)?;
+    Result { is_ok: true, value: true, error: 0 }
+}
+
+def metadata_tests() -> Result<i64, i64> {
+    let before_docs = sengoo_json_bounded_live_documents();
+    let before_bytes = sengoo_json_bounded_reserved_bytes();
+    let mut iteration = 0;
+    while iteration < 20 { metadata_round_trip()?; iteration = iteration + 1; };
+    metadata_check(sengoo_json_bounded_live_documents() == before_docs and sengoo_json_bounded_reserved_bytes() == before_bytes, 106)?;
+    println("JSON rich event metadata: legacy compatibility, explicit node limits, malformed input and exact cleanup passed");
+    Result { is_ok: true, value: 0, error: 0 }
+}
+
+def main() -> i64 { let result = metadata_tests(); if not result.is_ok() { println(result.error); return 1; }; result.value }

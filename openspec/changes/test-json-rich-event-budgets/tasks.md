@@ -1,0 +1,3 @@
+- [x] Add independent rich-event explicit JSON budget and cleanup regression.
+- [x] Compile and run the native regression using the pinned compiler.
+- [x] Document the opt-in budget boundary and strict-validate OpenSpec.

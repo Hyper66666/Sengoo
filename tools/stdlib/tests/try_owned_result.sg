@@ -1,0 +1,46 @@
+import std::json;
+
+def forward_named_document() -> Result<JsonDoc, i64> {
+    let pending = json_parse("{\"answer\":42}");
+    if not pending.is_ok() { return pending; };
+    let document = pending?;
+    let encoded = document.serialize_string()?;
+    if encoded.len() == 0 { return Result { is_ok: false, value: document, error: 10 }; };
+    Result { is_ok: true, value: document, error: 0 }
+}
+
+def forward_named_error() -> Result<i64, JsonDoc> {
+    let error = json_parse("{\"error\":9}").unwrap_or(JsonDoc { handle: 0 });
+    let pending: Result<JsonDoc, JsonDoc> = Result { is_ok: false, value: JsonDoc { handle: 0 }, error: error };
+    let unused = pending?;
+    Result { is_ok: true, value: unused.root().kind().unwrap_or(-1), error: JsonDoc { handle: 0 } }
+}
+
+def forward_named_option() -> Option<JsonDoc> {
+    let document = json_parse("{\"optional\":true}").unwrap_or(JsonDoc { handle: 0 });
+    let pending = Option { is_some: true, value: document };
+    let selected = pending?;
+    Option { is_some: true, value: selected }
+}
+
+def main() -> i64 {
+    let baseline = sengoo_json_bounded_live_documents();
+    {
+        let forwarded = forward_named_document();
+        if not forwarded.is_ok() { println("named propagation failed"); return 1; };
+        let encoded = forwarded.value.serialize_string();
+        if not encoded.is_ok() { println("named propagation closed its returned document"); return 2; };
+        if encoded.value.as_str() != "{\"answer\":42}" { return 3; };
+        let failed = forward_named_error();
+        if failed.is_ok() { return 5; };
+        let error_text = failed.error.serialize_string();
+        if not error_text.is_ok() or error_text.value.as_str() != "{\"error\":9}" { return 6; };
+        let optional = forward_named_option();
+        if not optional.is_some { return 7; };
+        let optional_text = optional.value.serialize_string();
+        if not optional_text.is_ok() or optional_text.value.as_str() != "{\"optional\":true}" { return 8; };
+    };
+    if sengoo_json_bounded_live_documents() != baseline { return 4; };
+    println("named Result propagation preserves its returned document and releases it once");
+    0
+}

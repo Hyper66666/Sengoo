@@ -2,6 +2,38 @@ use crate::error::ParseError;
 use crate::{compile_to_ir, Parser};
 
 #[test]
+fn value_in_if_without_else_reports_branch_span_and_function() {
+    let source = "def action() -> bool { true }\ndef update(flag: bool) { if flag { action(); }; }";
+    let parsed = Parser::parse(source).unwrap();
+    let error = crate::TypeChecker::new()
+        .check_program(&parsed)
+        .unwrap_err();
+    match error {
+        crate::CompileError::TypeckError(crate::typeck::TypeckError::Diagnostic {
+            code,
+            message,
+            span_lo,
+            span_hi,
+        }) => {
+            assert_eq!(code, "if-without-else-value");
+            assert!(message.contains("function `update`"), "{message}");
+            assert!(message.contains("end the branch with ()"), "{message}");
+            assert!(source[span_lo as usize..span_hi as usize].contains("action()"));
+        }
+        other => panic!("expected a positioned branch diagnostic, got {other:?}"),
+    }
+}
+
+#[test]
+fn explicit_unit_and_conditional_returns_keep_their_existing_semantics() {
+    let source = "def action() -> bool { true }\n\
+        def update(flag: bool) { if flag { action(); (); }; }\n\
+        def early(flag: bool) -> i64 { if flag { return 7; }; 0 }\n\
+        def main() -> i64 { update(true); early(false) }";
+    compile_to_ir(source).expect("explicit unit and early returns remain supported");
+}
+
+#[test]
 fn invalid_struct_field_name_reports_actionable_error() {
     let source = r#"
 def main() -> i64 {
