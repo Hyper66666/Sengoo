@@ -2,6 +2,8 @@ import selfhost_mir_validate;
 
 import selfhost_x64_scalar;
 
+import selfhost_x64_memmove;
+
 import selfhost_object;
 
 import selfhost_unwind;
@@ -134,6 +136,31 @@ def sh_native_field(native: &ShNative, mir: &ShMir, id: i64) -> Result<i64, i64>
     sh_x64_binary(&native.code, 0, 10, 0)?;
     sh_native_address(native, id, 11)?;
     sh_native_copy(native, sh_native_size(native, mir, sh_mir_value_type(mir, id))?);
+}
+
+def sh_native_index(native: &ShNative, mir: &ShMir, id: i64) -> Result<i64, i64> {
+    let first = sh_mir_inst_arg(mir, id, 0);
+    let pointer = sh_mir_value_type(mir, first);
+    let base = sh_mir_type_arg(mir, pointer, 0);
+    let kind = sh_mir_type_word(mir, base, 0);
+    if kind == 9 { return sh_i64_error(6502); };
+    let element = if kind == 8 { sh_mir_type_arg(mir, base, 0); } else { base; };
+    let stride = sh_native_size(native, mir, element)?;
+    sh_native_load(native, first, 10)?;
+    sh_native_load(native, sh_mir_inst_arg(mir, id, 1), 0)?;
+    sh_x64_mov_imm(&native.code, 11, stride)?;
+    sh_x64_binary(&native.code, 6, 0, 11)?;
+    sh_x64_binary(&native.code, 0, 0, 10)?;
+    sh_native_save(native, id, 0);
+}
+
+def sh_native_memmove(native: &ShNative, mir: &ShMir, id: i64) -> Result<i64, i64> {
+    sh_native_load(native, sh_mir_inst_arg(mir, id, 0), 11)?;
+    sh_native_load(native, sh_mir_inst_arg(mir, id, 1), 10)?;
+    sh_native_load(native, sh_mir_inst_arg(mir, id, 2), 1)?;
+    sh_x64_memmove(&native.code)?;
+    sh_x64_mov_imm(&native.code, 0, 0)?;
+    sh_native_finish(native, mir, id);
 }
 
 def sh_native_edge(native: &ShNative, mir: &ShMir, edge: i64) -> Result<i64, i64> {
@@ -346,6 +373,8 @@ def sh_native_instruction(native: &ShNative, mir: &ShMir, id: i64) -> Result<i64
     if opcode == 12 { return sh_native_cast(native, mir, id); };
     if opcode == 16 or opcode == 24 { return sh_native_aggregate(native, mir, id); };
     if opcode == 17 or opcode == 18 { return sh_native_field(native, mir, id); };
+    if opcode == 19 { return sh_native_index(native, mir, id); };
+    if opcode == 22 { return sh_native_memmove(native, mir, id); };
     if opcode == 23 { sh_native_load(native, first, 0)?; return sh_native_finish(native, mir, id); };
     if opcode == 13 { let offset = sh_native_at(&native.locals, aux); if offset < 8 { return sh_i64_error(6501); }; sh_x64_memory(&native.code, 2, 0, 5, -offset)?; return sh_native_finish(native, mir, id); };
     if opcode == 14 { sh_native_load(native, first, 10)?; let width = sh_native_width(mir, ty); if width < 0 { sh_native_address(native, id, 11)?; return sh_native_copy(native, sh_native_size(native, mir, ty)?); }; if width == 0 { sh_x64_mov_imm(&native.code, 0, 0)?; } else { sh_x64_scalar_memory(&native.code, false, 0, 10, 0, width, sh_native_signed(mir, ty))?; }; return sh_native_finish(native, mir, id); };

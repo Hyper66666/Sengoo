@@ -59,6 +59,73 @@ extern int64_t sg_native_cleanup(bool);
 extern int64_t sg_native_nested_cleanup(void), sg_native_array_cleanup(void);
 struct DropChoice { int64_t tag,value; };
 extern int64_t sg_native_enum_cleanup(struct DropChoice);
+typedef void (*move_fn)(void *,const void *,uint64_t);
+extern void sg_native_memmove_u8(void *,const void *,uint64_t);
+extern void sg_native_memmove_u64(void *,const void *,uint64_t);
+extern void sg_native_memmove_pair(void *,const void *,uint64_t);
+extern uint8_t *sg_native_index_bytes(uint8_t *,int64_t);
+extern struct Pair *sg_native_index_pairs(struct Pair *,int64_t);
+extern struct Odd *sg_native_index_odd(struct Odd *,int64_t);
+extern int64_t *sg_native_index_array(int64_t *,int64_t);
+
+static int test_memory_ranges(void) {
+    move_fn moves[]={sg_native_memmove_u8,sg_native_memmove_u64,sg_native_memmove_pair};
+    uint8_t actual[128],expected[128],source[128];
+    for (unsigned i=0;i<128;++i) source[i]=(uint8_t)(i*73+19);
+    for (unsigned f=0;f<3;++f) {
+        moves[f](NULL,NULL,0);
+        for (unsigned destination=0;destination<25;++destination) {
+            for (unsigned input=0;input<25;++input) {
+                for (unsigned count=0;count<41;++count) {
+                    memcpy(actual,source,sizeof(actual));
+                    memcpy(expected,source,sizeof(expected));
+                    memmove(expected+destination,expected+input,count);
+                    moves[f](actual+destination,actual+input,count);
+                    if (memcmp(actual,expected,sizeof(actual))) return 1;
+                }
+            }
+        }
+        for (unsigned count=0;count<=65;++count) {
+            memset(actual,0xA5,sizeof(actual));
+            memset(expected,0xA5,sizeof(expected));
+            memmove(expected+1,source+3,count);
+            moves[f](actual+1,source+3,count);
+            if (memcmp(actual,expected,sizeof(actual))) return 2;
+        }
+    }
+    SYSTEM_INFO information;
+    GetSystemInfo(&information);
+    SIZE_T page=information.dwPageSize;
+    uint8_t *guard=VirtualAlloc(NULL,page*2,MEM_RESERVE|MEM_COMMIT,PAGE_READWRITE);
+    DWORD old;
+    if (!guard || !VirtualProtect(guard+page,page,PAGE_NOACCESS,&old)) return 3;
+    for (unsigned f=0;f<3;++f) {
+        for (unsigned count=1;count<64;++count) {
+            memcpy(guard+page-count,source,count);
+            memset(actual,0xA5,sizeof(actual));
+            moves[f](actual+1,guard+page-count,count);
+            if (memcmp(actual+1,source,count) || actual[0]!=0xA5 || actual[count+1]!=0xA5) return 4;
+            memset(guard+page-count,0,count);
+            moves[f](guard+page-count,source,count);
+            if (memcmp(guard+page-count,source,count)) return 5;
+        }
+    }
+    if (!VirtualFree(guard,0,MEM_RELEASE)) return 6;
+    struct Pair pairs[8];
+    struct Odd odds[8];
+    int64_t array[3]={20,22,0};
+    for (int64_t index=-3;index<=3;++index) {
+        if (sg_native_index_bytes(actual+64,index)!=actual+64+index ||
+            sg_native_index_pairs(pairs+4,index)!=pairs+4+index ||
+            sg_native_index_odd(odds+4,index)!=odds+4+index) return 7;
+    }
+    for (int64_t index=0;index<3;++index) {
+        if (sg_native_index_array(array,index)!=array+index) return 8;
+    }
+    *sg_native_index_array(array,2)=42;
+    if (array[2]!=42) return 9;
+    return 0;
+}
 static int drop_count;
 static int64_t drop_values[32];
 void sg_drop_test_owner(void *pointer) {
@@ -183,6 +250,7 @@ int main(int argc,char **argv) {
         sg_native_large(1,2,3,4,5,6)!=42 || checks<4 || unwound!=7) return 67;
     if (virtual_unwind(sg_native_add) || virtual_unwind(sg_native_swap)) return 68;
     if (test_casts()) return 74;
+    if (test_memory_ranges()) return 79;
     if (sg_native_cleanup(false)!=42 || drop_count!=0 ||
         sg_native_cleanup(true)!=42 || drop_count!=1 ||
         sg_native_cleanup(true)!=42 || drop_count!=2) return 76;
@@ -216,5 +284,6 @@ int main(int argc,char **argv) {
     puts("native conditional initialization and exact user Drop: ok");
     puts("native nested and array reverse cleanup with cleared flags: ok");
     puts("native active enum payload cleanup: ok");
+    puts("native overlapping byte memmove and typed index strides: ok");
     return 0;
 }

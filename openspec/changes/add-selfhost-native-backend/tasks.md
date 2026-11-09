@@ -17,6 +17,7 @@
 - [x] Execute signed/unsigned division and remainder, debug zero/overflow hooks and release wrapping behavior for signed minimum divided by minus one (`target/selfhost/m4-division/evidence.json`). Full numeric/cleanup coverage remains open.
 - [x] Execute initial owned-local initialization, conditional user Drop, cleared flags, nested/array reverse cleanup and active-only enum payload cleanup; reject pending resource glue and forged nested Drop calls without emitting an object (`target/selfhost/m4-cleanup-safe/evidence.json`). Runtime resource glue, conditional partial-field cleanup and full ownership support remain open.
 - [x] Run the qualified SG native emitter with the separately qualified SG linker and real SDK import archive under an empty PATH; execute 32 programs in two clean directories and compare object/PE bytes exactly (`target/selfhost/m5-native-source-link-qualified/evidence.json`). Compiler self-rebuild, full runtime and M4/M5 closure remain open.
+- [x] Emit typed array/raw-pointer index strides and unsafe opcode-22 byte memmove; independently execute 76,875 overlap cases across u8/u64/aggregate pointees, unaligned/separate ranges, zero-count null pointers, protected-page boundaries and 1/3/8/16-byte strides (`target/selfhost/m4-memory-ranges/evidence.json`). Slices, full runtime extents and supported-corpus closure remain open.
 
 ## Supported target behavior
 
@@ -211,3 +212,17 @@ The report first revalidates passed emitter/linker evidence and exact generated
 binary hashes. Those tools were built earlier with the Rust seed and clang;
 this gate does not rebuild them or prove an S2/S3 fixed point, process tracing,
 full SDK/runtime behavior, debugger support or complete M4/M5 parity.
+
+Memory-range evidence: `target/selfhost/m4-memory-ranges/evidence.json`,
+SHA-256 `027f4f81ca944a644d578e41ea0972fa6144645f0323e36e4e0a9d530ed67547`,
+revision `c68790bb9c9dc168e353419ccd88da6e10e58042`, Windows 11 AMD64.
+All 29 commands passed with unchanged inputs/tools. Existing ABI, native exact
+resources, deterministic object, numeric, cleanup, stack probe and unwind
+regressions remained green. The C oracle compares full buffers with libc memmove
+for 25*25*41 overlapping range shapes for each of three MIR pointee sizes; byte
+counts are never scaled by that size. Additional separate/unaligned ranges,
+NULL zero count and exact spans adjacent to PAGE_NOACCESS prove byte access
+boundaries. Typed array/reference and raw-pointer indices match independent
+C addresses with 1/3/8/16 strides, including valid negative raw offsets.
+The unsafe producer remains responsible for complete runtime byte extents;
+slice metadata and complete M4 support remain open.

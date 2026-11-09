@@ -1,0 +1,42 @@
+import selfhost_x64_scalar;
+
+def sh_x64_memmove_inner(output: &ShBinary) -> Result<i64, i64> {
+    let start = sh_binary_len(output);
+    sh_x64_mov_imm(output, 0, 0)?;
+    sh_x64_binary(output, 5, 1, 0)?;
+    let empty = sh_x64_branch(output, 2, 4)?;
+    sh_x64_binary(output, 5, 11, 10)?;
+    let forward = sh_x64_branch(output, 2, 6)?;
+    sh_x64_binary(output, 0, 10, 1)?;
+    sh_x64_binary(output, 0, 11, 1)?;
+    sh_x64_mov_imm(output, 2, 1)?;
+    let backward_head = sh_binary_len(output);
+    sh_x64_binary(output, 1, 10, 2)?;
+    sh_x64_binary(output, 1, 11, 2)?;
+    sh_x64_scalar_memory(output, false, 0, 10, 0, 1, false)?;
+    sh_x64_scalar_memory(output, true, 0, 11, 0, 1, false)?;
+    sh_x64_binary(output, 1, 1, 2)?;
+    let backward_loop = sh_x64_branch(output, 2, 5)?;
+    sh_x64_fix_branch(output, backward_loop, backward_head)?;
+    let finish = sh_x64_branch(output, 0, 0)?;
+    sh_x64_fix_branch(output, forward, sh_binary_len(output))?;
+    sh_x64_mov_imm(output, 2, 1)?;
+    let forward_head = sh_binary_len(output);
+    sh_x64_scalar_memory(output, false, 0, 10, 0, 1, false)?;
+    sh_x64_scalar_memory(output, true, 0, 11, 0, 1, false)?;
+    sh_x64_binary(output, 0, 10, 2)?;
+    sh_x64_binary(output, 0, 11, 2)?;
+    sh_x64_binary(output, 1, 1, 2)?;
+    let forward_loop = sh_x64_branch(output, 2, 5)?;
+    sh_x64_fix_branch(output, forward_loop, forward_head)?;
+    sh_x64_fix_branch(output, empty, sh_binary_len(output))?;
+    sh_x64_fix_branch(output, finish, sh_binary_len(output))?;
+    sh_i64_ok(start);
+}
+
+def sh_x64_memmove(output: &ShBinary) -> Result<i64, i64> {
+    let start = sh_binary_len(output);
+    let emitted = sh_x64_memmove_inner(output);
+    if not emitted.is_ok() { return sh_x64_rewind(output, start, emitted.error); };
+    emitted;
+}

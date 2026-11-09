@@ -205,6 +205,16 @@ marks unresolved nested field release as pending until per-field initialization
 facts can suppress automatic cleanup exactly. The native consumer never treats
 pending glue as a successful no-op.
 
+Opcode 19 computes element addresses from the resolved physical element stride
+for fixed arrays and raw pointers. Typed slice metadata remains unsupported.
+Opcode 22 consumes the validator's unsigned byte-count contract. Its inline
+memmove selects forward copying when destination is at or below source and
+backward copying otherwise. It uses only volatile registers and one-byte loads
+and stores, leaves the direction flag untouched, and performs no access at zero
+count. It does not invoke a C memory routine, scale counts by pointee size,
+guess runtime bounds, or transfer an owning value. The binary helper rewinds
+all emitted bytes if its capacity is exhausted.
+
 Primary references:
 
 - Intel instruction reference: https://www.intel.com/content/www/us/en/content-details/671110/intel-64-and-ia-32-architectures-software-developer-s-manual-combined-volumes-2a-2b-2c-and-2d-instruction-set-reference-a-z.html

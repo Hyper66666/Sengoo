@@ -29,7 +29,7 @@ def main():
     out.mkdir(parents=True, exist_ok=True)
     paths = {name: getattr(args, name).resolve() for name in ("seed", "clang", "formatter")}
     lock = json.loads((ROOT / "selfhost/bootstrap.lock").read_text())
-    names = ("core", "types", "lexer", "mir", "mir_validate", "layout", "abi", "binary", "coff", "object", "x64", "x64_scalar", "x64_sse", "float_literal", "unwind", "native")
+    names = ("core", "types", "lexer", "mir", "mir_validate", "layout", "abi", "binary", "coff", "object", "x64", "x64_scalar", "x64_memmove", "x64_sse", "float_literal", "unwind", "native")
     inputs = [Path(__file__), ROOT / "selfhost/bootstrap.lock", ROOT / "selfhost/tests/native.sg", ROOT / "selfhost/tests/abi.sg", ROOT / "selfhost/tests/native_probe.c"]
     inputs += [ROOT / "selfhost/src" / (name + ".sg") for name in names]
     inputs += sorted((ROOT / "tools/stdlib").rglob("*.sg"))
@@ -71,7 +71,7 @@ def main():
             if digest != lock[name]["sha256"]:
                 raise ValueError(f"{name} identity mismatch")
             report["tools"][name] = {"path": str(path), "sha256": digest}
-        for name in ("src/native.sg", "src/x64_scalar.sg", "src/x64_sse.sg", "src/unwind.sg", "src/layout.sg", "src/abi.sg", "tests/abi.sg", "tests/native.sg"):
+        for name in ("src/native.sg", "src/x64_scalar.sg", "src/x64_memmove.sg", "src/x64_sse.sg", "src/unwind.sg", "src/layout.sg", "src/abi.sg", "tests/abi.sg", "tests/native.sg"):
             run("format-" + name.replace("/", "-"), [paths["formatter"], "--check", ROOT / "selfhost" / name])
         abi_binary = out / "abi-tests.exe"
         run("build-abi", [paths["seed"], "--runtime-mode", "source-development", "build",
@@ -116,6 +116,8 @@ def main():
             raise AssertionError("nested/array cleanup order or cleared initialization flag failed")
         if b"native active enum payload cleanup: ok" not in executed:
             raise AssertionError("enum cleanup touched an inactive payload or repeated a drop")
+        if b"native overlapping byte memmove and typed index strides: ok" not in executed:
+            raise AssertionError("overlap/byte-count/alignment/index execution did not complete")
         for case in ("overflow", "overflow8", "umul-overflow", "uadd-overflow", "mul-overflow"):
             run("reject-" + case, [probe, case], b"integer overflow", 63)
         run("reject-division-zero", [probe, "division-zero"], b"division by zero", 62)
