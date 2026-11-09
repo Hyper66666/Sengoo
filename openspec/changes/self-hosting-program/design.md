@@ -42,7 +42,8 @@ explicit external-toolchain procedures outside the no-external-tools gate.
 | SG semantic analysis, borrowing/Drop, HIR/MIR and reference comparison | Future semantic child |
 | Windows x64 code generator, target ABI and optimization | Future native-backend child |
 | COFF/PE linker, CodeView and PDB | Future native-linker child |
-| Remaining SG runtime, package manager, LSP and compatibility ports | Future toolchain-port children |
+| Native SDK manifests, declarations and permitted provider packaging | `add-selfhost-native-sdk` |
+| Remaining SG runtime algorithms, package manager, LSP and compatibility ports | Future toolchain-port children |
 
 Future rows are reservations, not approved completed implementations. Each
 future child receives concrete deltas and verification before its work begins;
