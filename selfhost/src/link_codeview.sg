@@ -27,11 +27,10 @@ def sh_link_codeview_attach(object: &ShObject, debug: &ShLinkDebug) -> Result<i6
     at = lines_at;
     function = 0;
     while at < sh_binary_len(&data) { let kind = sh_link_uint(&data, at, 4)?; let length = sh_link_uint(&data, at + 4, 4)?; if kind == 242 { symbol = sh_link_cv_object_symbol(object, debug, function)?; sh_binary_patch(&data, at + 8, 0, 4)?; sh_binary_patch(&data, at + 12, 0, 2)?; sh_link_push(&fixups, at + 8)?; sh_link_push(&fixups, symbol)?; sh_link_push(&fixups, 11)?; sh_link_push(&fixups, at + 12)?; sh_link_push(&fixups, symbol)?; sh_link_push(&fixups, 10)?; function = function + 1; (); }; at = at + length + 8; };
-    let path = sh_symbol_text(&debug.names, debug.path)?;
+    let strings = sh_link_pdb_file_strings(debug)?;
     sh_binary_unsigned(&data, 243, 4)?;
-    sh_binary_unsigned(&data, path.len() + 2, 4)?;
-    sh_binary_byte(&data, 0)?;
-    sh_link_debug_text(&data, &path)?;
+    sh_binary_unsigned(&data, sh_binary_len(&strings), 4)?;
+    sh_link_debug_append(&data, &strings)?;
     sh_binary_align(&data, 4, 0)?;
     let section_name = string_from_str(".debug$S")?;
     let section = sh_object_add_section(object, &section_name, &data, 1107296320, 4)?;
@@ -76,19 +75,14 @@ def sh_link_cv_tail(bytes: &ShBinary, at: i64, end: i64) -> Result<i64, i64> {
 }
 
 def sh_link_cv_source(debug: &ShLinkDebug, bytes: &ShBinary, strings_at: i64, strings_size: i64, checksums_at: i64, checksums_size: i64) -> Result<i64, i64> {
-    if strings_at < 0 or checksums_at < 0 or strings_size < 2 or checksums_size != 40 or sh_binary_get(bytes, strings_at)? != 0 { return sh_i64_error(7301); };
-    let path = sh_link_cv_text(bytes, strings_at + 1, strings_at + strings_size)?;
-    let expected_path = sh_symbol_text(&debug.names, debug.path)?;
-    if sengoo_string_eq(path.handle, expected_path.handle) == 0 or strings_size != path.len() + 2 { return sh_i64_error(7301); };
-    if sh_link_uint(bytes, checksums_at, 4)? != 1 or sh_link_uint(bytes, checksums_at + 4, 1)? != 32 or sh_link_uint(bytes, checksums_at + 5, 1)? != 3 { return sh_i64_error(7303); };
-    let source = sh_binary_new(1048576);
-    let mut index = 0;
-    while index < debug.source.len() { sh_binary_byte(&source, sengoo_vec_get_or_default_i64(debug.source.handle, index, -1))?; index = index + 1; };
-    let digest = sh_link_sha256(&source)?;
-    index = 0;
-    while index < 32 { if sh_binary_get(&digest, index)? != sh_binary_get(bytes, checksums_at + 6 + index)? { return sh_i64_error(7301); }; index = index + 1; };
-    sh_link_cv_tail(bytes, checksums_at + 38, checksums_at + 40)?;
-    sh_i64_ok(0);
+    if debug.files.len() % 4 != 0 or debug.files.len() / 4 < 1 or debug.files.len() / 4 > 256 or strings_at < 0 or checksums_at < 0 or checksums_size != 40 * (debug.files.len() / 4) { return sh_i64_error(7301); };
+    let expected_strings = sh_link_pdb_file_strings(debug)?;
+    if strings_size != sh_binary_len(&expected_strings) { return sh_i64_error(7301); };
+    let mut at = 0;
+    while at < strings_size { if sh_binary_get(bytes, strings_at + at)? != sh_binary_get(&expected_strings, at)? { return sh_i64_error(7301); }; at = at + 1; };
+    let mut file = 0;
+    while file < debug.files.len() / 4 { let row = checksums_at + file * 40; if sh_link_uint(bytes, row, 4)? != sh_link_pdb_file_offset(debug, file)? or sh_link_uint(bytes, row + 4, 1)? != 32 or sh_link_uint(bytes, row + 5, 1)? != 3 { return sh_i64_error(7303); }; let source = sh_binary_new(1048576); let mut index = 0; let base = sh_link_word(&debug.files, 4, file, 1); while index < sh_link_word(&debug.files, 4, file, 2) { sh_binary_byte(&source, sengoo_vec_get_or_default_i64(debug.file_data.handle, base + index, -1))?; index = index + 1; }; let digest = sh_link_sha256(&source)?; index = 0; while index < 32 { if sh_binary_get(&digest, index)? != sh_binary_get(bytes, row + 6 + index)? { return sh_i64_error(7301); }; index = index + 1; }; sh_link_cv_tail(bytes, row + 38, row + 40)?; file = file + 1; };
+    sh_i64_ok(file);
 }
 
 def sh_link_cv_symbols(debug: &ShLinkDebug, bytes: &ShBinary, start: i64, size: i64, type_map: &Vec<i64>) -> Result<i64, i64> {
@@ -118,15 +112,19 @@ def sh_link_cv_symbols(debug: &ShLinkDebug, bytes: &ShBinary, start: i64, size: 
 }
 
 def sh_link_cv_lines(debug: &ShLinkDebug, bytes: &ShBinary, start: i64, size: i64) -> Result<i64, i64> {
-    if size < 32 or sh_link_uint(bytes, start + 6, 2)? != 0 or sh_link_uint(bytes, start + 12, 4)? != 0 { return sh_i64_error(7303); };
+    if size < 32 or sh_link_uint(bytes, start + 6, 2)? != 0 { return sh_i64_error(7303); };
     let count = sh_link_uint(bytes, start + 16, 4)?;
-    if count > 65536 or size != 24 + count * 8 or sh_link_uint(bytes, start + 20, 4)? != 12 + count * 8 { return sh_i64_error(7301); };
+    if count < 1 or count > 65536 or size != 24 + count * 8 or sh_link_uint(bytes, start + 20, 4)? != 12 + count * 8 { return sh_i64_error(7301); };
     let segment = sh_link_uint(bytes, start + 4, 2)?;
     let offset = sh_link_uint(bytes, start, 4)?;
     let code_size = sh_link_uint(bytes, start + 8, 4)?;
     let mut function = 0;
     while function < debug.functions.len() / 8 and (sh_link_word(&debug.functions, 8, function, 1) != segment or sh_link_word(&debug.functions, 8, function, 2) != offset) { function = function + 1; };
     if function == debug.functions.len() / 8 or code_size != sh_link_word(&debug.functions, 8, function, 3) { return sh_i64_error(7301); };
+    let checksum = sh_link_uint(bytes, start + 12, 4)?;
+    let file = sengoo_vec_get_or_default_i64(debug.function_files.handle, function, -1);
+    if checksum % 40 != 0 { return sh_i64_error(7303); };
+    if file < 0 or checksum / 40 >= debug.files.len() / 4 or checksum / 40 != file { return sh_i64_error(7301); };
     let mut index = 0;
     while index < debug.lines.len() / 3 { if sh_link_word(&debug.lines, 3, index, 0) == function { return sh_i64_error(7301); }; index = index + 1; };
     index = 0;
@@ -136,6 +134,7 @@ def sh_link_cv_lines(debug: &ShLinkDebug, bytes: &ShBinary, start: i64, size: i6
 
 def sh_link_codeview_read(debug: &ShLinkDebug, link: &ShLinker, image: &ShBinary, object: i64) -> Result<i64, i64> {
     if debug.path < 0 or debug.functions.len() != 0 or not link.linked { return sh_i64_error(7303); };
+    sh_link_debug_registry_validate(debug)?;
     let mut symbol_section = -1;
     let mut type_section = -1;
     let mut section = 0;
@@ -163,6 +162,7 @@ def sh_link_codeview_read(debug: &ShLinkDebug, link: &ShLinker, image: &ShBinary
     index = 0;
     while index < fragments.len() / 2 { sh_link_cv_lines(debug, &symbols, sh_link_word(&fragments, 2, index, 0), sh_link_word(&fragments, 2, index, 1))?; index = index + 1; };
     if fragments.len() / 2 != debug.functions.len() / 8 { return sh_i64_error(7301); };
+    if debug.files.len() > 4 and debug.origins.len() / 2 != debug.functions.len() / 8 { return sh_i64_error(7301); };
     sh_link_debug_validate(debug, image)?;
     sh_i64_ok(debug.functions.len() / 8);
 }

@@ -357,3 +357,55 @@ construction still uses the explicitly recorded Rust/C runtime; this is not
 M6 Rust-free completion. Generic/class/recursive/function type support,
 conditional active-variant display, full C++/SDK type streams, multiple debug
 modules, complete M5 and full PDB qualification remain open.
+
+
+## Multiple physical files in one SG object/PDB module
+
+- [x] Preserve independent physical paths, raw-source checksums and checked C13 file-block references in COFF, PDB /names and DBI FileInfo.
+- [x] Consume validated physical MIR function-source ownership and real native address/stack/lifetime metadata without flattening the debugger's source identities.
+- [x] Require an independent typed-MIR function-source registry for supported multi-file COFF reading and reject missing/duplicate/wrong/bounded entries.
+- [x] Verify Unicode/space/ampersand paths, exact source stops, main-to-worker stepping, locals 40/42 and Windows exit 42.
+- [x] Exercise first-call success and failure resource scopes, deterministic repeated artifacts and malformed file/checksum/line-block cases.
+- [x] Regress the existing single-source primitive/aggregate/pointer/type/unwind/debugger corpus and compare prior qualified one-file artifacts where their identities permit exact comparison.
+
+The target-only proof cited in the design is complete. Production admission is
+recorded by these fresh reports, all with no changed consumed sources/tools:
+
+- `target/selfhost/m5-multi-physical-debug-qualified/evidence.json`, SHA-256
+  `d92cc89a2d9ffb65dcc24c63c2a010668e40612db2ac64225207dc6caa3aa80d`:
+  44 commands, 215 input hashes, 42 tools, 18 rejection cases. Both physical
+  files live in a Unicode/space/ampersand directory. Native LLDB frame-format
+  output records their exact paths and source lines, including an independent
+  worker-file breakpoint. Five first-call scopes compare all five resources
+  after every success/failure; both assertion negative controls actually exit
+  1. The source/COFF/link/PDB product chain uses an empty PATH. Repeated object,
+  executable and PDB bytes match; Windows exits 42.
+- `target/selfhost/m5-codeview-multi-file-regression/evidence.json`, SHA-256
+  `2d9e3e7572cc14f85066487e5067f3ac02a54288324a67d1ac7a70874668c1ee`:
+  all 93 original pure CodeView/range/primitive/pointer/aggregate commands pass.
+- `target/selfhost/m5-native-debug-multi-file-regression/evidence.json`, SHA-256
+  `2b25449d65d40d17182d23aa26a33d5c358a739e8399382f19fdc53984b61d65`:
+  all 79 original real-source native/debugger commands pass, including nine
+  source fixtures and 21 rejection cases; producer checkout changes are empty.
+- `target/selfhost/m5-multi-debug-byte-compatibility-final/evidence.json`, SHA-256
+  `d9c75721b600a43a164debb80f6e51077ffda38fc4428e164b28688bede3e137`:
+  an independent Python oracle checks COFF F3/F4 and PDB /names/DBI/C13 paths,
+  SHA-256 and file references with four malformed-byte negative controls.
+  Against the earlier qualified aggregate-native report, all nine one-file
+  COFF objects are byte-identical. PE/PDB comparison removes only the exact
+  output PDB path, its debug-section extent copies, and the path-derived
+  GUID/signature; all other PE bytes and all 11 PDB streams match. A changed
+  code byte is observed for every fixture. Raw PE/PDB bytes at different output
+  paths are not claimed identical.
+
+The main and pure reports start/end at full revision
+`3eeefa14f2ae6112053c404b753a4d2b468b3f92`; the native report ends and the
+independent oracle starts/ends at
+`081abb656e0c939bcfd3653bbcc15c000fb8ff8d` on the recorded Windows host.
+The development seed still uses the recorded C/Rust runtime; the new gate
+pins Cargo/rustc and observes Cargo actually invoking that rustc for both a
+build script and library. This does not complete M6. The earlier trial remains
+a failed report because an unflushed LLDB Python print did not satisfy the
+full-path oracle; it is not qualification evidence. Independent COFF/PDB
+modules, mixed-file functions, inline-origin policies and complete M5 remain
+open.

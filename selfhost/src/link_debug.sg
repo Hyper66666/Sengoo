@@ -10,6 +10,12 @@ struct ShLinkDebug {
     path: i64,
     source: Vec<i64>,
     source_lines: i64,
+    files: Vec<i64>,
+    file_ids: Vec<i64>,
+    file_data: Vec<i64>,
+    line_files: Vec<i64>,
+    function_files: Vec<i64>,
+    origins: Vec<i64>,
     functions: Vec<i64>,
     locals: Vec<i64>,
     local_flags: Vec<i64>,
@@ -21,7 +27,7 @@ def sh_link_debug_new() -> ShLinkDebug {
     let types = sh_link_cv_types_new();
     let arguments = vec_new_i64();
     let default_type = sh_link_cv_type_procedure(&types, 19, &arguments);
-    ShLinkDebug { types: types, names: sh_symbols_new(1048576), path: -1, source: vec_new_i64(), source_lines: 0, functions: vec_new_i64(), locals: vec_new_i64(), local_flags: vec_new_i64(), ranges: vec_new_i64(), lines: vec_new_i64() };
+    ShLinkDebug { types: types, names: sh_symbols_new(1048576), path: -1, source: vec_new_i64(), source_lines: 0, files: vec_new_i64(), file_ids: vec_new_i64(), file_data: vec_new_i64(), line_files: vec_new_i64(), function_files: vec_new_i64(), origins: vec_new_i64(), functions: vec_new_i64(), locals: vec_new_i64(), local_flags: vec_new_i64(), ranges: vec_new_i64(), lines: vec_new_i64() };
 }
 
 def sh_link_debug_name(debug: &ShLinkDebug, text: &String) -> Result<i64, i64> {
@@ -34,23 +40,78 @@ def sh_link_debug_name(debug: &ShLinkDebug, text: &String) -> Result<i64, i64> {
 
 def sh_link_debug_source(debug: &mut ShLinkDebug, path: &String, source: &ShBinary) -> Result<i64, i64> {
     if debug.path >= 0 { return sh_i64_error(7303); };
+    sh_link_debug_source_file(debug, 0, path, source);
+}
+
+def sh_link_debug_file_row(debug: &ShLinkDebug, file: i64) -> i64 {
+    let mut index = 0;
+    while index < debug.file_ids.len() { if sengoo_vec_get_or_default_i64(debug.file_ids.handle, index, -1) == file { return index; }; index = index + 1; };
+    -1;
+}
+
+def sh_link_debug_source_file(debug: &mut ShLinkDebug, file: i64, path: &String, source: &ShBinary) -> Result<i64, i64> {
+    if debug.files.len() / 4 >= 256 or sh_binary_len(source) > 1048576 or sh_binary_len(source) > 8388608 - debug.file_data.len() { return sh_i64_error(7302); };
+    if file < 0 or sh_link_debug_file_row(debug, file) >= 0 or debug.functions.len() != 0 { return sh_i64_error(7301); };
     if sh_binary_len(source) > 1048576 { return sh_i64_error(7302); };
     let name = sh_link_debug_name(debug, path)?;
+    let mut prior = 0;
+    while prior < debug.files.len() / 4 { if sh_link_word(&debug.files, 4, prior, 0) == name { return sh_i64_error(7301); }; prior = prior + 1; };
     let buffer = sh_binary_buffer(source)?;
     let decoded = string_from_utf8(buffer, sh_binary_len(source));
     if not decoded.is_ok() { return sh_i64_error(7301); };
     let mut lines = 1;
     let mut index = 0;
-    while index < sh_binary_len(source) { let byte = sh_binary_get(source, index)?; if byte == 0 { return sh_i64_error(7301); }; if byte == 10 { lines = lines + 1; }; sh_link_push(&debug.source, byte)?; index = index + 1; };
-    debug.path = name;
-    debug.source_lines = lines;
+    let first = debug.file_data.len();
+    while index < sh_binary_len(source) { let byte = sh_binary_get(source, index)?; if byte == 0 { return sh_i64_error(7301); }; if byte == 10 { lines = lines + 1; }; sh_link_push(&debug.file_data, byte)?; if debug.path < 0 { sh_link_push(&debug.source, byte)?; (); }; index = index + 1; };
+    sh_link_push(&debug.files, name)?;
+    sh_link_push(&debug.files, first)?;
+    sh_link_push(&debug.files, sh_binary_len(source))?;
+    sh_link_push(&debug.files, lines)?;
+    sh_link_push(&debug.file_ids, file)?;
+    if debug.path < 0 { debug.path = name; debug.source_lines = lines; };
+    sh_i64_ok(debug.files.len() / 4 - 1);
+}
+
+def sh_link_debug_function_origin(debug: &ShLinkDebug, name: &String, file: i64) -> Result<i64, i64> {
+    if debug.origins.len() / 2 >= 256 { return sh_i64_error(7302); };
+    if debug.functions.len() != 0 or sh_link_debug_file_row(debug, file) < 0 { return sh_i64_error(7301); };
+    let symbol = sh_link_debug_name(debug, name)?;
+    let mut index = 0;
+    while index < debug.origins.len() / 2 { if sh_link_word(&debug.origins, 2, index, 0) == symbol { return sh_i64_error(7301); }; index = index + 1; };
+    sh_link_push(&debug.origins, symbol)?;
+    sh_link_push(&debug.origins, file)?;
     sh_i64_ok(0);
+}
+
+def sh_link_debug_registry_validate(debug: &ShLinkDebug) -> Result<i64, i64> {
+    if debug.files.len() % 4 != 0 or debug.files.len() / 4 != debug.file_ids.len() or debug.files.len() / 4 < 1 { return sh_i64_error(7301); };
+    if debug.files.len() / 4 > 256 or debug.origins.len() / 2 > 256 { return sh_i64_error(7302); };
+    if debug.origins.len() % 2 != 0 { return sh_i64_error(7301); };
+    sh_link_debug_files_validate(debug)?;
+    if debug.files.len() > 4 and debug.origins.len() == 0 { return sh_i64_error(7303); };
+    let mut origin = 0;
+    while origin < debug.origins.len() / 2 { let name = sh_link_word(&debug.origins, 2, origin, 0); if name < 0 or name >= sh_symbol_count(&debug.names) or sh_link_debug_file_row(debug, sh_link_word(&debug.origins, 2, origin, 1)) < 0 { return sh_i64_error(7301); }; let mut previous = 0; while previous < origin { if sh_link_word(&debug.origins, 2, previous, 0) == name { return sh_i64_error(7301); }; previous = previous + 1; }; origin = origin + 1; };
+    sh_i64_ok(origin);
+}
+
+def sh_link_debug_files_validate(debug: &ShLinkDebug) -> Result<i64, i64> {
+    if debug.files.len() % 4 != 0 or debug.files.len() / 4 != debug.file_ids.len() or debug.file_ids.len() < 1 { return sh_i64_error(7301); };
+    if debug.file_ids.len() > 256 or debug.file_data.len() > 8388608 { return sh_i64_error(7302); };
+    let mut row = 0;
+    let mut end = 0;
+    while row < debug.file_ids.len() { let name = sh_link_word(&debug.files, 4, row, 0); let first = sh_link_word(&debug.files, 4, row, 1); let size = sh_link_word(&debug.files, 4, row, 2); let id = sengoo_vec_get_or_default_i64(debug.file_ids.handle, row, -1); if name < 0 or name >= sh_symbol_count(&debug.names) or first != end or size < 0 or size > 1048576 or size > debug.file_data.len() - first or id < 0 { return sh_i64_error(7301); }; let mut previous = 0; while previous < row { if sh_link_word(&debug.files, 4, previous, 0) == name or sengoo_vec_get_or_default_i64(debug.file_ids.handle, previous, -1) == id { return sh_i64_error(7301); }; previous = previous + 1; }; let mut lines = 1; let mut at = 0; while at < size { let byte = sengoo_vec_get_or_default_i64(debug.file_data.handle, first + at, -1); if byte < 1 or byte > 255 { return sh_i64_error(7301); }; if byte == 10 { lines = lines + 1; }; if row == 0 and byte != sengoo_vec_get_or_default_i64(debug.source.handle, at, -1) { return sh_i64_error(7301); }; at = at + 1; }; if lines != sh_link_word(&debug.files, 4, row, 3) or (row == 0 and (debug.path != name or debug.source.len() != size or debug.source_lines != lines)) { return sh_i64_error(7301); }; end = first + size; row = row + 1; };
+    if end != debug.file_data.len() { return sh_i64_error(7301); };
+    sh_i64_ok(row);
 }
 
 def sh_link_debug_function(debug: &ShLinkDebug, name: &String, segment: i64, offset: i64, size: i64, frame: i64, prologue: i64, epilogue: i64) -> Result<i64, i64> {
     if debug.functions.len() / 8 >= 256 { return sh_i64_error(7302); };
     if debug.path < 0 or segment < 1 or segment > 96 or offset < 0 or offset > 4294967295 or size < 1 or size > 65535 or frame < 0 or frame > 1048576 or frame % 8 != 0 or prologue < 0 or (epilogue != 0 and epilogue < prologue) or epilogue > size { return sh_i64_error(7301); };
     let symbol = sh_link_debug_name(debug, name)?;
+    let mut file = if debug.files.len() == 4 { 0; } else { -1; };
+    let mut origin = 0;
+    while origin < debug.origins.len() / 2 { if sh_link_word(&debug.origins, 2, origin, 0) == symbol { file = sh_link_debug_file_row(debug, sh_link_word(&debug.origins, 2, origin, 1)); }; origin = origin + 1; };
+    if file < 0 { return sh_i64_error(if debug.files.len() > 4 { 7303; } else { 7301; }); };
     let mut index = 0;
     while index < debug.functions.len() / 8 { if sh_link_word(&debug.functions, 8, index, 0) == symbol { return sh_i64_error(7305); }; if sh_link_word(&debug.functions, 8, index, 1) == segment { let first = sh_link_word(&debug.functions, 8, index, 2); let end = first + sh_link_word(&debug.functions, 8, index, 3); if offset < end and first < offset + size { return sh_i64_error(7301); }; }; index = index + 1; };
     sh_link_push(&debug.functions, symbol)?;
@@ -61,6 +122,7 @@ def sh_link_debug_function(debug: &ShLinkDebug, name: &String, segment: i64, off
     sh_link_push(&debug.functions, prologue)?;
     sh_link_push(&debug.functions, epilogue)?;
     sh_link_push(&debug.functions, 4097)?;
+    sh_link_push(&debug.function_files, file)?;
     sh_i64_ok(debug.functions.len() / 8 - 1);
 }
 
@@ -86,12 +148,14 @@ def sh_link_debug_local(debug: &ShLinkDebug, function: i64, name: &String, kind:
 
 def sh_link_debug_line(debug: &ShLinkDebug, function: i64, offset: i64, line: i64) -> Result<i64, i64> {
     if debug.lines.len() / 3 >= 65536 { return sh_i64_error(7302); };
-    if function < 0 or function >= debug.functions.len() / 8 or offset < 0 or offset >= sh_link_word(&debug.functions, 8, function, 3) or line < 1 or line > debug.source_lines or line > 16777215 { return sh_i64_error(7301); };
+    let file = sengoo_vec_get_or_default_i64(debug.function_files.handle, function, -1);
+    if file < 0 or function < 0 or function >= debug.functions.len() / 8 or offset < 0 or offset >= sh_link_word(&debug.functions, 8, function, 3) or line < 1 or line > sh_link_word(&debug.files, 4, file, 3) or line > 16777215 { return sh_i64_error(7301); };
     let mut index = 0;
     while index < debug.lines.len() / 3 { if sh_link_word(&debug.lines, 3, index, 0) == function and sh_link_word(&debug.lines, 3, index, 1) >= offset { return sh_i64_error(7301); }; index = index + 1; };
     sh_link_push(&debug.lines, function)?;
     sh_link_push(&debug.lines, offset)?;
     sh_link_push(&debug.lines, line)?;
+    sh_link_push(&debug.line_files, file)?;
     sh_i64_ok(debug.lines.len() / 3 - 1);
 }
 
@@ -116,6 +180,7 @@ def sh_link_debug_zeros(output: &ShBinary, size: i64) -> Result<i64, i64> {
 }
 
 def sh_link_debug_validate(debug: &ShLinkDebug, image: &ShBinary) -> Result<i64, i64> {
+    sh_link_debug_registry_validate(debug)?;
     if sh_binary_len(image) < 512 or sh_link_uint(image, 0, 2)? != 23117 or sh_link_uint(image, 60, 4)? != 64 or sh_link_uint(image, 64, 4)? != 17744 or sh_link_uint(image, 68, 2)? != 34404 or sh_link_uint(image, 88, 2)? != 523 or sh_link_uint(image, 120, 4)? != 4096 or sh_link_uint(image, 124, 4)? != 512 { return sh_i64_error(7303); };
     let sections = sh_link_uint(image, 70, 2)?;
     if sections < 1 or sections >= 96 or 328 + sections * 40 > sh_link_uint(image, 148, 4)? or sh_link_uint(image, 248, 8)? != 0 or sh_link_uint(image, 232, 8)? != 0 { return sh_i64_error(7303); };
@@ -127,7 +192,12 @@ def sh_link_debug_validate(debug: &ShLinkDebug, image: &ShBinary) -> Result<i64,
     let mut section = 0;
     while section < sections { let row = 328 + section * 40; let size = sh_link_uint(image, row + 8, 4)?; let rva = sh_link_uint(image, row + 12, 4)?; let padded = sh_link_uint(image, row + 16, 4)?; let raw = sh_link_uint(image, row + 20, 4)?; if rva % 4096 != 0 or raw % 512 != 0 or padded % 512 != 0 or rva < previous_virtual or raw < previous_raw or raw > sh_binary_len(image) or padded > sh_binary_len(image) - raw or size > padded or rva > virtual_size or size > virtual_size - rva { return sh_i64_error(7301); }; previous_raw = raw + padded; previous_virtual = sh_link_align(rva + size, 4096, 16777216)?; section = section + 1; };
     if debug.path < 0 or debug.functions.len() == 0 { return sh_i64_error(7301); };
-    if debug.local_flags.len() != debug.locals.len() / 6 { return sh_i64_error(7301); };
+    if debug.functions.len() % 8 != 0 or debug.locals.len() % 6 != 0 or debug.lines.len() % 3 != 0 or debug.local_flags.len() != debug.locals.len() / 6 or debug.function_files.len() != debug.functions.len() / 8 or debug.line_files.len() != debug.lines.len() / 3 { return sh_i64_error(7301); };
+    if debug.file_ids.len() > 1 and debug.origins.len() / 2 != debug.functions.len() / 8 { return sh_i64_error(7301); };
+    let mut owner = 0;
+    while owner < debug.functions.len() / 8 { let file = sengoo_vec_get_or_default_i64(debug.function_files.handle, owner, -1); if file < 0 or file >= debug.file_ids.len() { return sh_i64_error(7301); }; owner = owner + 1; };
+    let mut line = 0;
+    while line < debug.lines.len() / 3 { let owner = sh_link_word(&debug.lines, 3, line, 0); let file = sengoo_vec_get_or_default_i64(debug.line_files.handle, line, -1); let number = sh_link_word(&debug.lines, 3, line, 2); if owner < 0 or owner >= debug.functions.len() / 8 or file < 0 or file >= debug.file_ids.len() or file != sengoo_vec_get_or_default_i64(debug.function_files.handle, owner, -1) or number < 1 or number > sh_link_word(&debug.files, 4, file, 3) { return sh_i64_error(7301); }; line = line + 1; };
     let mut function = 0;
     while function < debug.functions.len() / 8 { let signature = sh_link_word(&debug.functions, 8, function, 7); let expected_parameters = sh_link_cv_procedure_count(&debug.types, signature)?; let mut parameters = 0; let mut local = 0; while local < debug.locals.len() / 6 { let flags = sengoo_vec_get_or_default_i64(debug.local_flags.handle, local, -1); if flags < 0 or flags > 1 { return sh_i64_error(7303); }; if sh_link_word(&debug.locals, 6, local, 0) == function and flags == 1 { parameters = parameters + 1; }; local = local + 1; }; if parameters != expected_parameters { return sh_i64_error(7301); }; let segment = sh_link_word(&debug.functions, 8, function, 1); if segment > sections { return sh_i64_error(7301); }; let row = 328 + (segment - 1) * 40; let offset = sh_link_word(&debug.functions, 8, function, 2); let size = sh_link_word(&debug.functions, 8, function, 3); if (sh_link_uint(image, row + 36, 4)? & 536870912) == 0 or offset > sh_link_uint(image, row + 8, 4)? or size > sh_link_uint(image, row + 8, 4)? - offset { return sh_i64_error(7301); }; function = function + 1; };
     sh_i64_ok(sections);
@@ -167,6 +237,7 @@ def sh_link_debug_identity(debug: &ShLinkDebug, image: &ShBinary, pdb_path: &Str
     while index < debug.ranges.len() { sh_binary_unsigned(&identity, sengoo_vec_get_or_default_i64(debug.ranges.handle, index, 0), 8)?; index = index + 1; };
     index = 0;
     while index < debug.lines.len() { sh_binary_unsigned(&identity, sengoo_vec_get_or_default_i64(debug.lines.handle, index, 0), 8)?; index = index + 1; };
+    if debug.files.len() > 4 { index = 0; while index < debug.files.len() { sh_binary_unsigned(&identity, sengoo_vec_get_or_default_i64(debug.files.handle, index, -1), 8)?; index = index + 1; }; index = 0; while index < debug.file_ids.len() { sh_binary_unsigned(&identity, sengoo_vec_get_or_default_i64(debug.file_ids.handle, index, -1), 8)?; index = index + 1; }; index = 0; while index < debug.file_data.len() { sh_binary_byte(&identity, sengoo_vec_get_or_default_i64(debug.file_data.handle, index, -1))?; index = index + 1; }; index = 0; while index < debug.line_files.len() { sh_binary_unsigned(&identity, sengoo_vec_get_or_default_i64(debug.line_files.handle, index, -1), 8)?; index = index + 1; }; index = 0; while index < debug.function_files.len() { sh_binary_unsigned(&identity, sengoo_vec_get_or_default_i64(debug.function_files.handle, index, -1), 8)?; index = index + 1; }; };
     sh_link_sha256(&identity);
 }
 

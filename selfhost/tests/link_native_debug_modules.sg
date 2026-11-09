@@ -1,0 +1,110 @@
+import selfhost_native;
+
+import selfhost_mir_module_sources;
+
+import selfhost_link_native_debug;
+
+import selfhost_link_checked_debug;
+
+import selfhost_link_pe;
+
+import std::args;
+
+import std::file;
+
+import std::io;
+
+import std::assert;
+
+extern "C" {
+    fn sengoo_string_live_handle_count() -> i64;
+    fn sengoo_buffer_live_handle_count() -> i64;
+    fn sengoo_opaque_live_handle_count() -> i64;
+    fn sengoo_file_snapshot_live_handle_count() -> i64;
+    fn sengoo_file_snapshot_live_bytes() -> i64;
+}
+
+def sh_lnt_argument(index: i64) -> Result<String, i64> {
+    let buffer = ffi_buffer_new(arg_len(index).unwrap_or(0))?;
+    let length = arg_copy(index, buffer)?;
+    string_from_utf8(buffer, length);
+}
+
+def sh_lnt_mapping(native: &ShNative, mir: &ShMir) -> ShNativeDebugMap {
+    let map = sh_link_native_debug_map();
+    let mut function = 0;
+    while function < sh_mir_fn_count(mir) { let first = sh_native_at(&native.functions, function); if first >= 0 { map.functions.push(function); map.functions.push(first); map.functions.push(sh_native_at(&native.ends, function)); map.functions.push(sh_native_at(&native.frames, function) + 8); map.functions.push(sh_native_at(&native.prologue_ends, function) - first); map.functions.push(1); (); }; function = function + 1; };
+    let mut instruction = 0;
+    while instruction < sh_mir_inst_count(mir) { let start = sh_native_at(&native.instruction_starts, instruction); if start >= 0 { map.instructions.push(instruction); map.instructions.push(start); map.instructions.push(sh_native_at(&native.instruction_ends, instruction)); (); }; instruction = instruction + 1; };
+    let mut term = 0;
+    while term < sh_mir_term_count(mir) { let start = sh_native_at(&native.terminator_starts, term); if start >= 0 { map.terminators.push(term); map.terminators.push(start); map.terminators.push(sh_native_at(&native.terminator_ends, term)); (); }; term = term + 1; };
+    let mut local = 0;
+    while local < sh_mir_local_count(mir) { let slot = sh_native_at(&native.locals, local); if slot >= 0 { map.locals.push(local); map.locals.push(sh_native_at(&native.frames, sh_mir_local(mir, local, 0)) - slot); (); }; local = local + 1; };
+    let mut index = 0;
+    while index < native.epilogues.len() { map.epilogues.push(sh_native_at(&native.epilogues, index)); index = index + 1; };
+    map;
+}
+
+def sh_lmd_sources(debug: &mut ShLinkDebug, graph: &ShModules) -> Result<i64, i64> {
+    let mut file = 0;
+    while file < graph.units.len() { let path = graph.units.get(file).path.clone()?; let source = graph.units.get(file).source; let length = sh_source_len(&graph.sources, source)?; let text = sh_span_text(&graph.sources, ShSpan { source: source, start: 0, end: length })?; let bytes = sh_lex_bytes(&text)?; let raw = sh_binary_new(1048576); let mut at = 0; while at < length { sh_binary_byte(&raw, sh_lex_byte(&bytes, at))?; at = at + 1; }; sh_link_debug_source_file(debug, source, &path, &raw)?; file = file + 1; };
+    sh_i64_ok(file);
+}
+
+def sh_lmd_scope(root: &String, object_path: &String, image_path: &String, pdb_path: &String, reading: bool, invalid: i64, write: bool) -> Result<i64, i64> {
+    let config = string_new();
+    let graph = sh_modules_load(root.as_str(), "tools/stdlib", &config, 32, 1048576);
+    if graph.error != 0 { return sh_i64_error(graph.error); };
+    let analyzed = sh_modules_check(&graph, 1000000, 1000);
+    if analyzed.error != 0 { return sh_i64_error(analyzed.error); };
+    let mut lowered = sh_lower(&analyzed.front.expanded.text, &analyzed.front.parsed.ast, &analyzed.checked, 100000);
+    if lowered.error != 0 { return sh_i64_error(lowered.error); };
+    sh_module_mir_sources(&graph, &analyzed.front, &mut lowered.mir)?;
+    let raw = if reading { sh_link_load(object_path.as_str(), 1048576)?; } else { let object = sh_object_new(1048576); let mut native = sh_native_new(&lowered.mir, 1048576, false); native.collect_debug = true; sh_native_emit_into(&mut native, &lowered.mir, &object)?; let map = sh_lnt_mapping(&native, &lowered.mir); sh_link_checked_debug_names(&map, &lowered.mir, &analyzed.checked)?; let mut origin = sh_link_debug_new(); sh_lmd_sources(&mut origin, &graph)?; sh_link_native_debug_fill_sources(&mut origin, &lowered.mir, &map)?; sh_link_codeview_attach(&object, &origin)?; sh_object_emit(&object)?; };
+    let mut link = sh_link_new(1048576);
+    let object = sh_link_coff(&mut link, &raw)?;
+    let main = string_from_str("main")?;
+    let image = sh_link_pe(&mut link, &main)?;
+    let mut decoded = sh_link_debug_new();
+    sh_lmd_sources(&mut decoded, &graph)?;
+    sh_link_native_debug_register(&decoded, &lowered.mir)?;
+    if invalid == 1 { let name = sh_symbol_text(&lowered.mir.symbols, sh_mir_fn(&lowered.mir, 0, 0))?; sh_link_debug_function_origin(&decoded, &name, sh_mir_fn(&lowered.mir, 0, 4))?; (); };
+    if invalid == 2 { decoded.origins.clear(); (); };
+    if invalid == 3 { decoded.origins.set(1, 999); (); };
+    if invalid == 4 { decoded.origins.set(1, 1 - sh_link_word(&decoded.origins, 2, 0, 1)); (); };
+    if invalid == 5 { let mut at = 0; while at < 2 { decoded.origins.push(sh_link_word(&decoded.origins, 2, 0, at)); at = at + 1; }; };
+    if invalid == 6 { decoded.origins.pop(); decoded.origins.pop(); (); };
+    if invalid == 7 { decoded.origins.set(0, 9223372036854775807); (); };
+    if invalid == 8 { while decoded.origins.len() / 2 <= 256 { decoded.origins.push(sh_link_word(&decoded.origins, 2, 0, 0)); decoded.origins.push(sh_link_word(&decoded.origins, 2, 0, 1)); (); }; };
+    if invalid == 9 { decoded.file_ids.pop(); (); };
+    sh_link_codeview_read(&decoded, &link, &image, object)?;
+    let linked = sh_link_debug_image(&decoded, &image, pdb_path)?;
+    let pdb = sh_link_pdb(&decoded, &image, pdb_path)?;
+    if not sh_modules_unchanged(&graph) { return sh_i64_error(5206); };
+    if write { let bytes = sh_binary_buffer(&raw)?; let image_bytes = sh_binary_buffer(&linked)?; let pdb_bytes = sh_binary_buffer(&pdb)?; if not reading { file_write_str_raw(sengoo_stdlib_str_ptr(object_path.as_str()), bytes.ptr(), bytes.used_len())?; (); }; file_write_str_raw(sengoo_stdlib_str_ptr(image_path.as_str()), image_bytes.ptr(), image_bytes.used_len())?; file_write_str_raw(sengoo_stdlib_str_ptr(pdb_path.as_str()), pdb_bytes.ptr(), pdb_bytes.used_len())?; (); };
+    sh_i64_ok(0);
+}
+
+def main() -> i64 {
+    if args_len() == 1 { let mode = sh_lnt_argument(0); if not mode.is_ok() { return 64; }; if mode.value.as_str() == "--fail-equality" { assert_eq_i64(1, 2, "link_native_debug_modules.sg", 1); (); }; if mode.value.as_str() == "--fail-truth" { assert_true(false, "link_native_debug_modules.sg", 2); (); }; return 66; };
+    if args_len() != 4 and args_len() != 5 { return 64; };
+    let a = sh_lnt_argument(0);
+    let b = sh_lnt_argument(1);
+    let c = sh_lnt_argument(2);
+    let d = sh_lnt_argument(3);
+    if not a.is_ok() or not b.is_ok() or not c.is_ok() or not d.is_ok() { return 64; };
+    let mut reading = false;
+    let mut invalid = 0;
+    if args_len() == 5 { let mode = sh_lnt_argument(4); if not mode.is_ok() { return 64; }; if mode.value.as_str() == "read" { reading = true; } else { let bytes = sh_lex_bytes(&mode.value); if not bytes.is_ok() { return 64; }; invalid = sh_lex_byte(&bytes.value, 0) - 64; }; };
+    let strings = sengoo_string_live_handle_count();
+    let buffers = sengoo_buffer_live_handle_count();
+    let opaque = sengoo_opaque_live_handle_count();
+    let snapshots = sengoo_file_snapshot_live_handle_count();
+    let snapshot_bytes = sengoo_file_snapshot_live_bytes();
+    let mut round = 0;
+    let mut expected_code = -1;
+    while round < 5 { let result = sh_lmd_scope(&a.value, &b.value, &c.value, &d.value, reading, invalid, round == 0); let code = if result.is_ok() { 0; } else { result.error; }; assert_eq_i64(sengoo_string_live_handle_count(), strings, "link_native_debug_modules.sg", 90); assert_eq_i64(sengoo_buffer_live_handle_count(), buffers, "link_native_debug_modules.sg", 90); assert_eq_i64(sengoo_opaque_live_handle_count(), opaque, "link_native_debug_modules.sg", 90); assert_eq_i64(sengoo_file_snapshot_live_handle_count(), snapshots, "link_native_debug_modules.sg", 90); assert_eq_i64(sengoo_file_snapshot_live_bytes(), snapshot_bytes, "link_native_debug_modules.sg", 90); if expected_code < 0 { expected_code = code; } else { assert_eq_i64(code, expected_code, "link_native_debug_modules.sg", 100); (); }; round = round + 1; };
+    if expected_code != 0 { println(expected_code); return 65; };
+    println("selfhost multi-source native debug first-call resources: ok");
+    0;
+}

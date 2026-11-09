@@ -37,21 +37,30 @@ def sh_link_pdb_symbols(debug: &ShLinkDebug, output: &ShBinary) -> Result<i64, i
     sh_i64_ok(sh_binary_len(output));
 }
 
+def sh_link_pdb_file_strings(debug: &ShLinkDebug) -> Result<ShBinary, i64> {
+    let strings = sh_binary_new(1048576);
+    sh_binary_byte(&strings, 0)?;
+    let mut file = 0;
+    while file < debug.files.len() / 4 { let path = sh_symbol_text(&debug.names, sh_link_word(&debug.files, 4, file, 0))?; sh_link_debug_text(&strings, &path)?; file = file + 1; };
+    Result { is_ok: true, value: strings, error: 0 };
+}
+
+def sh_link_pdb_file_offset(debug: &ShLinkDebug, file: i64) -> Result<i64, i64> {
+    if file < 0 or file >= debug.files.len() / 4 { return sh_i64_error(7301); };
+    let mut offset = 1;
+    let mut index = 0;
+    while index < file { let path = sh_symbol_text(&debug.names, sh_link_word(&debug.files, 4, index, 0))?; offset = offset + path.len() + 1; index = index + 1; };
+    sh_i64_ok(offset);
+}
+
 def sh_link_pdb_lines(debug: &ShLinkDebug, output: &ShBinary) -> Result<i64, i64> {
     let first = sh_binary_len(output);
     let mut function = 0;
-    while function < debug.functions.len() / 8 { let mut count = 0; let mut line = 0; while line < debug.lines.len() / 3 { if sh_link_word(&debug.lines, 3, line, 0) == function { count = count + 1; }; line = line + 1; }; if count == 0 { return sh_i64_error(7301); }; sh_binary_unsigned(output, 242, 4)?; sh_binary_unsigned(output, 24 + count * 8, 4)?; sh_binary_unsigned(output, sh_link_word(&debug.functions, 8, function, 2), 4)?; sh_binary_unsigned(output, sh_link_word(&debug.functions, 8, function, 1), 2)?; sh_binary_unsigned(output, 0, 2)?; sh_binary_unsigned(output, sh_link_word(&debug.functions, 8, function, 3), 4)?; sh_binary_unsigned(output, 0, 4)?; sh_binary_unsigned(output, count, 4)?; sh_binary_unsigned(output, 12 + count * 8, 4)?; line = 0; while line < debug.lines.len() / 3 { if sh_link_word(&debug.lines, 3, line, 0) == function { sh_binary_unsigned(output, sh_link_word(&debug.lines, 3, line, 1), 4)?; sh_binary_unsigned(output, sh_link_word(&debug.lines, 3, line, 2) | 2147483648, 4)?; (); }; line = line + 1; }; function = function + 1; };
-    let source = sh_binary_new(1048576);
-    let mut index = 0;
-    while index < debug.source.len() { sh_binary_byte(&source, sengoo_vec_get_or_default_i64(debug.source.handle, index, -1))?; index = index + 1; };
-    let digest = sh_link_sha256(&source)?;
+    while function < debug.functions.len() / 8 { let mut total = 0; let mut blocks = 0; let mut file = 0; while file < debug.files.len() / 4 { let mut count = 0; let mut line = 0; while line < debug.lines.len() / 3 { if sh_link_word(&debug.lines, 3, line, 0) == function and sengoo_vec_get_or_default_i64(debug.line_files.handle, line, -1) == file { count = count + 1; }; line = line + 1; }; if count > 0 { blocks = blocks + 1; total = total + count; }; file = file + 1; }; if total == 0 { return sh_i64_error(7301); }; sh_binary_unsigned(output, 242, 4)?; sh_binary_unsigned(output, 12 + blocks * 12 + total * 8, 4)?; sh_binary_unsigned(output, sh_link_word(&debug.functions, 8, function, 2), 4)?; sh_binary_unsigned(output, sh_link_word(&debug.functions, 8, function, 1), 2)?; sh_binary_unsigned(output, 0, 2)?; sh_binary_unsigned(output, sh_link_word(&debug.functions, 8, function, 3), 4)?; file = 0; while file < debug.files.len() / 4 { let mut count = 0; let mut line = 0; while line < debug.lines.len() / 3 { if sh_link_word(&debug.lines, 3, line, 0) == function and sengoo_vec_get_or_default_i64(debug.line_files.handle, line, -1) == file { count = count + 1; }; line = line + 1; }; if count > 0 { sh_binary_unsigned(output, file * 40, 4)?; sh_binary_unsigned(output, count, 4)?; sh_binary_unsigned(output, 12 + count * 8, 4)?; line = 0; while line < debug.lines.len() / 3 { if sh_link_word(&debug.lines, 3, line, 0) == function and sengoo_vec_get_or_default_i64(debug.line_files.handle, line, -1) == file { sh_binary_unsigned(output, sh_link_word(&debug.lines, 3, line, 1), 4)?; sh_binary_unsigned(output, sh_link_word(&debug.lines, 3, line, 2) | 2147483648, 4)?; (); }; line = line + 1; }; }; file = file + 1; }; function = function + 1; };
     sh_binary_unsigned(output, 244, 4)?;
-    sh_binary_unsigned(output, 40, 4)?;
-    sh_binary_unsigned(output, 1, 4)?;
-    sh_binary_byte(output, 32)?;
-    sh_binary_byte(output, 3)?;
-    sh_link_debug_append(output, &digest)?;
-    sh_binary_unsigned(output, 0, 2)?;
+    sh_binary_unsigned(output, 40 * (debug.files.len() / 4), 4)?;
+    let mut file = 0;
+    while file < debug.files.len() / 4 { let source = sh_binary_new(1048576); let mut at = 0; let base = sh_link_word(&debug.files, 4, file, 1); let size = sh_link_word(&debug.files, 4, file, 2); while at < size { sh_binary_byte(&source, sengoo_vec_get_or_default_i64(debug.file_data.handle, base + at, -1))?; at = at + 1; }; let digest = sh_link_sha256(&source)?; sh_binary_unsigned(output, sh_link_pdb_file_offset(debug, file)?, 4)?; sh_binary_byte(output, 32)?; sh_binary_byte(output, 3)?; sh_link_debug_append(output, &digest)?; sh_binary_unsigned(output, 0, 2)?; file = file + 1; };
     sh_i64_ok(sh_binary_len(output) - first);
 }
 
@@ -104,16 +113,23 @@ def sh_link_pdb_types(records: bool) -> Result<ShBinary, i64> {
 }
 
 def sh_link_pdb_names(debug: &ShLinkDebug) -> Result<ShBinary, i64> {
-    let output = sh_binary_new(131072);
-    let path = sh_symbol_text(&debug.names, debug.path)?;
+    let output = sh_binary_new(1048576);
+    let strings = sh_link_pdb_file_strings(debug)?;
     sh_binary_unsigned(&output, 4026462206, 4)?;
     sh_binary_unsigned(&output, 1, 4)?;
-    sh_binary_unsigned(&output, path.len() + 2, 4)?;
-    sh_binary_byte(&output, 0)?;
-    sh_link_debug_text(&output, &path)?;
-    sh_binary_unsigned(&output, 2, 4)?;
-    if sh_link_pdb_hash(&path)? % 2 == 0 { sh_binary_unsigned(&output, 1, 4)?; sh_binary_unsigned(&output, 0, 4)?; (); } else { sh_binary_unsigned(&output, 0, 4)?; sh_binary_unsigned(&output, 1, 4)?; (); };
-    sh_binary_unsigned(&output, 1, 4)?;
+    sh_binary_unsigned(&output, sh_binary_len(&strings), 4)?;
+    sh_link_debug_append(&output, &strings)?;
+    let mut capacity = 2;
+    while capacity < debug.files.len() / 2 { capacity = capacity * 2; };
+    let slots = vec_new_i64();
+    let mut index = 0;
+    while index < capacity { sh_link_push(&slots, 0)?; index = index + 1; };
+    let mut file = 0;
+    while file < debug.files.len() / 4 { let path = sh_symbol_text(&debug.names, sh_link_word(&debug.files, 4, file, 0))?; let mut bucket = sh_link_pdb_hash(&path)? % capacity; while sengoo_vec_get_or_default_i64(slots.handle, bucket, 0) != 0 { bucket = (bucket + 1) % capacity; }; slots.set(bucket, sh_link_pdb_file_offset(debug, file)?); file = file + 1; };
+    sh_binary_unsigned(&output, capacity, 4)?;
+    index = 0;
+    while index < capacity { sh_binary_unsigned(&output, sengoo_vec_get_or_default_i64(slots.handle, index, 0), 4)?; index = index + 1; };
+    sh_binary_unsigned(&output, debug.files.len() / 4, 4)?;
     Result { is_ok: true, value: output, error: 0 };
 }
 
@@ -129,7 +145,7 @@ def sh_link_pdb_dbi(debug: &ShLinkDebug, image: &ShBinary, symbols: i64, lines: 
     sh_binary_patch(&output, module + 34, 6, 2)?;
     sh_binary_patch(&output, module + 36, symbols, 4)?;
     sh_binary_patch(&output, module + 44, lines, 4)?;
-    sh_binary_patch(&output, module + 48, 1, 2)?;
+    sh_binary_patch(&output, module + 48, debug.files.len() / 4, 2)?;
     let path = sh_symbol_text(&debug.names, debug.path)?;
     sh_link_debug_text(&output, &path)?;
     sh_link_debug_text(&output, &path)?;
@@ -149,11 +165,14 @@ def sh_link_pdb_dbi(debug: &ShLinkDebug, image: &ShBinary, symbols: i64, lines: 
     let map_size = sh_binary_len(&output) - map;
     let files = sh_binary_len(&output);
     sh_binary_unsigned(&output, 1, 2)?;
-    sh_binary_unsigned(&output, 1, 2)?;
+    sh_binary_unsigned(&output, debug.files.len() / 4, 2)?;
     sh_binary_unsigned(&output, 0, 2)?;
-    sh_binary_unsigned(&output, 1, 2)?;
-    sh_binary_unsigned(&output, 0, 4)?;
-    sh_link_debug_text(&output, &path)?;
+    sh_binary_unsigned(&output, debug.files.len() / 4, 2)?;
+    let mut file = 0;
+    let mut offset = 0;
+    while file < debug.files.len() / 4 { sh_binary_unsigned(&output, offset, 4)?; let path = sh_symbol_text(&debug.names, sh_link_word(&debug.files, 4, file, 0))?; offset = offset + path.len() + 1; file = file + 1; };
+    file = 0;
+    while file < debug.files.len() / 4 { let path = sh_symbol_text(&debug.names, sh_link_word(&debug.files, 4, file, 0))?; sh_link_debug_text(&output, &path)?; file = file + 1; };
     sh_binary_align(&output, 4, 0)?;
     let files_size = sh_binary_len(&output) - files;
     sh_binary_unsigned(&output, 4026462206, 4)?;

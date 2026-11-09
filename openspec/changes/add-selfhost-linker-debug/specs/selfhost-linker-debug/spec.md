@@ -114,3 +114,11 @@ and final process/equality/performance gates SHALL retain their own evidence.
 - **THEN** the seed compiler reads the recorded immutable snapshots through explicit module/runtime paths
 - **AND** the report retains original and snapshot hashes with every producer tool and command
 - **AND** later checkout changes are distinguished from any snapshot or guarded runtime/tool mutation
+
+#### Scenario: One SG compilation unit debugs multiple physical files
+- **WHEN** a validated physical-source MIR and its actual native metadata describe supported functions from multiple immutable source snapshots
+- **THEN** one object and PDB module preserve each file's path and SHA-256 with checked C13 checksum references and DBI file records
+- **AND** a real debugger resolves exact physical paths, crosses a source-file boundary while stepping and reads expected locals
+- **AND** every input file block agrees with the independent typed-MIR function-source registry
+- **AND** malformed, duplicate, unresolved, missing or excessive file/registry records fail before output publication
+- **AND** the existing single-source API remains available while independent input COFF modules and mixed-file function origins remain unsupported

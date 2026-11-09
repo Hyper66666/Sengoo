@@ -422,3 +422,61 @@ object emission, PE linking, CodeView remapping and PDB writing remain SG.
 
 Aggregate record layout reference:
 https://github.com/llvm/llvm-project/blob/llvmorg-19.1.7/llvm/lib/DebugInfo/CodeView/TypeRecordMapping.cpp
+
+## Multiple physical sources in one compilation unit
+
+One SG-produced object continues to correspond to one PDB module. Its C13 file
+checksum table contains a separate SHA-256 record for every physical source;
+line file-block NameIndex values reference byte offsets in that table, not
+file ordinals. The COFF F3 string table, PDB /names and DBI module FileInfo all
+retain the physical paths. This scope does not implement independent COFF
+input modules, inline origins or language-specific source pretty-printing.
+
+The debug model keeps bounded file records and separately delimited byte
+storage, with explicit physical MIR file IDs, per-function file ownership and
+per-line file references. Counts are at most 256 files and 256 functions, each
+source is at most 1 MiB, and combined source bytes are at most 8 MiB. Source
+text comes from the same module graph snapshots used by semantic checking and
+physical-MIR rebasing; the driver verifies the files remain unchanged before
+publishing any artifacts. Native code offsets and local stack ranges remain
+the emitter's actual facts. Existing single-source APIs retain their sole-file
+defaults; the single-source identity encoding is retained for byte comparison.
+
+S_GPROC32 has no source-file field. A reader cannot detect replacement of an
+entire function's only file block with a different otherwise-valid file from
+the COFF line record alone. Therefore the supported multiple-source reader
+requires a caller-supplied function-name to physical-MIR-source registry before
+parsing symbols. The native adapter derives it from validated typed MIR; the
+reader checks every file block against that independent registry. It never
+infers the registry from the record being verified. Missing, duplicate,
+unresolved or excessive registry entries fail explicitly. Third-party
+multiple-file COFF without that contract remains unsupported. The initial
+production subset allows one physical source per function and rejects inline
+or otherwise mixed-file function fragments instead of guessing ownership.
+
+The target-only proof is frozen at
+`target/selfhost/multi-debug-poc/freeze.json` (SHA-256
+`3f3a6ae407ace41902c788e0e72fc7aa198f9c25d6c96796fa45aa9183a4003d`).
+Its 8-command report
+`target/selfhost/multi-debug-poc/evidence.json` (SHA-256
+`b490257a0ee604ca37d1fb5504a5c9c672675d4eaff021c47c52d9814be75507`)
+proves one PDB module with two separate file checksums, actual source
+breakpoints, main-to-worker stepping, local values 40/42 and Windows exit 42.
+Production admission requires the additional Unicode-path, registry/reader
+negative, first-call resource and previous complete regression gates; the
+prototype does not close the corresponding production tasks.
+
+The production follow-up now passes the four reports named in the tasks:
+44-command multiple-source qualification, 93-command pure CodeView regression,
+79-command real-source native regression, and an independent Python binary
+oracle. The public internal entry points are
+`sh_link_debug_source_file(debug, physicalFileId, path, bytes)`,
+`sh_link_native_debug_fill_sources(debug, mir, map)` and
+`sh_link_native_debug_register(debug, mir)` before COFF decoding. The legacy
+`sh_link_debug_source` and `sh_link_native_debug_fill` wrappers remain available.
+All nine prior one-file COFF fixtures remain byte-identical. PE/PDB identities
+include the output PDB path, so comparison at different output locations
+checks every remaining byte after explicitly accounting for that path,
+derived identity and copied debug-section extents; it does not assert raw
+PE/PDB equality. Independent COFF modules and mixed-file function origins stay
+outside this admission.
