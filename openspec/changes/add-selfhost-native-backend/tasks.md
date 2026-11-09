@@ -396,3 +396,30 @@ their output. Immutable consumed sources/tools and producer checkout hashes
 remained unchanged. The separate M3 physical-source gate proves the transformed
 spans, macro/cfg origins, limits and resources; this replay proves their CLI
 integration without claiming multiple-module PDBs or native self-compilation.
+
+Multi-file SG-link integration:
+`target/selfhost/m4-module-sg-link-qualified/evidence.json`, SHA-256
+`fd4f2d9b95951653b2b4871b701e1cc3f7ed31ed046cf40364951410338e2af3`,
+full start/end revision `4ca67c911907e8caa354554b1944f1190d88b871`, Windows 11
+AMD64. All 83 commands passed with 644 unchanged source/snapshot/report inputs,
+nineteen unchanged tools and unchanged external/configuration guards. Five
+physical module graphs compile through the integrated native driver and the
+qualified SG linker in two fresh directories, producing ten Windows exits 42.
+Thirty-two product-chain commands run with PATH empty. Objects, PE images,
+numeric SDK objects and output bytes match across directories. The original
+five independent clang/reference executions, four located output-preserving
+rejections and ten first-call resource rounds remain enabled.
+
+The selected historical linker is SHA-256
+`fa4b82a743fbd130e2d2252627420dc0f171149803a356e76da13ebbcde5412e`.
+Its complete 174-source qualification is recursively bound through report
+`88f10f70126b4679a891dce25359d0619d4ea4463bdd8bf968e7e6fee48a5f01`
+to foundation report
+`d6a2d672db09d27f14782a2d6be1580300580adafe9d5b31640201a0c83c6518`.
+Every original source-key/hash binding, copied snapshot, producer tool, SDK
+archive and artifact identity is rechecked before copying. Eight independent
+negative controls reject missing/rehashed snapshots, changed tools/artifacts,
+broken report bindings and failed/cyclic qualifications. Loading the resulting
+module report verifies the three-level chain again. This is consumption of a
+pinned historical implementation, not a rebuild of the current linker or a
+complete M5, SDK, child-process trace or compiler fixed-point qualification.

@@ -9,8 +9,11 @@ from pathlib import Path
 import platform
 import shutil
 import subprocess
+import sys
 import time
 import tomllib
+
+from linker_evidence import copy_linker
 
 ROOT = Path(__file__).resolve().parents[1]
 
@@ -65,6 +68,7 @@ def rust_override(name):
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--native-evidence", required=True, type=Path)
+    parser.add_argument("--linker-evidence", type=Path)
     parser.add_argument("--output", required=True, type=Path)
     args = parser.parse_args()
     output = args.output.resolve()
@@ -79,7 +83,9 @@ def main():
               "limits": ["transparent import environment with physical file provenance; complete namespace/stdlib/self-build gates remain open",
                          "qualified tool is copied by identity; exact immutable implementation snapshots retain its producer provenance",
                          "external clang links independent C and frozen-reference LLVM artifacts; this gate does not qualify SG linker/runtime SDK"]}
-    inputs = {Path(__file__), ROOT / "selfhost/tests/native_source_probe.c", ROOT / "selfhost/tests/native_driver.sg", evidence}
+    inputs = {Path(__file__), ROOT / "selfhost/linker_evidence.py", ROOT / "selfhost/tests/linker_evidence.py", ROOT / "selfhost/tests/native_source_probe.c", ROOT / "selfhost/tests/native_driver.sg", evidence}
+    if args.linker_evidence:
+        inputs.add(args.linker_evidence.resolve())
     report["sources"] = {str(path.relative_to(ROOT)): sha(path) for path in inputs if path.is_file()}
 
     def run(name, command, env, expected=0):
@@ -91,7 +97,7 @@ def main():
         (output / (name + ".stderr.log")).write_bytes(result.stderr)
         report["steps"].append({"name": name, "command": list(map(str, command)), "exit_code": result.returncode,
                                 "expected_exit_code": expected, "seconds": time.monotonic() - started,
-                                "module_map": env.get("SENGOO_MODULE_MAP", "")})
+                                "module_map": env.get("SENGOO_MODULE_MAP", ""), "path": env.get("PATH", "")})
         print(name, result.returncode, flush=True)
         if result.returncode != expected:
             raise AssertionError(name + " returned " + str(result.returncode))
@@ -197,6 +203,10 @@ def main():
         report["native_binary_copy"] = copy_verified_binary(source_binary, native, producer["artifacts"]["native.exe"])
         report["tools"]["native"] = {"path": str(native), "sha256": producer["artifacts"]["native.exe"]}
         report["producer"] = {"path": str(evidence), "sha256": sha(evidence), "source_revision": producer["revision"]}
+        linker = None
+        if args.linker_evidence:
+            linker, linker_producer = copy_linker(ROOT, args.linker_evidence.resolve(), output, report)
+            report["limits"].append("optional SG linking uses a pinned historical fully source-bound linker; current linker rebuild, full runtime SDK and self-build qualification remain open")
         report["removed_rust_environment_overrides"] = sorted(name for name in os.environ if rust_override(name))
         env = {key: value for key, value in os.environ.items() if not key.upper().startswith(("SENGOO_", "SGPLATFORM_", "SDL2_")) and not rust_override(key)}
         clang = Path(report["tools"]["clang"]["path"])
@@ -232,6 +242,9 @@ def main():
             raise ValueError("selected rustc sysroot differs from pinned toolchain")
         report["pinned_rust_environment"] = {name: env[name] for name in ("CARGO", "RUSTC", "RUSTC_WRAPPER", "RUSTC_WORKSPACE_WRAPPER", "CARGO_BUILD_RUSTC", "CARGO_BUILD_RUSTC_WRAPPER", "CARGO_BUILD_RUSTC_WORKSPACE_WRAPPER", "RUSTUP_TOOLCHAIN")}
         report["pinned_rust_environment"]["path_prefix"] = str(selected["cargo"].parent)
+        if linker is not None:
+            report["tools"]["runner-python"] = {"path": sys.executable, "sha256": sha(Path(sys.executable)), "version": sys.version}
+            run("linker-qualification-negative-controls", [sys.executable, ROOT / "selfhost/tests/linker_evidence.py", "-v"], env)
         rust_probe = output / "rust-tool-probe"
         write(rust_probe, {"Cargo.toml": '[package]\nname="module-gate-rust-tool"\nversion="0.0.0"\nedition="2021"\n[workspace]\n',
                            "build.rs": 'fn main(){println!("cargo:warning=module_gate_rustc={}",std::env::var("RUSTC").unwrap());}\n',
@@ -276,6 +289,47 @@ def main():
             if (actual.stdout, actual.stderr) != (expected.stdout, expected.stderr):
                 raise AssertionError("module execution differs")
             report["cases"].append({"name": name, "result_equal": True, "object_sha256": sha(obj), "reference_ir_sha256": sha(llvm), "emit_status": emitted_json, "repeat_status": repeated_json})
+        if linker is not None:
+            sdk = linker_producer.get("sdk")
+            if not sdk:
+                raise ValueError("pinned linker qualification lacks its SDK import library")
+            runtime_source = ROOT / "selfhost/tests/native_numeric_sdk.sg"
+            runtime_raw = runtime_source.read_bytes()
+            runtime_digest = hashlib.sha256(runtime_raw).hexdigest()
+            report["sources"][str(runtime_source.relative_to(ROOT))] = runtime_digest
+            pure_env = {key: value for key, value in env.items() if not key.upper().startswith(("SENGOO_", "SGPLATFORM_", "SDL2_"))}
+            pure_env.update(PATH="", SENGOO_STDLIB=str(output / "implementation/tools/stdlib"))
+            first, linked_rows = {}, []
+            for round_name in ("first clean 世界 &", "second clean 世界 &"):
+                directory = output / "sg-linked-modules" / round_name
+                directory.mkdir(parents=True)
+                runtime_input, runtime_object = directory / "numeric sdk.sg", directory / "numeric sdk.obj"
+                runtime_input.write_bytes(runtime_raw)
+                report["sources"][str(runtime_input.relative_to(ROOT))] = runtime_digest
+                parse_cli(run(round_name + "-numeric-sdk-emit", [native, runtime_input, runtime_object], pure_env).stdout, True)
+                runtime_object_digest = sha(runtime_object)
+                if first.get("runtime", runtime_object_digest) != runtime_object_digest:
+                    raise AssertionError("numeric runtime object differs across clean directories")
+                first["runtime"] = runtime_object_digest
+                for name, (files, mapping) in scenarios.items():
+                    case_directory = directory / name
+                    write(case_directory, files)
+                    case_env = dict(pure_env, SENGOO_MODULE_MAP=";".join(key + "=" + str(case_directory / value) for key, value in mapping.items()))
+                    source, obj, exe = case_directory / "main.sg", case_directory / "native.obj", case_directory / "native.exe"
+                    parse_cli(run(round_name + "-" + name + "-sg-emit", [native, source, obj], case_env).stdout, True)
+                    linked = run(round_name + "-" + name + "-sg-link", [linker, "link", exe, "main", obj, runtime_object, sdk["path"]], pure_env)
+                    if linked.stdout or linked.stderr:
+                        raise AssertionError("SG linker success output differs")
+                    executed = run(round_name + "-" + name + "-sg-execute", [exe], pure_env, 42)
+                    identity = {"object_sha256": sha(obj), "image_sha256": sha(exe), "runtime_object_sha256": runtime_object_digest,
+                                "stdout_sha256": hashlib.sha256(executed.stdout).hexdigest(), "stderr_sha256": hashlib.sha256(executed.stderr).hexdigest()}
+                    if name in first and first[name] != identity:
+                        raise AssertionError("SG-linked module object/PE differs across fresh directories: " + name)
+                    first[name] = identity
+                    linked_rows.append({"name": name, "round": round_name, "empty_path": True, **identity})
+            report["sg_linked_cases"] = linked_rows
+            report["sg_linked_clean_directories"] = 2
+            report["sg_linked_deterministic_objects_and_images"] = True
         failures = {
             "missing": ({"main.sg": "import missing;def main()->i64{42}"}, "main.sg", "modules", 5201),
             "cycle": ({"main.sg": "import other;def main()->i64{42}", "other.sg": "import main;def answer()->i64{1}"}, None, "modules", 5202),

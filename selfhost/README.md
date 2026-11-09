@@ -185,6 +185,12 @@ inputs. `module_codegen_gate.py --native-evidence REPORT --output DIRECTORY`
 consumes the passed source report and its immutable snapshots to qualify
 multi-file diagnostics, deterministic objects and repeated in-process resource
 recovery. This development evidence does not establish compiler self-rebuild.
+Its optional `--linker-evidence REPORT` revalidates a complete pinned SG linker
+qualification, including copied historical source manifests when the checkout
+has moved on. It then compiles and SG-links the five module graphs in two fresh
+directories with an empty PATH, comparing object and PE bytes and execution.
+This consumes the qualified linker binary rather than rebuilding current linker
+sources or completing the runtime SDK.
 
 `linker_gate.py` separately qualifies SG COFF/archive/PE linking, real Windows
 SDK imports and independently observed Windows execution. `native_link_gate.py`
