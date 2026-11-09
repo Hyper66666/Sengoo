@@ -45,6 +45,7 @@ def main():
                          "PATH is empty and source-runtime/toolchain overrides are removed for every command",
                          "numeric SDK is an SG verification fixture using ExitProcess; diagnostics and full runtime SDK remain open",
                          "single-source compiler preview; no compiler self-rebuild, full ABI or CodeView/PDB qualification",
+                         "qualified implementation sources are copied and hashed before execution; the pinned tools do not reread mutable checkout sources",
                          "final self-build child-process tracing and supported-corpus gates remain open"]}
     initial_sources = {Path(__file__), NUMERIC_SDK, ROOT / "selfhost/source_codegen_gate.py"}
 
@@ -60,11 +61,20 @@ def main():
             raise ValueError(name + " qualification has changed or missing identity guards")
         if not data.get("sources") or not data.get("steps") or not data.get("tools"):
             raise ValueError(name + " qualification lacks required provenance")
+        snapshot_root = out / "qualified-sources" / name
+        source_manifest = {}
         for source, digest in data["sources"].items():
             path = (ROOT / source).resolve()
             if not path.is_relative_to(ROOT) or not path.is_file() or sha(path) != digest:
                 raise ValueError(name + " source identity no longer matches: " + source)
-            initial_sources.add(path)
+            raw = path.read_bytes()
+            if hashlib.sha256(raw).hexdigest() != digest:
+                raise ValueError(name + " source changed while taking the qualified snapshot: " + source)
+            snapshot = snapshot_root / path.relative_to(ROOT)
+            snapshot.parent.mkdir(parents=True, exist_ok=True)
+            snapshot.write_bytes(raw)
+            initial_sources.add(snapshot)
+            source_manifest[source] = {"sha256": digest, "snapshot": str(snapshot.relative_to(ROOT))}
         for tool, identity in data["tools"].items():
             path = Path(identity["path"])
             if not path.is_file() or sha(path) != identity["sha256"]:
@@ -74,7 +84,7 @@ def main():
             raise ValueError(name + " qualified artifact differs")
         report["qualifications"][name] = {"path": str(evidence), "sha256": sha(evidence),
                                            "source_revision": data.get("source_revision", data.get("revision")),
-                                           "steps": len(data["steps"])}
+                                           "steps": len(data["steps"]), "sources": source_manifest}
         report["tools"][name] = {"path": str(binary), "sha256": sha(binary)}
         return binary, data
 
@@ -104,9 +114,12 @@ def main():
         sdk = Path(sdk_identity["path"])
         report["tools"]["sdk-kernel32"] = sdk_identity
         report["sources"] = {str(p.relative_to(ROOT)): sha(p) for p in sorted(initial_sources)}
-        cases = {name: text for name, text in CASES.items() if name not in ("c-call", "drop-scope", "drop-return")}
+        cases = {name: text for name, text in CASES.items()
+                 if name not in ("c-call", "drop-scope", "drop-return", "string-utf8", "string-empty", "string-nul")}
         cases["windows-sdk"] = ('extern "C"{fn GetCurrentProcessId()->u32;fn GetCurrentThreadId()->u32;}'
                                 'def main()->i64{if GetCurrentProcessId()>0u32 and GetCurrentThreadId()>0u32{42}else{1}}')
+        cases["windows-string"] = ('extern "C"{fn lstrlenA(value:&str)->i32;}'
+                                   'def main()->i64{if lstrlenA("世界")==6i32 and lstrlenA("")==0i32 and lstrlenA("A\\0B")==1i32{42}else{1}}')
         first_artifacts = {}
         for round_name in ("first 世界 &", "second 世界 &"):
             directory = out / round_name

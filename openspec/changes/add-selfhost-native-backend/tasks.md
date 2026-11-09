@@ -269,3 +269,20 @@ to the preceding string checkpoint's `checked.obj`, SHA-256
 `1d0b25ae1f50e18f165c050267ea241bc27405f53f5acef9709dc4c8a0374b61`.
 All previous C ABI, numeric, cleanup, strings, memory, stack and unwind checks
 remain green. These are machine-address facts, not qualified source debugging.
+
+Expanded SG link integration:
+`target/selfhost/m5-native-hir3-source-link-qualified/evidence.json`, SHA-256
+`88f10f70126b4679a891dce25359d0619d4ea4463bdd8bf968e7e6fee48a5f01`.
+All 261 commands passed on Windows 11 AMD64. Forty-two programs compile and
+SG-link in each of two new directories and execute 42 (84 executions), with
+equal object/PE/output bytes across directories. Arrays, impl effect contexts,
+aggregate operators and real SDK lstrlenA calls cover the expanded native data
+path. Traps and unresolved-output preservation remain green. Before execution,
+the gate revalidates source/tool/artifact identities from the two successful
+qualification reports and copies their exact implementation sources into
+per-tool target snapshots. All 279 snapshot/runtime inputs and pinned binaries
+remain unchanged; subsequent checkout edits cannot alter these running tools.
+The recorded revision interval is
+`befcfd6d1898fefc971939bd4d7565f3da119601` through
+`f1967f2f3167d3ef802f6dff17b2fcaa8d558d9f`. This is explicit pinned-tool
+provenance, not a rebuild of the changing checkout or an S2/S3 fixed point.
