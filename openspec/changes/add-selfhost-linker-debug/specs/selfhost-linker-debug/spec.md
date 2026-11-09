@@ -101,3 +101,16 @@ and final process/equality/performance gates SHALL retain their own evidence.
 - **AND** a real debugger observes readonly and mutable referenced values and opaque raw pointer bits correctly
 - **AND** unsupported sizes/modes, dangling references and unrepresentable reference combinations fail explicitly
 - **AND** the 64-wrapper limit includes const modifiers and rejects an additional wrapper before mutating the type pool
+
+#### Scenario: Supported aggregate fields retain target layout
+- **WHEN** supported nongeneric struct, tuple, array and tagged-enum locals carry checked field names and target layouts
+- **THEN** SG preserves their real field offsets, sizes, array elements and enum tag/payload layout in COFF and PDB types
+- **AND** a real debugger reads initialized struct fields, tuple/array elements and a known active enum payload while stepping source
+- **AND** malformed member references, counts, extents, names, padding and stack-frame overruns fail before output publication
+- **AND** unsupported recursive, class, generic, function and native C++ property forms fail explicitly
+
+#### Scenario: Concurrent edits cannot replace a compiler producer input
+- **WHEN** a native-debug qualification run captures its SG module and standard-library/runtime.c producer closure
+- **THEN** the seed compiler reads the recorded immutable snapshots through explicit module/runtime paths
+- **AND** the report retains original and snapshot hashes with every producer tool and command
+- **AND** later checkout changes are distinguished from any snapshot or guarded runtime/tool mutation

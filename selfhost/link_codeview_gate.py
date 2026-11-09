@@ -61,7 +61,7 @@ def mutations(raw):
         ("line-file", change(fragments[0xF2][1] + 12, 1), 7303),
         ("line-count", change(fragments[0xF2][1] + 16, 65537), 7301),
         ("line-end-delta", change(fragments[0xF2][1] + 28, 0x81000001), 7303),
-        ("type-leaf", change(sections[b".debug$T"][1] + 6, 0x1505, "<H"), 7303),
+        ("type-leaf", change(sections[b".debug$T"][1] + 6, 0x1601, "<H"), 7303),
         ("source-name", change(fragments[0xF3][1] + 1, ord("X"), "<B"), 7301),
         ("unknown-debug-section", change(sections[b".debug$T"][0] + 7, ord("X"), "<B"), 7303),
     ]
@@ -130,11 +130,24 @@ def main():
     parser.add_argument("--ranges", action="store_true")
     parser.add_argument("--primitives", action="store_true")
     parser.add_argument("--references", action="store_true")
+    parser.add_argument("--aggregates", action="store_true")
     args = parser.parse_args()
     output = args.output.resolve()
     if not output.is_relative_to(ROOT / "target"):
         raise ValueError("output must stay in target/")
     output.mkdir(parents=True, exist_ok=True)
+    std_snapshot = output / "producer-snapshot/tools/stdlib"
+    std_origins, std_snapshots = {}, {}
+    for path in sorted((ROOT / "tools/stdlib").rglob("*")):
+        if not path.is_file() or any(part in {"target", "build", "__pycache__"} for part in path.relative_to(ROOT / "tools/stdlib").parts):
+            continue
+        destination = std_snapshot / path.relative_to(ROOT / "tools/stdlib")
+        destination.parent.mkdir(parents=True, exist_ok=True)
+        destination.write_bytes(path.read_bytes())
+        std_origins[str(path.relative_to(ROOT))] = sha(destination)
+        std_snapshots[str(destination.relative_to(ROOT))] = sha(destination)
+    if any(sha(ROOT / name) != digest for name, digest in std_origins.items()):
+        raise AssertionError("stdlib changed while capturing producer snapshot")
     tools = {name: getattr(args, name).resolve() for name in ("seed", "clang", "formatter")}
     tools.update(debugger=tools["clang"].parent / "lldb.exe", pdb_inspector=tools["clang"].parent / "llvm-pdbutil.exe", coff_inspector=tools["clang"].parent / "llvm-readobj.exe")
     python_home = args.lldb_python_home.resolve()
@@ -153,12 +166,18 @@ def main():
         if not args.primitives:
             raise ValueError("--references requires --primitives")
         inputs.append(ROOT / "selfhost/tests/link_cv_pointer_probe.cpp")
-    for folder in (ROOT / "tools/stdlib", ROOT / "runtime"):
+    if args.aggregates:
+        if not args.references:
+            raise ValueError("--aggregates requires --references")
+        inputs += [ROOT / "selfhost/tests" / name for name in ("link_cv_aggregate.sg", "link_cv_aggregate_probe.cpp")]
+    inputs += [ROOT / name for name in std_snapshots]
+    for folder in (ROOT / "runtime",):
         inputs += [path for path in folder.rglob("*") if path.is_file() and not any(part in {"target", "build", "__pycache__"} for part in path.relative_to(folder).parts)]
     revision = lambda: subprocess.check_output(["git", "rev-parse", "HEAD"], cwd=ROOT, text=True).strip()
     report = {"schema": 1, "result": "running", "stage": "sg-coff-codeview-pdb-checkpoint", "m5_complete": False,
               "source_revision": revision(), "started_at": dt.datetime.now(dt.timezone.utc).isoformat(), "host": platform.platform(), "python": sys.version,
               "sources": {str(p.relative_to(ROOT)): sha(p) for p in sorted(set(inputs))}, "tools": {}, "steps": [],
+              "producer_stdlib_origins": std_origins, "producer_stdlib_snapshots": std_snapshots,
               "limits": ["the SG writer emits real .debug$S/.debug$T and SECTION/SECREL relocations; the SG reader consumes actual relocated contributions",
                          "one module with named i64/no-argument procedure prototype, SP-relative i64 locals and SHA256 source checksums; unknown debug symbols/types/subsections/sections fail",
                          "COFF auxiliary/COMDAT/weak/full SDK CodeView, multiple modules, aggregate/generic debug types and automatic native compiler debug mapping remain open",
@@ -166,11 +185,12 @@ def main():
     report["multiple_return_ranges"] = args.ranges
     report["primitive_signatures"] = args.primitives
     report["pointer_reference_types"] = args.references
+    report["aggregate_types"] = args.aggregates
     env = dict(os.environ)
     for name in list(env):
         if name.upper().startswith(("SENGOO_", "SGPLATFORM_", "SDL2_", "PYTHON", "LLDB_")):
             env.pop(name)
-    env.update(SENGOO_STDLIB=str(ROOT / "tools/stdlib"), SENGOO_RUNTIME=str(ROOT / "tools/stdlib/runtime.c"), SENGOO_CLANG=str(tools["clang"]),
+    env.update(SENGOO_STDLIB=str(std_snapshot), SENGOO_RUNTIME=str(std_snapshot / "runtime.c"), SENGOO_CLANG=str(tools["clang"]),
                SENGOO_MODULE_MAP=";".join("selfhost_" + name + "=" + str(ROOT / "selfhost/src" / (name + ".sg")) for name in MODULES))
     env["PATH"] = str(tools["clang"].parent) + os.pathsep + env.get("PATH", "")
     empty = output / "empty-toolchain-path"
@@ -383,6 +403,76 @@ def main():
                     report["negative_cases"].append({"name": f"short-pointer-{length}", "expected_code": 7321, "input_sha256": sha(path), "previous_outputs_preserved": True})
                 roundtrip.write_bytes(prefix.read_bytes())
                 report["artifacts"].update({path.name: sha(path) for path in (independent, prefix, roundtrip, full, duplicate_prefix)})
+                if args.aggregates:
+                    aggregate_test = output / "aggregate-types.exe"
+                    run("build-aggregate-type-pool", [tools["seed"], "--runtime-mode", "source-development", "build", ROOT / "selfhost/tests/link_cv_aggregate.sg", "-o", aggregate_test])
+                    run("aggregate-type-pool-100-exact-resources", [aggregate_test], marker=b"aggregate types: ok", pure=True)
+                    independent = output / "clang-aggregate.obj"
+                    run("build-independent-aggregate-types", [tools["clang"], "-g", "-gcodeview", "-O0", "-Werror", "-c", ROOT / "selfhost/tests/link_cv_aggregate_probe.cpp", "-o", independent])
+                    run("inspect-independent-aggregate-types", [tools["coff_inspector"], "--codeview", independent], marker=b"FieldOffset: 0x10")
+                    raw = independent.read_bytes()
+                    independent_types = None
+                    for index in range(u16(raw, 2)):
+                        row = 20 + index * 40
+                        if raw[row:row + 8] == b".debug$T":
+                            at, size = u32(raw, row + 20), u32(raw, row + 16)
+                            independent_types = raw[at:at + size]
+                    if independent_types is None:
+                        raise AssertionError("independent aggregate type stream missing")
+                    records, at = [], 4
+                    while at < len(independent_types):
+                        length, kind = struct.unpack_from("<HH", independent_types, at)
+                        records.append((kind, independent_types[at:at + length + 2]))
+                        at += length + 2
+                    member_list = next(data for kind, data in records if kind == 0x1203 and b"flag\0" in data)
+                    enum_list = next(data for kind, data in records if kind == 0x1203 and b"Empty\0" in data)
+                    array_record = next(data for kind, data in records if kind == 0x1503 and u32(data, 4) == 116)
+                    original_struct = next(data for kind, data in records if kind == 0x1505 and u16(data, 4) == 4 and b"Pair\0" in data)
+                    original_enum = next(data for kind, data in records if kind == 0x1507 and b"Tag\0" in data)
+
+                    def supported_nominal(data, name_at, fields_at):
+                        # Remove unsupported C++ unique-name metadata only. The actual
+                        # member records, offsets, size and declared name remain intact.
+                        result = bytearray(data[:data.index(0, name_at) + 1])
+                        struct.pack_into("<H", result, 6, 0)
+                        struct.pack_into("<I", result, fields_at, 4096)
+                        padding = -len(result) % 4
+                        result += bytes(0xF0 + value for value in range(padding, 0, -1))
+                        struct.pack_into("<H", result, 0, len(result) - 2)
+                        return bytes(result)
+
+                    structure = supported_nominal(original_struct, 22, 8)
+                    enumeration = supported_nominal(original_enum, 16, 12)
+                    streams = {"field-list": member_list, "array": array_record, "structure": member_list + structure, "enum": enum_list + enumeration}
+                    for label, data in streams.items():
+                        prefix = output / ("independent-aggregate-" + label + ".cv")
+                        prefix.write_bytes(struct.pack("<I", 4) + data)
+                        run("sg-roundtrip-independent-aggregate-" + label, [type_test, prefix, roundtrip], pure=True)
+                        if prefix.read_bytes() != roundtrip.read_bytes():
+                            raise AssertionError("independent aggregate encoding differs: " + label)
+                        report["artifacts"][prefix.name] = sha(prefix)
+                    valid = struct.pack("<I", 4) + member_list + structure
+                    struct_at = 4 + len(member_list)
+                    malformed = [("member-type-forward", 12, "<I", 4096, 7321),
+                                 ("member-attributes", 10, "<H", 1, 7323),
+                                 ("member-offset", 16, "<H", 25, 7321),
+                                 ("structure-count", struct_at + 4, "<H", 3, 7321),
+                                 ("structure-properties", struct_at + 6, "<H", 128, 7323),
+                                 ("structure-fieldlist-forward", struct_at + 8, "<I", 4097, 7321),
+                                 ("structure-derived", struct_at + 12, "<I", 1, 7323),
+                                 ("structure-size", struct_at + 20, "<H", 23, 7321)]
+                    for label, offset, fmt, value, expected in malformed:
+                        changed = bytearray(valid)
+                        struct.pack_into(fmt, changed, offset, value)
+                        path = output / (label + ".cv")
+                        path.write_bytes(changed)
+                        roundtrip.write_bytes(sentinel)
+                        rejected = run("reject-aggregate-" + label, [type_test, path, roundtrip], 65, pure=True)
+                        if rejected.strip() != str(expected).encode() or roundtrip.read_bytes() != sentinel:
+                            raise AssertionError("aggregate diagnostic/output differs: " + repr(rejected))
+                        report["negative_cases"].append({"name": label, "expected_code": expected, "input_sha256": sha(path), "previous_outputs_preserved": True})
+                    report["artifacts"].update({path.name: sha(path) for path in (aggregate_test, independent)})
+                    report["aggregate_resource_scopes"] = 100
     except BaseException as error:
         report.update(result="failed", error=repr(error))
         raise
@@ -390,6 +480,7 @@ def main():
         changed = [name for name, digest in report["sources"].items() if not (ROOT / name).is_file() or sha(ROOT / name) != digest]
         changed_tools = [name for name, identity in report["tools"].items() if not Path(identity["path"]).is_file() or sha(Path(identity["path"])) != identity["sha256"]]
         report.update(changed_sources=changed, changed_tools=changed_tools, source_revision_end=revision(), completed_at=dt.datetime.now(dt.timezone.utc).isoformat())
+        report["producer_stdlib_checkout_changes"] = [name for name, digest in std_origins.items() if not (ROOT / name).is_file() or sha(ROOT / name) != digest]
         if changed or changed_tools:
             report.update(result="failed", error="CodeView input identity changed")
         (output / "evidence.json").write_text(json.dumps(report, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")

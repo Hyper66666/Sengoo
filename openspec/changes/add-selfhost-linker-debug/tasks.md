@@ -296,3 +296,64 @@ This checkpoint supports checked scalar/void pointer targets and scalar
 references. Aggregate/function targets, richer pointer modes, type servers,
 and the complete native SDK/debug/module corpus remain open; complete M5 is
 not qualified.
+
+
+## Bounded aggregate type and source-debug checkpoint
+
+- [x] Emit and remap checked struct/union/array/enum field records with target sizes, offsets, backward references and bounded shared-type depth.
+- [x] Compare independent clang member/array bytes and supported nominal records after explicitly removing unsupported unique-name metadata.
+- [x] Prove 100 aggregate type-pool resource scopes and reject malformed members/counts/extents/references/properties.
+- [x] Compile real SG struct/tuple/array/tagged-enum locals through native COFF, SG PE/PDB generation and actual debugger field observation.
+- [x] Reject malformed/duplicate/missing field-name maps and native local extents outside the real frame allocation.
+- [x] Bind the compiler producer to immutable SG/stdlib snapshots, Rust runtime inputs, tool identities and actual checkout-change reporting.
+
+The earlier aggregate development reports are retained without promoting
+failed runs to qualification. One old unknown-type mutation became a supported
+structure leaf and correctly changed from unsupported to malformed; the
+negative now uses the still-unsupported LF_FUNC_ID leaf. The first snapshot
+native build caught an if-without-else branch returning bool and was corrected
+to unit. Whole-local frame checking also exposed the established distinction
+between an RSP-only fixture's allocation and a native RBP frame's additional
+saved-register slot. Generic CodeView validation checks the declared frame;
+the native adapter additionally checks the exact allocation before that slot.
+The bounded final evidence follows; the broad M5 completion tasks remain open.
+
+Pure CodeView/PDB evidence:
+`target/selfhost/m5-codeview-aggregate-frame-checked/evidence.json`, SHA-256
+`1c41ebf853647cd627567e1f78830785df1d75ee3a5567c8f7a8469143af35ed`.
+Ninety-three commands and 52 negative cases passed on Windows 11 AMD64;
+191 guarded source/snapshot inputs and 36 tool/runtime identities were unchanged.
+Independent clang supplies actual member-list and array bytes, plus structure
+and enum records with their unsupported unique-name property removed explicitly
+and their field-list index remapped. SG round trips those supported records
+exactly. The complete native C++ stream is still rejected. The gate includes
+100 primitive-pool and 100 aggregate-pool exact resource scopes, twenty typed
+COFF/PDB scopes per invocation, the prior actual debugger and Windows unwind
+corpus, depth limits, bad field references/attributes/counts/offsets/properties,
+and output preservation.
+
+Automatic source/native evidence:
+`target/selfhost/m5-native-debug-aggregate-final/evidence.json`, SHA-256
+`0f9e8af3a3bbe1fd93063a4a367a3aac9257544ef1ecd2689704951bed0c3ced`.
+Seventy-nine commands and 21 negative cases passed on Windows 11 AMD64;
+217 source/snapshot inputs, 40 imported SG modules and 41 tool identities were
+unchanged, including the actual Cargo/rustc/rustup shims and resolved binaries
+with their versions. Existing user Cargo configurations are hashed and guarded.
+The producer contains 155 exact SG/stdlib/runtime.c snapshots; all original
+checkout hashes also remained unchanged during this final run. Each of nine
+real SG sources compiles twice with identical object/PE/PDB bytes and five
+complete resource-check scopes per invocation. LLVM inspects the resulting
+COFF/PDB and LLDB observes struct bool/i32/u64 fields true/40/2, tuple members
+40/2, array elements 40/2, and enum Value tag/payload 40. Source stepping, answer
+40/42 and Windows exit 42 pass. Malformed/duplicate/missing field names and a
+whole aggregate outside the native allocation fail before output publication.
+
+Both reports record the full revision interval
+`d5144a0fbce78d9d5fc01b9b72195604131fb852` through
+`682446a8f9d407f5cb86d81af4ea816ed90210b4`; all guarded sources/tools and all
+reported producer checkout changes are empty. Production compile/object/link/
+PDB commands run with an unavailable compiler/linker PATH. Development seed
+construction still uses the explicitly recorded Rust/C runtime; this is not
+M6 Rust-free completion. Generic/class/recursive/function type support,
+conditional active-variant display, full C++/SDK type streams, multiple debug
+modules, complete M5 and full PDB qualification remain open.

@@ -2,16 +2,21 @@ import selfhost_mir_validate;
 
 import selfhost_link_codeview;
 
+import selfhost_layout;
+
 struct ShNativeDebugMap {
     functions: Vec<i64>,
     instructions: Vec<i64>,
     terminators: Vec<i64>,
     locals: Vec<i64>,
     epilogues: Vec<i64>,
+    field_names: Vec<i64>,
+    type_heights: Vec<i64>,
+    type_ids: Vec<i64>,
 }
 
 def sh_link_native_debug_map() -> ShNativeDebugMap {
-    ShNativeDebugMap { functions: vec_new_i64(), instructions: vec_new_i64(), terminators: vec_new_i64(), locals: vec_new_i64(), epilogues: vec_new_i64() };
+    ShNativeDebugMap { functions: vec_new_i64(), instructions: vec_new_i64(), terminators: vec_new_i64(), locals: vec_new_i64(), epilogues: vec_new_i64(), field_names: vec_new_i64(), type_heights: vec_new_i64(), type_ids: vec_new_i64() };
 }
 
 def sh_lnd_function(map: &ShNativeDebugMap, function: i64) -> i64 {
@@ -66,6 +71,7 @@ def sh_lnd_record_span(debug: &ShLinkDebug, lines: &Vec<i64>, file: i64, expecte
 }
 
 def sh_lnd_validate_map(debug: &ShLinkDebug, mir: &ShMir, map: &ShNativeDebugMap, file: i64) -> Result<i64, i64> {
+    sh_lnd_validate_fields(mir, map)?;
     let function_ids = sh_lnd_index(&map.functions, 6, sh_mir_fn_count(mir))?;
     let instructions = sh_lnd_index(&map.instructions, 3, sh_mir_inst_count(mir))?;
     let terms = sh_lnd_index(&map.terminators, 3, sh_mir_term_count(mir))?;
@@ -73,7 +79,7 @@ def sh_lnd_validate_map(debug: &ShLinkDebug, mir: &ShMir, map: &ShNativeDebugMap
     if map.functions.len() == 0 or map.functions.len() / 6 > 256 or map.epilogues.len() % 3 != 0 or map.epilogues.len() / 3 > 65536 { return sh_i64_error(7312); };
     let mut row = 0;
     let mut previous_end = 0;
-    while row < map.functions.len() / 6 { let function = sh_link_word(&map.functions, 6, row, 0); let first = sh_link_word(&map.functions, 6, row, 1); let end = sh_link_word(&map.functions, 6, row, 2); let frame = sh_link_word(&map.functions, 6, row, 3); let prologue = sh_link_word(&map.functions, 6, row, 4); let section = sh_link_word(&map.functions, 6, row, 5); let signature = sh_mir_fn(mir, function, 1); let parameter_count = sh_mir_type_word(mir, signature, 5) - 1; if sh_mir_fn(mir, function, 3) != 0 or sh_mir_type_word(mir, signature, 0) != 11 or sh_mir_type_word(mir, signature, 2) != 0 or parameter_count < 0 or parameter_count > 64 or not sh_lnd_supported(mir, sh_mir_type_arg(mir, signature, parameter_count), true, 0) { return sh_i64_error(7313); }; let mut parameter = 0; while parameter < parameter_count { if not sh_lnd_supported(mir, sh_mir_type_arg(mir, signature, parameter), false, 0) { return sh_i64_error(7313); }; parameter = parameter + 1; }; let function_name = sh_symbol_text(&mir.symbols, sh_mir_fn(mir, function, 0))?; let main_name = string_from_str("main")?; if sengoo_string_eq(function_name.handle, main_name.handle) != 0 and (parameter_count != 0 or sh_lnd_primitive(mir, sh_mir_type_arg(mir, signature, parameter_count)) != 19) { return sh_i64_error(7313); }; if sh_mir_fn(mir, function, 4) != file or first < previous_end or end <= first or end - first > 65535 or frame < 8 or frame > 1048576 or frame % 8 != 0 or prologue < 1 or prologue >= end - first or section != 1 { return sh_i64_error(7311); }; previous_end = end; row = row + 1; };
+    while row < map.functions.len() / 6 { let function = sh_link_word(&map.functions, 6, row, 0); let first = sh_link_word(&map.functions, 6, row, 1); let end = sh_link_word(&map.functions, 6, row, 2); let frame = sh_link_word(&map.functions, 6, row, 3); let prologue = sh_link_word(&map.functions, 6, row, 4); let section = sh_link_word(&map.functions, 6, row, 5); let signature = sh_mir_fn(mir, function, 1); let parameter_count = sh_mir_type_word(mir, signature, 5) - 1; if sh_mir_fn(mir, function, 3) != 0 or sh_mir_type_word(mir, signature, 0) != 11 or sh_mir_type_word(mir, signature, 2) != 0 or parameter_count < 0 or parameter_count > 64 or not sh_lnd_supported(mir, map, sh_mir_type_arg(mir, signature, parameter_count), true, 0) { return sh_i64_error(7313); }; let mut parameter = 0; while parameter < parameter_count { if not sh_lnd_supported(mir, map, sh_mir_type_arg(mir, signature, parameter), false, 0) { return sh_i64_error(7313); }; parameter = parameter + 1; }; let function_name = sh_symbol_text(&mir.symbols, sh_mir_fn(mir, function, 0))?; let main_name = string_from_str("main")?; if sengoo_string_eq(function_name.handle, main_name.handle) != 0 and (parameter_count != 0 or sh_lnd_primitive(mir, sh_mir_type_arg(mir, signature, parameter_count)) != 19) { return sh_i64_error(7313); }; if sh_mir_fn(mir, function, 4) != file or first < previous_end or end <= first or end - first > 65535 or frame < 8 or frame > 1048576 or frame % 8 != 0 or prologue < 1 or prologue >= end - first or section != 1 { return sh_i64_error(7311); }; previous_end = end; row = row + 1; };
     row = 0;
     while row < sh_mir_fn_count(mir) { if sh_mir_fn(mir, row, 3) == 0 and sengoo_vec_get_or_default_i64(function_ids.handle, row, -1) < 0 { return sh_i64_error(7311); }; row = row + 1; };
     let mut prior = -1;
@@ -100,11 +106,12 @@ def sh_lnd_validate_map(debug: &ShLinkDebug, mir: &ShMir, map: &ShNativeDebugMap
 
 def sh_lnd_local(debug: &ShLinkDebug, mir: &ShMir, map: &ShNativeDebugMap, local: i64, debug_function: i64, function_row: i64, local_indexes: &Vec<i64>, inst_indexes: &Vec<i64>, file: i64) -> Result<i64, i64> {
     let ty = sh_mir_local(mir, local, 1);
-    let primitive = sh_lnd_type(debug, mir, ty, 0)?;
+    let primitive = sh_lnd_type(debug, mir, map, ty, 0)?;
     if not sh_link_cv_value(&debug.types, primitive, false, 0) or (sh_mir_local(mir, local, 3) != 0 and sh_mir_local(mir, local, 3) != 1) or sh_mir_local(mir, local, 4) >= 2 or sh_mir_local(mir, local, 7) != file { return sh_i64_error(7313); };
     let local_row = sengoo_vec_get_or_default_i64(local_indexes.handle, local, -1);
     if local_row < 0 { return sh_i64_error(7311); };
     let stack = sh_link_word(&map.locals, 2, local_row, 1);
+    if stack < 0 or sh_link_cva_size(&debug.types, primitive, 0) > sh_link_word(&map.functions, 6, function_row, 3) - 8 - stack { return sh_i64_error(7301); };
     let function = sh_mir_local(mir, local, 0);
     let entry = sh_mir_fn(mir, function, 2);
     let mut initialized = -1;
@@ -143,6 +150,7 @@ def sh_lnd_lines(debug: &ShLinkDebug, mir: &ShMir, map: &ShNativeDebugMap, funct
 }
 
 def sh_link_native_debug_fill(debug: &mut ShLinkDebug, mir: &ShMir, map: &ShNativeDebugMap, path: &String, source: &ShBinary) -> Result<i64, i64> {
+    if map.type_heights.len() != 0 or map.type_ids.len() != 0 { return sh_i64_error(7311); };
     let validation = sh_mir_validate(mir);
     if validation.error != 0 { return sh_i64_error(validation.error); };
     if debug.path >= 0 or sh_mir_count(&mir.sources, 2) != 1 or sh_mir_word(&mir.sources, 2, 0, 1) != sh_binary_len(source) { return sh_i64_error(7313); };
@@ -157,7 +165,7 @@ def sh_link_native_debug_fill(debug: &mut ShLinkDebug, mir: &ShMir, map: &ShNati
     let local_indexes = sh_lnd_index(&map.locals, 2, sh_mir_local_count(mir))?;
     let inst_indexes = sh_lnd_index(&map.instructions, 3, sh_mir_inst_count(mir))?;
     let mut row = 0;
-    while row < map.functions.len() / 6 { let function = sh_link_word(&map.functions, 6, row, 0); let name = sh_symbol_text(&mir.symbols, sh_mir_fn(mir, function, 0))?; let first = sh_link_word(&map.functions, 6, row, 1); let signature = sh_mir_fn(mir, function, 1); let parameter_count = sh_mir_type_word(mir, signature, 5) - 1; let arguments = vec_new_i64(); let mut parameter = 0; while parameter < parameter_count { sh_link_push(&arguments, sh_lnd_type(debug, mir, sh_mir_type_arg(mir, signature, parameter), 0)?)?; parameter = parameter + 1; }; let result = sh_lnd_type(debug, mir, sh_mir_type_arg(mir, signature, parameter_count), 0)?; let debug_function = sh_link_debug_typed_function(debug, &name, 1, first, sh_link_word(&map.functions, 6, row, 2) - first, sh_link_word(&map.functions, 6, row, 3), sh_link_word(&map.functions, 6, row, 4), 0, result, &arguments)?; sh_lnd_lines(debug, mir, map, row, debug_function, file, &lines)?; parameter = 0; while parameter < parameter_count { let mut local = 0; let mut found = -1; while local < sh_mir_local_count(mir) { if sh_mir_local(mir, local, 0) == function and sh_mir_local(mir, local, 3) == 1 and sh_mir_local(mir, local, 6) == parameter { if found >= 0 { return sh_i64_error(7311); }; found = local; }; local = local + 1; }; if found < 0 { return sh_i64_error(7311); }; sh_lnd_local(debug, mir, map, found, debug_function, row, &local_indexes, &inst_indexes, file)?; parameter = parameter + 1; }; let mut local = 0; while local < sh_mir_local_count(mir) { if sh_mir_local(mir, local, 0) == function and sh_mir_local(mir, local, 2) >= 0 and sh_mir_local(mir, local, 3) != 1 { sh_lnd_local(debug, mir, map, local, debug_function, row, &local_indexes, &inst_indexes, file)?; (); }; local = local + 1; }; row = row + 1; };
+    while row < map.functions.len() / 6 { let function = sh_link_word(&map.functions, 6, row, 0); let name = sh_symbol_text(&mir.symbols, sh_mir_fn(mir, function, 0))?; let first = sh_link_word(&map.functions, 6, row, 1); let signature = sh_mir_fn(mir, function, 1); let parameter_count = sh_mir_type_word(mir, signature, 5) - 1; let arguments = vec_new_i64(); let mut parameter = 0; while parameter < parameter_count { sh_link_push(&arguments, sh_lnd_type(debug, mir, map, sh_mir_type_arg(mir, signature, parameter), 0)?)?; parameter = parameter + 1; }; let result = sh_lnd_type(debug, mir, map, sh_mir_type_arg(mir, signature, parameter_count), 0)?; let debug_function = sh_link_debug_typed_function(debug, &name, 1, first, sh_link_word(&map.functions, 6, row, 2) - first, sh_link_word(&map.functions, 6, row, 3), sh_link_word(&map.functions, 6, row, 4), 0, result, &arguments)?; sh_lnd_lines(debug, mir, map, row, debug_function, file, &lines)?; parameter = 0; while parameter < parameter_count { let mut local = 0; let mut found = -1; while local < sh_mir_local_count(mir) { if sh_mir_local(mir, local, 0) == function and sh_mir_local(mir, local, 3) == 1 and sh_mir_local(mir, local, 6) == parameter { if found >= 0 { return sh_i64_error(7311); }; found = local; }; local = local + 1; }; if found < 0 { return sh_i64_error(7311); }; sh_lnd_local(debug, mir, map, found, debug_function, row, &local_indexes, &inst_indexes, file)?; parameter = parameter + 1; }; let mut local = 0; while local < sh_mir_local_count(mir) { if sh_mir_local(mir, local, 0) == function and sh_mir_local(mir, local, 2) >= 0 and sh_mir_local(mir, local, 3) != 1 { sh_lnd_local(debug, mir, map, local, debug_function, row, &local_indexes, &inst_indexes, file)?; (); }; local = local + 1; }; row = row + 1; };
     sh_i64_ok(debug.functions.len() / 8);
 }
 
@@ -191,24 +199,114 @@ def sh_lnd_add_local(debug: &ShLinkDebug, function: i64, name: &String, kind: i6
     sh_link_debug_local(debug, function, name, kind, stack, start, size);
 }
 
-def sh_lnd_supported(mir: &ShMir, ty: i64, allow_void: bool, depth: i64) -> bool {
-    if depth > 64 { return false; };
+def sh_lnd_supported(mir: &ShMir, map: &ShNativeDebugMap, ty: i64, allow_void: bool, depth: i64) -> bool {
     let primitive = sh_lnd_primitive(mir, ty);
     if primitive >= 0 { return sh_link_cv_builtin(primitive, allow_void); };
-    let kind = sh_mir_type_word(mir, ty, 0);
-    if kind != 6 and kind != 7 { return false; };
-    if sh_mir_type_word(mir, sh_mir_type_arg(mir, ty, 0), 0) == 6 { return false; };
-    sh_lnd_supported(mir, sh_mir_type_arg(mir, ty, 0), kind == 7, depth + 1);
+    while map.type_heights.len() < sh_type_count(&mir.types) { if not map.type_heights.push(-1) { return false; }; };
+    let height = sh_lnd_height(mir, map, ty, 0);
+    height >= 0 and depth <= 64 - height;
 }
 
-def sh_lnd_type(debug: &ShLinkDebug, mir: &ShMir, ty: i64, depth: i64) -> Result<i64, i64> {
+def sh_lnd_height(mir: &ShMir, map: &ShNativeDebugMap, ty: i64, depth: i64) -> i64 {
+    if depth > 64 or ty < 0 or ty >= map.type_heights.len() { return -3; };
+    if sh_lnd_primitive(mir, ty) >= 0 { return 0; };
+    let cached = sengoo_vec_get_or_default_i64(map.type_heights.handle, ty, -3);
+    if cached != -1 { return if cached == -2 { -3; } else { cached; }; };
+    if not map.type_heights.set(ty, -2) { return -3; };
+    let kind = sh_mir_type_word(mir, ty, 0);
+    let mut height = -3;
+    if kind == 6 or kind == 7 or kind == 8 { let child = sh_mir_type_arg(mir, ty, 0); let primitive = sh_lnd_primitive(mir, child); if (kind == 7 or primitive != 3) and sh_mir_type_word(mir, child, 0) != 6 { let nested = sh_lnd_height(mir, map, child, depth + 1); if nested >= 0 { height = nested + 1; }; }; };
+    if kind == 10 { height = 1; let mut field = 0; if sh_mir_type_word(mir, ty, 5) > 256 { height = -3; }; while height >= 0 and field < sh_mir_type_word(mir, ty, 5) { let child = sh_mir_type_arg(mir, ty, field); let nested = if sh_lnd_primitive(mir, child) == 3 { -3; } else { sh_lnd_height(mir, map, child, depth + 1); }; if nested < 0 { height = -3; } else { if nested + 1 > height { height = nested + 1; }; }; field = field + 1; }; };
+    if kind == 12 and sh_mir_type_word(mir, ty, 1) != 2 and sh_mir_type_word(mir, ty, 5) == 0 { height = 1; let mut row = 0; let mut rows = 0; while height >= 0 and row < sh_mir_count(&mir.layouts, 7) { if sh_mir_word(&mir.layouts, 7, row, 0) == ty { rows = rows + 1; let variant = sh_mir_word(&mir.layouts, 7, row, 1); let count = sh_mir_field_count(mir, ty, variant); if count < 0 or count > 256 or rows > 256 { height = -3; }; let mut field = 0; while height >= 0 and field < count { let child = sh_mir_field_type(mir, ty, variant, field); let nested = if sh_lnd_primitive(mir, child) == 3 { -3; } else { sh_lnd_height(mir, map, child, depth + 1); }; if nested < 0 { height = -3; } else { if nested + 1 > height { height = nested + 1; }; }; field = field + 1; }; }; row = row + 1; }; if rows == 0 { height = -3; }; };
+    if height > 64 { height = -3; };
+    map.type_heights.set(ty, height);
+    height;
+}
+
+def sh_lnd_type(debug: &ShLinkDebug, mir: &ShMir, map: &ShNativeDebugMap, ty: i64, depth: i64) -> Result<i64, i64> {
+    if ty < 0 or ty >= sh_type_count(&mir.types) or depth > 64 { return sh_i64_error(7313); };
+    while map.type_ids.len() < sh_type_count(&mir.types) { sh_link_push(&map.type_ids, -1)?; };
+    let cached = sengoo_vec_get_or_default_i64(map.type_ids.handle, ty, -1);
+    if cached >= 0 { return sh_i64_ok(cached); };
+    let result = sh_lnd_type_inner(debug, mir, map, ty, depth)?;
+    if not map.type_ids.set(ty, result) { return sh_i64_error(7312); };
+    sh_i64_ok(result);
+}
+
+def sh_lnd_type_inner(debug: &ShLinkDebug, mir: &ShMir, map: &ShNativeDebugMap, ty: i64, depth: i64) -> Result<i64, i64> {
     if depth > 64 { return sh_i64_error(7312); };
     let primitive = sh_lnd_primitive(mir, ty);
     if primitive >= 0 { return sh_i64_ok(primitive); };
     let kind = sh_mir_type_word(mir, ty, 0);
+    if kind == 8 or kind == 10 or kind == 12 { return sh_lnd_aggregate(debug, mir, map, ty, depth); };
     if kind != 6 and kind != 7 { return sh_i64_error(7313); };
     if sh_mir_type_word(mir, sh_mir_type_arg(mir, ty, 0), 0) == 6 { return sh_i64_error(7313); };
-    let mut base = sh_lnd_type(debug, mir, sh_mir_type_arg(mir, ty, 0), depth + 1)?;
+    let mut base = sh_lnd_type(debug, mir, map, sh_mir_type_arg(mir, ty, 0), depth + 1)?;
     if sh_mir_type_word(mir, ty, 2) % 2 == 0 { base = sh_link_cv_modifier(&debug.types, base)?; };
     sh_link_cv_pointer(&debug.types, base, kind == 6);
+}
+
+def sh_lnd_field_name(mir: &ShMir, map: &ShNativeDebugMap, ty: i64, variant: i64, field: i64) -> Result<String, i64> {
+    if sh_mir_type_word(mir, ty, 0) == 10 { let name = string_from_str("_")?; name.push_i64(field)?; return Result { is_ok: true, value: name, error: 0 }; };
+    let mut row = 0;
+    let mut found = -1;
+    while row < map.field_names.len() / 4 { if sh_link_word(&map.field_names, 4, row, 0) == ty and sh_link_word(&map.field_names, 4, row, 1) == variant and sh_link_word(&map.field_names, 4, row, 2) == field { if found >= 0 { return Result { is_ok: false, value: String { handle: 0 }, error: 7311 }; }; found = sh_link_word(&map.field_names, 4, row, 3); }; row = row + 1; };
+    if found < 0 { return Result { is_ok: false, value: String { handle: 0 }, error: 7313 }; };
+    let text = sh_symbol_text(&mir.symbols, found)?;
+    if field == -1 { let bytes = sh_coff_symbol_bytes(&text)?; let mut index = 0; let mut start = 0; while index + 1 < text.len() { if bytes.get_u8(index)? == 58 and bytes.get_u8(index + 1)? == 58 { start = index + 2; }; index = index + 1; }; return text.get(start, text.len()); };
+    if variant >= 0 { let bytes = sh_coff_symbol_bytes(&text)?; if text.len() > 0 and bytes.get_u8(0)? >= 48 and bytes.get_u8(0)? <= 57 { let named = string_from_str("_")?; string_copy_result(sengoo_string_push_padded_string_status(named.handle, text.handle, 1, 0))?; return Result { is_ok: true, value: named, error: 0 }; }; };
+    Result { is_ok: true, value: text, error: 0 };
+}
+
+def sh_lnd_payload(debug: &ShLinkDebug, mir: &ShMir, map: &ShNativeDebugMap, layout: &ShTargetLayout, ty: i64, variant: i64, depth: i64) -> Result<i64, i64> {
+    let fields = sh_link_cva_fields();
+    let count = sh_mir_field_count(mir, ty, variant);
+    if count < 0 or count > 256 { return sh_i64_error(7313); };
+    let mut field = 0;
+    let base = if variant >= 0 { 8; } else { 0; };
+    while field < count { let child = sh_mir_field_type(mir, ty, variant, field); let cv = sh_lnd_type(debug, mir, map, child, depth + 1)?; let name = sh_lnd_field_name(mir, map, ty, variant, field)?; let offset = sh_target_field_offset(layout, mir, ty, variant, field)? - base; sh_link_cva_member(&fields, &debug.types, &name, cv, offset)?; field = field + 1; };
+    sh_link_cva_finish(&debug.types, &fields);
+}
+
+def sh_lnd_aggregate(debug: &ShLinkDebug, mir: &ShMir, map: &ShNativeDebugMap, ty: i64, depth: i64) -> Result<i64, i64> {
+    if not sh_lnd_supported(mir, map, ty, false, depth) or map.field_names.len() % 4 != 0 { return sh_i64_error(7313); };
+    let layout = sh_target_layout(mir, ty, 16777216);
+    if layout.error != 0 { return sh_i64_error(7313); };
+    let size = sh_layout_at(&layout.sizes, ty);
+    let kind = sh_mir_type_word(mir, ty, 0);
+    if kind == 8 { let element = sh_lnd_type(debug, mir, map, sh_mir_type_arg(mir, ty, 0), depth + 1)?; return sh_link_cva_array(&debug.types, element, size); };
+    let name = if kind == 10 { let tuple = string_from_str("__sg_tuple_")?; tuple.push_i64(ty)?; tuple; } else { sh_symbol_text(&mir.symbols, sh_mir_type_word(mir, ty, 3))?; };
+    if kind == 10 or sh_mir_type_word(mir, ty, 1) == 0 { let fields = sh_lnd_payload(debug, mir, map, &layout, ty, -1, depth)?; return sh_link_cva_aggregate(&debug.types, 5381, &name, fields, size); };
+    let tags = sh_link_cva_fields();
+    let variants = sh_link_cva_fields();
+    let mut variant = 0;
+    let mut found = 0;
+    while variant < 256 { let mut row = 0; let mut selected = -1; while row < sh_mir_count(&mir.layouts, 7) { if sh_mir_word(&mir.layouts, 7, row, 0) == ty and sh_mir_word(&mir.layouts, 7, row, 1) == variant { selected = row; }; row = row + 1; }; if selected < 0 { break; }; let variant_name = sh_lnd_field_name(mir, map, ty, variant, -1)?; sh_link_cva_enumerator(&tags, &variant_name, variant)?; let payload_fields = sh_lnd_payload(debug, mir, map, &layout, ty, variant, depth + 2)?; let payload_name = name.clone()?; payload_name.push_str("__")?; string_copy_result(sengoo_string_push_padded_string_status(payload_name.handle, variant_name.handle, 1, 0))?; let payload = sh_link_cva_aggregate(&debug.types, 5381, &payload_name, payload_fields, sh_layout_at(&layout.layout_sizes, selected))?; sh_link_cva_member(&variants, &debug.types, &variant_name, payload, 0)?; found = found + 1; variant = variant + 1; };
+    let mut rows = 0;
+    let mut row = 0;
+    while row < sh_mir_count(&mir.layouts, 7) { if sh_mir_word(&mir.layouts, 7, row, 0) == ty { rows = rows + 1; }; row = row + 1; };
+    if found == 0 or found != rows { return sh_i64_error(7313); };
+    let tag_fields = sh_link_cva_finish(&debug.types, &tags)?;
+    let tag_name = name.clone()?;
+    tag_name.push_str("__tag")?;
+    let tag = sh_link_cva_enum(&debug.types, &tag_name, tag_fields)?;
+    let variant_fields = sh_link_cva_finish(&debug.types, &variants)?;
+    let union_name = name.clone()?;
+    union_name.push_str("__payload")?;
+    let payload = sh_link_cva_aggregate(&debug.types, 5382, &union_name, variant_fields, size - 8)?;
+    let fields = sh_link_cva_fields();
+    let tag_field = string_from_str("__tag")?;
+    let payload_field = string_from_str("__payload")?;
+    sh_link_cva_member(&fields, &debug.types, &tag_field, tag, 0)?;
+    sh_link_cva_member(&fields, &debug.types, &payload_field, payload, 8)?;
+    let field_id = sh_link_cva_finish(&debug.types, &fields)?;
+    sh_link_cva_aggregate(&debug.types, 5381, &name, field_id, size);
+}
+
+def sh_lnd_validate_fields(mir: &ShMir, map: &ShNativeDebugMap) -> Result<i64, i64> {
+    if map.field_names.len() % 4 != 0 { return sh_i64_error(7311); };
+    if map.field_names.len() / 4 > 4096 { return sh_i64_error(7312); };
+    let mut row = 0;
+    while row < map.field_names.len() / 4 { let ty = sh_link_word(&map.field_names, 4, row, 0); let variant = sh_link_word(&map.field_names, 4, row, 1); let field = sh_link_word(&map.field_names, 4, row, 2); let name = sh_link_word(&map.field_names, 4, row, 3); if sh_mir_type_word(mir, ty, 0) != 12 or sh_mir_type_word(mir, ty, 5) != 0 { return sh_i64_error(7311); }; let enumeration = sh_mir_type_word(mir, ty, 1) == 1; if enumeration and variant < 0 or not enumeration and variant != -1 { return sh_i64_error(7311); }; let count = sh_mir_field_count(mir, ty, variant); if count < 0 or field < if enumeration { -1; } else { 0; } or field >= count { return sh_i64_error(7311); }; if name < 0 or name >= sh_symbol_count(&mir.symbols) { return sh_i64_error(7311); }; let mut previous = 0; while previous < row { if sh_link_word(&map.field_names, 4, previous, 0) == ty and sh_link_word(&map.field_names, 4, previous, 1) == variant and sh_link_word(&map.field_names, 4, previous, 2) == field { return sh_i64_error(7311); }; previous = previous + 1; }; row = row + 1; };
+    sh_i64_ok(row);
 }

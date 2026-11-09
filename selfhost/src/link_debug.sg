@@ -67,7 +67,10 @@ def sh_link_debug_function(debug: &ShLinkDebug, name: &String, segment: i64, off
 def sh_link_debug_local(debug: &ShLinkDebug, function: i64, name: &String, kind: i64, stack: i64, start: i64, size: i64) -> Result<i64, i64> {
     if debug.locals.len() / 6 >= 4096 { return sh_i64_error(7302); };
     if not sh_link_cv_value(&debug.types, kind, false, 0) { return sh_i64_error(7303); };
+    let stored_size = sh_link_cva_size(&debug.types, kind, 0);
+    if stored_size < 0 { return sh_i64_error(7303); };
     if function < 0 or function >= debug.functions.len() / 8 or stack < 0 or stack > sh_link_word(&debug.functions, 8, function, 4) - 8 or start < sh_link_word(&debug.functions, 8, function, 5) or size < 1 or start + size > sh_link_debug_lifetime_end(debug, function) { return sh_i64_error(7301); };
+    if stored_size > sh_link_word(&debug.functions, 8, function, 4) - stack { return sh_i64_error(7301); };
     let symbol = sh_link_debug_name(debug, name)?;
     let mut index = 0;
     while index < debug.locals.len() / 6 { if sh_link_word(&debug.locals, 6, index, 0) == function and sh_link_word(&debug.locals, 6, index, 1) == symbol { return sh_i64_error(7305); }; index = index + 1; };

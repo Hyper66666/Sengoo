@@ -6,6 +6,8 @@ import selfhost_mir_lower;
 
 import selfhost_link_native_debug;
 
+import selfhost_link_checked_debug;
+
 import selfhost_link_pe;
 
 import std::args;
@@ -64,6 +66,7 @@ def sh_lnt_file(source_path: &String, object_path: &String, image_path: &String,
     native.collect_debug = true;
     sh_native_emit_into(&mut native, &lowered.mir, &object)?;
     let map = sh_lnt_mapping(&native, &lowered.mir);
+    sh_link_checked_debug_names(&map, &lowered.mir, &checked)?;
     if invalid == 1 { let mut index = 0; while index < 6 { map.functions.push(sh_link_word(&map.functions, 6, 0, index)); index = index + 1; }; };
     if invalid == 2 { map.instructions.set(2, -1); (); };
     if invalid == 3 { map.instructions.pop(); map.instructions.pop(); map.instructions.pop(); (); };
@@ -73,6 +76,12 @@ def sh_lnt_file(source_path: &String, object_path: &String, image_path: &String,
     if invalid == 7 { map.instructions.set(3, sh_link_word(&map.instructions, 3, 0, 0)); (); };
     if invalid == 8 { map.functions.set(5, 2); (); };
     if invalid == 9 { map.terminators.set(1, sh_link_word(&map.instructions, 3, 0, 1)); (); };
+    if invalid == 10 { map.field_names.pop(); (); };
+    if invalid == 11 { map.field_names.set(3, -1); (); };
+    if invalid == 12 { map.field_names.set(2, 1000); (); };
+    if invalid == 13 { let mut index = 0; while index < 4 { map.field_names.push(sh_link_word(&map.field_names, 4, 0, index)); index = index + 1; }; };
+    if invalid == 14 { map.field_names.clear(); (); };
+    if invalid == 15 { map.locals.set(1, sh_link_word(&map.functions, 6, 0, 3) - 8); (); };
     sh_link_native_debug_attach(&object, &lowered.mir, &map, source_path, &source)?;
     let raw = sh_object_emit(&object)?;
     let main = string_from_str("main")?;

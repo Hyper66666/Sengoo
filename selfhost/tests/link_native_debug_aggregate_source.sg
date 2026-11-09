@@ -1,0 +1,13 @@
+struct Pair {
+    flag: bool,
+    small: i32,
+    big: u64,
+}
+def main() -> i64 {
+    let pair = Pair { flag: true, small: 40i32, big: 2u64 };
+    let tuple = (40i64, 2i64);
+    let array = [40i64, 2i64];
+    let mut answer: i64 = pair.small as i64;
+    answer = answer + tuple.1 + array[0] - 40;
+    return answer;
+}

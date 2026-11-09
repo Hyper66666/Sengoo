@@ -1,0 +1,85 @@
+import selfhost_link_cv_types;
+
+import std::assert;
+
+import std::io;
+
+extern "C" {
+    fn sengoo_string_live_handle_count() -> i64;
+    fn sengoo_buffer_live_handle_count() -> i64;
+    fn sengoo_opaque_live_handle_count() -> i64;
+}
+
+def sh_lat_scope() -> Result<i64, i64> {
+    let types = sh_link_cv_types_new();
+    let fields = sh_link_cva_fields();
+    let flag = string_from_str("flag")?;
+    let small = string_from_str("small")?;
+    let big = string_from_str("big")?;
+    let real = string_from_str("real")?;
+    sh_link_cva_member(&fields, &types, &flag, 48, 0)?;
+    sh_link_cva_member(&fields, &types, &small, 116, 4)?;
+    sh_link_cva_member(&fields, &types, &big, 35, 8)?;
+    sh_link_cva_member(&fields, &types, &real, 65, 16)?;
+    let field_id = sh_link_cva_finish(&types, &fields)?;
+    let pair = string_from_str("Pair")?;
+    let structure = sh_link_cva_aggregate(&types, 5381, &pair, field_id, 24)?;
+    assert_eq_i64(sh_link_cva_size(&types, structure, 0), 24, "link_cv_aggregate.sg", 1);
+    let array = sh_link_cva_array(&types, structure, 72)?;
+    assert_eq_i64(sh_link_cva_size(&types, array, 0), 72, "link_cv_aggregate.sg", 1);
+    let source = sh_binary_new(4096);
+    sh_binary_unsigned(&source, 4, 4)?;
+    let mut at = 0;
+    while at < sh_binary_len(&types.records) { sh_binary_byte(&source, sh_binary_get(&types.records, at)?)?; at = at + 1; };
+    let mapped = sh_link_cv_types_new();
+    let mapping = sh_link_cv_types_read(&mapped, &source)?;
+    assert_eq_i64(mapping.len(), 3, "link_cv_aggregate.sg", 1);
+    assert_eq_i64(sh_binary_len(&mapped.records), sh_binary_len(&types.records), "link_cv_aggregate.sg", 1);
+    at = 0;
+    while at < sh_binary_len(&types.records) { assert_eq_i64(sh_binary_get(&mapped.records, at)?, sh_binary_get(&types.records, at)?, "link_cv_aggregate.sg", 1); at = at + 1; };
+    assert_eq_i64(sh_link_cva_aggregate(&types, 5381, &pair, field_id, 23).error, 7321, "link_cv_aggregate.sg", 1);
+    assert_eq_i64(sh_link_cva_array(&types, 116, 3).error, 7321, "link_cv_aggregate.sg", 1);
+    let duplicate = sh_link_cva_fields();
+    sh_link_cva_member(&duplicate, &types, &flag, 48, 0)?;
+    sh_link_cva_member(&duplicate, &types, &flag, 48, 1)?;
+    let duplicate_id = sh_link_cva_finish(&types, &duplicate)?;
+    assert_eq_i64(sh_link_cva_aggregate(&types, 5381, &pair, duplicate_id, 2).error, 7321, "link_cv_aggregate.sg", 1);
+    let overlapping = sh_link_cva_fields();
+    sh_link_cva_member(&overlapping, &types, &flag, 19, 0)?;
+    sh_link_cva_member(&overlapping, &types, &small, 19, 4)?;
+    let overlapping_id = sh_link_cva_finish(&types, &overlapping)?;
+    assert_eq_i64(sh_link_cva_aggregate(&types, 5381, &pair, overlapping_id, 16).error, 7321, "link_cv_aggregate.sg", 1);
+    assert_eq_i64(sh_link_cva_aggregate(&types, 5382, &pair, overlapping_id, 16).error, 7321, "link_cv_aggregate.sg", 1);
+    let tags = sh_link_cva_fields();
+    let empty = string_from_str("Empty")?;
+    let value = string_from_str("Value")?;
+    sh_link_cva_enumerator(&tags, &empty, 0)?;
+    sh_link_cva_enumerator(&tags, &value, 1)?;
+    let tag_fields = sh_link_cva_finish(&types, &tags)?;
+    let tag = sh_link_cva_enum(&types, &pair, tag_fields)?;
+    assert_eq_i64(sh_link_cva_size(&types, tag, 0), 8, "link_cv_aggregate.sg", 1);
+    assert_eq_i64(sh_link_cva_aggregate(&types, 5381, &pair, tag_fields, 8).error, 7323, "link_cv_aggregate.sg", 1);
+    let deep = sh_link_cv_types_new();
+    let mut child = 19;
+    at = 0;
+    while at < 64 { child = sh_link_cva_array(&deep, child, 8)?; assert_eq_i64(if sh_link_cv_value(&deep, child, false, 0) { 1; } else { 0; }, 1, "link_cv_aggregate.sg", 1); at = at + 1; };
+    let prior = deep.offsets.len();
+    assert_eq_i64(sh_link_cva_array(&deep, child, 8).error, 7323, "link_cv_aggregate.sg", 1);
+    assert_eq_i64(deep.offsets.len(), prior, "link_cv_aggregate.sg", 1);
+    let large = sh_link_cva_array(&types, 116, 65536)?;
+    assert_eq_i64(sh_link_cva_size(&types, large, 0), 65536, "link_cv_aggregate.sg", 1);
+    sh_i64_ok(0);
+}
+
+def main() -> i64 {
+    let strings = sengoo_string_live_handle_count();
+    let buffers = sengoo_buffer_live_handle_count();
+    let opaque = sengoo_opaque_live_handle_count();
+    let mut index = 0;
+    while index < 100 { let result = sh_lat_scope(); if not result.is_ok() { println(result.error); return 1; }; index = index + 1; };
+    assert_eq_i64(sengoo_string_live_handle_count(), strings, "link_cv_aggregate.sg", 1);
+    assert_eq_i64(sengoo_buffer_live_handle_count(), buffers, "link_cv_aggregate.sg", 1);
+    assert_eq_i64(sengoo_opaque_live_handle_count(), opaque, "link_cv_aggregate.sg", 1);
+    println("selfhost SG CodeView aggregate types: ok");
+    0;
+}

@@ -38,7 +38,7 @@ def sh_ltt_scope() -> Result<i64, i64> {
     let bad_count = sh_link_cv_types_read(&remapped, &input);
     assert_eq_i64(bad_count.error, 7321, "link_cv_types.sg", 1);
     sh_binary_patch(&input, 22, 0, 2)?;
-    sh_binary_patch(&input, 6, 5381, 2)?;
+    sh_binary_patch(&input, 6, 5633, 2)?;
     let unknown = sh_link_cv_types_read(&remapped, &input);
     assert_eq_i64(unknown.error, 7323, "link_cv_types.sg", 1);
     arguments.clear();

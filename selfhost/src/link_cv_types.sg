@@ -3,10 +3,11 @@ import selfhost_link_model;
 struct ShLinkCvTypes {
     records: ShBinary,
     offsets: Vec<i64>,
+    depths: Vec<i64>,
 }
 
 def sh_link_cv_types_new() -> ShLinkCvTypes {
-    ShLinkCvTypes { records: sh_binary_new(1048576), offsets: vec_new_i64() };
+    ShLinkCvTypes { records: sh_binary_new(1048576), offsets: vec_new_i64(), depths: vec_new_i64() };
 }
 
 def sh_link_cv_builtin(kind: i64, allow_void: bool) -> bool {
@@ -20,10 +21,13 @@ def sh_link_cv_type_record(types: &ShLinkCvTypes, record: &ShBinary) -> Result<i
     let mut index = 0;
     while index < types.offsets.len() { let offset = sengoo_vec_get_or_default_i64(types.offsets.handle, index, -1); let size = sh_link_uint(&types.records, offset, 2)? + 2; if size == sh_binary_len(record) { let mut at = 0; while at < size and sh_binary_get(&types.records, offset + at)? == sh_binary_get(record, at)? { at = at + 1; }; if at == size { return sh_i64_ok(4096 + index); }; }; index = index + 1; };
     if sh_binary_len(record) > types.records.limit - sh_binary_len(&types.records) { return sh_i64_error(7322); };
+    let depth = sh_link_cva_record_depth(types, record)?;
+    if depth > 64 { return sh_i64_error(7323); };
     let offset = sh_binary_len(&types.records);
     let mut at = 0;
     while at < sh_binary_len(record) { sh_binary_byte(&types.records, sh_binary_get(record, at)?)?; at = at + 1; };
     sh_link_push(&types.offsets, offset)?;
+    sh_link_push(&types.depths, depth)?;
     sh_i64_ok(4096 + types.offsets.len() - 1);
 }
 
@@ -60,7 +64,7 @@ def sh_link_cv_types_read(types: &ShLinkCvTypes, input: &ShBinary) -> Result<Vec
     if sh_binary_len(input) < 4 or sh_binary_len(input) > 1048576 or sh_link_uint(input, 0, 4)? != 4 { return sh_link_cv_type_map_error(7321); };
     let remap = vec_new_i64();
     let mut at = 4;
-    while at < sh_binary_len(input) { if sh_binary_len(input) - at < 4 { return sh_link_cv_type_map_error(7321); }; if remap.len() >= 4096 { return sh_link_cv_type_map_error(7322); }; let length = sh_link_uint(input, at, 2)?; let kind = sh_link_uint(input, at + 2, 2)?; if length < 2 or length + 2 > sh_binary_len(input) - at or (length + 2) % 4 != 0 { return sh_link_cv_type_map_error(7321); }; let mut mapped = -1; if kind == 4609 { if length < 6 { return sh_link_cv_type_map_error(7321); }; let count = sh_link_uint(input, at + 4, 4)?; if count > 64 { return sh_link_cv_type_map_error(7322); }; if length != 6 + count * 4 { return sh_link_cv_type_map_error(7321); }; let arguments = vec_new_i64(); let mut index = 0; while index < count { sh_link_push(&arguments, sh_link_cv_resolve(types, &remap, sh_link_uint(input, at + 8 + index * 4, 4)?, false)?)?; index = index + 1; }; mapped = sh_link_cv_type_arguments(types, &arguments)?; } else { if kind == 4104 { if length != 14 or sh_link_uint(input, at + 8, 2)? != 0 { return sh_link_cv_type_map_error(7323); }; let old_list = sh_link_uint(input, at + 12, 4)?; if old_list < 4096 or old_list - 4096 >= remap.len() { return sh_link_cv_type_map_error(7321); }; let list = sengoo_vec_get_or_default_i64(remap.handle, old_list - 4096, -1); if sh_link_cv_type_kind(types, list) != 4609 { return sh_link_cv_type_map_error(7321); }; let list_at = sengoo_vec_get_or_default_i64(types.offsets.handle, list - 4096, -1); let count = sh_link_uint(&types.records, list_at + 4, 4)?; if sh_link_uint(input, at + 10, 2)? != count { return sh_link_cv_type_map_error(7321); }; let arguments = vec_new_i64(); let mut index = 0; while index < count { sh_link_push(&arguments, sh_link_uint(&types.records, list_at + 8 + index * 4, 4)?)?; index = index + 1; }; mapped = sh_link_cv_type_procedure(types, sh_link_cv_resolve(types, &remap, sh_link_uint(input, at + 4, 4)?, true)?, &arguments)?; } else { if kind == 4097 { if length != 10 or sh_link_uint(input, at + 8, 2)? != 1 or sh_link_uint(input, at + 10, 2)? != 61938 { return sh_link_cv_type_map_error(7323); }; mapped = sh_link_cv_modifier(types, sh_link_cv_resolve(types, &remap, sh_link_uint(input, at + 4, 4)?, true)?)?; } else { if kind == 4098 { if length != 10 { return sh_link_cv_type_map_error(7321); }; let attributes = sh_link_uint(input, at + 8, 4)?; if attributes != 65548 and attributes != 65580 { return sh_link_cv_type_map_error(7323); }; mapped = sh_link_cv_pointer(types, sh_link_cv_resolve(types, &remap, sh_link_uint(input, at + 4, 4)?, attributes == 65548)?, attributes == 65580)?; } else { return sh_link_cv_type_map_error(7323); }; }; }; }; sh_link_push(&remap, mapped)?; at = at + length + 2; };
+    while at < sh_binary_len(input) { if sh_binary_len(input) - at < 4 { return sh_link_cv_type_map_error(7321); }; if remap.len() >= 4096 { return sh_link_cv_type_map_error(7322); }; let length = sh_link_uint(input, at, 2)?; let kind = sh_link_uint(input, at + 2, 2)?; if length < 2 or length + 2 > sh_binary_len(input) - at or (length + 2) % 4 != 0 { return sh_link_cv_type_map_error(7321); }; let mut mapped = -1; if kind == 4609 { if length < 6 { return sh_link_cv_type_map_error(7321); }; let count = sh_link_uint(input, at + 4, 4)?; if count > 64 { return sh_link_cv_type_map_error(7322); }; if length != 6 + count * 4 { return sh_link_cv_type_map_error(7321); }; let arguments = vec_new_i64(); let mut index = 0; while index < count { sh_link_push(&arguments, sh_link_cv_resolve(types, &remap, sh_link_uint(input, at + 8 + index * 4, 4)?, false)?)?; index = index + 1; }; mapped = sh_link_cv_type_arguments(types, &arguments)?; } else { if kind == 4104 { if length != 14 or sh_link_uint(input, at + 8, 2)? != 0 { return sh_link_cv_type_map_error(7323); }; let old_list = sh_link_uint(input, at + 12, 4)?; if old_list < 4096 or old_list - 4096 >= remap.len() { return sh_link_cv_type_map_error(7321); }; let list = sengoo_vec_get_or_default_i64(remap.handle, old_list - 4096, -1); if sh_link_cv_type_kind(types, list) != 4609 { return sh_link_cv_type_map_error(7321); }; let list_at = sengoo_vec_get_or_default_i64(types.offsets.handle, list - 4096, -1); let count = sh_link_uint(&types.records, list_at + 4, 4)?; if sh_link_uint(input, at + 10, 2)? != count { return sh_link_cv_type_map_error(7321); }; let arguments = vec_new_i64(); let mut index = 0; while index < count { sh_link_push(&arguments, sh_link_uint(&types.records, list_at + 8 + index * 4, 4)?)?; index = index + 1; }; mapped = sh_link_cv_type_procedure(types, sh_link_cv_resolve(types, &remap, sh_link_uint(input, at + 4, 4)?, true)?, &arguments)?; } else { if kind == 4097 { if length != 10 or sh_link_uint(input, at + 8, 2)? != 1 or sh_link_uint(input, at + 10, 2)? != 61938 { return sh_link_cv_type_map_error(7323); }; mapped = sh_link_cv_modifier(types, sh_link_cv_resolve(types, &remap, sh_link_uint(input, at + 4, 4)?, true)?)?; } else { if kind == 4098 { if length != 10 { return sh_link_cv_type_map_error(7321); }; let attributes = sh_link_uint(input, at + 8, 4)?; if attributes != 65548 and attributes != 65580 { return sh_link_cv_type_map_error(7323); }; mapped = sh_link_cv_pointer(types, sh_link_cv_resolve(types, &remap, sh_link_uint(input, at + 4, 4)?, attributes == 65548)?, attributes == 65580)?; } else { mapped = sh_link_cva_read(types, input, at, length, kind, &remap)?; }; }; }; }; sh_link_push(&remap, mapped)?; at = at + length + 2; };
     if at != sh_binary_len(input) { return sh_link_cv_type_map_error(7321); };
     Result { is_ok: true, value: remap, error: 0 };
 }
@@ -92,6 +96,7 @@ def sh_link_cv_value(types: &ShLinkCvTypes, id: i64, allow_void: bool, depth: i6
     if depth > 64 { return false; };
     if sh_link_cv_builtin(id, allow_void) { return true; };
     let kind = sh_link_cv_type_kind(types, id);
+    if kind == 5379 or kind == 5381 or kind == 5382 or kind == 5383 { let nested = sh_link_cva_depth(types, id); return nested >= 0 and nested <= 64 - depth and sh_link_cva_size(types, id, depth) >= 0; };
     if kind != 4097 and kind != 4098 { return false; };
     let at = sengoo_vec_get_or_default_i64(types.offsets.handle, id - 4096, -1);
     let base = sh_link_uint(&types.records, at + 4, 4).unwrap_or(-1);
@@ -134,4 +139,206 @@ def sh_link_cv_reference(types: &ShLinkCvTypes, id: i64, depth: i64) -> bool {
     let at = sengoo_vec_get_or_default_i64(types.offsets.handle, id - 4096, -1);
     if kind == 4098 { return sh_link_uint(&types.records, at + 8, 4).unwrap_or(-1) == 65580; };
     sh_link_cv_reference(types, sh_link_uint(&types.records, at + 4, 4).unwrap_or(-1), depth + 1);
+}
+
+def sh_link_cva_pad(record: &ShBinary) -> Result<i64, i64> {
+    let mut remaining = (4 - sh_binary_len(record) % 4) % 4;
+    while remaining > 0 { sh_binary_byte(record, 240 + remaining)?; remaining = remaining - 1; };
+    sh_i64_ok(0);
+}
+
+def sh_link_cva_padding(input: &ShBinary, at: i64, end: i64) -> Result<i64, i64> {
+    let mut index = at;
+    let aligned = at + (4 - at % 4) % 4;
+    if aligned > end { return sh_i64_error(7321); };
+    while index < aligned { if sh_binary_get(input, index)? != 240 + aligned - index { return sh_i64_error(7321); }; index = index + 1; };
+    sh_i64_ok(aligned);
+}
+
+def sh_link_cva_numeric(record: &ShBinary, value: i64) -> Result<i64, i64> {
+    if value < 0 or value > 16777216 { return sh_i64_error(7322); };
+    if value < 32768 { return sh_binary_unsigned(record, value, 2); };
+    sh_binary_unsigned(record, 32772, 2)?;
+    sh_binary_unsigned(record, value, 4);
+}
+
+def sh_link_cva_number(input: &ShBinary, at: i64, end: i64) -> Result<i64, i64> {
+    if at < 0 or at > end - 2 { return sh_i64_error(7321); };
+    let leaf = sh_link_uint(input, at, 2)?;
+    if leaf < 32768 { return sh_i64_ok(leaf); };
+    if leaf != 32772 { return sh_i64_error(7323); };
+    if at > end - 6 { return sh_i64_error(7321); };
+    let value = sh_link_uint(input, at + 2, 4)?;
+    if value < 32768 { return sh_i64_error(7321); };
+    if value > 16777216 { return sh_i64_error(7322); };
+    sh_i64_ok(value);
+}
+
+def sh_link_cva_number_end(input: &ShBinary, at: i64) -> i64 {
+    at + if sh_link_uint(input, at, 2).unwrap_or(32772) < 32768 { 2; } else { 6; };
+}
+
+def sh_link_cva_text(input: &ShBinary, at: i64, end: i64, empty: bool) -> Result<String, i64> {
+    if at < 0 or at >= end or end > sh_binary_len(input) { return Result { is_ok: false, value: String { handle: 0 }, error: 7321 }; };
+    let mut length = 0;
+    while at + length < end and sh_binary_get(input, at + length)? != 0 { length = length + 1; };
+    if length > 1024 or not empty and length == 0 or at + length == end { return Result { is_ok: false, value: String { handle: 0 }, error: 7321 }; };
+    let buffer = ffi_buffer_new(length)?;
+    let mut index = 0;
+    while index < length { buffer.push_u8(sh_binary_get(input, at + index)?)?; index = index + 1; };
+    let text = string_from_utf8(buffer, length);
+    if not text.is_ok() { return Result { is_ok: false, value: String { handle: 0 }, error: 7321 }; };
+    text;
+}
+
+def sh_link_cva_write_text(record: &ShBinary, name: &String, empty: bool) -> Result<i64, i64> {
+    if name.len() > 1024 or not empty and name.len() == 0 { return sh_i64_error(7322); };
+    let bytes = sh_coff_symbol_bytes(name)?;
+    let mut index = 0;
+    while index < name.len() { let byte = bytes.get_u8(index)?; if byte == 0 { return sh_i64_error(7321); }; sh_binary_byte(record, byte)?; index = index + 1; };
+    sh_binary_byte(record, 0);
+}
+
+def sh_link_cva_record(kind: i64) -> ShBinary {
+    let record = sh_binary_new(65536);
+    sh_binary_unsigned(&record, 0, 2);
+    sh_binary_unsigned(&record, kind, 2);
+    record;
+}
+
+def sh_link_cva_finish(types: &ShLinkCvTypes, record: &ShBinary) -> Result<i64, i64> {
+    sh_link_cva_pad(record)?;
+    if sh_binary_len(record) > 65536 { return sh_i64_error(7322); };
+    sh_binary_patch(record, 0, sh_binary_len(record) - 2, 2)?;
+    sh_link_cv_type_record(types, record);
+}
+
+def sh_link_cva_fields() -> ShBinary {
+    sh_link_cva_record(4611);
+}
+
+def sh_link_cva_member(fields: &ShBinary, types: &ShLinkCvTypes, name: &String, ty: i64, offset: i64) -> Result<i64, i64> {
+    if not sh_link_cv_value(types, ty, false, 1) { return sh_i64_error(7323); };
+    sh_binary_unsigned(fields, 5389, 2)?;
+    sh_binary_unsigned(fields, 3, 2)?;
+    sh_binary_unsigned(fields, ty, 4)?;
+    sh_link_cva_numeric(fields, offset)?;
+    sh_link_cva_write_text(fields, name, false)?;
+    sh_link_cva_pad(fields);
+}
+
+def sh_link_cva_enumerator(fields: &ShBinary, name: &String, value: i64) -> Result<i64, i64> {
+    sh_binary_unsigned(fields, 5378, 2)?;
+    sh_binary_unsigned(fields, 3, 2)?;
+    sh_link_cva_numeric(fields, value)?;
+    sh_link_cva_write_text(fields, name, false)?;
+    sh_link_cva_pad(fields);
+}
+
+def sh_link_cva_check_fields(types: &ShLinkCvTypes, id: i64, enumeration: bool, union: bool, size: i64, depth: i64) -> Result<i64, i64> {
+    if depth > 64 or sh_link_cv_type_kind(types, id) != 4611 { return sh_i64_error(7323); };
+    let start = sengoo_vec_get_or_default_i64(types.offsets.handle, id - 4096, -1);
+    let end = start + sh_link_uint(&types.records, start, 2)? + 2;
+    let names = sh_symbols_new(256);
+    let mut at = start + 4;
+    let mut count = 0;
+    let mut previous_end = 0;
+    while at < end { if count >= 256 { return sh_i64_error(7322); }; let kind = sh_link_uint(&types.records, at, 2)?; if kind != if enumeration { 5378; } else { 5389; } or sh_link_uint(&types.records, at + 2, 2)? != 3 { return sh_i64_error(7323); }; let numeric = at + if enumeration { 4; } else { 8; }; let value = sh_link_cva_number(&types.records, numeric, end)?; if not enumeration { let ty = sh_link_uint(&types.records, at + 4, 4)?; let field_size = sh_link_cva_size(types, ty, depth + 1); if not sh_link_cv_value(types, ty, false, depth + 1) or field_size < 0 { return sh_i64_error(7323); }; if value > size or field_size > size - value or union and value != 0 or not union and value < previous_end { return sh_i64_error(7321); }; previous_end = value + field_size; }; let text_at = sh_link_cva_number_end(&types.records, numeric); let name = sh_link_cva_text(&types.records, text_at, end, false)?; let before = sh_symbol_count(&names); sh_intern(&names, &name)?; if sh_symbol_count(&names) != before + 1 { return sh_i64_error(7321); }; at = sh_link_cva_padding(&types.records, text_at + name.len() + 1, end)?; count = count + 1; };
+    if at != end { return sh_i64_error(7321); };
+    sh_i64_ok(count);
+}
+
+def sh_link_cva_aggregate(types: &ShLinkCvTypes, kind: i64, name: &String, fields: i64, size: i64) -> Result<i64, i64> {
+    if kind != 5381 and kind != 5382 or size < 0 or size > 16777216 { return sh_i64_error(7323); };
+    let count = sh_link_cva_check_fields(types, fields, false, kind == 5382, size, 0)?;
+    let record = sh_link_cva_record(kind);
+    sh_binary_unsigned(&record, count, 2)?;
+    sh_binary_unsigned(&record, 0, 2)?;
+    sh_binary_unsigned(&record, fields, 4)?;
+    if kind == 5381 { sh_binary_unsigned(&record, 0, 8)?; (); };
+    sh_link_cva_numeric(&record, size)?;
+    sh_link_cva_write_text(&record, name, false)?;
+    sh_link_cva_finish(types, &record);
+}
+
+def sh_link_cva_enum(types: &ShLinkCvTypes, name: &String, fields: i64) -> Result<i64, i64> {
+    let count = sh_link_cva_check_fields(types, fields, true, false, 0, 0)?;
+    let record = sh_link_cva_record(5383);
+    sh_binary_unsigned(&record, count, 2)?;
+    sh_binary_unsigned(&record, 0, 2)?;
+    sh_binary_unsigned(&record, 35, 4)?;
+    sh_binary_unsigned(&record, fields, 4)?;
+    sh_link_cva_write_text(&record, name, false)?;
+    sh_link_cva_finish(types, &record);
+}
+
+def sh_link_cva_array(types: &ShLinkCvTypes, element: i64, size: i64) -> Result<i64, i64> {
+    let element_size = sh_link_cva_size(types, element, 1);
+    if not sh_link_cv_value(types, element, false, 1) or element_size < 1 { return sh_i64_error(7323); };
+    if size < 0 or size > 16777216 or size % element_size != 0 { return sh_i64_error(7321); };
+    let record = sh_link_cva_record(5379);
+    sh_binary_unsigned(&record, element, 4)?;
+    sh_binary_unsigned(&record, 35, 4)?;
+    sh_link_cva_numeric(&record, size)?;
+    let name = string_from_str("")?;
+    sh_link_cva_write_text(&record, &name, true)?;
+    sh_link_cva_finish(types, &record);
+}
+
+def sh_link_cva_size(types: &ShLinkCvTypes, id: i64, depth: i64) -> i64 {
+    if depth > 64 { return -1; };
+    if id == 3 { return 0; };
+    if id == 16 or id == 32 or id == 48 or id == 104 or id == 105 or id == 112 { return 1; };
+    if id == 17 or id == 33 or id == 114 or id == 115 or id == 113 or id == 122 { return 2; };
+    if id == 18 or id == 34 or id == 64 or id == 116 or id == 117 or id == 123 { return 4; };
+    if id == 19 or id == 35 or id == 65 or id == 118 or id == 119 { return 8; };
+    let kind = sh_link_cv_type_kind(types, id);
+    let at = sengoo_vec_get_or_default_i64(types.offsets.handle, id - 4096, -1);
+    if kind == 4097 { return sh_link_cva_size(types, sh_link_uint(&types.records, at + 4, 4).unwrap_or(-1), depth + 1); };
+    if kind == 4098 { return 8; };
+    if kind == 5383 { return 8; };
+    if kind == 5379 or kind == 5381 or kind == 5382 { let offset = if kind == 5381 { 20; } else { 12; }; return sh_link_cva_number(&types.records, at + offset, at + sh_link_uint(&types.records, at, 2).unwrap_or(-2) + 2).unwrap_or(-1); };
+    -1;
+}
+
+def sh_link_cva_read(types: &ShLinkCvTypes, input: &ShBinary, at: i64, length: i64, kind: i64, remap: &Vec<i64>) -> Result<i64, i64> {
+    let end = at + length + 2;
+    if kind == 4611 { let record = sh_link_cva_fields(); let names = sh_symbols_new(256); let mut cursor = at + 4; while cursor < end { if sh_symbol_count(&names) >= 256 { return sh_i64_error(7322); }; let member = sh_link_uint(input, cursor, 2)?; if member != 5389 and member != 5378 or sh_link_uint(input, cursor + 2, 2)? != 3 { return sh_i64_error(7323); }; let numeric = cursor + if member == 5389 { 8; } else { 4; }; let value = sh_link_cva_number(input, numeric, end)?; let name_at = sh_link_cva_number_end(input, numeric); let name = sh_link_cva_text(input, name_at, end, false)?; let before = sh_symbol_count(&names); sh_intern(&names, &name)?; if before + 1 != sh_symbol_count(&names) { return sh_i64_error(7321); }; if member == 5389 { let ty = sh_link_cv_resolve(types, remap, sh_link_uint(input, cursor + 4, 4)?, false)?; sh_link_cva_member(&record, types, &name, ty, value)?; (); } else { sh_link_cva_enumerator(&record, &name, value)?; (); }; cursor = sh_link_cva_padding(input, name_at + name.len() + 1, end)?; }; return sh_link_cva_finish(types, &record); };
+    if kind == 5379 { if length < 14 or sh_link_uint(input, at + 8, 4)? != 35 { return sh_i64_error(7323); }; let element = sh_link_cv_resolve(types, remap, sh_link_uint(input, at + 4, 4)?, false)?; let size = sh_link_cva_number(input, at + 12, end)?; let name_at = sh_link_cva_number_end(input, at + 12); let name = sh_link_cva_text(input, name_at, end, true)?; if name.len() != 0 or sh_link_cva_padding(input, name_at + 1, end)? != end { return sh_i64_error(7323); }; return sh_link_cva_array(types, element, size); };
+    if kind != 5381 and kind != 5382 and kind != 5383 { return sh_i64_error(7323); };
+    if length < if kind == 5381 { 22; } else { 14; } { return sh_i64_error(7321); };
+    if sh_link_uint(input, at + 6, 2)? != 0 { return sh_i64_error(7323); };
+    let old_fields = sh_link_uint(input, at + if kind == 5383 { 12; } else { 8; }, 4)?;
+    if old_fields < 4096 or old_fields - 4096 >= remap.len() { return sh_i64_error(7321); };
+    let fields = sengoo_vec_get_or_default_i64(remap.handle, old_fields - 4096, -1);
+    if sh_link_cv_type_kind(types, fields) != 4611 { return sh_i64_error(7321); };
+    let numeric_at = at + if kind == 5381 { 20; } else { 12; };
+    let size = if kind == 5383 { if sh_link_uint(input, at + 8, 4)? != 35 { return sh_i64_error(7323); }; 0; } else { sh_link_cva_number(input, numeric_at, end)?; };
+    if kind == 5381 and sh_link_uint(input, at + 12, 8)? != 0 { return sh_i64_error(7323); };
+    let name_at = if kind == 5383 { at + 16; } else { sh_link_cva_number_end(input, numeric_at); };
+    let name = sh_link_cva_text(input, name_at, end, false)?;
+    if sh_link_cva_padding(input, name_at + name.len() + 1, end)? != end { return sh_i64_error(7321); };
+    let count = sh_link_cva_check_fields(types, fields, kind == 5383, kind == 5382, size, 0)?;
+    if count != sh_link_uint(input, at + 4, 2)? { return sh_i64_error(7321); };
+    if kind == 5383 { return sh_link_cva_enum(types, &name, fields); };
+    sh_link_cva_aggregate(types, kind, &name, fields, size);
+}
+
+def sh_link_cva_depth(types: &ShLinkCvTypes, id: i64) -> i64 {
+    if sh_link_cv_builtin(id, true) { return 0; };
+    if id < 4096 or id - 4096 >= types.depths.len() { return -1; };
+    sengoo_vec_get_or_default_i64(types.depths.handle, id - 4096, -1);
+}
+
+def sh_link_cva_record_depth(types: &ShLinkCvTypes, record: &ShBinary) -> Result<i64, i64> {
+    let kind = sh_link_uint(record, 2, 2)?;
+    if kind == 4097 or kind == 4098 or kind == 5379 { let child = sh_link_cva_depth(types, sh_link_uint(record, 4, 4)?); if child < 0 { return sh_i64_error(7321); }; return sh_i64_ok(child + 1); };
+    if kind == 5383 { return sh_i64_ok(1); };
+    if kind == 5381 or kind == 5382 { let child = sh_link_cva_depth(types, sh_link_uint(record, 8, 4)?); if child < 0 { return sh_i64_error(7321); }; return sh_i64_ok(child + 1); };
+    if kind != 4611 { return sh_i64_ok(0); };
+    let mut at = 4;
+    let end = sh_binary_len(record);
+    let mut deepest = 0;
+    while at < end { let member = sh_link_uint(record, at, 2)?; if member != 5389 and member != 5378 { return sh_i64_error(7323); }; if member == 5389 { let child = sh_link_cva_depth(types, sh_link_uint(record, at + 4, 4)?); if child < 0 { return sh_i64_error(7321); }; if child > deepest { deepest = child; }; }; let numeric = at + if member == 5389 { 8; } else { 4; }; sh_link_cva_number(record, numeric, end)?; let text_at = sh_link_cva_number_end(record, numeric); let text = sh_link_cva_text(record, text_at, end, false)?; at = sh_link_cva_padding(record, text_at + text.len() + 1, end)?; };
+    sh_i64_ok(deepest);
 }

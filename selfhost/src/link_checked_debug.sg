@@ -1,0 +1,18 @@
+import selfhost_semantic;
+
+import selfhost_link_native_debug;
+
+def sh_link_checked_debug_name(map: &ShNativeDebugMap, ty: i64, variant: i64, field: i64, name: i64) -> Result<i64, i64> {
+    if map.field_names.len() / 4 >= 4096 { return sh_i64_error(7312); };
+    sh_link_push(&map.field_names, ty)?;
+    sh_link_push(&map.field_names, variant)?;
+    sh_link_push(&map.field_names, field)?;
+    sh_link_push(&map.field_names, name);
+}
+
+def sh_link_checked_debug_names(map: &ShNativeDebugMap, mir: &ShMir, checked: &ShChecked) -> Result<i64, i64> {
+    if map.field_names.len() != 0 { return sh_i64_error(7311); };
+    let mut ty = 0;
+    while ty < sh_type_count(&mir.types) { if sh_mir_type_word(mir, ty, 0) == 12 and sh_mir_type_word(mir, ty, 5) == 0 { let mut source_ty = 0; let mut actual = -1; while source_ty < sh_type_count(&checked.types) { if sh_s_kind(checked, source_ty) == 12 and sh_s_arity(checked, source_ty) == 0 and sh_s_nominal(checked, source_ty) == sh_mir_type_word(mir, ty, 3) { actual = source_ty; break; }; source_ty = source_ty + 1; }; if actual < 0 { return sh_i64_error(7313); }; let owner = sh_adt_binding(checked, actual); if sh_mir_type_word(mir, ty, 1) == 0 { let count = sh_layout_field_count(checked, actual); let mut field = 0; while field < count { let binding = sh_layout_field_binding(checked, actual, field); sh_link_checked_debug_name(map, ty, -1, field, sh_binding_word(checked, binding, 0))?; field = field + 1; }; } else { let mut binding = 0; while binding < sh_binding_count(checked) { if sh_binding_word(checked, binding, 2) == 5 and sh_binding_word(checked, binding, 6) == owner { let variant = sh_binding_word(checked, binding, 7); sh_link_checked_debug_name(map, ty, variant, -1, sh_binding_word(checked, binding, 0))?; let mut field = 0; while field < sh_binding_count(checked) { if sh_binding_word(checked, field, 2) == 6 and sh_binding_word(checked, field, 6) == binding { sh_link_checked_debug_name(map, ty, variant, sh_binding_word(checked, field, 7), sh_binding_word(checked, field, 0))?; (); }; field = field + 1; }; }; binding = binding + 1; }; }; }; ty = ty + 1; };
+    sh_i64_ok(map.field_names.len() / 4);
+}

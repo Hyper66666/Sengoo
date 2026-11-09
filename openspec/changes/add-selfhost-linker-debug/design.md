@@ -367,3 +367,58 @@ compiler participating in product PE/PDB generation.
 
 Pointer record reference:
 https://github.com/llvm/llvm-project/blob/llvmorg-19.1.7/llvm/include/llvm/DebugInfo/CodeView/TypeRecord.h
+
+## Bounded aggregate debug types
+
+The SG type pool writes and remaps LF_FIELDLIST with public LF_MEMBER or
+LF_ENUMERATE entries, LF_STRUCTURE, LF_UNION, LF_ARRAY and the supported
+unsigned-64 LF_ENUM form. Structure members must fit their declared size in
+nonoverlapping offset order; union members all start at zero and fit the union.
+Member names are unique within a list. Counts, sizes, backward references,
+NUL-terminated UTF-8 names and LF_PAD bytes are checked before publication.
+The numeric subset uses canonical immediate unsigned values or LF_ULONG;
+negative/other numeric leaves and unsupported properties (including C++ forward
+references, unique names, inheritance and methods) fail explicitly. It does
+not accept a complete arbitrary native C++ type stream.
+
+Bounds are 256 members per field list, 1,024 UTF-8 bytes per name, 16 MiB per
+represented aggregate/array, 4,096 interned records and 1 MiB type bytes.
+The existing 64-layer cap now includes aggregate/array wrappers. A per-record
+depth cache accounts for shared subtypes without recursively expanding an
+exponential DAG. Array byte sizes must be exact multiples of nonzero element
+sizes; references to field lists and procedure records are not value types.
+Local validation includes the entire represented byte extent in the fixed
+stack frame, rather than just checking its starting address.
+
+MIR retains aggregate field types/offsets but not their declared names.
+ShNativeDebugMap therefore adds checked flat quadruples
+`(mirType, variant, fieldOrdinal, nameSymbol)`. A variant ordinal of -1 denotes
+a struct; an enum field ordinal of -1 names the variant. The independent
+link_checked_debug adapter obtains these names from ShChecked layout bindings
+whose symbol indices are retained by MIR. The map rejects malformed widths,
+unknown types/variants/fields/symbols and duplicate entries, with a 4,096-row
+bound. The native emitter has no debug module dependency and needs no changes.
+Fresh map caches memoize supported MIR type heights and emitted CV indices;
+cycles, generic nominal types, class layouts and function targets remain
+unsupported. Tuple member names are `_0`, `_1`, and so on.
+
+The adapter reuses sh_target_layout for array strides, tuple padding and named
+field offsets. Nongeneric enums are represented by their real eight-byte
+`__tag` and `__payload` union at byte eight, with named variant payload structs.
+Tag enumerators carry the actual MIR variant ordinals. This is a physical
+tag/union view; conditional active-variant display, inactive-payload
+initialization and a language-specific debugger pretty-printer remain open.
+Real LLDB fixtures inspect a known initialized Value payload, and do not infer
+meaning from inactive union arms.
+
+Native qualification snapshots the complete SG entry/import closure and the
+whole standard library/runtime.c before building. The source and snapshot
+hashes, producer command/tool hashes and full revision interval are recorded.
+Module maps and source-runtime overrides point to those snapshots. Later
+checkout edits are reported separately and cannot silently replace a producer
+input; snapshot/runtime-Rust/tool changes still fail the run. Independent
+format probes use clang only as an oracle, while product source compilation,
+object emission, PE linking, CodeView remapping and PDB writing remain SG.
+
+Aggregate record layout reference:
+https://github.com/llvm/llvm-project/blob/llvmorg-19.1.7/llvm/lib/DebugInfo/CodeView/TypeRecordMapping.cpp
