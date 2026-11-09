@@ -14,7 +14,7 @@
 - [x] Convert bounded decimal floating literals entirely in SG with exact rational IEEE rounding and an edition-2026-compatible f64-to-f32 path; independently verify 3,332 cases, 15 actual reference double-rounding executions and 100 resource rounds (`target/selfhost/m4-float-literal-exact/evidence.json`). Numeric casts and complete backend integration remain open.
 - [x] Connect reference-compatible decimal literals and compare 19 exact supported programs through the SG native CLI and frozen Rust/LLVM path, including generic instances, structures, float literals and class methods (`target/selfhost/m4-source-expanded/evidence.json`). Full language/tool/backend support remains open.
 - [x] Preserve saturating float-to-signed/unsigned integer conversion, integer-to-float rounding and f32/f64 width conversion with independently executed boundary/NaN/infinity cases and 4,096 integer bit patterns (`target/selfhost/m4-numeric-casts/evidence.json`). Full M4 semantics remain open.
-- [x] Emit fixed-frame Windows x64 `.pdata/.xdata` unwind records and checked `__chkstk` probes for >4 KiB frames; verify LLVM inspection, `RtlLookupFunctionEntry`, `RtlVirtualUnwind`, deterministic objects and exact resource recovery (`target/selfhost/m4-unwind-final3/evidence.json`). Exception handlers, XMM saves and CodeView remain open.
+- [x] Execute signed/unsigned division and remainder, debug zero/overflow hooks and release wrapping behavior for signed minimum divided by minus one (`target/selfhost/m4-division/evidence.json`). Full numeric/cleanup coverage remains open.
 
 ## Supported target behavior
 
@@ -154,3 +154,14 @@ NaN/infinity/zero/range saturation to i8/u8/i64/u64, f32 and f64 sources,
 in-range truncation and f32/f64 width casts, plus 4,096 signed/unsigned integer
 rounding cases. All preceding scalar/aggregate/call/unwind/probe/overflow and
 resource regressions remain green; a complete backend gate remains open.
+
+Integer division evidence: `target/selfhost/m4-division/evidence.json`, SHA-256
+`e76b1a4b8c3db854a9d812e92cc2f92ee908c0b300049ce09f9f3cc1c2be9b0b`,
+revision `c68939c6f3a7bb12c126581f31e5f02456825bfe`, Windows 11 x64.
+Twenty-eight commands passed with unchanged inputs/tools. C verified defined
+signed/unsigned quotient and remainder results. Debug zero and minimum/-1
+overflow cases invoked their hooks (verification exits 62 and 63); wrapping
+mode returned minimum/zero without an overflow hook. The reference overflowing
+LLVM divide is not a defined result oracle; this edge is recorded explicitly
+against the existing numeric overflow specification. All prior native
+regressions and exact resource checks passed.

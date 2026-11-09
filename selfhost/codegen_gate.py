@@ -108,8 +108,12 @@ def main():
             raise AssertionError("aggregate C ABI cases did not execute")
         if b"native saturating casts, NaN, ranges and integer rounding: ok" not in executed:
             raise AssertionError("numeric conversion cases did not execute")
+        if b"native signed and unsigned division and remainder: ok" not in executed:
+            raise AssertionError("division/remainder cases did not execute")
         for case in ("overflow", "overflow8", "umul-overflow", "uadd-overflow", "mul-overflow"):
             run("reject-" + case, [probe, case], b"integer overflow", 63)
+        run("reject-division-zero", [probe, "division-zero"], b"division by zero", 62)
+        run("reject-division-overflow", [probe, "division-overflow"], b"integer overflow", 63)
         run("execute-wrap", [wrap_probe, "wrap"], b"native wrapping arithmetic: ok")
         report["artifacts"] = {p.name: sha(p) for p in (abi_binary, binary, checked, repeated, wrapping, probe, wrap_probe)}
         report["result"] = "passed"

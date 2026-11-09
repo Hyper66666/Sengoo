@@ -178,11 +178,28 @@ def sh_native_float_binary(native: &ShNative, mir: &ShMir, id: i64) -> Result<i6
     sh_native_save(native, id, 0);
 }
 
+def sh_native_division(native: &ShNative, mir: &ShMir, id: i64) -> Result<i64, i64> {
+    let lhs = sh_mir_inst_arg(mir, id, 0);
+    let rhs = sh_mir_inst_arg(mir, id, 1);
+    let ty = sh_mir_value_type(mir, id);
+    let remainder = sh_mir_inst(mir, id, 6) == sh_kind("%");
+    if native.checked { sh_native_load(native, rhs, 1)?; sh_native_call_fixup(native, sh_mir_fn_count(mir) + 2)?; (); };
+    sh_native_load(native, lhs, 0)?;
+    sh_native_load(native, rhs, 10)?;
+    let mut overflow_done = -1;
+    let signed = sh_native_signed(mir, ty);
+    if signed { let bits = sh_mir_type_word(mir, ty, 1); let minimum = if bits == 64 { -9223372036854775807 - 1; } else { -(1 << (bits - 1)); }; sh_x64_mov_imm(&native.code, 11, minimum)?; sh_x64_binary(&native.code, 5, 0, 11)?; let regular_lhs = sh_x64_branch(&native.code, 2, 5)?; sh_x64_mov_imm(&native.code, 11, -1)?; sh_x64_binary(&native.code, 5, 10, 11)?; let regular_rhs = sh_x64_branch(&native.code, 2, 5)?; if native.checked { sh_x64_mov_imm(&native.code, 1, 1)?; sh_native_call_fixup(native, sh_mir_fn_count(mir))?; (); }; sh_x64_mov_imm(&native.code, 0, if remainder { 0; } else { minimum; })?; overflow_done = sh_x64_branch(&native.code, 0, 0)?; sh_x64_fix_branch(&native.code, regular_lhs, sh_binary_len(&native.code))?; sh_x64_fix_branch(&native.code, regular_rhs, sh_binary_len(&native.code))?; sh_binary_byte(&native.code, 72)?; sh_binary_byte(&native.code, 153)?; sh_x64_unary(&native.code, 3, 10)?; (); } else { sh_x64_binary(&native.code, 4, 2, 2)?; sh_x64_unary(&native.code, 4, 10)?; (); };
+    if remainder { sh_x64_mov(&native.code, 0, 2)?; (); };
+    if overflow_done >= 0 { sh_x64_fix_branch(&native.code, overflow_done, sh_binary_len(&native.code))?; (); };
+    sh_native_finish(native, mir, id);
+}
+
 def sh_native_binary(native: &ShNative, mir: &ShMir, id: i64) -> Result<i64, i64> {
     let lhs = sh_mir_inst_arg(mir, id, 0);
     let rhs = sh_mir_inst_arg(mir, id, 1);
     let ty = sh_mir_value_type(mir, lhs);
     if sh_mir_type_word(mir, ty, 0) == 3 { return sh_native_float_binary(native, mir, id); };
+    if sh_mir_inst(mir, id, 6) == sh_kind("/") or sh_mir_inst(mir, id, 6) == sh_kind("%") { return sh_native_division(native, mir, id); };
     let operator = sh_mir_inst(mir, id, 6);
     if sh_native_width(mir, ty) < 0 { return sh_i64_error(6502); };
     sh_native_load(native, lhs, 0)?;
@@ -414,7 +431,7 @@ def sh_native_emit(native: &mut ShNative, mir: &ShMir) -> Result<ShBinary, i64> 
     if not section.is_ok() { return sh_coff_error(section.error); };
     let symbol_ids = vec_new_i64();
     index = 0;
-    while index <= sh_mir_fn_count(mir) + 1 { let mut used = index < sh_mir_fn_count(mir) and (sh_mir_fn(mir, index, 3) & 2) == 0; if index >= sh_mir_fn_count(mir) { let mut call = 0; while call < native.calls.len() { if sh_native_at(&native.calls, call + 1) == index { used = true; }; call = call + 2; }; }; let mut symbol = -1; if used { let text = if index == sh_mir_fn_count(mir) { string_from_str("sengoo_panic_integer_overflow"); } else { if index == sh_mir_fn_count(mir) + 1 { string_from_str("__chkstk"); } else { sh_symbol_text(&mir.symbols, sh_mir_fn(mir, index, 0)); }; }; if not text.is_ok() { return sh_coff_error(6501); }; let offset = sh_native_at(&native.functions, index); let added = sh_object_add_symbol(&object, &text.value, if offset >= 0 { offset; } else { 0; }, if offset >= 0 { 1; } else { 0; }, true, 2); if not added.is_ok() { return sh_coff_error(added.error); }; symbol = added.value; }; if not symbol_ids.push(symbol) { return sh_coff_error(6503); }; index = index + 1; };
+    while index <= sh_mir_fn_count(mir) + 2 { let mut used = index < sh_mir_fn_count(mir) and (sh_mir_fn(mir, index, 3) & 2) == 0; if index >= sh_mir_fn_count(mir) { let mut call = 0; while call < native.calls.len() { if sh_native_at(&native.calls, call + 1) == index { used = true; }; call = call + 2; }; }; let mut symbol = -1; if used { let text = if index == sh_mir_fn_count(mir) { string_from_str("sengoo_panic_integer_overflow"); } else { if index == sh_mir_fn_count(mir) + 1 { string_from_str("__chkstk"); } else { if index == sh_mir_fn_count(mir) + 2 { string_from_str("sengoo_panic_division_by_zero"); } else { sh_symbol_text(&mir.symbols, sh_mir_fn(mir, index, 0)); }; }; }; if not text.is_ok() { return sh_coff_error(6501); }; let offset = sh_native_at(&native.functions, index); let added = sh_object_add_symbol(&object, &text.value, if offset >= 0 { offset; } else { 0; }, if offset >= 0 { 1; } else { 0; }, true, 2); if not added.is_ok() { return sh_coff_error(added.error); }; symbol = added.value; }; if not symbol_ids.push(symbol) { return sh_coff_error(6503); }; index = index + 1; };
     index = 0;
     while index < native.calls.len() { let symbol = sh_native_at(&symbol_ids, sh_native_at(&native.calls, index + 1)); if symbol < 0 { return sh_coff_error(6502); }; let added = sh_object_add_relocation(&object, 0, sh_native_at(&native.calls, index), symbol, 4); if not added.is_ok() { return sh_coff_error(added.error); }; (); index = index + 2; };
     let unwind = sh_native_unwind(native, &object, mir, &symbol_ids);

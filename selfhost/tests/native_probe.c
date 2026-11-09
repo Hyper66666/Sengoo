@@ -18,10 +18,12 @@ extern int64_t sg_native_local(void);
 extern int64_t sg_native_swap(int64_t);
 extern int64_t sg_native_mul(int64_t,int64_t);
 extern int64_t sg_native_sub(int64_t,int64_t);
+extern int64_t sg_native_div(int64_t,int64_t), sg_native_rem(int64_t,int64_t);
 extern int64_t sg_native_shift(int64_t,int64_t);
 extern bool sg_native_less(int64_t,int64_t);
 extern uint64_t sg_native_uadd(uint64_t,uint64_t);
 extern uint64_t sg_native_umul(uint64_t,uint64_t);
+extern uint64_t sg_native_udiv(uint64_t,uint64_t), sg_native_urem(uint64_t,uint64_t);
 extern int64_t sg_native_large(int64_t,int64_t,int64_t,int64_t,int64_t,int64_t);
 extern double sg_native_fadd(double,double);
 extern double sg_native_fsub(double,double);
@@ -55,6 +57,9 @@ extern struct Odd sg_native_odd(struct Odd);
 extern struct NativeChoice sg_native_enum(void);
 struct Pair sg_native_pair_external(struct Pair p) { p.x+=2; return p; }
 static int checks;
+void sengoo_panic_division_by_zero(int64_t divisor) {
+    if (!divisor) { fputs("division by zero\n",stderr); exit(62); }
+}
 static int unwound;
 void sengoo_panic_integer_overflow(int64_t overflow) {
     ++checks;
@@ -142,8 +147,11 @@ int main(int argc,char **argv) {
     if (argc>1 && strcmp(argv[1],"umul-overflow")==0) { (void)sg_native_umul(UINT64_MAX,2); return 65; }
     if (argc>1 && strcmp(argv[1],"uadd-overflow")==0) { (void)sg_native_uadd(UINT64_MAX,1); return 65; }
     if (argc>1 && strcmp(argv[1],"mul-overflow")==0) { (void)sg_native_mul(INT64_MAX,2); return 65; }
+    if (argc>1 && strcmp(argv[1],"division-zero")==0) { (void)sg_native_div(42,0); return 65; }
+    if (argc>1 && strcmp(argv[1],"division-overflow")==0) { (void)sg_native_div(INT64_MIN,-1); return 65; }
     if (argc>1 && strcmp(argv[1],"wrap")==0) {
-        if (sg_native_add(INT64_MAX,1)!=INT64_MIN || sg_native_umul(UINT64_MAX,2)!=UINT64_MAX-1 || checks!=0) return 66;
+        if (sg_native_add(INT64_MAX,1)!=INT64_MIN || sg_native_umul(UINT64_MAX,2)!=UINT64_MAX-1 ||
+            sg_native_div(INT64_MIN,-1)!=INT64_MIN || sg_native_rem(INT64_MIN,-1)!=0 || checks!=0) return 66;
         puts("native wrapping arithmetic: ok"); return 0;
     }
     int8_t byte=-2;
@@ -154,6 +162,8 @@ int main(int argc,char **argv) {
         sg_native_local()!=-123 || sg_native_swap(0)!=12 || sg_native_swap(1)!=21 ||
         sg_native_swap(2)!=12 || sg_native_swap(101)!=21 ||
         sg_native_mul(-6,7)!=-42 || sg_native_sub(2,44)!=-42 || sg_native_shift(-84,1)!=-42 ||
+        sg_native_div(-85,2)!=-42 || sg_native_rem(-85,2)!=-1 ||
+        sg_native_udiv(UINT64_MAX,2)!=UINT64_MAX/2 || sg_native_urem(UINT64_MAX,2)!=1 ||
         !sg_native_less(INT64_MIN,INT64_MAX) || sg_native_less(INT64_MAX,INT64_MIN) ||
         sg_native_uadd(40,2)!=42 || sg_native_umul(6,7)!=42 ||
         sg_native_large(1,2,3,4,5,6)!=42 || checks<4 || unwound!=7) return 67;
@@ -181,5 +191,6 @@ int main(int argc,char **argv) {
     puts("native float arithmetic, NaN and mixed Windows ABI: ok");
     puts("native aggregate Windows parameters and return pointers: ok");
     puts("native saturating casts, NaN, ranges and integer rounding: ok");
+    puts("native signed and unsigned division and remainder: ok");
     return 0;
 }

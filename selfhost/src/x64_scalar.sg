@@ -34,8 +34,8 @@ def sh_x64_shift(output: &ShBinary, operation: i64, register: i64, immediate: i6
 }
 
 def sh_x64_unary(output: &ShBinary, operation: i64, register: i64) -> Result<i64, i64> {
-    if not sh_x64_register(register) or operation < 0 or operation > 3 { return sh_i64_error(6101); };
-    let group = if operation == 0 { 2; } else { if operation == 1 { 3; } else { if operation == 2 { 4; } else { 7; }; }; };
+    if not sh_x64_register(register) or operation < 0 or operation > 4 { return sh_i64_error(6101); };
+    let group = if operation == 0 { 2; } else { if operation == 1 { 3; } else { if operation == 2 { 4; } else { if operation == 3 { 7; } else { 6; }; }; }; };
     let start = sh_binary_len(output);
     let valid = sh_binary_byte(output, 72 | (register >> 3)).is_ok() and sh_binary_byte(output, 247).is_ok() and sh_binary_byte(output, 192 | (group << 3) | (register & 7)).is_ok();
     if not valid { return sh_x64_rewind(output, start, 6001); };

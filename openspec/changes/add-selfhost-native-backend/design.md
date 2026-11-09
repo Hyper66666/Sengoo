@@ -176,6 +176,16 @@ sticky-bit value and doubles it; f32/f64 conversion uses the corresponding SSE
 width conversion. Independent C cases cover NaN, infinities, signed zero,
 in-range truncation, boundaries and 4,096 deterministic integer bit patterns.
 
+Signed and unsigned integer division/remainder use explicit high-half
+preparation and the appropriate DIV/IDIV instruction. Debug division calls the
+existing division-by-zero hook with the typed divisor. Signed minimum divided
+by minus one follows the existing numeric overflow contract: debug uses the
+overflow hook, wrapping mode returns the minimum value (or zero remainder).
+The LLVM reference emits an overflowing signed divide with no defined result
+for that corner; the independent native test checks the specified overflow
+contract rather than treating that reference expression as a value oracle.
+Defined nonzero signed/unsigned divisions and remainders are checked against C.
+
 Primary references:
 
 - Intel instruction reference: https://www.intel.com/content/www/us/en/content-details/671110/intel-64-and-ia-32-architectures-software-developer-s-manual-combined-volumes-2a-2b-2c-and-2d-instruction-set-reference-a-z.html

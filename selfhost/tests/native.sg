@@ -416,11 +416,15 @@ def sh_nt_fixture(mir: &ShMir) -> Result<bool, i64> {
     sh_nt_swap(mir, integer, boolean)?;
     sh_nt_binary_function(mir, "sg_native_mul", integer, integer, "*")?;
     sh_nt_binary_function(mir, "sg_native_sub", integer, integer, "-")?;
+    sh_nt_binary_function(mir, "sg_native_div", integer, integer, "/")?;
+    sh_nt_binary_function(mir, "sg_native_rem", integer, integer, "%")?;
     sh_nt_binary_function(mir, "sg_native_shift", integer, integer, ">>")?;
     sh_nt_binary_function(mir, "sg_native_less", integer, boolean, "<")?;
     let unsigned = sh_type_primitive(&mir.types, 2, 64, 0)?;
     sh_nt_binary_function(mir, "sg_native_uadd", unsigned, unsigned, "+")?;
     sh_nt_binary_function(mir, "sg_native_umul", unsigned, unsigned, "*")?;
+    sh_nt_binary_function(mir, "sg_native_udiv", unsigned, unsigned, "/")?;
+    sh_nt_binary_function(mir, "sg_native_urem", unsigned, unsigned, "%")?;
     args.clear();
     index = 0;
     while index < 6 { args.push(integer); index = index + 1; };
