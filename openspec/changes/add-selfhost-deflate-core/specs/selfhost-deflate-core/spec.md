@@ -15,6 +15,16 @@ blocks without delegating compression policy to a C or Rust decoder.
 - **THEN** decoding SHALL return a malformed-stream failure before any unauthorized memory access
 - **AND** it SHALL not report its partial output as a successful result
 
+#### Scenario: Unused distance declarations differ from zlib limits
+- **WHEN** an otherwise valid dynamic empty stream declares 31 or 32 distance lengths and decodes no distance
+- **THEN** the RFC header range SHALL be supported while decoded reserved distance symbols remain errors
+- **AND** zlib's stricter header rejection SHALL remain an explicit independent-oracle difference
+
+#### Scenario: A deployed duplicate length encoding is read
+- **WHEN** length symbol 284 has extra value 31
+- **THEN** the decoder SHALL preserve deployed decoder compatibility by producing length 258
+- **AND** tests SHALL distinguish this duplicate from 284 extra 30 and canonical symbol 285
+
 ### Requirement: Raw decoding SHALL preserve bounded unsafe memory contracts
 
 The caller SHALL supply valid, non-overlapping input/output extents within the
@@ -23,8 +33,13 @@ owned runtime storage.
 
 #### Scenario: Limits or output capacity are invalid
 - **WHEN** input/output limits are negative or oversized, or decoded bytes exceed output capacity
-- **THEN** invalid limits SHALL reject without any memory access and capacity failure SHALL stop before the first out-of-range write
+- **THEN** invalid limits SHALL reject without accessing either supplied range and capacity failure SHALL stop before the first out-of-range write
 - **AND** protected-page execution SHALL verify input preservation and bounded partial output
+
+#### Scenario: A complete final block has trailing bytes
+- **WHEN** the final end-of-block has unused bits in its last consumed byte or additional complete supplied bytes
+- **THEN** unused final-byte padding SHALL be allowed and any additional complete bytes SHALL return malformed-stream failure
+- **AND** no framed consumed-length API SHALL be inferred from that raw exact-input contract
 
 ### Requirement: Decoder evidence SHALL retain runtime and package boundaries
 

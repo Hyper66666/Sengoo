@@ -1,0 +1,21 @@
+extern "C" {
+    unsafe fn sengoo_sg_raw_inflate(source: * const u8, length: i64, target: * mut u8, capacity: i64) -> i64;
+    unsafe fn sengoo_deflate_fixture_input(kind: i64) -> * const u8;
+    unsafe fn sengoo_deflate_fixture_output() -> * mut u8;
+    fn sengoo_deflate_fixture_length(kind: i64) -> i64;
+    fn sengoo_deflate_fixture_check(kind: i64, count: i64) -> i64;
+}
+pub unsafe extern "C" fn main() -> i64 {
+    let output = sengoo_deflate_fixture_output();
+    let mut kind = 0;
+    while kind < 3 {
+        let source = sengoo_deflate_fixture_input(kind);
+        let length = sengoo_deflate_fixture_length(kind);
+        let count = sengoo_sg_raw_inflate(source, length, output, 512);
+        if sengoo_deflate_fixture_check(kind, count) != 1 {
+            return 1;
+        };
+        kind = kind + 1;
+    };
+    42;
+}

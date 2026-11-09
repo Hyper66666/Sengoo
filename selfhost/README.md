@@ -233,6 +233,30 @@ The local checkpoint is `target/selfhost/runtime-text-final-checkpoint/evidence.
 its source identities, corpus counts and remaining integration tasks are
 recorded in `openspec/changes/add-selfhost-runtime-text-core/tasks.md`.
 
+## SG raw DEFLATE foundation
+
+`runtime/deflate.sg` implements stored, fixed and dynamic Huffman raw DEFLATE,
+including overlapping copies and history across blocks. Its unsafe C export
+`sengoo_sg_raw_inflate(source, input_length, target, capacity)` requires separate
+readable/writable caller ranges, each bounded to 64 MiB. Success returns the
+decoded byte count; failures are -1 for malformed/truncated/trailing streams,
+-2 for exhausted output capacity and -3 for invalid limits. Failure may leave
+an output prefix. Successful decoding consumes exactly the supplied raw stream
+bytes, allowing unused padding in its final byte.
+
+`verify_runtime_deflate.py --text-evidence REPORT --output DIRECTORY` consumes
+the complete qualified UTF-8 tool/SDK branch and independently checks zlib
+expectations, explicit format edge cases, protected ranges and actual 64 MiB
+input/output limits. Two fresh artifact directories must produce identical
+unmodified SG objects, normalized C memory/fixture objects and SG-linked PE
+bytes. The recorded checkpoint is
+`target/selfhost/runtime-deflate-final-checkpoint/evidence.json`.
+
+The corpus retains the explicit HDIST 31/32 format/oracle differences and the
+duplicate length-258 encoding compatibility case. Gzip framing, tar/package
+integration, final SDK packaging, self-building and performance remain open;
+this raw decoder does not replace the installed package manager.
+
 Other focused gates are `syntax_gate.py`, `transform_gate.py`, `format_gate.py`,
 `native_gate.py`, `layout_gate.py`, `object_gate.py` and `codegen_gate.py`.
 Their exact local evidence paths and source/tool hashes are recorded in the
