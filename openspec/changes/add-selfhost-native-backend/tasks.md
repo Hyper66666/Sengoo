@@ -383,3 +383,16 @@ snapshot bytes: ten rounds, twenty checked compilations. The earlier steady
 state report is retained with its narrower warmup scope. The new adapter is
 still a development CLI and does not establish complete namespaces, persistent
 HIR module facts, a final SDK or compiler self-rebuild.
+
+Physical-MIR driver integration:
+`target/selfhost/m4-physical-module-driver-integrated/evidence.json`, SHA-256
+`b76ccee25c8af47c00035493766f4f6fef3790267091bec073f76f916fc5fc76`,
+start revision `12d564e3fe50176756bf388d923978013608700e`, Windows 11
+AMD64. The production development driver now validates and remaps the combined
+MIR's source metadata before native object emission. All 346 commands passed:
+49 programs execute 42, 46 retain exact reference-equal outputs and the three
+named reference gaps remain explicitly unequal; all five rejected inputs retain
+their output. Immutable consumed sources/tools and producer checkout hashes
+remained unchanged. The separate M3 physical-source gate proves the transformed
+spans, macro/cfg origins, limits and resources; this replay proves their CLI
+integration without claiming multiple-module PDBs or native self-compilation.

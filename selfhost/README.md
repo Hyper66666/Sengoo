@@ -168,6 +168,10 @@ failed compilation preserves the previous output. Module lookup uses relative
 files, `SENGOO_STDLIB` and `SENGOO_MODULE_MAP` with the qualified resolver's
 precedence and physical identity rules. Full namespaces and public module
 compatibility remain open.
+Before emission, combined MIR source metadata is validated and mapped back to
+physical file IDs and original UTF-8 byte intervals. This keeps expansion and
+specialization origins available to later consumers; multiple-file PDB support
+is still a separate gate.
 It is not yet the public `sgc` command interface. Resolved root and structural
 cleanup, stack probing and unwind records have focused execution gates; pending
 runtime glue, conditional field cleanup, async, full module/tool compatibility,
