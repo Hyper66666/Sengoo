@@ -850,3 +850,15 @@ name the fixture in stderr. Before/after mapping COFF bytes are identical; the
 mapped object and frozen reference both execute 42 with equal output. Full HIR
 module persistence, public tool integration and multiple-debug-module support
 remain open. This adapter alone does not establish M3 or compiler self-build.
+
+Specialization-oracle hardening:
+`target/selfhost/m3-module-mir-instance-name-qualified/evidence.json`, SHA-256
+`838d6b0e1e68c657faa3534017cd1ea079471fe0109a55864dd40134a98fa61c`,
+full start/end revision `4ca67c911907e8caa354554b1944f1190d88b871`, Windows 11
+AMD64. Fourteen commands and all existing mapping/resource/negative controls
+pass with unchanged inputs/tools/configurations/checkout. The independent
+oracle now explicitly rejects the bare generic name `identity`, as well as
+other malformed specialization names. The observed generated name remains
+`identity__sg_instance_3`; the previous report's actual code was specialized,
+but its name check also accepted the bare spelling. The stronger negative
+control closes that test-oracle gap without changing the adapter implementation.

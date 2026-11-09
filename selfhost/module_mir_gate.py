@@ -70,6 +70,8 @@ def validate_output(raw, files):
         spelling = "identity" if re.fullmatch(r"identity__sg_instance_[0-9]+", name) else name
         if spelling not in expected:
             raise AssertionError("unexpected function name: " + name)
+        if spelling == "identity" and not re.fullmatch(r"identity__sg_instance_[0-9]+", name):
+            raise AssertionError("generic function lacks a concrete specialization name")
         actual = int(source), int(start), int(end)
         file, begin, limit = expected[spelling]
         if kind == "function":
@@ -103,7 +105,7 @@ def validate_oracle_controls(raw, files):
     fields = lines[index].split("|")
     fields[3], fields[4] = "0", str(len(files[("main.sg", "worker.sg", "leaf.sg")[int(fields[2])]]))
     wrong_whole_file[index] = "|".join(fields)
-    wrong_name = [line.replace("identity__sg_instance_3", "identity_unqualified_3") for line in lines]
+    wrong_name = [re.sub(r"identity__sg_instance_[0-9]+", "identity", line) for line in lines]
     wrong_macro = list(lines)
     call_start = files["worker.sg"].index(b"add_two!(a)")
     for at, line in enumerate(lines):
