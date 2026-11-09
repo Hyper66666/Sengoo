@@ -456,6 +456,50 @@ def sh_nt_narrow_copies(mir: &ShMir, integer: i64, boolean: i64) -> Result<bool,
     Result { is_ok: true, value: true, error: 0 };
 }
 
+def sh_nt_runtime_view(mir: &ShMir, integer: i64) -> Result<bool, i64> {
+    let empty = vec_new_i64();
+    let name = string_from_str("String")?;
+    let symbol = sh_intern(&mir.symbols, &name)?;
+    let owner = sh_type_intern(&mir.types, 12, 0, 0, symbol, &empty)?;
+    let fields = vec_new_i64();
+    fields.push(integer);
+    let offsets = vec_new_i64();
+    offsets.push(-1);
+    sh_mir_add_layout(mir, owner, -1, &fields, &offsets, -1, -1, -1)?;
+    let args = vec_new_i64();
+    args.push(owner);
+    let receiver_type = sh_type_intern(&mir.types, 6, 0, 0, -1, &args)?;
+    args.clear();
+    args.push(integer);
+    let handle_pointer = sh_type_intern(&mir.types, 6, 0, 0, -1, &args)?;
+    let runtime = sh_nt_fn(mir, "sengoo_string_as_str_ptr", &args, integer, 1, true)?;
+    let string_type = sh_type_primitive(&mir.types, 5, 0, 0)?;
+    args.clear();
+    args.push(string_type);
+    let result_type = sh_type_intern(&mir.types, 6, 0, 0, -1, &args)?;
+    args.clear();
+    args.push(receiver_type);
+    let function = sh_nt_fn(mir, "sg_native_runtime_view", &args, result_type, 0, false)?;
+    let scope = sh_mir_add_scope(mir, function, -1, 0)?;
+    let block = sh_nt_block(mir, function, scope)?;
+    let receiver = sh_nt_inst(mir, block, 1, receiver_type, &empty, 0, 0)?;
+    args.clear();
+    args.push(receiver);
+    let field = sh_nt_inst(mir, block, 17, handle_pointer, &args, 0, -1)?;
+    args.clear();
+    args.push(field);
+    let handle = sh_nt_inst(mir, block, 14, integer, &args, 0, 0)?;
+    args.clear();
+    args.push(handle);
+    let bits = sh_nt_inst(mir, block, 20, integer, &args, runtime, 1)?;
+    args.clear();
+    args.push(bits);
+    args.push(receiver);
+    let view = sh_nt_inst(mir, block, 26, result_type, &args, 1, runtime)?;
+    sh_nt_return(mir, block, view)?;
+    Result { is_ok: true, value: true, error: 0 };
+}
+
 def sh_nt_cleanup(mir: &ShMir, integer: i64, boolean: i64, unit: i64) -> Result<bool, i64> {
     let name = string_from_str("TestOwner")?;
     let symbol = sh_intern(&mir.symbols, &name)?;
@@ -729,6 +773,7 @@ def sh_nt_fixture(mir: &ShMir) -> Result<bool, i64> {
     sh_nt_memory_ranges(mir, integer, unit)?;
     sh_nt_strings(mir)?;
     sh_nt_narrow_copies(mir, integer, boolean)?;
+    sh_nt_runtime_view(mir, integer)?;
     Result { is_ok: true, value: true, error: 0 };
 }
 

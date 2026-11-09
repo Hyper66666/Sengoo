@@ -301,3 +301,14 @@ qword load plus padding makes the same C probe fail with the required exit 81.
 All other ABI/numeric/cleanup/string/memory/unwind/resource regressions pass.
 The preserved projection-resource discovery exposed the original error; its
 OR guard and cleanup assertions were retained.
+
+Runtime pointer bridge evidence:
+`target/selfhost/m4-runtime-pointer-bridge/evidence.json`, SHA-256
+`43bba0d320ec6b01378eb5ab0cd6c4940ed932d9e2129eb57f5cee857846f5e4`,
+revision `35b163db0bb259fe74e4f786d74f084f9cdc51e1`, Windows 11 AMD64.
+All 31 commands passed with unchanged inputs/tools. The raw fixture loads the
+verified receiver handle, calls the declared C i64-to-i64 provider and copies
+the exact result bits through opcode 26 to a shared string reference. The C
+caller verifies the handle and view bytes. Existing regressions, resources and
+the old-qword negative control pass. This independent C ABI probe does not
+claim production String allocation or a complete native runtime SDK.

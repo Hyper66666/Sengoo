@@ -68,6 +68,13 @@ extern int64_t sg_native_phi_u8(bool,uint8_t,uint8_t), sg_native_phi_u16(bool,ui
 extern int64_t sg_native_phi_u32(bool,uint32_t,uint32_t);
 struct NarrowFields { int8_t byte; int16_t short_value; int32_t word; };
 extern int64_t sg_native_narrow_fields(struct NarrowFields);
+struct StringHandle { int64_t handle; };
+extern const char *sg_native_runtime_view(const struct StringHandle *);
+int64_t sengoo_string_as_str_ptr(int64_t handle) {
+    static const char view[]="runtime view";
+    if (handle!=42) exit(82);
+    return (int64_t)(uintptr_t)view;
+}
 
 __declspec(noinline) static void poison_stack(void) {
     volatile uint8_t bytes[8192];
@@ -310,6 +317,7 @@ int main(int argc,char **argv) {
     if (test_memory_ranges()) return 79;
     if (test_string_data()) return 80;
     if (test_narrow_copies()) return 81;
+    if (memcmp(sg_native_runtime_view(&(struct StringHandle){42}),"runtime view",sizeof("runtime view"))) return 82;
     if (sg_native_cleanup(false)!=42 || drop_count!=0 ||
         sg_native_cleanup(true)!=42 || drop_count!=1 ||
         sg_native_cleanup(true)!=42 || drop_count!=2) return 76;
@@ -346,5 +354,6 @@ int main(int argc,char **argv) {
     puts("native overlapping byte memmove and typed index strides: ok");
     puts("native readonly UTF-8 string data, NUL and literal relocations: ok");
     puts("native dirty-stack bool and narrow integer phi/field reads: ok");
+    puts("native validated borrowed runtime pointer bridge: ok");
     return 0;
 }

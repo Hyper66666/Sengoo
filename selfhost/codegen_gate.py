@@ -124,6 +124,8 @@ def main():
             raise AssertionError("readonly string data/UTF-8/NUL/relocation cases did not complete")
         if b"native dirty-stack bool and narrow integer phi/field reads: ok" not in executed:
             raise AssertionError("dirty upper stack bytes affected scalar phi or field values")
+        if b"native validated borrowed runtime pointer bridge: ok" not in executed:
+            raise AssertionError("validated runtime ABI pointer bridge failed")
         function = re.search(rb"<sg_native_phi_bool>:\r?\n(.*?)(?=\r?\n[0-9a-f]+ <|\Z)", assembly, re.S)
         if not function:
             raise AssertionError("independent disassembly lacks the bool phi function")
