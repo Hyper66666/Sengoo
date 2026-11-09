@@ -120,3 +120,10 @@ frontend state.
 - **WHEN** an authorized borrowed-view runtime call returns zero or a negative pointer status
 - **THEN** native lowering SHALL fail before passing that value to a safe borrowed-view consumer
 - **AND** a successful valid-handle runtime probe SHALL NOT count as verification of this error path
+
+
+#### Scenario: A borrowed receiver or scalar dereference is used repeatedly
+- **WHEN** an instantiated method self parameter is a reference, or an expression copies a non-borrow-carrying scalar through a reference
+- **THEN** ownership checking SHALL preserve the source owner or reference loan for later valid uses
+- **AND** dereference transfer classification SHALL use the checked expression result rather than a differently typed lifetime-provenance place
+- **AND** moving an owning value out of a borrowed place SHALL retain its explicit rejection

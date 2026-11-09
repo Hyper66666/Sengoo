@@ -400,3 +400,24 @@ current native opcode 26 copies them into a safe view. Valid registered-handle
 integration evidence does not cover that path. A target-only guard proposal
 must reject non-positive pointer bits before the consumer; it is not production
 implementation until separately reviewed and applied by the native owner.
+
+
+### Borrowed access and pointer status follow-up
+
+Method receiver access follows the checked instantiated self parameter: a
+reference receiver does not transfer the underlying owning place merely
+because no legacy by-value summary was inferred. Scalar dereferences use their
+expression type when deciding transfer. Their origin loan may point to a
+different type, such as a key that contributes a lifetime to a returned
+reference; copying an integer from that reference is not moving the key.
+A copied result that carries no borrow must also leave the original reference
+loan available for later reads. Owned dereference results retain the existing
+move-out-of-borrow rejection.
+
+The production opcode-26 bridge now rejects non-positive provider results with
+a signed comparison and a trap before the safe view consumer. A durable
+whole-pipeline gate binds an old compiler's exact identity, actual registered
+runtime storage, a new compiler built from an immutable source snapshot, and
+consumer reachability. Snapshot inputs and later checkout edits are recorded
+separately. Positive addresses still require the authorized provider/live-owner
+contract; this check is not a general integer-to-safe-reference permission.

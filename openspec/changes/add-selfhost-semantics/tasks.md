@@ -639,7 +639,7 @@ these static protocol regressions. Full M3 remains open.
 - [x] Audit the exact fixed-arity, signed-i64 C prototypes and destination position of unicode_version_copy, unicode_provenance_copy and ffi_last_error_copy; reject source-name shadows, wrong arity and variadic signature facts.
 - [x] Re-run the full typed HIR/MIR/ownership gate including fifty native signature poison/restore resource rounds, and independently execute four actual runtime Buffer programs over one hundred scopes each.
 - [x] Rebuild a module-aware CLI from the same frozen source closure and require the actual std::string import to reach the ownership phase with zero diagnostics.
-- [ ] Reject zero or negative runtime pointer status before constructing a safe borrowed view; the invalid-handle reproduction and a target-only native patch are retained separately, and production native code has not yet adopted that patch.
+- [x] Reject zero or negative runtime pointer status before constructing a safe borrowed view; the production native guard and actual-runtime old/new consumer-reachability controls are verified in the later status checkpoint below.
 
 The final frontend report
 target/selfhost/m3-native-input-borrow/final-checkpoint/evidence.json
@@ -694,3 +694,59 @@ preserved as target/selfhost/m3-buffer-observers/actual-core-final.json, SHA-256
 It is not a passing core/native compilation gate. Remaining cases concentrate
 in collections scalar/reference reads, iterator/handle state and two core
 borrowed String-field method calls; they stay open.
+
+
+## Borrowed receiver and scalar dereference checkpoint
+
+- [x] Preserve shared/mutable method receiver borrowing from the instantiated function signature even when no by-value observation summary exists.
+- [x] Classify a dereference transfer using the typed expression result rather than the potentially different type of its loan provenance.
+- [x] Copy non-borrow-carrying dereference results without transferring the source mutable-reference loan; retain owned-value move-out-of-borrow rejection.
+- [x] Run six additional positive/negative cases within the fifty-round ownership resource suite, together with the complete HIR/MIR poison, roundtrip and raw CFG/SSA gates.
+- [x] Rebuild the current module-aware CLI and independently record actual std::string and core checking results without calling a still-failing core entry complete.
+
+Formal frontend report:
+target/selfhost/m3-borrow-reference-access/final-checkpoint/evidence.json,
+SHA-256 912b4972617ed7481050fdbb6bb92f69e0d3d827dd18b28bcc35fb6b969276eb.
+It records actual start revision 49e47f80af573f3186e853c6abb41909412bbfac
+and end revision 2b64f9bcb6768494a13c0d255880ada85387d668, Windows 11 AMD64,
+Python 3.12.14, all four native build/execution commands successful and empty
+source/tool changes. The intervening independent commits did not alter the
+declared frontend import/resource closure.
+
+The current-source CLI discovery report
+target/selfhost/m3-borrow-reference-access/current-discovery/evidence.json
+has SHA-256 607be485473a7744dab7d86323438b54552f69187ca2da8c11d0b04b907032e9.
+It records identical full revision
+3e70fd54feb5ff0e6c3f4144889b6a7845000ec3 and empty source/tool changes.
+The actual std::string graph still has zero ownership diagnostics. The actual
+core entry has 230 remaining ownership diagnostics, down from 236: six scalar
+borrow-provenance false positives are closed, while 228 move diagnostics and
+two borrowed String-field by-value method cases remain open. This discovery
+is not a successful core/native self-compilation gate. The six small fixtures
+also have separately saved frozen-reference check/LLVM phase observations;
+their conservative SG owned-move rejection is not presented as a zero-difference
+frozen-reference result.
+
+## Production runtime pointer status rejection
+
+- [x] Build a native compiler from a complete immutable production SG import snapshot and verify real registered String storage over one hundred valid scopes.
+- [x] Use a hash-bound pre-guard compiler as the negative control for zero, invalid-handle status, out-of-memory status, minimum signed status and a real invalid registered handle.
+- [x] Require every old control to enter the C consumer with exit 55 and every guarded execution to trap before that consumer, with no marker output.
+
+The durable gate is selfhost/verify_runtime_pointer_status.py. Its final report
+target/selfhost/m4-runtime-pointer-status/final-production-checkpoint/evidence.json
+has SHA-256 b789d1501d7186ca1bca92e5394e70382d4ec364035de1faa70b2acfba80cee9.
+It records 36 passing commands, identical full revision
+3e70fd54feb5ff0e6c3f4144889b6a7845000ec3, complete C/Rust runtime and Cargo
+dependency input inventory, and empty dependency/snapshot/tool changes.
+A concurrent checkout edit to native.sg is explicitly listed under
+checkout_changes; compilation consumes the preserved snapshot, so that edit
+does not become part of this binary. The original 36-command report remains
+preserved at production-checkpoint/evidence-36cmd-initial.json.
+
+Five old controls independently print the consumer-reached marker and exit 55.
+Five new controls terminate with Windows status 0xC000001D and no consumer
+output. The valid registered-storage program returns 42 after one hundred
+exact resource scopes. This protects the non-positive status boundary; it
+does not prove that arbitrary positive pointer bits identify valid storage.
+Full SDK admission, complete M3 and native self-compilation remain open.
