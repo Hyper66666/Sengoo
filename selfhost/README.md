@@ -262,9 +262,21 @@ bytes. The recorded checkpoint is
 `target/selfhost/runtime-deflate-final-checkpoint/evidence.json`.
 
 The corpus retains the explicit HDIST 31/32 format/oracle differences and the
-duplicate length-258 encoding compatibility case. Gzip framing, tar/package
-integration, final SDK packaging, self-building and performance remain open;
-this raw decoder does not replace the installed package manager.
+duplicate length-258 encoding compatibility case.
+
+`runtime/gzip.sg` shares that decoder through its prefix interface. It verifies
+optional headers, FHCRC, output CRC32 and ISIZE, with explicit first-member,
+strict-single and strict-concatenation modes. Success packs the consumed byte
+count above 27 decoded-length bits. `verify_runtime_gzip.py --raw-evidence REPORT
+--rust-evidence REPORT --output DIRECTORY` compares the exact corpus with both
+Python/zlib and the repository-pinned Rust flate2 implementation. The checkpoint
+is `target/selfhost/runtime-gzip-final-posttrim/evidence.json`.
+
+Tar/package integration, final SDK packaging, self-building and performance
+remain open. In particular, sgpm permits 256 MiB of unpacked content and 10,000
+tar entries; these runtime foundations currently bound each output to 64 MiB.
+They do not replace the installed package manager or establish that its lazy
+tar reader drains and checks the gzip trailer before publishing an archive.
 
 Other focused gates are `syntax_gate.py`, `transform_gate.py`, `format_gate.py`,
 `native_gate.py`, `layout_gate.py`, `object_gate.py` and `codegen_gate.py`.

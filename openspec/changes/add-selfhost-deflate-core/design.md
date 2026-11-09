@@ -35,9 +35,9 @@ clang may build only memory adapters and independent verification callers in
 the explicit development SDK procedure. Source/tool/revision/host evidence is
 required before any implementation task is checked.
 
-This foundation does not establish gzip headers/checksums/concatenation policy,
-tar extraction, package-manager compatibility, performance, final SDK packaging
-or full M7/M8 completion.
+The raw foundation is separately qualified below. The gzip framing increment
+uses that same decoder; tar extraction, package-manager integration,
+performance, final SDK packaging and full M7/M8 completion remain independent.
 
 ## Entry and implementation
 
@@ -110,3 +110,54 @@ against the compiler's consumed dependency list. Instrumented tests prove read
 order, initialized history and sequential bounded writes; production-adapter
 tests report absent instrumentation as null, without claiming unobserved
 failure-prefix/sequence counters.
+
+## Shared prefix result and gzip framing
+
+One private unsafe C-ABI raw decoder accepts an exact-input flag and returns
+`(consumed_bytes << 27) | decoded_bytes` on success. Both counts are at most
+64 MiB, so their disjoint fields fit within signed i64. The existing
+`sengoo_sg_raw_inflate` exact-input export keeps its original four-argument
+decoded-count result and errors. The new `sengoo_sg_raw_inflate_prefix` has
+the same four arguments and returns the packed counts without rejecting bytes
+after the final raw block. Both call the single shared LZ/Huffman algorithm;
+neither an extra decoder nor pointer/integer authority is introduced. Prefix
+tests check unused trailing bytes are not read and empty output accepts a null
+zero-capacity pointer without a memory adapter call.
+
+The unsafe `sengoo_sg_gzip_decode(source, input_length, target, capacity, mode)`
+returns those same packed consumed/decoded counts, or -1 for a malformed
+header/body/trailer, -2 for insufficient output, and -3 for an invalid mode or
+negative/oversized extent. It rejects bad extents/modes before any supplied
+range access. It validates the RFC 1952 magic, method and reserved flags;
+examines the little-endian extra length and bounded zero-terminated name and
+comment; verifies FHCRC as the low 16 bits of the header CRC32; and verifies
+the output CRC32 and ISIZE trailer. With a 64 MiB output bound, decoded length
+never wraps the 32-bit ISIZE field. Header metadata is skipped without being
+published as a filename or interpreted as a filesystem path. FTEXT, MTIME,
+XFL and OS do not change decoded bytes. CRC32 policy is SG code.
+
+Mode zero decodes and fully verifies the first member, returning its precise
+wire consumption and ignoring any following bytes. Mode one requires exactly
+one member and EOF immediately after its trailer. Mode two requires at least
+one member and consumes a strict concatenation to EOF. Empty input fails in
+all modes. Neither strict mode permits inter-member or trailing zero padding;
+Python gzip's extra tolerance is not an RFC requirement. Each member resets
+raw history while output capacity is shared across the entire result.
+
+The actual package path uses `flate2::read::GzDecoder` in
+`tools/sgpm/src/resolver.rs`. Cached flate2 1.1.9 code uses first-member policy
+and verifies CRC/ISIZE when its stream is fully read; its buffered reader may
+read ahead, so its cursor position is not the SG consumed-wire contract.
+FNAME and FCOMMENT each accept at most 65,535 non-NUL bytes, matching that
+implementation's `MAX_HEADER_BUF`; the framing API retains this explicit
+consumer compatibility bound even though Python zlib accepts longer metadata.
+The separate Rust MultiGzDecoder boundary and zero/trailing policies are tested
+explicitly rather than inferred from Python gzip.
+
+The current tar consumer iterates entries lazily and is not demonstrated to
+drain the gzip trailer on every path. Completing this bounded framing decoder
+does not silently establish checksum enforcement or safe publication in that
+package extraction path. Tar and actual consumer integration remain unchecked.
+The C extension only offsets already bounded primitive pointers; offset zero
+returns the original pointer directly so a null zero-capacity output does not
+perform undefined C null-pointer arithmetic.

@@ -126,7 +126,7 @@ def main():
         report['qualification']={'path':str(evidence),'sha256':digest(read(evidence)),'revision_start':prior['source_revision'],'revision_end':prior['source_revision_end'],'native_binary':report['tools']['native'],'formatter_preview':report['tools']['formatter'],'actual_ntdll':prior['stack_probe_provider'],'scope':'all prior consumed sources/external headers/tools guarded; actual emitter/preview binaries and stack SDK copied by exact digest; historical SG linker chain independently resolved'}
         cenv=dict(clean,PATH=str(clang.parent)+os.pathsep+clean.get('PATH',''),SOURCE_DATE_EPOCH='0')
         implementation=out/'implementation'
-        names=['selfhost/runtime/deflate.sg','selfhost/runtime/deflate_memory.c','selfhost/tests/deflate_cases.py','selfhost/tests/deflate_probe.c','selfhost/tests/deflate_fixture.c','selfhost/tests/deflate_smoke.sg']
+        names=['selfhost/runtime/deflate.sg','selfhost/runtime/deflate_memory.c','selfhost/tests/deflate_cases.py','selfhost/tests/deflate_probe.c','selfhost/tests/deflate_prefix_probe.c','selfhost/tests/deflate_fixture.c','selfhost/tests/deflate_smoke.sg']
         for name in names:snap(ROOT/name,implementation/name)
         for path in (ROOT/'openspec/changes/add-selfhost-deflate-core').rglob('*.md'):
             if path.name!='tasks.md':snap(path,implementation/path.relative_to(ROOT))
@@ -191,6 +191,12 @@ def main():
             report['cases'].append({'round':roundname,'sha256':identities,'cold_exit':42,'stdout_empty':True,'stderr_empty':True});objects.append(built)
         record_expected={key:value for key,value in report['corpus'].items() if key in ['records','calls','successes','malformed','capacity_failures','invalid_limits','guard_cases']}
         report['probe_results']={}
+        prefix_obj,prefix_binary=out/'prefix-probe.obj',out/'prefix-probe.exe'
+        compile_c('compile-prefix-probe',implementation/'selfhost/tests/deflate_prefix_probe.c',prefix_obj)
+        run('link-prefix-probe',[clang,'--ld-path='+str(extra['lld']),prefix_obj,objects[0]['deflate'],stack,'-o',prefix_binary],cenv)
+        prefix=run('prefix-counts',[prefix_binary]);exact_json(prefix.stdout,{'schema':1,'ok':True,'prefix_cases':4,'legacy_exact_cases':3,'invalid_limits':8,'null_empty_output':True,'no_trailing_reads':True,'decoded_bytes_equal':True})
+        if prefix.stderr:raise AssertionError('prefix probe stderr')
+        report['probe_results']['prefix-counts']=strict_json(prefix.stdout)
         for mode in ['instrumented','production']:
             obj=out/('probe-'+mode+'.obj');binary=out/('probe-'+mode+'.exe');compile_c('compile-probe-'+mode,implementation/'selfhost/tests/deflate_probe.c',obj,production=mode=='production')
             run('link-probe-'+mode,[clang,'--ld-path='+str(extra['lld']),obj,objects[0]['deflate'],*([objects[0]['deflate_memory']] if mode=='production' else []),stack,'-o',binary],cenv)

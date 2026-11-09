@@ -279,8 +279,8 @@ macro_rules! sh_def_compressed {
         }
     };
 }
-pub unsafe extern "C" fn sengoo_sg_raw_inflate(source: * const u8, input_length: i64, target: * mut u8,
-capacity: i64) -> i64 {
+unsafe extern "C" fn sh_deflate_inflate(source: * const u8, input_length: i64, target: * mut u8, capacity: i64,
+exact: bool) -> i64 {
     if input_length < 0 or input_length > 67108864 or capacity < 0 or capacity > 67108864 {
         return - 3;
     };
@@ -357,8 +357,20 @@ capacity: i64) -> i64 {
             };
         };
     };
-    if bits.used != input_length {
+    if exact and bits.used != input_length {
         return - 1;
     };
-    produced;
+    (bits.used << 27) | produced;
+}
+pub unsafe extern "C" fn sengoo_sg_raw_inflate(source: * const u8, input_length: i64, target: * mut u8,
+capacity: i64) -> i64 {
+    let result = sh_deflate_inflate(source, input_length, target, capacity, true);
+    if result < 0 {
+        return result;
+    };
+    result & 134217727;
+}
+pub unsafe extern "C" fn sengoo_sg_raw_inflate_prefix(source: * const u8, input_length: i64, target: * mut u8,
+capacity: i64) -> i64 {
+    sh_deflate_inflate(source, input_length, target, capacity, false);
 }

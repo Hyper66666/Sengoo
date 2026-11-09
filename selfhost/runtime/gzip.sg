@@ -1,0 +1,154 @@
+extern "C" {
+    unsafe fn sengoo_sg_raw_inflate_prefix(source: * const u8, length: i64, target: * mut u8, capacity: i64) -> i64;
+    unsafe fn sengoo_deflate_input_read(source: * const u8, index: i64) -> u8;
+    unsafe fn sengoo_deflate_output_read(target: * mut u8, index: i64) -> u8;
+    unsafe fn sengoo_gzip_input_offset(source: * const u8, index: i64) -> * const u8;
+    unsafe fn sengoo_gzip_output_offset(target: * mut u8, index: i64) -> * mut u8;
+}
+def sh_gzip_crc_byte(crc: i64, byte: i64) -> i64 {
+    let mut value = crc ^ byte;
+    let mut bit = 0;
+    while bit < 8 {
+        value = if (value & 1) != 0 {
+            (value >> 1) ^ 3988292384;
+        } else {
+            value >> 1;
+        };
+        bit = bit + 1;
+    };
+    value;
+}
+macro_rules! sh_gzip_byte {
+    () => {
+        {
+            if at >= input_length {
+                return - 1;
+            };
+            let value = sengoo_deflate_input_read(source, at) as i64;
+            at = at + 1;
+            value;
+        }
+    };
+}
+macro_rules! sh_gzip_header_byte {
+    () => {
+        {
+            let byte = sh_gzip_byte! ();
+            header_crc = sh_gzip_crc_byte(header_crc, byte);
+            byte;
+        }
+    };
+}
+macro_rules! sh_gzip_word32 {
+    () => {
+        {
+            let mut word = 0;
+            let mut shift = 0;
+            while shift < 32 {
+                let byte = sh_gzip_byte! ();
+                word = word | (byte << shift);
+                shift = shift + 8;
+            };
+            word;
+        }
+    };
+} // mode 0: first member; mode 1: strict single; mode 2: strict concatenation.
+// Success packs exact consumed bytes above 27 decoded-length bits.
+pub unsafe extern "C" fn sengoo_sg_gzip_decode(source: * const u8, input_length: i64, target: * mut u8,
+capacity: i64, mode: i64) -> i64 {
+    if input_length < 0 or input_length > 67108864 or capacity < 0 or capacity > 67108864 or mode < 0 or mode > 2 {
+        return - 3;
+    };
+    let mut at = 0;
+    let mut produced = 0;
+    loop {
+        if input_length - at < 10 {
+            return - 1;
+        };
+        let mut header_crc = 4294967295;
+        let id1 = sh_gzip_header_byte! ();
+        let id2 = sh_gzip_header_byte! ();
+        let method = sh_gzip_header_byte! ();
+        let flags = sh_gzip_header_byte! ();
+        if id1 != 31 or id2 != 139 or method != 8 or (flags & 224) != 0 {
+            return - 1;
+        };
+        let mut fixed = 0;
+        while fixed < 6 {
+            sh_gzip_header_byte! ();
+            fixed = fixed + 1;
+        };
+        if (flags & 4) != 0 {
+            let low = sh_gzip_header_byte! ();
+            let high = sh_gzip_header_byte! ();
+            let extra = low | (high << 8);
+            if extra > input_length - at {
+                return - 1;
+            };
+            let end = at + extra;
+            while at < end {
+                sh_gzip_header_byte! ();
+            };
+        };
+        let mut field = 0;
+        while field < 2 {
+            if (flags & (8 << field)) != 0 {
+                let mut count = 0;
+                loop {
+                    let byte = sh_gzip_header_byte! ();
+                    if byte == 0 {
+                        break;
+                    };
+                    if count >= 65535 {
+                        return - 1;
+                    };
+                    count = count + 1;
+                };
+            };
+            field = field + 1;
+        };
+        if (flags & 2) != 0 {
+            let low = sh_gzip_byte! ();
+            let high = sh_gzip_byte! ();
+            if (low | (high << 8)) != ((header_crc ^ 4294967295) & 65535) {
+                return - 1;
+            };
+        };
+        let member_input = sengoo_gzip_input_offset(source, at);
+        let member_output = sengoo_gzip_output_offset(target, produced);
+        let decoded = sengoo_sg_raw_inflate_prefix(member_input, input_length - at, member_output, capacity - produced);
+        if decoded < 0 {
+            return decoded;
+        };
+        let used = decoded >> 27;
+        let count = decoded & 134217727;
+        if used < 1 or used > input_length - at or count > capacity - produced {
+            return - 1;
+        };
+        at = at + used;
+        let mut crc = 4294967295;
+        let end = produced + count;
+        let mut index = produced;
+        while index < end {
+            let byte = sengoo_deflate_output_read(target, index) as i64;
+            crc = sh_gzip_crc_byte(crc, byte);
+            index = index + 1;
+        };
+        let expected_crc = sh_gzip_word32! ();
+        let expected_size = sh_gzip_word32! ();
+        if expected_crc != (crc ^ 4294967295) or expected_size != count {
+            return - 1;
+        };
+        produced = end;
+        if mode == 0 {
+            return (at << 27) | produced;
+        };
+        if at == input_length {
+            return (at << 27) | produced;
+        };
+        if mode == 1 {
+            return - 1;
+        };
+    };
+    - 1;
+}

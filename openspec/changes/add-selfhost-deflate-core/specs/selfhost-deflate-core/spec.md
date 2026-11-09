@@ -50,3 +50,28 @@ revision and distinguish the decoder from remaining package integration.
 - **WHEN** qualified SG emission and linking execute the raw decoder successfully
 - **THEN** repeated fresh artifacts SHALL be byte-identical and reports SHALL record actual independent oracle comparisons
 - **AND** the result SHALL not close gzip/tar/package compatibility, final SDK or full self-hosting milestones
+
+### Requirement: Gzip framing SHALL reuse the raw decoder and verify member integrity
+
+The SG gzip entry SHALL reuse one shared raw algorithm through an exact consumed
+byte-count contract. It SHALL parse bounded RFC 1952 headers and optional fields
+and validate header CRC16, output CRC32 and ISIZE when present or required.
+
+#### Scenario: A valid optional header and trailer are decoded
+- **WHEN** a complete member contains FEXTRA, FNAME, FCOMMENT or FHCRC
+- **THEN** the SG decoder SHALL locate the raw stream without losing bytes and verify the applicable checksums and size
+- **AND** the copied result SHALL match independent decoder output without retaining either pointer
+
+#### Scenario: A member is truncated or its integrity fields are corrupt
+- **WHEN** a required optional-field terminator, raw final block or trailer is missing, or a header/body checksum or ISIZE is wrong
+- **THEN** the framing entry SHALL return malformed failure and SHALL NOT publish its partial output as success
+
+#### Scenario: Member and tail policies are explicit
+- **WHEN** mode zero, strict-single mode one or strict-concatenated mode two is selected
+- **THEN** mode zero SHALL fully validate the first member and return its wire consumption, mode one SHALL require immediate EOF, and mode two SHALL require at least one member and decode every adjacent member to EOF
+- **AND** empty input and trailing zero padding SHALL NOT be silently accepted by either strict mode
+
+#### Scenario: Header metadata reaches the consumer bound
+- **WHEN** a name or comment exceeds 65,535 non-NUL bytes or an optional field exceeds the available input
+- **THEN** the selected flate2-compatible entry SHALL fail within its authorized extents
+- **AND** independent-oracle differences from more tolerant Python policies SHALL remain explicitly recorded
