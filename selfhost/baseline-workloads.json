@@ -1,0 +1,44 @@
+{
+  "schema": 1,
+  "target": "x86_64-pc-windows-msvc",
+  "edition": "2026",
+  "warmups": 1,
+  "samples": 10,
+  "optimization": 2,
+  "runtime_mode": "source-development",
+  "max_time_ratio": 1.10,
+  "max_peak_memory_ratio": 1.15,
+  "cache_policy": "OS and shared native/runtime caches remain warm; full build forces the project compiler path; incremental changes an existing imported function body with a stable signature",
+  "performance_workloads": [
+    {"id": "startup", "operation": "sgc --version"},
+    {"id": "check", "operation": "sgc check", "input": "selfhost/bench/main.sg"},
+    {"id": "build-full", "operation": "sgc build --force-rebuild -O 2", "input": "selfhost/bench/main.sg"},
+    {"id": "build-incremental", "operation": "sgc build -O 2 following an imported function body edit", "input": "selfhost/bench/library.sg"},
+    {"id": "format", "operation": "sgfmt --check", "input": "selfhost/bench/main.sg"},
+    {"id": "runtime", "operation": "O2 generated program, exact success output", "input": "selfhost/bench/main.sg"},
+    {"id": "package-metadata", "operation": "sgpm metadata --format json", "input": "examples/compat/v0.2.0-rc.1"},
+    {"id": "lsp-diagnostics", "operation": "embedded analyzer only: isolated identical LSP binary and empty PATH, stdio JSON-RPC initialize, open, invalid edit, diagnostic, shutdown/exit", "input": "selfhost/bench/lsp.sg"}
+  ],
+  "authoritative_sources": [
+    "docs/language-reference.md",
+    "docs/compatibility-policy.md",
+    "examples/realworld/SUPPORT_MATRIX.md",
+    "docs/agent-ecosystem-acceptance.md"
+  ],
+  "compatibility_corpus": [
+    {"id": "language-reference", "surfaces": ["edition 2026", "documented language forms and rejection boundaries"], "paths": ["docs/language-reference.md", "tools/sgc/tests/language_reference_doctests.rs", "examples/*.sg"], "gate": "cargo test --locked -p sgc --test language_reference_doctests --test core_conformance"},
+    {"id": "semantic-language", "surfaces": ["generics/traits", "macros/attributes", "borrow/move/Drop", "numeric types", "HIR/MIR", "diagnostics", "closures", "async/futures"], "paths": ["compiler/src/tests/*.rs", "compiler/tests/*.rs"], "gate": "cargo test --locked -p sengoo-compiler --lib; cargo test --locked -p sengoo-compiler --tests"},
+    {"id": "native-correctness", "surfaces": ["runtime ABI1", "FFI", "closures", "resources", "source/runtime cache", "Unicode arguments/files/processes", "native debug"], "paths": ["tools/sgc/tests/*.rs", "tools/stdlib/tests/*.sg", "tools/stdlib/tests/*.c", "tools/stdlib/tests/*.py", "tools/sgc/src/tests.rs", "docs/debugging-native.md"], "gate": "cargo test --locked -p sgc --tests; cargo test --locked -p sgc --bin sgc; explicit native debugger and resource gates; classify experimental target tests separately"},
+    {"id": "runtime", "surfaces": ["network", "cooperative and concurrent async", "cancellation", "native bridge", "Python"], "paths": ["runtime/src/**/*.rs", "docs/runtime-async-semantics.md", "docs/ffi.md"], "gate": "cargo test --locked -p sengoo-runtime --lib --features native-bridge; Python feature and isolated network/runtime gates"},
+    {"id": "formatter", "surfaces": ["comments", "idempotence", "syntax preservation"], "paths": ["tools/sgfmt/src/*.rs", "tools/sgfmt/tests/**/*.sg", "tools/sgfmt/tests/*.rs"], "gate": "cargo test --locked -p sgfmt"},
+    {"id": "packages", "surfaces": ["manifest schema1", "lock1/2", "aliases/multiversion", "semver", "registries", "tar/gzip", "locked tool loop"], "paths": ["tools/sgpm/src/*.rs", "tools/sgpm/tests/**/*.rs", "examples/compat/**/*.sg", "examples/compat/**/Sengoo.toml", "examples/compat/**/Sengoo.lock", "openspec/specs/sgpm-package-graph/spec.md", "openspec/specs/package-registry-distribution/spec.md"], "gate": "cargo test --locked -p sgpm; installed locked-project and registry loop"},
+    {"id": "language-server", "surfaces": ["diagnostics", "completion", "navigation", "rename", "formatting", "UTF16 ranges", "version/cancellation/snapshots"], "paths": ["tools/sglsp/src/**/*.rs", "tools/sglsp/tests/**/*.rs"], "gate": "cargo test --locked -p sglsp; stdio JSON-RPC lifecycle plus retained semantic tests"},
+    {"id": "realworld-and-agent", "surfaces": ["documented Windows supported packages", "reflection", "Python bridges", "agent SDK/protocol/resource consumers"], "paths": ["examples/realworld/**/*.sg", "examples/realworld/**/Sengoo.toml", "packages/**/*.sg", "packages/**/Sengoo.toml", "tools/sgeval/**/*.sg", "scripts/verify_agent_*.py", "docs/agent-ecosystem-acceptance.md", "examples/realworld/SUPPORT_MATRIX.md"], "gate": "retained Windows realworld, Python, Agent SDK and exact-version package consumer gates; no paid-provider claim"},
+    {"id": "distribution-and-performance", "surfaces": ["installed mode", "upgrade/rollback", "tool versions", "artifact budgets", "compile-scale performance"], "paths": ["scripts/*candidate*.py", "scripts/*distribution*.py", "bench/frontend-memory-baseline.json", "bench/scripts/release_resource_gate.py", ".github/workflows/compatibility.yml", ".github/workflows/toolchain-distribution.yml", ".github/workflows/perf-smoke.yml", "openspec/specs/toolchain-distribution/spec.md"], "gate": "existing pinned host candidate/install/rollback and perf gates; other release hosts remain independently required"}
+  ],
+  "classification": {
+    "compatibility_corpus_is_inventory_not_pass_evidence": true,
+    "experimental": ["WASM", "bytecode", "Cranelift", "graphics outside the documented Windows native supported subset"],
+    "excluded_from_this_host_qualification": ["Linux", "macOS Intel", "macOS ARM64", "unsupported Python versions", "fresh-machine qualification", "public release"]
+  }
+}

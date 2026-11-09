@@ -7,8 +7,8 @@
 
 ## Integration milestones
 
-- [ ] M0: complete the seed/source/tool identity lock, supported corpus and measured baseline freeze with named evidence.
-- [x] M1: complete and verify `add-selfhost-foundations` (Windows x64 44-step source-hashed gate, `target/selfhost/m1-run2/evidence.json`; M0 measured-baseline/seed-distribution qualification remains open).
+- [x] M0: freeze explicit source/tool identity, 741-input supported corpus inventory and eight ten-sample quiet reference workloads (`freeze-selfhost-baseline`; `target/selfhost/m0-frozen/evidence.json`, independently qualified source-release tools; local artifacts, not public seed distribution).
+- [x] M1: complete and verify `add-selfhost-foundations` (Windows x64 44-step source-hashed gate, `target/selfhost/m1-run2/evidence.json`; clean committed rerun at `target/selfhost/m1-clean/evidence.json`).
 - [ ] M2: register and verify the SG syntax/formatter child.
 - [ ] M3: register and verify the semantic/HIR/MIR child.
 - [ ] M4: register and verify the Windows x64 native-backend child.

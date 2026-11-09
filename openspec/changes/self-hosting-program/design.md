@@ -35,6 +35,7 @@ explicit external-toolchain procedures outside the no-external-tools gate.
 | Work | Requirement owner |
 | --- | --- |
 | Program sequence, evidence ledger and final integration gates | `self-hosting-program` |
+| Frozen corpus and daily performance reference qualification | `freeze-selfhost-baseline` |
 | Seed identity, stage0 driver, source/span/symbol/node arenas | `add-selfhost-foundations` |
 | Stage0 Windows synchronous Unicode process-launch correction | `fix-windows-process-utf8-launch` |
 | SG lexer/parser/macro/attribute pipeline and formatter integration | Future syntax child |
@@ -107,6 +108,12 @@ Changing this workload set or baseline requires explicit evidence rather than
 rebaselining a failure away. Keep two consecutive complete candidates; supported
 behavior fixes restart that sequence. A Windows preview does not replace the
 existing four-host stable publication gates.
+
+Before M8, freeze installed reference and candidate runtime/SDK bundles
+independently. Do not feed changed candidate runtime sources to the frozen
+reference compiler and call it an unchanged performance baseline. M0's local
+source-development sampler qualifies the current reference snapshot; final
+installed/no-external-tools qualification remains a separate integration gate.
 
 ## Evidence rules
 

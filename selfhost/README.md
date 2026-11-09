@@ -120,8 +120,11 @@ process failure, and 124 is timeout. Compiler failures keep their own status.
 
 ## Next gates
 
-M0's complete comparable performance baseline and distributable/rebuilt seed
-qualification remain separate work. M2 adds the SG lexer/parser to these
+M0's local source-release reference and eight daily workload baselines are
+frozen in `BASELINE.md` and `reference-baseline.lock`. Raw reports remain under
+`target/selfhost/m0-frozen/` and `target/selfhost/reference-qualification/`.
+Public seed distribution, installed SDKs and clean-machine qualification remain
+separate work. M2 adds the SG lexer/parser to these
 foundations; M3 adds semantic analysis and MIR; M4/M5 add native code generation
 and linking/debug symbols; M6 proves compiler self-rebuild; M7 finishes all
 supported Windows tool/runtime behavior; M8 requires reproducible S2/S3 outputs,

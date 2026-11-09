@@ -1,0 +1,11 @@
+struct BenchItem {
+    value: i64,
+}
+
+def bench_score(item: BenchItem) -> i64 {
+    item.value * 3 + 1;
+}
+
+def bench_revision() -> i64 {
+    7;
+}

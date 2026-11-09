@@ -1,0 +1,11 @@
+struct BaselineItem {
+    value: i64,
+}
+
+def baseline_score(item: BaselineItem) -> i64 {
+    item.value + 1;
+}
+
+def main() -> i64 {
+    baseline_score(BaselineItem { value: 41 });
+}
