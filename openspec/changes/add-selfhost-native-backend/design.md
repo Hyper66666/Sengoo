@@ -186,6 +186,25 @@ for that corner; the independent native test checks the specified overflow
 contract rather than treating that reference expression as a value oracle.
 Defined nonzero signed/unsigned divisions and remainders are checked against C.
 
+The initial ownership consumer allocates per-local initialization flags and a
+bounded cleanup scratch region in the described fixed frame. Flags begin false,
+explicit MIR initialization/move facts update them, conditional root drops
+test them, and an executed root drop clears the flag. User Drop calls use the
+validated target function and saved receiver address. Structural cleanup walks
+tuple/struct fields and array elements in reverse; tagged enum cleanup selects
+only the active payload. Projection cleanup leaves the root flag untouched.
+Unknown resource glue, explicit pending glue and conditional projection drops
+remain unsupported errors until the necessary runtime or field facts are
+available. A type name never authorizes an external resource free. The current
+defensive rejection list for known unresolved runtime wrappers is temporary;
+the typed MIR glue-kind table is the authoritative contract.
+
+MIR validation rejects a forged destructor target whose call graph recursively
+invokes another Drop target, indirect call or projected cleanup. Source lowering
+marks unresolved nested field release as pending until per-field initialization
+facts can suppress automatic cleanup exactly. The native consumer never treats
+pending glue as a successful no-op.
+
 Primary references:
 
 - Intel instruction reference: https://www.intel.com/content/www/us/en/content-details/671110/intel-64-and-ia-32-architectures-software-developer-s-manual-combined-volumes-2a-2b-2c-and-2d-instruction-set-reference-a-z.html

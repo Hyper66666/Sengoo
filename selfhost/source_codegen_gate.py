@@ -7,6 +7,7 @@ import json
 import os
 from pathlib import Path
 import platform
+import re
 import subprocess
 import time
 
@@ -28,14 +29,51 @@ CASES = {
     "aggregate": "struct Pair{left:i64,right:i64} def make(a:i64,b:i64)->Pair{Pair{left:a,right:b}} def main()->i64{let pair=make(40,2);pair.left+pair.right}",
     "float-f64": "def add(a:f64,b:f64)->f64{a+b} def main()->i64{if add(40.0,2.0)==42.0{42}else{1}}",
     "float-f32": "def add(a:f32,b:f32)->f32{a+b} def main()->i64{if add(40.0f32,2.0f32)==42.0f32{42}else{1}}",
+    "float-cast": "def main()->i64{42.9 as i64}",
+    "float-nan-cast": "def main()->i64{let x=0.0/0.0;(x as i64)+42}",
+    "float-saturate": "def main()->i64{let x=1.0e300;if (x as i64)==9223372036854775807{42}else{1}}",
+    "float-narrow-cast": "def main()->i64{let x=42.0 as f32;if (x as f64)==42.0{42}else{1}}",
+    "division": "def divide(x:i64,y:i64)->i64{x/y} def main()->i64{divide(85,2)}",
+    "remainder": "def rem(x:i64,y:i64)->i64{x%y} def main()->i64{rem(85,43)}",
     "class-read": "class Parent{value:i64;def score(&self)->i64{self.value}} class Child:Parent{extra:i64;} def main()->i64{let child=Child{value:42,extra:0};child.score()}",
     "class-write": "class Parent{value:i64;def update(&mut self){self.value=42;();}} class Child:Parent{extra:i64;} def main()->i64{let mut child=Child{value:0,extra:0};child.update();child.value}",
     "method-names": "struct First{value:i64} struct Second{value:i64} impl First{def score(&self)->i64{self.value}} impl Second{def score(&self)->i64{self.value}} def main()->i64{let a=First{value:20};let b=Second{value:22};a.score()+b.score()}",
+    "method-effect-tail": "struct Counter{value:i64} impl Counter{def bump(&mut self){self.value=self.value+1;true;}} def main()->i64{let mut counter=Counter{value:41};counter.bump();counter.value}",
+    "for-break": "def main()->i64{for value in 0..4{break;};42}",
+    "for-return": "def main()->i64{for value in 0..4{return 42;};0}",
+    "try-result": "struct Result<T,E>{is_ok:bool,value:T,error:E} def answer()->Result<i64,i64>{Result{is_ok:true,value:42,error:0}} def main()->i64{let result=try{let value=answer()?;value;};result.value}",
+    "try-option": "struct Option<T>{is_some:bool,value:T} def answer()->Option<i64>{Option{is_some:true,value:42}} def main()->i64{let result=try{let value=answer()?;value;};result.value}",
+    "try-error": "struct Result<T,E>{is_ok:bool,value:T,error:E} def answer()->Result<bool,i64>{Result{is_ok:false,value:false,error:42}} def wrapped()->Result<i64,i64>{let value=answer()?;Result{is_ok:true,value:0,error:0}} def main()->i64{let result=wrapped();result.error}",
+    "option-none": "struct Option<T>{is_some:bool,value:T} def answer()->Option<i64>{Option{is_some:false,value:0}} def wrapped()->Option<i64>{let value=answer()?;Option{is_some:true,value:42}} def main()->i64{let result=wrapped();if result.is_some{0}else{42}}",
+    "drop-scope": 'extern "C"{fn sg_drop_record(value:i64);fn sg_drop_count()->i64;fn sg_drop_at(index:i64)->i64;} struct Owner{value:i64} impl Drop for Owner{def drop(&mut self){sg_drop_record(self.value);}} def scope(){let first=Owner{value:20};let second=Owner{value:22};();} def main()->i64{scope();if sg_drop_count()==2 and sg_drop_at(0)==22 and sg_drop_at(1)==20{42}else{1}}',
+    "drop-return": 'extern "C"{fn sg_drop_record(value:i64);fn sg_drop_count()->i64;fn sg_drop_at(index:i64)->i64;} struct Owner{value:i64} impl Drop for Owner{def drop(&mut self){sg_drop_record(self.value);}} def answer()->i64{let owner=Owner{value:42};return 42;} def main()->i64{let answer=answer();if answer==42 and sg_drop_count()==1 and sg_drop_at(0)==42{42}else{1}}',
+}
+
+# The frozen reference accepts this source but emits invalid LLVM IR. Keep the
+# exact failed link and independently execute the SG result; never call it equal.
+REFERENCE_LINK_GAPS = {
+    "try-result": b"defined with type 'ptr' but expected 'i64'",
 }
 
 
 def sha(path):
     return hashlib.sha256(path.read_bytes()).hexdigest()
+
+
+def native_modules():
+    pending = [ROOT / "selfhost/tools/native.sg"]
+    seen = set()
+    while pending:
+        source = pending.pop()
+        if source in seen:
+            continue
+        seen.add(source)
+        for name in re.findall(r"(?m)^\s*import\s+selfhost_([A-Za-z0-9_]+)\s*;", source.read_text(encoding="utf-8")):
+            path = ROOT / "selfhost/src" / (name + ".sg")
+            if not path.is_file():
+                raise ValueError(f"missing declared native compiler module: {name}")
+            pending.append(path)
+    return sorted(seen - {ROOT / "selfhost/tools/native.sg"})
 
 
 def main():
@@ -51,19 +89,19 @@ def main():
     paths = {name: getattr(args, name).resolve() for name in ("seed", "clang", "formatter", "reference")}
     lock = json.loads((ROOT / "selfhost/bootstrap.lock").read_text())
     baseline = json.loads((ROOT / "selfhost/reference-baseline.lock").read_text())
-    modules = sorted((ROOT / "selfhost/src").glob("*.sg"))
-    inputs = [Path(__file__), ROOT / "selfhost/bootstrap.lock", ROOT / "selfhost/reference-baseline.lock",
+    modules = native_modules()
+    inputs = [Path(__file__), ROOT / "selfhost/bootstrap.lock", ROOT / "selfhost/reference-baseline.lock", ROOT / "selfhost/REFERENCE_GAPS.md",
               ROOT / "selfhost/tools/native.sg", ROOT / "selfhost/tests/native_source_probe.c", *modules]
     inputs += sorted((ROOT / "tools/stdlib").rglob("*.sg"))
     inputs += [ROOT / "tools/stdlib/runtime.c", ROOT / "tools/stdlib/runtime_abi.h"]
     report = {"schema": 1, "result": "running", "stage": "sg-source-to-native-object",
               "revision": subprocess.check_output(["git", "rev-parse", "HEAD"], cwd=ROOT, text=True).strip(),
               "host": platform.platform(), "sources": {str(p.relative_to(ROOT)): sha(p) for p in inputs if p.is_file()},
-              "tools": {}, "steps": [], "cases": [], "m4_complete": False,
+              "tools": {}, "steps": [], "cases": [], "m4_complete": False, "reference_link_gaps": [],
               "limits": ["single-source development CLI; not sgc command/module/configuration parity",
                          "SG performs frontend/semantics/HIR/MIR/x64/COFF emission; external clang only links verification artifacts",
                          "frozen qualified Rust reference separately emits LLVM IR for the exact same source bytes",
-                         "full ownership/async/numeric-conversion/debug/linker/self-build gates remain open"]}
+                         "full ownership, async, numeric, debug, module/tool compatibility and self-build gates remain open"]}
     env = dict(os.environ)
     for name in list(env):
         if name.upper().startswith(("SENGOO_", "SGPLATFORM_", "SDL2_")):
@@ -116,7 +154,17 @@ def main():
             actual = run(name + "-native-execute", [native_exe], 42)
             run(name + "-reference-ir", [paths["reference"], "--runtime-mode", "source-development", "build", source,
                                          "--force-rebuild", "-O", "0", "--emit-llvm", "-o", ir])
-            run(name + "-reference-link", [paths["clang"], ROOT / "selfhost/tests/native_source_probe.c", ir, "-o", reference_exe])
+            linked = run(name + "-reference-link", [paths["clang"], ROOT / "selfhost/tests/native_source_probe.c", ir, "-o", reference_exe],
+                         1 if name in REFERENCE_LINK_GAPS else 0)
+            if name in REFERENCE_LINK_GAPS:
+                if REFERENCE_LINK_GAPS[name] not in linked.stderr or b"insertvalue" not in linked.stderr:
+                    raise AssertionError("frozen reference failure differs from the reviewed LLVM link gap")
+                if sha(source) != row["sha256"] or actual.stdout or actual.stderr:
+                    raise AssertionError("independent SG execution changed inputs or output")
+                row.update(object_sha256=sha(obj), reference_ir_sha256=sha(ir), result_equal=False,
+                           reference_link_gap=True, native_expected_exit_code=42)
+                report["reference_link_gaps"].append(name)
+                continue
             expected = run(name + "-reference-execute", [reference_exe], 42)
             if (actual.stdout, actual.stderr) != (expected.stdout, expected.stderr) or sha(source) != row["sha256"]:
                 raise AssertionError("source/result bytes differ")
@@ -124,7 +172,8 @@ def main():
         for name, text, phase in (
             ("bad-syntax", "def main()->i64{", "frontend"),
             ("bad-semantics", "def main()->i64{missing}", "semantics"),
-            ("unsupported-float", "def main()->i64{let x:f64=42.0;x as i64}", "native"),
+            ("class-unit-tail", "class Counter{value:i64;def bump(&mut self){self.value=self.value+1;true;}} def main()->i64{42}", "semantics"),
+            ("unsupported-string", 'def main()->i64{let text="pending native string data";42}', "native"),
         ):
             source, obj = out / (name + ".sg"), out / (name + ".obj")
             source.write_bytes(text.encode("utf-8"))
@@ -137,6 +186,7 @@ def main():
             report["cases"].append({"name": name, "sha256": sha(source), "diagnostic": diagnostic, "previous_output_preserved": True})
         report["artifacts"] = {binary.name: sha(binary)}
         report["result"] = "passed"
+        report["reference_parity_complete"] = not report["reference_link_gaps"]
     except BaseException as error:
         report.update(result="failed", error=repr(error))
         raise

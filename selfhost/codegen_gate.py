@@ -38,10 +38,10 @@ def main():
               "revision": subprocess.check_output(["git", "rev-parse", "HEAD"], cwd=ROOT, text=True).strip(),
               "host": platform.platform(), "sources": {str(p.relative_to(ROOT)): sha(p) for p in inputs if p.is_file()},
               "tools": {}, "steps": [], "m4_complete": False,
-              "limits": ["validated scalar/aggregate MIR; float decimal literals/conversions, ownership/async/string data remain explicit unsupported errors",
+              "limits": ["validated scalar/aggregate MIR with resolved root/structural Drop; pending runtime glue, field cleanup across SG calls, async and string data remain unsupported",
                          "stack-slot allocation; frames over 4096 bytes call __chkstk through a checked REL32 placeholder",
                          "fixed-stack unwind records; exception cleanup handlers and CodeView remain open",
-                         "division/remainder and full ABI coverage remain open; shift fixtures use defined in-width counts",
+                         "defined scalar division/remainder and tested ABI shapes only; shift fixtures use defined in-width counts",
                          "SG emits bytes directly; external tools only independently inspect/link the verification caller",
                          "not an SG linker, complete backend or self-compilation fixed point"]}
     env = dict(os.environ)
@@ -110,6 +110,12 @@ def main():
             raise AssertionError("numeric conversion cases did not execute")
         if b"native signed and unsigned division and remainder: ok" not in executed:
             raise AssertionError("division/remainder cases did not execute")
+        if b"native conditional initialization and exact user Drop: ok" not in executed:
+            raise AssertionError("conditional owner cleanup cases did not execute")
+        if b"native nested and array reverse cleanup with cleared flags: ok" not in executed:
+            raise AssertionError("nested/array cleanup order or cleared initialization flag failed")
+        if b"native active enum payload cleanup: ok" not in executed:
+            raise AssertionError("enum cleanup touched an inactive payload or repeated a drop")
         for case in ("overflow", "overflow8", "umul-overflow", "uadd-overflow", "mul-overflow"):
             run("reject-" + case, [probe, case], b"integer overflow", 63)
         run("reject-division-zero", [probe, "division-zero"], b"division by zero", 62)

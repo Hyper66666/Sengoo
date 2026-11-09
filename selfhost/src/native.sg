@@ -16,6 +16,7 @@ struct ShNative {
     code: ShBinary,
     values: Vec<i64>,
     locals: Vec<i64>,
+    initialized: Vec<i64>,
     functions: Vec<i64>,
     ends: Vec<i64>,
     frames: Vec<i64>,
@@ -26,6 +27,7 @@ struct ShNative {
     result_mode: i64,
     result_pointer: i64,
     copies_base: i64,
+    drop_base: i64,
     frame: i64,
     edge_base: i64,
     checked: bool,
@@ -274,6 +276,59 @@ def sh_native_cast(native: &ShNative, mir: &ShMir, id: i64) -> Result<i64, i64> 
     sh_native_finish(native, mir, id);
 }
 
+def sh_native_drop_type(native: &ShNative, mir: &ShMir, ty: i64, depth: i64) -> Result<i64, i64> {
+    if depth < 0 or depth >= 64 { return sh_i64_error(6503); };
+    let glue = sh_mir_drop_kind(mir, ty);
+    if glue == 4 { return sh_i64_error(6502); };
+    if glue == 0 { return sh_i64_ok(0); };
+    let kind = sh_mir_type_word(mir, ty, 0);
+    if kind == 16 or kind == 14 { return sh_i64_error(6502); };
+    if kind != 12 and kind != 10 and kind != 8 { return sh_i64_ok(0); };
+    let saved = native.drop_base + depth * 16 + 8;
+    sh_x64_memory(&native.code, 1, 10, 5, -saved)?;
+    let mut count = 0;
+    if kind == 8 { let element = sh_mir_type_arg(mir, ty, 0); let size = sh_native_size(native, mir, element)?; let length = sh_mir_type_word(mir, ty, 1); sh_x64_mov_imm(&native.code, 0, length)?; sh_x64_memory(&native.code, 1, 0, 5, -saved - 8)?; let head = sh_binary_len(&native.code); sh_x64_memory(&native.code, 0, 0, 5, -saved - 8)?; sh_x64_mov_imm(&native.code, 11, 0)?; sh_x64_binary(&native.code, 5, 0, 11)?; let done = sh_x64_branch(&native.code, 2, 4)?; sh_x64_mov_imm(&native.code, 11, 1)?; sh_x64_binary(&native.code, 1, 0, 11)?; sh_x64_memory(&native.code, 1, 0, 5, -saved - 8)?; sh_x64_mov_imm(&native.code, 11, size)?; sh_x64_binary(&native.code, 6, 0, 11)?; sh_x64_memory(&native.code, 0, 10, 5, -saved)?; sh_x64_binary(&native.code, 0, 10, 0)?; count = sh_native_drop_type(native, mir, element, depth + 1)?; let back = sh_x64_branch(&native.code, 0, 0)?; sh_x64_fix_branch(&native.code, back, head)?; sh_x64_fix_branch(&native.code, done, sh_binary_len(&native.code))?; return sh_i64_ok(count); };
+    if kind == 10 { return sh_native_drop_fields(native, mir, ty, -1, depth); };
+    let name = sh_symbol_text(&mir.symbols, sh_mir_type_word(mir, ty, 3))?;
+    let resource = sh_s_text_equal_native(&name, "String") or sh_s_text_equal_native(&name, "Buffer") or sh_s_text_equal_native(&name, "Vec") or sh_s_text_equal_native(&name, "Box");
+    let enumeration = sh_mir_type_word(mir, ty, 1) == 1;
+    let end_patches = vec_new_i64();
+    let mut row = 0;
+    while row < sh_mir_count(&mir.layouts, 7) { if sh_mir_word(&mir.layouts, 7, row, 0) == ty { let variant = sh_mir_word(&mir.layouts, 7, row, 1); let destructor = sh_mir_word(&mir.layouts, 7, row, 4); if destructor < -1 or resource and destructor < 0 { return sh_i64_error(6502); }; let mut next = -1; if enumeration { sh_x64_memory(&native.code, 0, 10, 5, -saved)?; sh_x64_memory(&native.code, 0, 0, 10, 0)?; sh_x64_mov_imm(&native.code, 11, variant)?; sh_x64_binary(&native.code, 5, 0, 11)?; next = sh_x64_branch(&native.code, 2, 5)?; }; if destructor >= 0 { sh_x64_memory(&native.code, 0, 1, 5, -saved)?; sh_native_call_fixup(native, destructor)?; count = count + 1; }; count = count + sh_native_drop_fields(native, mir, ty, variant, depth)?; if enumeration { let finish = sh_x64_branch(&native.code, 0, 0)?; if not end_patches.push(finish) { return sh_i64_error(6503); }; sh_x64_fix_branch(&native.code, next, sh_binary_len(&native.code))?; (); }; }; row = row + 1; };
+    row = 0;
+    while row < end_patches.len() { sh_x64_fix_branch(&native.code, sh_native_at(&end_patches, row), sh_binary_len(&native.code))?; row = row + 1; };
+    sh_i64_ok(count);
+}
+
+def sh_s_text_equal_native(text: &String, expected: &str) -> bool {
+    let value = string_from_str(expected);
+    value.is_ok() and sengoo_string_eq(text.handle, value.value.handle) != 0;
+}
+
+def sh_native_drop_fields(native: &ShNative, mir: &ShMir, ty: i64, variant: i64, depth: i64) -> Result<i64, i64> {
+    let saved = native.drop_base + depth * 16 + 8;
+    let mut index = sh_mir_field_count(mir, ty, variant);
+    if index < 0 { return sh_i64_error(6502); };
+    let mut count = 0;
+    while index > 0 { index = index - 1; let child = sh_mir_field_type(mir, ty, variant, index); let offset = sh_target_field_offset(&native.layout, mir, ty, variant, index)?; sh_x64_memory(&native.code, 0, 10, 5, -saved)?; sh_x64_mov_imm(&native.code, 0, offset)?; sh_x64_binary(&native.code, 0, 10, 0)?; count = count + sh_native_drop_type(native, mir, child, depth + 1)?; };
+    sh_i64_ok(count);
+}
+
+def sh_native_drop(native: &ShNative, mir: &ShMir, id: i64) -> Result<i64, i64> {
+    let local = sh_mir_inst(mir, id, 6);
+    let conditional = sh_mir_inst(mir, id, 8) == 1;
+    let flag = sh_native_at(&native.initialized, local);
+    if conditional and local < 0 or local >= 0 and flag < 8 { return sh_i64_error(6502); };
+    let mut skipped = -1;
+    if conditional { sh_x64_memory(&native.code, 0, 0, 5, -flag)?; sh_x64_mov_imm(&native.code, 10, 0)?; sh_x64_binary(&native.code, 5, 0, 10)?; skipped = sh_x64_branch(&native.code, 2, 4)?; };
+    sh_native_load(native, sh_mir_inst_arg(mir, id, 0), 10)?;
+    sh_native_drop_type(native, mir, sh_mir_inst(mir, id, 7), 0)?;
+    if local >= 0 { sh_x64_mov_imm(&native.code, 0, 0)?; sh_x64_memory(&native.code, 1, 0, 5, -flag)?; (); };
+    if skipped >= 0 { sh_x64_fix_branch(&native.code, skipped, sh_binary_len(&native.code))?; (); };
+    sh_x64_mov_imm(&native.code, 0, 0)?;
+    sh_native_finish(native, mir, id);
+}
+
 def sh_native_instruction(native: &ShNative, mir: &ShMir, id: i64) -> Result<i64, i64> {
     let opcode = sh_mir_inst(mir, id, 2);
     let ty = sh_mir_value_type(mir, id);
@@ -281,7 +336,8 @@ def sh_native_instruction(native: &ShNative, mir: &ShMir, id: i64) -> Result<i64
     let first = sh_mir_inst_arg(mir, id, 0);
     sh_native_size(native, mir, ty)?;
     if opcode == 1 or opcode == 2 { return sh_i64_ok(0); };
-    if opcode == 25 { sh_x64_mov_imm(&native.code, 0, 0)?; return sh_native_finish(native, mir, id); };
+    if opcode == 25 { let flag = sh_native_at(&native.initialized, aux); if flag > 0 { sh_x64_mov_imm(&native.code, 0, sh_mir_inst(mir, id, 7))?; sh_x64_memory(&native.code, 1, 0, 5, -flag)?; (); }; sh_x64_mov_imm(&native.code, 0, 0)?; return sh_native_finish(native, mir, id); };
+    if opcode == 21 { return sh_native_drop(native, mir, id); };
     if opcode == 11 { return sh_native_binary(native, mir, id); };
     if opcode == 5 { let mut bits = aux; if sh_mir_inst(mir, id, 8) == 1 { let text = sh_symbol_text(&mir.symbols, aux)?; bits = sh_float_literal_reference(&text, sh_mir_type_word(mir, ty, 1))?; }; sh_x64_mov_imm(&native.code, 0, bits)?; return sh_native_finish(native, mir, id); };
     if opcode == 3 or opcode == 4 or opcode == 6 or opcode == 7 { sh_x64_mov_imm(&native.code, 0, if opcode == 3 { 0; } else { aux; })?; return sh_native_finish(native, mir, id); };
@@ -353,7 +409,7 @@ def sh_native_prepare(native: &mut ShNative, mir: &ShMir, function: i64, abi: &S
     let mut slots = if abi.result_mode == 3 { 16; } else { 0; };
     native.result_pointer = 8;
     let mut index = 0;
-    while index < sh_mir_local_count(mir) { if sh_mir_local(mir, index, 0) == function { if sh_mir_local(mir, index, 4) >= 2 { return sh_i64_error(6502); }; let size = sh_native_size(native, mir, sh_mir_local(mir, index, 1))?; slots = ((slots + if size < 8 { 8; } else { size; } + 15) / 16) * 16; if not native.locals.set(index, slots) { return sh_i64_error(6503); }; }; index = index + 1; };
+    while index < sh_mir_local_count(mir) { if sh_mir_local(mir, index, 0) == function { let size = sh_native_size(native, mir, sh_mir_local(mir, index, 1))?; slots = ((slots + if size < 8 { 8; } else { size; } + 15) / 16) * 16; if not native.locals.set(index, slots) { return sh_i64_error(6503); }; if (sh_mir_local(mir, index, 4) & 2) != 0 { slots = slots + 16; if not native.initialized.set(index, slots) { return sh_i64_error(6503); }; }; }; index = index + 1; };
     let mut outgoing = 32;
     let mut copy_size = 0;
     index = 0;
@@ -363,7 +419,11 @@ def sh_native_prepare(native: &mut ShNative, mir: &ShMir, function: i64, abi: &S
     while index < sh_mir_block_count(mir) { if sh_mir_block(mir, index, 0) == function { let mut total = 0; let mut parameter = 0; while parameter < sh_mir_block(mir, index, 3) { let size = sh_native_size(native, mir, sh_mir_value_type(mir, sh_mir_parameter(mir, index, parameter)))?; total = ((total + if size < 8 { 8; } else { size; } + 15) / 16) * 16; parameter = parameter + 1; }; if total > edge_size { edge_size = total; }; }; index = index + 1; };
     native.edge_base = slots;
     native.copies_base = slots + edge_size;
-    native.frame = ((slots + edge_size + copy_size + outgoing + 15) / 16) * 16;
+    native.drop_base = slots + edge_size + copy_size;
+    let mut has_drop = false;
+    index = 0;
+    while index < sh_mir_inst_count(mir) { if sh_mir_inst(mir, index, 0) == function and sh_mir_inst(mir, index, 2) == 21 { has_drop = true; }; index = index + 1; };
+    native.frame = ((slots + edge_size + copy_size + (if has_drop { 1024; } else { 0; }) + outgoing + 15) / 16) * 16;
     if native.frame > 2147483632 { return sh_i64_error(6503); };
     sh_i64_ok(slots);
 }
@@ -381,6 +441,8 @@ def sh_native_function(native: &mut ShNative, mir: &ShMir, function: i64) -> Res
     sh_x64_stack_register(&native.code, 5, false)?;
     sh_x64_mov(&native.code, 5, 4)?;
     if native.frame > 4096 { let probe = sh_x64_probe_stack(&native.code, native.frame)?; if not native.calls.push(probe + 11) or not native.calls.push(sh_mir_fn_count(mir) + 1) { return sh_i64_error(6503); }; (); } else { sh_x64_stack_adjust(&native.code, native.frame, false)?; (); };
+    index = 0;
+    while index < sh_mir_local_count(mir) { let flag = sh_native_at(&native.initialized, index); if sh_mir_local(mir, index, 0) == function and flag > 0 { sh_x64_mov_imm(&native.code, 0, 0)?; sh_x64_memory(&native.code, 1, 0, 5, -flag)?; (); }; index = index + 1; };
     sh_native_parameters(native, mir, function, &abi)?;
     let entry = sh_x64_branch(&native.code, 0, 0)?;
     if not native.branches.push(entry) or not native.branches.push(sh_mir_fn(mir, function, 2)) { return sh_i64_error(6503); };
@@ -414,7 +476,7 @@ def sh_native_emit(native: &mut ShNative, mir: &ShMir) -> Result<ShBinary, i64> 
     let mut index = 0;
     while index < sh_mir_inst_count(mir) { if not native.values.push(-1) { return sh_coff_error(6503); }; index = index + 1; };
     index = 0;
-    while index < sh_mir_local_count(mir) { if not native.locals.push(-1) { return sh_coff_error(6503); }; index = index + 1; };
+    while index < sh_mir_local_count(mir) { if not native.initialized.push(-1) or not native.locals.push(-1) { return sh_coff_error(6503); }; index = index + 1; };
     index = 0;
     while index < sh_mir_block_count(mir) { if not native.blocks.push(-1) { return sh_coff_error(6503); }; index = index + 1; };
     index = 0;
@@ -440,6 +502,6 @@ def sh_native_emit(native: &mut ShNative, mir: &ShMir) -> Result<ShBinary, i64> 
 }
 
 def sh_native_object(mir: &ShMir, maximum: i64, checked: bool) -> Result<ShBinary, i64> {
-    let mut native = ShNative { code: sh_binary_new(maximum), values: vec_new_i64(), locals: vec_new_i64(), functions: vec_new_i64(), ends: vec_new_i64(), frames: vec_new_i64(), blocks: vec_new_i64(), branches: vec_new_i64(), calls: vec_new_i64(), layout: sh_target_layout_cache(mir, 2147483647), result_mode: 0, result_pointer: 0, copies_base: 0, frame: 0, edge_base: 0, checked: checked };
+    let mut native = ShNative { code: sh_binary_new(maximum), values: vec_new_i64(), locals: vec_new_i64(), initialized: vec_new_i64(), functions: vec_new_i64(), ends: vec_new_i64(), frames: vec_new_i64(), blocks: vec_new_i64(), branches: vec_new_i64(), calls: vec_new_i64(), layout: sh_target_layout_cache(mir, 2147483647), result_mode: 0, result_pointer: 0, copies_base: 0, drop_base: 0, frame: 0, edge_base: 0, checked: checked };
     sh_native_emit(&mut native, mir);
 }

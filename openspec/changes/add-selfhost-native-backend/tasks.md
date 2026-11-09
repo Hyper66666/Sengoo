@@ -15,6 +15,7 @@
 - [x] Connect reference-compatible decimal literals and compare 19 exact supported programs through the SG native CLI and frozen Rust/LLVM path, including generic instances, structures, float literals and class methods (`target/selfhost/m4-source-expanded/evidence.json`). Full language/tool/backend support remains open.
 - [x] Preserve saturating float-to-signed/unsigned integer conversion, integer-to-float rounding and f32/f64 width conversion with independently executed boundary/NaN/infinity cases and 4,096 integer bit patterns (`target/selfhost/m4-numeric-casts/evidence.json`). Full M4 semantics remain open.
 - [x] Execute signed/unsigned division and remainder, debug zero/overflow hooks and release wrapping behavior for signed minimum divided by minus one (`target/selfhost/m4-division/evidence.json`). Full numeric/cleanup coverage remains open.
+- [x] Execute initial owned-local initialization, conditional user Drop, cleared flags, nested/array reverse cleanup and active-only enum payload cleanup; reject pending resource glue and forged nested Drop calls without emitting an object (`target/selfhost/m4-cleanup-safe/evidence.json`). Runtime resource glue, conditional partial-field cleanup and full ownership support remain open.
 
 ## Supported target behavior
 
@@ -165,3 +166,30 @@ mode returned minimum/zero without an overflow hook. The reference overflowing
 LLVM divide is not a defined result oracle; this edge is recorded explicitly
 against the existing numeric overflow specification. All prior native
 regressions and exact resource checks passed.
+
+Initial cleanup evidence: `target/selfhost/m4-cleanup-safe/evidence.json`,
+SHA-256 `5c605ebb4d2989b06d08fd9d702b2059e1ea9f455ff22899b3105c657fad824d`,
+revision `94c7a24fc99053c220fb6c4d36849de6451c9eea`, Windows 11 AMD64.
+All 28 commands passed with unchanged inputs/tools. The ABI fixture ran 100
+exact resource scopes and native builder/validator tests ran ten. Independent
+C execution verified false/true initialization paths, exactly-once user Drop,
+cleared flags, reverse tuple/array cleanup and only the active enum payload.
+Pending runtime glue returns 6502 before object publication. A forged recursive
+Drop target is rejected by MIR validation with 5007; field cleanup delegation
+without sufficient initialization facts remains pending rather than running
+twice. Earlier numeric/ABI/unwind/probe/resource regressions remain green.
+Complete ownership and M4 remain open.
+
+Expanded ownership/source integration:
+`target/selfhost/m4-source-ownership-qualified/evidence.json`, SHA-256
+`027a64742436a707a724625b4a49a3ea9e84e84237593c5b4846e9d14a5d21b7`,
+revision `94c7a24fc99053c220fb6c4d36849de6451c9eea`, Windows 11 AMD64.
+All 243 commands passed with unchanged inputs/tools. Thirty-four SG programs
+emitted repeat-identical objects and executed 42. Thirty-three also ran through
+the frozen Rust/LLVM path with identical exit/stdout/stderr, including numeric
+casts/division, impl effect tails, early for exits, Option try, Result error
+propagation, reverse user Drop and early-return Drop. The remaining Result try
+case requires the documented frozen-reference invalid-LLVM link failure and
+records `result_equal=false`; `selfhost/REFERENCE_GAPS.md` retains this gap.
+Four syntax/semantic/native failures preserve prior output, including strict
+class unit tails. This is not full reference parity or a completed M4 gate.

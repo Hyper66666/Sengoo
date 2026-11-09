@@ -55,6 +55,20 @@ extern struct Small sg_native_small(struct Small);
 extern struct Pair sg_native_pair_select(bool,struct Pair,struct Pair);
 extern struct Odd sg_native_odd(struct Odd);
 extern struct NativeChoice sg_native_enum(void);
+extern int64_t sg_native_cleanup(bool);
+extern int64_t sg_native_nested_cleanup(void), sg_native_array_cleanup(void);
+struct DropChoice { int64_t tag,value; };
+extern int64_t sg_native_enum_cleanup(struct DropChoice);
+static int drop_count;
+static int64_t drop_values[32];
+void sg_drop_test_owner(void *pointer) {
+    int64_t *value=pointer;
+    if (*value!=42 && *value!=1 && *value!=2) exit(75);
+    if (drop_count>=32) exit(75);
+    drop_values[drop_count]=*value;
+    *value=-999;
+    ++drop_count;
+}
 struct Pair sg_native_pair_external(struct Pair p) { p.x+=2; return p; }
 static int checks;
 void sengoo_panic_division_by_zero(int64_t divisor) {
@@ -169,6 +183,13 @@ int main(int argc,char **argv) {
         sg_native_large(1,2,3,4,5,6)!=42 || checks<4 || unwound!=7) return 67;
     if (virtual_unwind(sg_native_add) || virtual_unwind(sg_native_swap)) return 68;
     if (test_casts()) return 74;
+    if (sg_native_cleanup(false)!=42 || drop_count!=0 ||
+        sg_native_cleanup(true)!=42 || drop_count!=1 ||
+        sg_native_cleanup(true)!=42 || drop_count!=2) return 76;
+    if (sg_native_nested_cleanup()!=42 || drop_count!=4 || drop_values[2]!=2 || drop_values[3]!=1 ||
+        sg_native_array_cleanup()!=42 || drop_count!=6 || drop_values[4]!=2 || drop_values[5]!=1) return 77;
+    if (sg_native_enum_cleanup((struct DropChoice){0,-777})!=42 || drop_count!=6 ||
+        sg_native_enum_cleanup((struct DropChoice){1,42})!=42 || drop_count!=7 || drop_values[6]!=42) return 78;
     struct Pair pair=sg_native_pair(40,2);
     struct Pair called_pair=sg_native_pair_call(pair);
     struct Odd odd=sg_native_odd((struct Odd){1,2,3});
@@ -192,5 +213,8 @@ int main(int argc,char **argv) {
     puts("native aggregate Windows parameters and return pointers: ok");
     puts("native saturating casts, NaN, ranges and integer rounding: ok");
     puts("native signed and unsigned division and remainder: ok");
+    puts("native conditional initialization and exact user Drop: ok");
+    puts("native nested and array reverse cleanup with cleared flags: ok");
+    puts("native active enum payload cleanup: ok");
     return 0;
 }
