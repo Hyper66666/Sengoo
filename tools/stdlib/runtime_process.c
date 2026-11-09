@@ -442,6 +442,10 @@ static long long sengoo_process_output_register(SengooProcessOutput* output) {
 }
 
 #ifdef _WIN32
+/* Shared strict UTF-8 boundaries, implemented with the owned launch helpers. */
+static wchar_t* sengoo_process_utf16(const char* text);
+static wchar_t* sengoo_process_wide_environment(SengooProcessCommand* command);
+
 static char* sengoo_windows_process_command_line_dyn(SengooProcessCommand* command) {
     if (!sengoo_process_command_is_live(command)) {
         return NULL;
@@ -487,94 +491,6 @@ static char* sengoo_windows_process_command_line_dyn(SengooProcessCommand* comma
     return command_line;
 }
 
-static int sengoo_process_env_edit_matches(const char* edit_name, const char* entry, size_t entry_name_len) {
-    return edit_name
-        && strlen(edit_name) == entry_name_len
-        && _strnicmp(edit_name, entry, entry_name_len) == 0;
-}
-
-static SengooProcessEnvEdit* sengoo_process_find_env_edit_for_entry(SengooProcessCommand* command, const char* entry) {
-    const char* equals = strchr(entry, '=');
-    if (!equals || equals == entry) {
-        return NULL;
-    }
-    size_t name_len = (size_t)(equals - entry);
-    for (size_t i = 0; i < command->env_len; ++i) {
-        if (sengoo_process_env_edit_matches(command->env[i].name, entry, name_len)) {
-            return &command->env[i];
-        }
-    }
-    return NULL;
-}
-
-static int sengoo_process_env_block_append(char** block, size_t* len, size_t* cap, const char* entry) {
-    size_t entry_len = strlen(entry) + 1u;
-    return sengoo_process_bytes_append(block, len, cap, entry, entry_len);
-}
-
-static char* sengoo_process_build_windows_env_block(SengooProcessCommand* command) {
-    if (!command->env_clear && command->env_len == 0) {
-        return NULL;
-    }
-    char* block = NULL;
-    size_t len = 0;
-    size_t cap = 0;
-
-    if (!command->env_clear) {
-        LPCH inherited = GetEnvironmentStringsA();
-        if (!inherited) {
-            return NULL;
-        }
-        for (const char* entry = inherited; *entry != '\0'; entry += strlen(entry) + 1u) {
-            SengooProcessEnvEdit* edit = sengoo_process_find_env_edit_for_entry(command, entry);
-            if (edit) {
-                continue;
-            }
-            if (!sengoo_process_env_block_append(&block, &len, &cap, entry)) {
-                FreeEnvironmentStringsA(inherited);
-                free(block);
-                return NULL;
-            }
-        }
-        FreeEnvironmentStringsA(inherited);
-    }
-
-    for (size_t i = 0; i < command->env_len; ++i) {
-        if (command->env[i].remove) {
-            continue;
-        }
-        size_t name_len = strlen(command->env[i].name);
-        size_t value_len = strlen(command->env[i].value);
-        if (name_len > SIZE_MAX - value_len - 2u) {
-            free(block);
-            return NULL;
-        }
-        size_t entry_len = name_len + 1u + value_len;
-        char* entry = (char*)malloc(entry_len + 1u);
-        if (!entry) {
-            free(block);
-            return NULL;
-        }
-        memcpy(entry, command->env[i].name, name_len);
-        entry[name_len] = '=';
-        memcpy(entry + name_len + 1u, command->env[i].value, value_len);
-        entry[entry_len] = '\0';
-        int appended = sengoo_process_env_block_append(&block, &len, &cap, entry);
-        free(entry);
-        if (!appended) {
-            free(block);
-            return NULL;
-        }
-    }
-
-    char zero = '\0';
-    if (!sengoo_process_bytes_append(&block, &len, &cap, &zero, 1)) {
-        free(block);
-        return NULL;
-    }
-    return block;
-}
-
 static int sengoo_process_windows_pipe_read_available(HANDLE handle, char** data, size_t* len, size_t* cap) {
     if (handle == NULL || handle == INVALID_HANDLE_VALUE) {
         return 1;
@@ -609,6 +525,15 @@ static long long sengoo_process_command_run_platform_with_stdin(
     if (!command_line) {
         return 0;
     }
+    wchar_t* wide_line = sengoo_process_utf16(command_line);
+    wchar_t* wide_cwd = command->cwd ? sengoo_process_utf16(command->cwd) : NULL;
+    wchar_t* wide_environment = sengoo_process_wide_environment(command);
+    free(command_line);
+    if (!wide_line || !wide_environment || (command->cwd && !wide_cwd)
+        || wcslen(wide_line) >= 32767) {
+        free(wide_line); free(wide_cwd); free(wide_environment);
+        return 0;
+    }
 
     SECURITY_ATTRIBUTES security;
     memset(&security, 0, sizeof(security));
@@ -627,7 +552,7 @@ static long long sengoo_process_command_run_platform_with_stdin(
             || !SetHandleInformation(stdin_write, HANDLE_FLAG_INHERIT, 0)) {
             if (stdin_read) CloseHandle(stdin_read);
             if (stdin_write) CloseHandle(stdin_write);
-            free(command_line);
+            free(wide_line); free(wide_cwd); free(wide_environment);
             return 0;
         }
     }
@@ -636,7 +561,7 @@ static long long sengoo_process_command_run_platform_with_stdin(
             || !SetHandleInformation(stdout_read, HANDLE_FLAG_INHERIT, 0)) {
             if (stdin_read) CloseHandle(stdin_read);
             if (stdin_write) CloseHandle(stdin_write);
-            free(command_line);
+            free(wide_line); free(wide_cwd); free(wide_environment);
             return 0;
         }
     }
@@ -647,13 +572,12 @@ static long long sengoo_process_command_run_platform_with_stdin(
             if (stdout_write) CloseHandle(stdout_write);
             if (stdin_read) CloseHandle(stdin_read);
             if (stdin_write) CloseHandle(stdin_write);
-            free(command_line);
+            free(wide_line); free(wide_cwd); free(wide_environment);
             return 0;
         }
     }
 
-    char* env_block = sengoo_process_build_windows_env_block(command);
-    STARTUPINFOA startup_info;
+    STARTUPINFOW startup_info;
     PROCESS_INFORMATION process_info;
     memset(&startup_info, 0, sizeof(startup_info));
     memset(&process_info, 0, sizeof(process_info));
@@ -663,20 +587,19 @@ static long long sengoo_process_command_run_platform_with_stdin(
     startup_info.hStdOutput = command->capture_stdout ? stdout_write : GetStdHandle(STD_OUTPUT_HANDLE);
     startup_info.hStdError = command->capture_stderr ? stderr_write : GetStdHandle(STD_ERROR_HANDLE);
 
-    BOOL created = CreateProcessA(
+    BOOL created = CreateProcessW(
         NULL,
-        command_line,
+        wide_line,
         NULL,
         NULL,
         TRUE,
-        0,
-        env_block,
-        command->cwd,
+        CREATE_UNICODE_ENVIRONMENT,
+        wide_environment,
+        wide_cwd,
         &startup_info,
         &process_info
     );
-    free(command_line);
-    free(env_block);
+    free(wide_line); free(wide_cwd); free(wide_environment);
     if (stdout_write) {
         CloseHandle(stdout_write);
     }
