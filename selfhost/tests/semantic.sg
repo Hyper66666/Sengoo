@@ -23,6 +23,24 @@ def sh_semantic_case(source: &str, expected: i64) -> Result<bool, i64> {
 }
 
 def sh_semantic_positive() -> Result<bool, i64> {
+    sh_semantic_case("def main(){let s=format(\"{0} {0}\",42);}", 0)?;
+    sh_semantic_case("def main(){let s=format(\"{} {1:?} {0:>8.2}\",1,2);}", 0)?;
+    sh_semantic_case("def main(){let s=format(\"{{{0}}}\",42);}", 0)?;
+    sh_semantic_case("def main(){let s=format(\"{name}\",42);}", 5121)?;
+    sh_semantic_case("def main(){let s=format(\"{:bogus}\",42);}", 5121)?;
+    sh_semantic_case("def main(){let s=format(\"{:.}\",42);}", 5121)?;
+    sh_semantic_case("def main(){let s=format(\"{0}\",1,2);}", 5105)?;
+    sh_semantic_case("def main()->i64{match 42{a|a=>a,_=>0}}", 0)?;
+    sh_semantic_case("trait Greet{def greet(self)->i64{42}} trait Loud:Greet{} impl Greet for i64{} impl Loud for i64{} def say<T:Loud>(value:T)->i64{value.greet()} def main()->i64{say(42)}", 0)?;
+    sh_semantic_case("trait Add<Rhs,Output>{def add(self,rhs:Rhs)->Output{}} def sum<T>(a:T,b:T)->T where T:Add<T,T>{a+b} def main()->i64{sum(20,22)}", 0)?;
+    sh_semantic_case("def answer()->i64 requires true ensures result==42 {42}", 0)?;
+    sh_semantic_case("def worker_child(x:i64)->i64{x} def main()->i64{worker::child(42)}", 0)?;
+    sh_semantic_case("trait Math{def add(a:i64,b:i64)->i64{}} impl Math for i64{def add(a:i64,b:i64)->i64{a+b}} def main()->i64{Math::add(1,2)+i64::add(3,4)}", 0)?;
+    sh_semantic_case("enum Value{None,Some(i64)} def main()->i64{let x=Value::None();42}", 0)?;
+    sh_semantic_case("struct Counter{n:i64} impl Counter{def bump(&mut self){self.n=self.n+1;true}} def main(){let mut c=Counter{n:0};c.bump();}", 0)?;
+    sh_semantic_case("trait Add<Rhs,Output>{def add(self,rhs:Rhs)->Output{}} struct Value{n:i64} impl Add<Value,Value> for Value{def add(self,rhs:Value)->Value{Value{n:self.n+rhs.n}}} def main()->i64{let a=Value{n:20};let b=Value{n:22};(a+b).n}", 0)?;
+    sh_semantic_case("trait Add<Rhs,Output>{def add(self,rhs:Rhs)->Output{}} struct Value{n:i64} impl Add<Value,i64> for Value{def add(self,rhs:Value)->i64{self.n+rhs.n}} def add_values<T>(a:T,b:T)->i64 where T:Add<T,i64>{a+b} def main()->i64{add_values(Value{n:20},Value{n:22})}", 0)?;
+    sh_semantic_case("trait Neg<Output>{def neg(self)->Output{}} struct Value{n:i64} impl Neg<i64> for Value{def neg(self)->i64{-(self.n)}} def main()->i64{-Value{n:42}}", 0)?;
     sh_semantic_case("trait Show{def show(&self)->i64{}} struct Value{n:i64} impl Show for Value{def show(&self)->i64{self.n}} def read(x:&dyn Show)->i64{x.show()} def main()->i64{let v=Value{n:42};read(&v)}", 0)?;
     sh_semantic_case("trait Source{type Item;def value(&self)->Self::Item{}} struct Number{n:i64} impl Source for Number{type Item=i64;def value(&self)->Self::Item{self.n}} def read(x:dyn Source<Item=i64>)->i64{x.value()} def main()->i64{read(Number{n:42})}", 0)?;
     sh_semantic_case("async def child()->i64{42} async def main()->i64{let future=child();await future}", 0)?;
@@ -92,6 +110,19 @@ def sh_semantic_positive() -> Result<bool, i64> {
 }
 
 def sh_semantic_negative() -> Result<bool, i64> {
+    sh_semantic_case("def main()->i64{match 42{a|b=>a,_=>0}}", 5110)?;
+    sh_semantic_case("def main()->i64{match (1,2){(a,_)|(_,b)=>a,_=>0}}", 5110)?;
+    sh_semantic_case("trait Greet{} trait Loud:Greet{} impl Loud for i64{}", 5115)?;
+    sh_semantic_case("trait Loud:Missing{}", 5115)?;
+    sh_semantic_case("trait A:B{} trait B:A{}", 5115)?;
+    sh_semantic_case("def answer()->i64 requires 123 {0}", 5104)?;
+    sh_semantic_case("def answer()->i64 ensures result==7 {42}", 5127)?;
+    sh_semantic_case("def answer()->i64 ensures false {42}", 5127)?;
+    sh_semantic_case("def wrong(){true}", 5104)?;
+    sh_semantic_case("struct Counter{} impl Counter{def wrong()->(){true}}", 5104)?;
+    sh_semantic_case("struct Counter{} impl Counter{def wrong(){return true;}}", 5104)?;
+    sh_semantic_case("trait Add<Rhs,Output>{def add(self,rhs:Rhs)->i64{}}", 5123)?;
+    sh_semantic_case("trait Add<Rhs,Output>{def add(self,rhs:Rhs)->Output{}} struct Value{n:i64} impl Add<Value,i64> for Value{def add(self,rhs:Value)->i64{self.n+rhs.n}} def add_values<T>(a:T,b:T)->T where T:Add<T,T>{a+b} def main(){add_values(Value{n:20},Value{n:22});();}", 5115)?;
     sh_semantic_case("def main()->i64{match 1{_=>1,0=>2}}", 5112)?;
     sh_semantic_case("trait Source{def same(&self,x:Self)->i64{0}} def read(x:dyn Source){}", 5116)?;
     sh_semantic_case("trait Source{def same(&self)->Self{}} def read(x:dyn Source){}", 5116)?;

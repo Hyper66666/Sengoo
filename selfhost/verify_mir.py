@@ -69,7 +69,7 @@ def main() -> int:
         "tests": {"ownership_resource_rounds": 50, "hir_roundtrip_poison_observed_abi_and_lowering_rounds": 10,
                   "raw_mir_cfg_ssa_abi_bounds_rounds": 30, "exact_resources": ["String", "Buffer", "opaque"]},
         "remaining": ["complete ownership-aware generic monomorphization; generic owned arguments and generic foreign declarations reject 5009", "owned patterns and variant-aware cleanup", "complete inherited/dynamic methods and pattern/slice iteration",
-                      "try/closures/contracts/async/concurrency/cancellation", "conditional partial-field flags", "full frozen supported-corpus parity"],
+                      "complete try propagation with inactive reference/dyn/Future payloads; closures/contracts/async/concurrency/cancellation", "resolved runtime resource drop ABI/glue", "conditional partial-field flags", "full frozen supported-corpus parity"],
         "steps": [],
     }
     before: dict[str, str] = {}

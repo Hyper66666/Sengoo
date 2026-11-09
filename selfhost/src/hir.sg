@@ -106,10 +106,11 @@ def sh_hir_validate_ownership_links(hir: &ShHir) -> i64 {
         let binding = sh_ownership_action(&hir.ownership, index, 1);
         let kind = sh_ownership_action(&hir.ownership, index, 2);
         let scope = sh_ownership_action(&hir.ownership, index, 3);
+        if kind == 7 and sh_ast_word(&hir.ast, node, 0) != 56 { return 5506; };
         if kind == 8 {
             if sh_binding_word(&hir.checked, binding, 2) != 1 or sh_binding_word(&hir.checked, binding, 4) != node or sh_binding_word(&hir.checked, binding, 1) != scope or sh_ownership_action(&hir.ownership, index, 4) != 0 or sh_ownership_action_path(&hir.ownership, index) != -1 { return 5506; };
             let mut action = 0;
-            while action < sh_ownership_action_count(&hir.ownership) { let other_kind = sh_ownership_action(&hir.ownership, action, 2); if sh_ownership_action(&hir.ownership, action, 1) == binding and (other_kind == 2 or other_kind == 3 or other_kind == 6) { return 5506; }; action = action + 1; };
+            while action < sh_ownership_action_count(&hir.ownership) { let other_kind = sh_ownership_action(&hir.ownership, action, 2); if sh_ownership_action(&hir.ownership, action, 1) == binding and (other_kind == 2 or other_kind == 3 or other_kind == 6 or other_kind == 7) { return 5506; }; action = action + 1; };
         };
         let node_owner = sh_hir_node_owner(hir, node);
         let owner = if binding >= 0 { sh_binding_word(&hir.checked, binding, 6); } else { sh_hir_node_owner(hir, -binding - 1); };
@@ -125,7 +126,7 @@ def sh_hir_validate_ownership_links(hir: &ShHir) -> i64 {
             let producer = -binding - 1;
             if kind == 1 or kind == 2 { if node != producer { return 5506; }; };
             if kind == 1 and not sh_hir_scope_contains(hir, scope, sh_node_scope(&hir.checked, producer)) { return 5506; };
-            if kind == 3 or kind == 6 { let mut initialized = false; let mut action = 0; while action < sh_ownership_action_count(&hir.ownership) { if sh_ownership_action(&hir.ownership, action, 1) == binding and sh_ownership_action(&hir.ownership, action, 2) == 1 { initialized = true; }; action = action + 1; }; if not initialized { return 5506; }; };
+            if kind == 3 or kind == 6 or kind == 7 { let mut initialized = false; let mut action = 0; while action < sh_ownership_action_count(&hir.ownership) { if sh_ownership_action(&hir.ownership, action, 1) == binding and sh_ownership_action(&hir.ownership, action, 2) == 1 { initialized = true; }; action = action + 1; }; if not initialized { return 5506; }; };
         };
         index = index + 1;
     };
@@ -210,7 +211,7 @@ def sh_hir_validate(hir: &ShHir) -> i64 {
         index = index + 1;
     };
     index = 0;
-    while index < sh_ownership_action_count(&hir.ownership) { let node = sh_ownership_action(&hir.ownership, index, 0); let binding = sh_ownership_action(&hir.ownership, index, 1); let kind = sh_ownership_action(&hir.ownership, index, 2); let scope = sh_ownership_action(&hir.ownership, index, 3); let conditional = sh_ownership_action(&hir.ownership, index, 4); let path = sh_ownership_action_path(&hir.ownership, index); if not sh_hir_node_valid(hir, node) or kind < 1 or (kind > 6 and kind != 8) or not sh_hir_scope_valid(hir, scope) or conditional < 0 or conditional > 1 or path < -1 or path >= hir.ownership.paths.len() / 4 or (binding >= 0 and (not sh_hir_binding_valid(hir, binding) or sh_binding_word(&hir.checked, binding, 2) > 1)) or (binding < 0 and (binding < -count or not sh_hir_node_valid(hir, -binding - 1))) or (path >= 0 and sh_ownership_path_word(&hir.ownership, path, 0) != binding) { return 5506; }; index = index + 1; };
+    while index < sh_ownership_action_count(&hir.ownership) { let node = sh_ownership_action(&hir.ownership, index, 0); let binding = sh_ownership_action(&hir.ownership, index, 1); let kind = sh_ownership_action(&hir.ownership, index, 2); let scope = sh_ownership_action(&hir.ownership, index, 3); let conditional = sh_ownership_action(&hir.ownership, index, 4); let path = sh_ownership_action_path(&hir.ownership, index); if not sh_hir_node_valid(hir, node) or kind < 1 or kind > 8 or not sh_hir_scope_valid(hir, scope) or conditional < 0 or conditional > 1 or path < -1 or path >= hir.ownership.paths.len() / 4 or (binding >= 0 and (not sh_hir_binding_valid(hir, binding) or sh_binding_word(&hir.checked, binding, 2) > 1)) or (binding < 0 and (binding < -count or not sh_hir_node_valid(hir, -binding - 1))) or (path >= 0 and sh_ownership_path_word(&hir.ownership, path, 0) != binding) { return 5506; }; index = index + 1; };
     let calls = sh_hir_validate_calls(hir);
     if calls != 0 { return calls; };
     let ownership_links = sh_hir_validate_ownership_links(hir);

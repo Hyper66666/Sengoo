@@ -186,6 +186,58 @@ collision/ABI gates remain open under M7. Complete owned patterns and
 variant-aware/conditional field cleanup, error propagation, closures/async and
 concurrency/cancellation remain open. `m3_complete` remains `false`.
 
+## Propagation, loop exits and explicit Drop glue checkpoint
+
+- [x] Stop emitting counter-value uses in a for-loop advance block with no incoming edge; preserve strict SSA validation and verify unconditional break/return plus break/continue-branch regressions.
+- [x] Lower the named Result/Option function propagation and try-block success/failure cases with explicit branches, container rebuilding and typed result values.
+- [x] Record failure-only propagation cleanup as ownership action kind 7 at the question-mark AST node; preserve the success-path state and scope try-block failure cleanup to its own locals.
+- [x] Roundtrip propagation cleanup through HIR schema 2 without rerunning analysis and reject a forged cleanup site.
+- [x] Record nominal Drop glue as trivial, resolved user function, structural, tag-selected enum or pending; validate member-ownership proof, exact user Drop ABI/layout agreement, pending-state consistency and named metadata mutations.
+- [x] Preserve the narrowly approved implicit-unit effect tail for class/impl methods by discarding the body's checked tail value and emitting a unit return.
+
+Evidence: `target/selfhost/m3-try/checkpoint/evidence.json`, SHA-256
+`2057465dc209cf303e09b9df54c2324ddfba72c9e9882f48a39d73fa99af5b3f`.
+Both starting and ending revisions are
+`07082b7b406229de6f76862247fcb7b2997d9210`, Windows 11 AMD64. All 175
+frontend import-closure, stdlib/runtime, test and runner records remained
+identical, as did the verified seed/clang identities. Forced ownership
+build/native and MIR build/native commands all exited zero (25.90 s, 8.01 s,
+39.59 s, 3.38 s). Ownership cases and the independent propagation-fact
+assertions ran fifty rounds. Typed-source/cleanup, propagation HIR
+roundtrip/corruption, Drop glue mutation, generic, builtin-HIR and prior
+checkpoint tests ran ten rounds, with thirty raw MIR CFG/SSA/ABI rounds.
+String/Buffer/opaque counts recovered exactly. Test executable hashes are
+`d3170aaf752acf84dff8bd0c03cf92e46ae422a38d3bce193fccc4bf819ccb4f`
+(ownership) and
+`79dd3c5d21c1d247a000ebdc92c7150662a9836d1dd7495a45237c932d4e8295`
+(HIR/MIR).
+
+`ShMir.drop_glues` records are `type, kind, targetFunction`; kind 0 is
+proven trivial, 1 is a resolved user Drop, 2 structural fields, 3 tag-selected
+enum, and 4 pending. Layout `dropFunction=-2` records required unresolved
+glue. Pending metadata never authorizes a free; native cleanup must reject
+it while physical layout can still be computed. A recognized runtime-owner
+name without a resolved source Drop implementation remains pending even if
+it also contains owned fields. This checkpoint does not invent a runtime
+deallocator from the type name. Resolved runtime ownership/Drop ABI and
+complete generic Drop specialization remain open.
+
+The inactive payload builder currently covers scalar and recursively
+supported aggregate defaults. Reference/dyn/Future and other unsupported
+inactive payloads reject rather than fabricate a value. A fresh qualified
+reference check also rejects function propagation from `Option<bool>` into
+`Option<i64>`; that source case retains `5104`, alongside a same-payload
+Option failure positive. Result failure reconstruction with a different
+success payload and unchanged error type is covered.
+
+The original for-exit discovery (`for-exit-probe-native.log`) returned
+`5005` for unconditional break and return; the fixed independent probe
+returned zero for all three named sources. Neither those discovery logs nor
+earlier partial reports are relabeled as final evidence. Complete owned
+patterns, conditional field flags, resolved runtime resources,
+closures/contracts/async/concurrency/cancellation and full supported-corpus
+parity remain open. `m3_complete` remains `false`.
+
 ## Additional semantic and ownership checkpoint
 
 - [x] Verify the named 107 semantic fixtures and 100 exact resource scopes for numeric inference, associated projection normalization, callable/closure owner identities, core trait/FFI contracts and inherited class field facts (`target/selfhost/m3-semantic/evidence.json`).
@@ -254,3 +306,34 @@ negative gaps; the typed-only discovery CLI does not yet apply borrowing.
 Path function calls, remaining Hash/operator/contract/supertrait and pattern
 rules and the complete M3 gate remain open. These discovery results are not
 treated as a complete corpus pass.
+
+
+## Qualified calls, operator and CLI ownership checkpoint
+
+- [x] Verify 178 named semantic fixtures and 100 exact resource scopes, including qualified callable lookup, operator Rhs/Output and generic bounds, transitive supertraits, or-pattern bindings, contracts, the scoped implicit-unit method tail rule and format template argument/specifier validation.
+- [x] Run the semantic CLI through the real ownership analyzer after successful type checking, preserving located original-source diagnostics and phase identity.
+- [x] Replay structural types and native semantic tests, formatting and native CLI build, plus 49 fresh standalone Rust type-check requests on the unchanged mapped source closure.
+
+Report: `target/selfhost/m3-semantic/evidence.json`, SHA-256
+`f0b7c4be515ce334f94c4781ec4a9cd2350ee36b9ab60bab06494ac396eb2614`.
+It records identical start/end revision
+`07082b7b406229de6f76862247fcb7b2997d9210`, Windows 11 AMD64, empty
+source/tool change lists, 178 fixture outcomes and the same five reviewed
+49-case differences. The previous 147-case report is preserved as
+`target/selfhost/m3-semantic/evidence-147-e5a02ba.json`; the first 178-case run
+whose HEAD and ownership source changed remains failed development evidence.
+
+The complete fresh discovery still is not a parity pass: 770 standalone
+Rust-accepted fixtures have 19 CLI rejections, including eight newly exposed
+ownership compatibility gaps and the Hasher typed/lowering inconsistency.
+718 Rust-rejected fixtures have four remaining ownership acceptances; the
+oracle completed every request without faults. The six genuine positive gaps
+from the previous checkpoint now pass through the ownership CLI. Fixture 625
+remains a typed positive differential despite qualified reference MIR rejection;
+its independent evidence is `hasher-625-inconsistency.json` beside the report.
+
+The initial actual-source single-file discovery accepts only five of 96
+selfhost/stdlib files and records all diagnostics. Its imports do not load
+modules; this is an explicit missing capability, not a completed module graph.
+Full shared-module resolution, standard-library/intrinsic coverage and all
+remaining semantic, ownership and lowering obligations remain unchecked.

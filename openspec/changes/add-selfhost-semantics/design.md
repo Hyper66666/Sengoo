@@ -145,3 +145,53 @@ trait identities, duplicate associated items and nested binding payloads before
 publishing an ID. Object safety and fixed-associated-type coercions are checked
 against declarations; associated entries are type metadata, not runtime payload
 fields.
+
+
+## Operator, contract and unit method compatibility
+
+Arithmetic operator nodes retain a resolved method binding and an instantiated
+`call_types` signature, including the declared Rhs and Output types. Generic
+operator bounds retain those arguments; primitive arithmetic satisfies only the
+matching primitive Rhs/Output combination. Trait declarations and implementations
+are checked against their receiver, argument and output contracts. A complete
+lowering implementation must consume these facts rather than emit scalar
+instructions for a user-defined operator.
+
+Supertrait names must resolve to traits, their graph must be acyclic, and an
+implementation must satisfy transitive supertrait obligations. A generic bound
+also introduces its supertraits into method lookup. Or-pattern alternatives bind
+the same names and compatible types to shared binding IDs. Function requires and
+ensures expressions are boolean; ensures exposes a scoped result binding. Code
+5127 identifies directly contradictory literal postconditions, while arbitrary
+contract verification remains a separate obligation.
+
+For compatibility with the actual reference, an impl or class method with no
+written return type has a declared unit return and may discard its body tail
+value. The complete body is still checked, and explicit return statements obey
+that declared unit contract. This rule does not apply to ordinary functions or
+methods with an explicit return type. Named cases use Counter.bump with a boolean
+tail and reject an ordinary boolean-tail unit function, explicit `->()` boolean
+tail, and explicit `return true` in an implicit-unit method. MIR must discard the
+tail according to the declaration and return unit; the source-to-native gate
+records execution separately from typed acceptance.
+
+Format templates follow the current shared mini-language: automatic and explicit
+positions, debug style, right width, precision and escaped braces. Required
+arguments use max(automatic count, greatest explicit index + 1), so a repeated
+explicit position consumes one argument. Invalid specifiers remain located
+errors rather than being counted as arbitrary placeholders.
+
+The standalone Rust type checker accepts extracted fixture 625, whose Hash body
+uses Hasher methods without importing their definitions. Qualified sgc check
+rejects the same source at MIR lowering for missing write_i64, write_bool,
+write_str and finish. This remains a typed differential gap and a reference
+phase inconsistency; it is not reclassified as a typed negative or counted as
+full-source native support. No invented implementation is registered to hide the
+missing module context.
+
+Actual selfhost and standard-library single-file discovery records the missing
+module context explicitly. Imports do not yet load dependencies at this entry,
+and five accepted files out of the initial 96-file scan do not establish module
+resolution or self-compilation. Shared module graphs, canonical module identity,
+source ownership, standard-library signatures and intrinsic validation remain
+required before M3/M7 closure.

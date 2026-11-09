@@ -329,6 +329,15 @@ def sh_mt_lower() -> Result<bool, i64> {
     sh_mt_lower_case("def main() -> i64 { let mut sum = 0; for value in 0..4 { if value == 1 { continue; }; sum = sum + value; }; sum; }", 0)?;
     sh_mt_lower_case("def main() -> i64 { let mut sum = 0; for value in [20, 22, 99] { if value == 99 { break; }; sum = sum + value; }; sum; }", 0)?;
     sh_mt_lower_case("def main() -> i64 { let mut sum = 0; for (a, b) in [(20, 22), (1, 2)] { sum = sum + a + b; }; sum; }", 0)?;
+    sh_mt_lower_case("def main() -> i64 { for value in 0..4 { break; }; 42; }", 0)?;
+    sh_mt_lower_case("def main() -> i64 { for value in 0..4 { return 42; }; 0; }", 0)?;
+    sh_mt_lower_case("def main() -> i64 { for value in 0..4 { if true { break; } else { continue; }; }; 42; }", 0)?;
+    sh_mt_lower_case("struct Result<T,E> { is_ok: bool, value: T, error: E, } def answer() -> Result<i64,i64> { Result { is_ok: true, value: 42, error: 0 }; } def main() -> i64 { let result = try { let value = answer()?; value; }; result.value; }", 0)?;
+    sh_mt_lower_case("struct Option<T> { is_some: bool, value: T, } def answer() -> Option<i64> { Option { is_some: true, value: 42 }; } def main() -> i64 { let result = try { let value = answer()?; value; }; result.value; }", 0)?;
+    sh_mt_lower_case("struct Result<T,E> { is_ok: bool, value: T, error: E, } def answer() -> Result<bool,i64> { Result { is_ok: false, value: false, error: 42 }; } def wrapped() -> Result<i64,i64> { let value = answer()?; Result { is_ok: true, value: 0, error: 0 }; } def main() -> i64 { wrapped().error; }", 0)?;
+    sh_mt_lower_case("struct Option<T> { is_some: bool, value: T, } def answer() -> Option<bool> { Option { is_some: false, value: false }; } def wrapped() -> Option<i64> { let value = answer()?; Option { is_some: true, value: 42 }; } def main() -> i64 { let result = wrapped(); if result.is_some { 0; } else { 42; }; }", 5104)?;
+    sh_mt_lower_case("struct Option<T> { is_some: bool, value: T, } def answer() -> Option<i64> { Option { is_some: false, value: 0 }; } def wrapped() -> Option<i64> { let value = answer()?; Option { is_some: true, value: 42 }; } def main() -> i64 { let result = wrapped(); if result.is_some { 0; } else { 42; }; }", 0)?;
+    sh_mt_lower_case("class Counter { value: i64; def bump(&mut self) { self.value = self.value + 1; true; } } def main() -> i64 { let mut counter = Counter { value: 41 }; counter.bump(); counter.value; }", 0)?;
     sh_mt_lower_case("def main() -> i64 {}", 0)?;
     sh_mt_lower_case("struct Owner { value: i64, } impl Drop for Owner { def drop(&mut self) {} } def main() -> i64 { let value = Owner { value: 42 }; 42; }", 0)?;
     sh_mt_lower_case("struct Owner { value: i64, } impl Drop for Owner { def drop(&mut self) {} } struct Pair { left: Owner, right: Owner, } def main() -> i64 { let pair = Pair { left: Owner { value: 1 }, right: Owner { value: 2 } }; let moved = pair.left; 42; }", 0)?;
@@ -338,6 +347,8 @@ def sh_mt_lower() -> Result<bool, i64> {
     sh_mt_cleanup_case("struct Owner { value: i64, } impl Drop for Owner { def drop(&mut self) {} } def make() -> Owner { Owner { value: 42 }; } def observe(value: &Owner) {} def main() -> i64 { make().value; observe(&make()); let alias = &make(); observe(alias); 42; }", 3, 0)?;
     sh_mt_cleanup_case("struct Owner { value: i64, } impl Drop for Owner { def drop(&mut self) {} } def main() -> i64 { let mut value = Owner { value: 1 }; value = Owner { value: 2 }; 42; }", 2, 0)?;
     sh_mt_cleanup_case("struct Owner { value: i64, } impl Drop for Owner { def drop(&mut self) {} } class Parent { left: Owner; } class Child: Parent { right: Owner; } def main() -> i64 { let child = Child { left: Owner { value: 1 }, right: Owner { value: 2 } }; let moved = child.left; 42; }", 2, 1)?;
+    sh_mt_cleanup_case("struct Owner { value: i64, } impl Drop for Owner { def drop(&mut self) {} } struct Result<T,E> { is_ok: bool, value: T, error: E, } def answer() -> Result<i64,i64> { Result { is_ok: false, value: 0, error: 42 }; } def wrapped() -> Result<i64,i64> { let owner = Owner { value: 1 }; let value = answer()?; Result { is_ok: true, value: value, error: 0 }; } def main() -> i64 { wrapped().error; }", 2, 0)?;
+    sh_mt_cleanup_case("struct Owner { value: i64, } impl Drop for Owner { def drop(&mut self) {} } struct Result<T,E> { is_ok: bool, value: T, error: E, } def answer() -> Result<i64,i64> { Result { is_ok: false, value: 0, error: 42 }; } def main() -> i64 { let outer = Owner { value: 1 }; let result = try { let inner = Owner { value: 2 }; let value = answer()?; value; }; result.error; }", 3, 0)?;
     sh_mt_lower_case("def main() -> i64 { missing; }", 5101)?;
     Result { is_ok: true, value: true, error: 0 };
 }
@@ -399,6 +410,40 @@ def sh_mt_class_bounds() -> Result<bool, i64> {
     lowered.mir.parents.push(parent); lowered.mir.parents.push(child);
     assert_eq_i64(sh_mir_validate(&lowered.mir).error, 5003, "class.sg", 34);
     sh_mir_trim(&lowered.mir.parents, 2); assert_eq_i64(sh_mir_validate(&lowered.mir).error, 0, "class.sg", 35);
+    Result { is_ok: true, value: true, error: 0 };
+}
+
+def sh_mt_glue_type(mir: &ShMir, name: &str) -> i64 {
+    let mut ty = 0; while ty < sh_type_count(&mir.types) { if sh_mir_type_word(mir, ty, 0) == 12 { let label = sh_symbol_text(&mir.symbols, sh_mir_type_word(mir, ty, 3)); if label.is_ok() and sh_s_text_equal(&label.value, name) { return ty; }; }; ty = ty + 1; }; -1;
+}
+
+def sh_mt_glue_row(mir: &ShMir, ty: i64) -> i64 {
+    let mut row = 0; while row < sh_mir_count(&mir.drop_glues, 3) { if sh_mir_word(&mir.drop_glues, 3, row, 0) == ty { return row; }; row = row + 1; }; -1;
+}
+
+def sh_mt_drop_glues() -> Result<bool, i64> {
+    let text = string_from_str("struct Owner { value: i64, } impl Drop for Owner { def drop(&mut self) {} } struct Pair { owner: Owner, } enum Choice { Empty, Value(Owner), } struct Plain { value: i64, } struct String { handle: i64, } def main() -> i64 { 42; }")?;
+    let parsed = sh_parse(&text, 0, 10000); let checked = sh_check(&text, &parsed.ast, 100); let lowered = sh_lower(&text, &parsed.ast, &checked, 10000);
+    if lowered.error != 0 { println("drop glue setup"); println(lowered.error); return result_err_bool(lowered.error); };
+    let owner = sh_mt_glue_type(&lowered.mir, "Owner"); let pair = sh_mt_glue_type(&lowered.mir, "Pair"); let choice = sh_mt_glue_type(&lowered.mir, "Choice"); let plain = sh_mt_glue_type(&lowered.mir, "Plain"); let pending = sh_mt_glue_type(&lowered.mir, "String");
+    assert_eq_i64(sh_mir_drop_kind(&lowered.mir, owner), 1, "glue.sg", 11);
+    assert_true(sh_mir_drop_target(&lowered.mir, owner) >= 0, "glue.sg", 12);
+    assert_eq_i64(sh_mir_drop_kind(&lowered.mir, pair), 2, "glue.sg", 13);
+    assert_eq_i64(sh_mir_drop_kind(&lowered.mir, choice), 3, "glue.sg", 14);
+    assert_eq_i64(sh_mir_drop_kind(&lowered.mir, plain), 0, "glue.sg", 15);
+    assert_eq_i64(sh_mir_drop_kind(&lowered.mir, pending), 4, "glue.sg", 16);
+    let pair_row = sh_mt_glue_row(&lowered.mir, pair); lowered.mir.drop_glues.set(pair_row * 3 + 1, 0);
+    assert_eq_i64(sh_mir_validate(&lowered.mir).error, 5007, "glue.sg", 18); lowered.mir.drop_glues.set(pair_row * 3 + 1, 2);
+    let pending_row = sh_mt_glue_row(&lowered.mir, pending); lowered.mir.drop_glues.set(pending_row * 3 + 1, 0);
+    assert_eq_i64(sh_mir_validate(&lowered.mir).error, 5007, "glue.sg", 20); lowered.mir.drop_glues.set(pending_row * 3 + 1, 4);
+    let pending_layout = sh_mir_layout_id(&lowered.mir, pending); assert_eq_i64(sh_mir_word(&lowered.mir.layouts, 7, pending_layout, 4), -2, "glue.sg", 21);
+    lowered.mir.layouts.set(pending_layout * 7 + 4, -1);
+    assert_eq_i64(sh_mir_validate(&lowered.mir).error, 5007, "glue.sg", 23); lowered.mir.layouts.set(pending_layout * 7 + 4, -2);
+    let owner_row = sh_mt_glue_row(&lowered.mir, owner); let owner_target = sh_mir_drop_target(&lowered.mir, owner); let owner_layout = sh_mir_layout_id(&lowered.mir, owner);
+    let wrong = if owner_target == 0 { 1; } else { 0; }; lowered.mir.drop_glues.set(owner_row * 3 + 2, wrong); lowered.mir.layouts.set(owner_layout * 7 + 4, wrong);
+    assert_eq_i64(sh_mir_validate(&lowered.mir).error, 5007, "glue.sg", 26);
+    lowered.mir.drop_glues.set(owner_row * 3 + 2, owner_target); lowered.mir.layouts.set(owner_layout * 7 + 4, owner_target);
+    assert_eq_i64(sh_mir_validate(&lowered.mir).error, 0, "glue.sg", 28);
     Result { is_ok: true, value: true, error: 0 };
 }
 
@@ -471,6 +516,28 @@ def sh_mt_builtin_hir(source: &str) -> Result<bool, i64> {
     Result { is_ok: true, value: true, error: 0 };
 }
 
+def sh_mt_propagation_hir() -> Result<bool, i64> {
+    let text = string_from_str("struct Owner { value: i64, } impl Drop for Owner { def drop(&mut self) {} } struct Result<T,E> { is_ok: bool, value: T, error: E, } def fail() -> Result<i64,i64> { Result { is_ok: false, value: 0, error: 42 }; } def main() -> i64 { let outer = Owner { value: 1 }; let result = try { let inner = Owner { value: 2 }; let value = fail()?; value; }; result.error; }")?;
+    let parsed = sh_parse(&text, 0, 10000); let checked = sh_check(&text, &parsed.ast, 100); let hir = sh_hir_lift(&text, &parsed.ast, &checked, 10000);
+    if hir.error != 0 { println("propagation HIR"); println(hir.error); return result_err_bool(hir.error); };
+    let image = sh_hir_encode(&hir, 1000000); let restored = sh_hir_decode(&image.words, 1000000);
+    assert_eq_i64(restored.error, 0, "propagation.sg", 31); let image2 = sh_hir_encode(&restored, 1000000); sh_mt_words_equal(&image.words, &image2.words);
+    let direct = sh_lower(&text, &parsed.ast, &checked, 10000); let decoded = sh_lower_hir(&restored, 10000);
+    assert_eq_i64(direct.error, 0, "propagation.sg", 33); assert_eq_i64(decoded.error, 0, "propagation.sg", 34);
+    sh_mt_words_equal(&direct.mir.instructions, &decoded.mir.instructions); sh_mt_words_equal(&direct.mir.terminators, &decoded.mir.terminators); sh_mt_words_equal(&direct.mir.edges, &decoded.mir.edges); sh_mt_words_equal(&direct.mir.drop_glues, &decoded.mir.drop_glues);
+    let mut index = 0; let mut failure = 0;
+    while index < sh_ownership_action_count(&hir.ownership) {
+        if sh_ownership_action(&hir.ownership, index, 2) == 7 {
+            failure = failure + 1; let saved = sh_ownership_action(&hir.ownership, index, 0);
+            sh_mt_poison_action(&hir, index * 5, hir.ast.root);
+            assert_eq_i64(sh_hir_validate(&hir), 5506, "propagation.sg", 41); sh_mt_poison_action(&hir, index * 5, saved); ();
+        };
+        index = index + 1;
+    };
+    assert_eq_i64(failure, 1, "propagation.sg", 46);
+    Result { is_ok: true, value: true, error: 0 };
+}
+
 def sh_mt_hir() -> Result<bool, i64> {
     let text = string_from_str("// 涓栫晫 & UTF8 bridge\ndef main() -> i64 { let mut sum = 0; for value in 0..4 { sum = sum + value; }; match sum { 6 => 42, _ => 0, }; }")?;
     let parsed = sh_parse(&text, 0, 10000);
@@ -501,6 +568,7 @@ def sh_mt_hir() -> Result<bool, i64> {
     sh_mt_words_equal(&direct.mir.instances, &restored.mir.instances);
     sh_mt_words_equal(&direct.mir.substitutions, &restored.mir.substitutions);
     sh_mt_words_equal(&direct.mir.parents, &restored.mir.parents);
+    sh_mt_words_equal(&direct.mir.drop_glues, &restored.mir.drop_glues);
     sh_mt_words_equal(&direct.mir.types.words, &restored.mir.types.words);
     sh_mt_words_equal(&direct.mir.types.arguments, &restored.mir.types.arguments);
     image.words.set(1, 99); let bad_version = sh_hir_decode(&image.words, 1000000); assert_eq_i64(bad_version.error, 5502, "mir.sg", 436); image.words.set(1, 2);
@@ -518,6 +586,8 @@ def main() -> i64 {
     let opaque = sengoo_opaque_live_handle_count();
     let mut round = 0;
     while round < 10 {
+        let propagation = sh_mt_propagation_hir(); if not propagation.is_ok() { println(propagation.error); return 15; };
+        let glues = sh_mt_drop_glues(); if not glues.is_ok() { println(glues.error); return 14; };
         let builtin_print = sh_mt_builtin_hir("def main() { println(42); print(true); eprintln(\"hello\"); }");
         if not builtin_print.is_ok() { println(builtin_print.error); return 12; };
         let builtin_sleep = sh_mt_builtin_hir("async def main() -> i64 { let timer = sleep(1); await timer; 42; }");

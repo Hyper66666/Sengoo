@@ -14,6 +14,7 @@ struct ShOwnership {
     definitions: Vec<i64>,
     contracts: Vec<i64>,
     projection_context: i64,
+    try_scopes: Vec<i64>,
     error: i64,
     start: i64,
     end: i64,
@@ -56,13 +57,17 @@ def sh_b_named(checked: &ShChecked, ty: i64, name: &str) -> bool {
     text.is_ok() and sh_s_text_equal(&text.value, name);
 }
 
+def sh_b_runtime_owner(checked: &ShChecked, ty: i64) -> bool {
+    sh_b_named(checked, ty, "String") or sh_b_named(checked, ty, "Buffer") or sh_b_named(checked, ty, "Vec") or sh_b_named(checked, ty, "VecDeque") or sh_b_named(checked, ty, "HashMap") or sh_b_named(checked, ty, "BTreeMap") or sh_b_named(checked, ty, "HashSet") or sh_b_named(checked, ty, "Rc") or sh_b_named(checked, ty, "Arc") or sh_b_named(checked, ty, "Mutex") or sh_b_named(checked, ty, "RwLock") or sh_b_named(checked, ty, "Box");
+}
+
 def sh_b_drop_inner(checked: &ShChecked, ty_input: i64, depth: i64) -> bool {
     if depth > 64 { return true; };
     let ty = sh_s_resolve(checked, ty_input);
     let kind = sh_s_kind(checked, ty);
     if kind == 8 or kind == 9 or kind == 10 or kind == 16 { let mut index = 0; while index < sh_s_arity(checked, ty) { if sh_b_drop_inner(checked, sh_s_argument(checked, ty, index), depth + 1) { return true; }; index = index + 1; }; return false; };
     if kind != 12 { return false; };
-    if sh_b_named(checked, ty, "String") or sh_b_named(checked, ty, "Buffer") or sh_b_named(checked, ty, "Vec") or sh_b_named(checked, ty, "VecDeque") or sh_b_named(checked, ty, "HashMap") or sh_b_named(checked, ty, "BTreeMap") or sh_b_named(checked, ty, "HashSet") or sh_b_named(checked, ty, "Rc") or sh_b_named(checked, ty, "Arc") or sh_b_named(checked, ty, "Mutex") or sh_b_named(checked, ty, "RwLock") { return true; };
+    if sh_b_runtime_owner(checked, ty) { return true; };
     let mut index = 0;
     while index < checked.constraints.len() { if checked.constraints.get(index + 2).unwrap_or(0) == -2 { let target = checked.constraints.get(index).unwrap_or(-1); let trait_name = sh_symbol_text(&checked.symbols, checked.constraints.get(index + 1).unwrap_or(-1)); if sh_s_nominal(checked, sh_s_resolve(checked, target)) == sh_s_nominal(checked, ty) and trait_name.is_ok() and sh_s_text_equal(&trait_name.value, "Drop") { return true; }; }; index = index + 4; };
     let owner = sh_adt_binding(checked, ty);
@@ -187,7 +192,7 @@ def sh_b_carries_borrow(checked: &ShChecked, input: i64, depth: i64) -> bool {
 
 def sh_b_temporary(result: &mut ShOwnership, checked: &ShChecked, ast: &ShAst, node: i64, moving: bool, holder: i64) {
     let kind = sh_ast_word(ast, node, 0);
-    let produces = kind == 53 or kind == 60 or kind == 59 or kind == 58 and sh_ast_word(ast, node, 4) == 1;
+    let produces = kind == 53 or kind == 60 or kind == 59 or kind == 56 or kind == 68 and sh_ast_word(ast, node, 4) == sh_kind("try") or kind == 58 and sh_ast_word(ast, node, 4) == 1;
     let ty = sh_node_type(checked, node);
     if not produces or not sh_b_drop_inner(checked, ty, 0) or result.flow != 0 { return; };
     let binding = -node - 1;
@@ -384,7 +389,19 @@ def sh_b_walk(result: &mut ShOwnership, text: &String, checked: &ShChecked, ast:
     if kind == 55 { let base = sh_ast_child(ast, node, 0); if sh_b_place(result, checked, ast, base) < 0 or sh_s_kind(checked, sh_s_resolve(checked, sh_node_type(checked, base))) == 6 { sh_b_walk(result, text, checked, ast, base, false, holder); }; };
     let producer = kind == 53 or kind == 60 or kind == 59 or kind == 58 and sh_ast_word(ast, node, 4) == 1;
     let path = if producer { -1; } else { sh_b_place(result, checked, ast, node); };
-    if path >= 0 { sh_b_alias(result, checked, ast, node, path, holder); sh_b_path_use(result, checked, ast, node, path, moving); sh_b_legacy_projection(result, checked, ast, node, path, moving); } else if kind == 40 { let previous_scope = result.scope; result.scope = sh_b_block_scope(checked, ast, node); let mut index = 0; while result.flow == 0 and index < sh_ast_word(ast, node, 6) { let child = sh_ast_child(ast, node, index); let tail = index + 1 == sh_ast_word(ast, node, 6) and sh_ast_word(ast, child, 0) == 43; sh_b_walk(result, text, checked, ast, child, moving and tail, if tail { holder; } else { -1; }); index = index + 1; }; let mut loan = 0; while loan < result.loans.len() { let alias = result.loans.get(loan + 1).unwrap_or(-1); if alias >= 0 and sh_binding_word(checked, alias, 1) == result.scope { result.loans.set(loan + 4, 0); (); }; loan = loan + 5; }; if result.flow == 0 { let scope = result.scope; sh_b_cleanup(result, checked, ast, node, scope, false); }; result.scope = previous_scope; } else if kind == 41 or kind == 44 { let binding = sh_node_binding(checked, sh_ast_child(ast, node, 0)); let mut index = 1; while index < sh_ast_word(ast, node, 6) { let child = sh_ast_child(ast, node, index); if sh_ast_word(ast, child, 0) < 70 { sh_b_walk(result, text, checked, ast, child, true, binding); }; index = index + 1; }; sh_b_initialize(result, checked, ast, node, binding); sh_b_temporaries_end(result, checked, ast, node); } else if kind == 50 and sh_ast_word(ast, node, 4) % 1000 == sh_kind("&") { let operand = sh_ast_child(ast, node, 0); let previous_mode = result.access_mode; result.access_mode = 1; sh_b_walk(result, text, checked, ast, operand, false, holder); result.access_mode = previous_mode; let owner = sh_b_place(result, checked, ast, operand); let alias = sh_b_access_alias(checked, ast, operand, 0); let parent = if alias >= 0 { sh_b_alias_loan(result, alias); } else { -1; }; sh_b_loan_from(result, checked, ast, node, owner, holder, sh_ast_word(ast, node, 4) >= 1000, parent); } else if kind == 51 {
+    if path >= 0 { sh_b_alias(result, checked, ast, node, path, holder); sh_b_path_use(result, checked, ast, node, path, moving); sh_b_legacy_projection(result, checked, ast, node, path, moving); } else if kind == 56 {
+        sh_b_walk(result, text, checked, ast, sh_ast_child(ast, node, 0), true, -1);
+        let state = sh_b_state_copy(result);
+        let first = sh_ownership_action_count(result);
+        let scope = if result.try_scopes.len() > 0 { result.try_scopes.get(result.try_scopes.len() - 1).unwrap_or(-1); } else { sh_binding_word(checked, result.function, 7); };
+        sh_b_cleanup(result, checked, ast, node, scope, true);
+        let mut action = first;
+        while action < sh_ownership_action_count(result) { if result.actions.get(action * 5 + 2).unwrap_or(0) == 3 { result.actions.set(action * 5 + 2, 7); (); }; action = action + 1; };
+        sh_b_state_restore(result, &state);
+    } else if kind == 68 and sh_ast_word(ast, node, 4) == sh_kind("try") {
+        let body = sh_ast_child(ast, node, 0); result.try_scopes.push(sh_b_block_scope(checked, ast, body));
+        sh_b_walk(result, text, checked, ast, body, true, -1); result.try_scopes.pop(); ();
+    } else if kind == 40 { let previous_scope = result.scope; result.scope = sh_b_block_scope(checked, ast, node); let mut index = 0; while result.flow == 0 and index < sh_ast_word(ast, node, 6) { let child = sh_ast_child(ast, node, index); let tail = index + 1 == sh_ast_word(ast, node, 6) and sh_ast_word(ast, child, 0) == 43; sh_b_walk(result, text, checked, ast, child, moving and tail, if tail { holder; } else { -1; }); index = index + 1; }; let mut loan = 0; while loan < result.loans.len() { let alias = result.loans.get(loan + 1).unwrap_or(-1); if alias >= 0 and sh_binding_word(checked, alias, 1) == result.scope { result.loans.set(loan + 4, 0); (); }; loan = loan + 5; }; if result.flow == 0 { let scope = result.scope; sh_b_cleanup(result, checked, ast, node, scope, false); }; result.scope = previous_scope; } else if kind == 41 or kind == 44 { let binding = sh_node_binding(checked, sh_ast_child(ast, node, 0)); let mut index = 1; while index < sh_ast_word(ast, node, 6) { let child = sh_ast_child(ast, node, index); if sh_ast_word(ast, child, 0) < 70 { sh_b_walk(result, text, checked, ast, child, true, binding); }; index = index + 1; }; sh_b_initialize(result, checked, ast, node, binding); sh_b_temporaries_end(result, checked, ast, node); } else if kind == 50 and sh_ast_word(ast, node, 4) % 1000 == sh_kind("&") { let operand = sh_ast_child(ast, node, 0); let previous_mode = result.access_mode; result.access_mode = 1; sh_b_walk(result, text, checked, ast, operand, false, holder); result.access_mode = previous_mode; let owner = sh_b_place(result, checked, ast, operand); let alias = sh_b_access_alias(checked, ast, operand, 0); let parent = if alias >= 0 { sh_b_alias_loan(result, alias); } else { -1; }; sh_b_loan_from(result, checked, ast, node, owner, holder, sh_ast_word(ast, node, 4) >= 1000, parent); } else if kind == 51 {
         let op = sh_ast_word(ast, node, 4);
         let logical = op == sh_kind("and") or op == sh_kind("or") or op == sh_kind("&&") or op == sh_kind("||");
         let compare = op == sh_kind("==") or op == sh_kind("!=") or op == sh_kind("<") or op == sh_kind(">") or op == sh_kind("<=") or op == sh_kind(">=");
@@ -558,7 +575,7 @@ def sh_b_call(result: &mut ShOwnership, text: &String, checked: &ShChecked, ast:
 
 def sh_ownership_from_facts(actions: Vec<i64>, action_paths: Vec<i64>, paths: Vec<i64>, limit: i64) -> ShOwnership {
     let diagnostics: Vec<ShDiagnostic> = vec_new();
-    let mut result = ShOwnership { diagnostics: diagnostics, actions: actions, action_paths: action_paths, paths: paths, state: vec_new_i64(), loans: vec_new_i64(), loan_parents: vec_new_i64(), access_mode: 0, last_uses: vec_new_i64(), loops: vec_new_i64(), definitions: vec_new_i64(), contracts: vec_new_i64(), projection_context: 0, error: 0, start: 0, end: 0, limit: limit, function: -1, scope: 0, flow: 0, depth: 0 };
+    let mut result = ShOwnership { diagnostics: diagnostics, actions: actions, action_paths: action_paths, paths: paths, state: vec_new_i64(), loans: vec_new_i64(), loan_parents: vec_new_i64(), access_mode: 0, last_uses: vec_new_i64(), loops: vec_new_i64(), definitions: vec_new_i64(), contracts: vec_new_i64(), projection_context: 0, try_scopes: vec_new_i64(), error: 0, start: 0, end: 0, limit: limit, function: -1, scope: 0, flow: 0, depth: 0 };
     if limit < 1 or limit > 1000000 or result.actions.len() % 5 != 0 or result.paths.len() % 4 != 0 or result.action_paths.len() != result.actions.len() / 5 or result.actions.len() > 5000000 or result.paths.len() > 4000000 { result.error = 6110; };
     result;
 }

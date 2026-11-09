@@ -2,6 +2,8 @@ import selfhost_semantic;
 
 import selfhost_frontend;
 
+import selfhost_borrow;
+
 import std::args;
 
 import std::io;
@@ -27,6 +29,42 @@ def sh_semantic_json_error(code: i64, start: i64, end: i64, phase: &str) -> Resu
     Result { is_ok: true, value: true, error: 0 };
 }
 
+def sh_semantic_header(checked: &ShChecked, ok: bool, phase: &str) -> Result<String, i64> {
+    let output = string_from_str("{\"schema_version\":1,\"ok\":")?;
+    output.push_str(if ok { "true"; } else { "false"; })?;
+    output.push_str(",\"phase\":\"")?;
+    output.push_str(phase)?;
+    output.push_str("\",\"ast_nodes\":")?;
+    output.push_i64(checked.node_types.len())?;
+    output.push_str(",\"types\":")?;
+    output.push_i64(sh_type_count(&checked.types))?;
+    output.push_str(",\"bindings\":")?;
+    output.push_i64(sh_binding_count(checked))?;
+    output.push_str(",\"diagnostics\":[")?;
+    string_result_ok(output);
+}
+
+def sh_semantic_diagnostic(output: &String, mapping: &ShSourceMap, diagnostic: &ShDiagnostic, index: i64) -> Result<bool, i64> {
+    let original = sh_exp_map(mapping, diagnostic.start, diagnostic.end);
+    if index > 0 { output.push_str(",")?; (); };
+    output.push_str("{\"code\":")?;
+    output.push_i64(diagnostic.code)?;
+    output.push_str(",\"severity\":")?;
+    output.push_i64(diagnostic.severity)?;
+    output.push_str(",\"node\":")?;
+    output.push_i64(diagnostic.node)?;
+    output.push_str(",\"start\":")?;
+    output.push_i64(original.start)?;
+    output.push_str(",\"end\":")?;
+    output.push_i64(original.end)?;
+    output.push_str(",\"expected\":")?;
+    output.push_i64(diagnostic.expected)?;
+    output.push_str(",\"actual\":")?;
+    output.push_i64(diagnostic.actual)?;
+    output.push_str("}")?;
+    Result { is_ok: true, value: true, error: 0 };
+}
+
 def sh_semantic_file(path: &str) -> Result<i64, i64> {
     let sources = sh_sources_new(1, 16777216);
     let source = sh_source_load(&sources, path)?;
@@ -36,20 +74,18 @@ def sh_semantic_file(path: &str) -> Result<i64, i64> {
     let front = sh_frontend(&text, source, &features, 16777216, 1000000);
     if front.error != 0 { sh_semantic_json_error(front.error, front.start, front.end, "frontend")?; return sh_i64_ok(65); };
     let checked = sh_check(&front.expanded.text, &front.parsed.ast, 1000);
-    let output = string_from_str("{\"schema_version\":1,\"ok\":")?;
-    output.push_str(if checked.error == 0 { "true"; } else { "false"; })?;
-    output.push_str(",\"phase\":\"typecheck\",\"ast_nodes\":")?;
-    output.push_i64(sh_ast_count(&front.parsed.ast))?;
-    output.push_str(",\"types\":")?;
-    output.push_i64(sh_type_count(&checked.types))?;
-    output.push_str(",\"bindings\":")?;
-    output.push_i64(sh_binding_count(&checked))?;
-    output.push_str(",\"diagnostics\":[")?;
+    if checked.error != 0 { let output = sh_semantic_header(&checked, false, "typecheck")?; let mut index = 0; while index < checked.diagnostics.len() { let diagnostic = checked.diagnostics.get(index); sh_semantic_diagnostic(&output, &front.expanded.mapping, diagnostic, index)?; index = index + 1; }; output.push_str("]}\n")?; io_stdout_write(output.as_str())?; return sh_i64_ok(65); };
+    let ownership = sh_ownership(&front.expanded.text, &front.parsed.ast, &checked, 1000);
+    let output = sh_semantic_header(&checked, ownership.error == 0, "ownership")?;
     let mut index = 0;
-    while index < checked.diagnostics.len() { let diagnostic = checked.diagnostics.get(index); let original = sh_exp_map(&front.expanded.mapping, diagnostic.start, diagnostic.end); if index > 0 { output.push_str(",")?; (); }; output.push_str("{\"code\":")?; output.push_i64(diagnostic.code)?; output.push_str(",\"severity\":")?; output.push_i64(diagnostic.severity)?; output.push_str(",\"node\":")?; output.push_i64(diagnostic.node)?; output.push_str(",\"start\":")?; output.push_i64(original.start)?; output.push_str(",\"end\":")?; output.push_i64(original.end)?; output.push_str(",\"expected\":")?; output.push_i64(diagnostic.expected)?; output.push_str(",\"actual\":")?; output.push_i64(diagnostic.actual)?; output.push_str("}")?; index = index + 1; };
-    output.push_str("]}\n")?;
+    while index < ownership.diagnostics.len() { let diagnostic = ownership.diagnostics.get(index); sh_semantic_diagnostic(&output, &front.expanded.mapping, diagnostic, index)?; index = index + 1; };
+    output.push_str("],\"cleanup_actions\":")?;
+    output.push_i64(sh_ownership_action_count(&ownership))?;
+    output.push_str(",\"ownership_paths\":")?;
+    output.push_i64(ownership.paths.len() / 4)?;
+    output.push_str("}\n")?;
     io_stdout_write(output.as_str())?;
-    sh_i64_ok(if checked.error == 0 { 0; } else { 65; });
+    sh_i64_ok(if ownership.error == 0 { 0; } else { 65; });
 }
 
 def main() -> i64 {
