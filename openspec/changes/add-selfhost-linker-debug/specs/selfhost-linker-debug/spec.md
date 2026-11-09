@@ -93,3 +93,11 @@ and final process/equality/performance gates SHALL retain their own evidence.
 - **THEN** SG interns and remaps their real CodeView prototypes and preserves typed parameter/local records in the PDB
 - **AND** a real debugger observes the declared scalar parameter and local values while stepping
 - **AND** malformed type references, counts, parameter flags or prototype mismatches fail before outputs are published
+
+
+#### Scenario: Supported pointer and reference records preserve their meaning
+- **WHEN** supported scalar-pointer or reference types carry checked const qualifiers and backward type references
+- **THEN** SG remaps the real LF_POINTER/LF_MODIFIER records and retains their pointer/reference distinction
+- **AND** a real debugger observes readonly and mutable referenced values and opaque raw pointer bits correctly
+- **AND** unsupported sizes/modes, dangling references and unrepresentable reference combinations fail explicitly
+- **AND** the 64-wrapper limit includes const modifiers and rejects an additional wrapper before mutating the type pool

@@ -4,6 +4,10 @@ import std::assert;
 
 import std::io;
 
+import std::args;
+
+import std::file;
+
 extern "C" {
     fn sengoo_string_live_handle_count() -> i64;
     fn sengoo_buffer_live_handle_count() -> i64;
@@ -40,10 +44,65 @@ def sh_ltt_scope() -> Result<i64, i64> {
     arguments.clear();
     arguments.push(3);
     assert_eq_i64(sh_link_cv_type_arguments(&types, &arguments).error, 7323, "link_cv_types.sg", 1);
+    let constant = sh_link_cv_modifier(&types, 19)?;
+    let reference = sh_link_cv_pointer(&types, constant, true)?;
+    let pointer = sh_link_cv_pointer(&types, 19, false)?;
+    arguments.clear();
+    arguments.push(reference);
+    arguments.push(pointer);
+    sh_link_cv_type_procedure(&types, reference, &arguments)?;
+    let pointer_input = sh_binary_new(1024);
+    sh_binary_unsigned(&pointer_input, 4, 4)?;
+    index = 0;
+    while index < sh_binary_len(&types.records) { sh_binary_byte(&pointer_input, sh_binary_get(&types.records, index)?)?; index = index + 1; };
+    let pointer_types = sh_link_cv_types_new();
+    let pointer_mapping = sh_link_cv_types_read(&pointer_types, &pointer_input)?;
+    assert_eq_i64(pointer_mapping.len(), types.offsets.len(), "link_cv_types.sg", 1);
+    index = 0;
+    while index < pointer_mapping.len() { assert_eq_i64(sengoo_vec_get_or_default_i64(pointer_mapping.handle, index, -1), 4096 + index, "link_cv_types.sg", 1); index = index + 1; };
+    assert_eq_i64(sh_link_cv_pointer(&types, 3, true).error, 7323, "link_cv_types.sg", 1);
+    sh_link_cv_pointer(&types, 3, false)?;
+    assert_eq_i64(sh_link_cv_pointer(&types, reference, true).error, 7323, "link_cv_types.sg", 1);
+    assert_eq_i64(sh_link_cv_pointer(&types, reference, false).error, 7323, "link_cv_types.sg", 1);
+    assert_eq_i64(sh_link_cv_modifier(&types, reference).error, 7323, "link_cv_types.sg", 1);
+    let deep_types = sh_link_cv_types_new();
+    let mut deepest = 19;
+    index = 0;
+    while index < 64 { deepest = sh_link_cv_pointer(&deep_types, deepest, false)?; assert_eq_i64(if sh_link_cv_value(&deep_types, deepest, false, 0) { 1; } else { 0; }, 1, "link_cv_types.sg", 1); index = index + 1; };
+    let prior_count = deep_types.offsets.len();
+    assert_eq_i64(sh_link_cv_pointer(&deep_types, deepest, false).error, 7323, "link_cv_types.sg", 1);
+    assert_eq_i64(sh_link_cv_modifier(&deep_types, deepest).error, 7323, "link_cv_types.sg", 1);
+    assert_eq_i64(deep_types.offsets.len(), prior_count, "link_cv_types.sg", 1);
+    let deep_arguments = vec_new_i64();
+    deep_arguments.push(deepest);
+    sh_link_cv_type_procedure(&deep_types, deepest, &deep_arguments)?;
+    sh_i64_ok(0);
+}
+
+def sh_ltt_argument(index: i64) -> Result<String, i64> {
+    let buffer = ffi_buffer_new(arg_len(index).unwrap_or(0))?;
+    let length = arg_copy(index, buffer)?;
+    string_from_utf8(buffer, length);
+}
+
+def sh_ltt_roundtrip() -> Result<i64, i64> {
+    if args_len() != 2 { return sh_i64_ok(64); };
+    let input_path = sh_ltt_argument(0)?;
+    let output_path = sh_ltt_argument(1)?;
+    let input = sh_link_load(input_path.as_str(), 1048576)?;
+    let types = sh_link_cv_types_new();
+    let mapping = sh_link_cv_types_read(&types, &input)?;
+    let output = sh_binary_new(1048580);
+    sh_binary_unsigned(&output, 4, 4)?;
+    let mut index = 0;
+    while index < sh_binary_len(&types.records) { sh_binary_byte(&output, sh_binary_get(&types.records, index)?)?; index = index + 1; };
+    let bytes = sh_binary_buffer(&output)?;
+    file_write_str_raw(sengoo_stdlib_str_ptr(output_path.as_str()), bytes.ptr(), bytes.used_len())?;
     sh_i64_ok(0);
 }
 
 def main() -> i64 {
+    if args_len() > 0 { let roundtrip = sh_ltt_roundtrip(); if not roundtrip.is_ok() { println(roundtrip.error); return 65; }; return if roundtrip.value == 64 { 64; } else { 0; }; };
     let strings = sengoo_string_live_handle_count();
     let buffers = sengoo_buffer_live_handle_count();
     let opaque = sengoo_opaque_live_handle_count();

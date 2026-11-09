@@ -78,6 +78,8 @@ def sh_lnt_file(source_path: &String, object_path: &String, image_path: &String,
     let main = string_from_str("main")?;
     let mut link = sh_link_new(1048576);
     let object_id = sh_link_coff(&mut link, &raw)?;
+    let mut foreign = 0;
+    while foreign < sh_mir_fn_count(&lowered.mir) { if sh_mir_fn(&lowered.mir, foreign, 3) == 1 { let name = sh_symbol_text(&lowered.mir.symbols, sh_mir_fn(&lowered.mir, foreign, 0))?; let target = string_from_str("GetCurrentProcess")?; if sengoo_string_eq(name.handle, target.handle) != 0 { let signature = sh_mir_fn(&lowered.mir, foreign, 1); let returned = sh_mir_type_arg(&lowered.mir, signature, 0); if sh_mir_type_word(&lowered.mir, signature, 5) != 1 or sh_mir_type_word(&lowered.mir, returned, 0) != 7 or sh_mir_type_word(&lowered.mir, sh_mir_type_arg(&lowered.mir, returned, 0), 0) != 0 { return sh_i64_error(7313); }; let symbol = sh_link_import_name(&link, "GetCurrentProcess")?; let dll = sh_link_import_name(&link, "KERNEL32.dll")?; sh_link_import_add(&link, symbol, dll, symbol, -1, 0, 0)?; (); }; }; foreign = foreign + 1; };
     let image = sh_link_pe(&mut link, &main)?;
     let mut decoded = sh_link_debug_new();
     sh_link_debug_source(&mut decoded, source_path, &source)?;

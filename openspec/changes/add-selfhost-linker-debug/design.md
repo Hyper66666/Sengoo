@@ -328,3 +328,42 @@ module/SDK debug support still retains its own open gates.
 
 Primitive CodeView type reference:
 https://github.com/llvm/llvm-project/blob/llvmorg-19.1.7/llvm/include/llvm/DebugInfo/CodeView/TypeIndex.h
+
+
+## Pointer, reference and const modifier types
+
+The type pool accepts the supported LF_MODIFIER const form with canonical
+LF_PAD2/LF_PAD1 padding and LF_POINTER Near64 forms of exactly eight bytes.
+Pointer mode and lvalue-reference mode are distinct. Immutable SG references
+qualify the referent with const before forming the reference; mutability does
+not become an incorrect const flag on the pointer itself. Raw void pointers
+are representable; references to void, references to references and pointers
+to references are rejected explicitly so C++ reference collapsing cannot
+misrepresent an SG type. Raw/ref chains have a bounded 64-step type validation,
+including const modifier wrappers. Constructors reserve their new outer layer
+when validating the base, so every returned type is immediately usable;
+attempts to add the 65th wrapper fail before the pool is changed. Short pointer
+records fail the record-length check before any attributes are read.
+Unsupported pointer modes/sizes/options and forward/dangling type references
+fail before output publication. Aggregate and function pointer targets retain
+separate open qualification work.
+
+CodeView argument/result/local references are remapped into canonical type
+indices before prototype and parameter validation. The native adapter maps
+supported scalar pointer/reference types recursively and preserves stable
+stack locations and source-derived lifetimes. Readonly and mutable reference
+fixtures require real debugger values, not just inspectable type names.
+A raw pointer fixture obtains its value from GetCurrentProcess through an
+explicit unsafe C declaration and an SG-owned KERNEL32 import binding, then
+observes the opaque pointer bits without dereferencing the handle. It retains
+the existing frontend's FFI/cast rules rather than inventing an integer cast.
+
+An independent clang C++ const-i64-reference object supplies its actual first
+four type records. SG reads, remaps and rewrites that prefix byte for byte;
+64 valid duplicate records canonicalize to the same prefix. The unimplemented
+remaining native type leaves in the complete clang stream fail explicitly.
+This exact format comparison is independent verification, not an external
+compiler participating in product PE/PDB generation.
+
+Pointer record reference:
+https://github.com/llvm/llvm-project/blob/llvmorg-19.1.7/llvm/include/llvm/DebugInfo/CodeView/TypeRecord.h

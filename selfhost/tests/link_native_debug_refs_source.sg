@@ -1,0 +1,9 @@
+def read_value(value: &i64) -> i64 {
+    let mut answer: i64 = *value;
+    answer = answer + 2;
+    return answer;
+}
+def main() -> i64 {
+    let answer: i64 = 40;
+    return read_value(&answer);
+}

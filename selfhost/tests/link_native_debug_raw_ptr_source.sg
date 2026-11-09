@@ -1,0 +1,11 @@
+extern "C" {
+    unsafe fn GetCurrentProcess() -> *mut ();
+}
+def address(value: *mut ()) -> i64 {
+    let mut answer: i64 = 40;
+    answer = answer + 2;
+    return answer;
+}
+def main() -> i64 {
+    return address(GetCurrentProcess());
+}

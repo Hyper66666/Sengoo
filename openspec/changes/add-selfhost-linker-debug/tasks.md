@@ -235,8 +235,64 @@ includes the synchronized HIR4/MIR26 interfaces and the qualified native typed
 load fix; the earlier failed development build with a transient missing
 ShChecked builtin_calls field is retained and is not qualification evidence.
 
-The primitive reader/writer supports the named builtin kinds; pointer,
+At the primitive checkpoint, the reader/writer supported the named builtin kinds; pointer,
 aggregate, type-server/variadic and complete native SDK/debug/module coverage
-remain open. The console main contract is still signed-i64(), and local
+remained open. The console main contract is still signed-i64(), and local
 initialization/scope/lifetime proofs retain their stated restrictions.
 `m5_complete` remains `false`.
+
+
+## Pointer/reference type-pool checkpoint evidence
+
+- [x] Preserve distinct Near64 pointer and lvalue-reference modes with checked const referent modifiers.
+- [x] Remap builtin and backward pointer/modifier references through arguments, results and locals; reject unsupported or unrepresentable combinations explicitly.
+- [x] Independently compare a real clang C++ const-i64-reference type prefix byte for byte, including 64-record deduplication and unsupported full-stream rejection.
+- [x] Regress the prior typed COFF/PDB, multiple-return ranges, actual debugger and Windows unwind corpus with the extended type pool.
+- [x] Prove 64 pointer/modifier wrappers remain usable, reject the 65th before pool mutation, and reject short pointer records before reading attributes.
+- [x] Compile and debug seven real SG sources, including readonly/mutable references and a raw void pointer from an explicitly unsafe WinAPI declaration.
+
+Pure COFF/PDB evidence: `target/selfhost/m5-codeview-pointer-types-bounded/evidence.json`,
+SHA-256 `766baa8fababace263b4c01782b9d1c5469256a9f22c6c7fd76ebb2c82492112`.
+Seventy-seven commands and 44 negative cases passed on Windows 11 AMD64;
+186 source inputs and 36 tool/runtime identities were unchanged. Start/end
+full revision: `ac077024a358e5f4b2fb1a12a643e96353f56b67`.
+The gate retains the 100 type-pool resource scopes and twenty complete typed
+COFF/PDB resource scopes per invocation, deterministic bytes, source stepping,
+local lifetime gaps and runtime unwind checks. The independent clang fixture
+is only a format oracle; product type remapping and PE/PDB generation run in SG
+with an unavailable compiler/linker PATH.
+
+A read-only review found the initial constructor's depth check reserved no
+space for its new wrapper: it could return an unusable 65th-layer type. Both
+constructors now validate the base starting at depth one. Independent 64-layer
+pointer and mixed pointer/modifier round trips pass; the two 65-layer forms
+fail without publishing output. Both short-record forms report malformed
+types. The earlier 71-command report is retained as historical evidence and
+is superseded by the bounded report above.
+
+Automatic source evidence:
+`target/selfhost/m5-native-debug-pointers-bounded/evidence.json`, SHA-256
+`e3a582c5a0cbb078cb9c0ecaa570654d316584e1f4d9936576185c3dca80de16`.
+Sixty commands and 14 negative cases passed on Windows 11 AMD64, with 210
+source inputs, 38 imported SG modules and 36 tool/runtime identities unchanged.
+Start/end full revision: `ac077024a358e5f4b2fb1a12a643e96353f56b67`.
+All seven real sources compile twice with identical object/PE/PDB bytes;
+each invocation runs five complete success/failure resource scopes. LLDB
+reads a const-i64 reference with pointee 40, a mutable reference changing
+40 to 42, and a void pointer equal to the real GetCurrentProcess handle
+`0xffffffffffffffff`; source stepping, local 40/42 values and exit 42 pass.
+The prior scalar and multiple-return source fixtures remain in the same gate.
+Production source/object/link/PDB commands have no compiler/linker tools in
+PATH. The raw-pointer fixture's explicit KERNEL32 binding is part of the test
+driver; arbitrary FFI admission/runtime handle validation is not qualified.
+
+Earlier development evidence is retained: the first raw-pointer declaration
+correctly failed the frontend's unsafe-FFI rule (5122), and was corrected to
+an unsafe function inside the extern-C block. That failed trial is not
+qualification evidence. The complete 60-command pre-depth-fix native report
+also remains available, and is superseded by the bounded report above.
+
+This checkpoint supports checked scalar/void pointer targets and scalar
+references. Aggregate/function targets, richer pointer modes, type servers,
+and the complete native SDK/debug/module corpus remain open; complete M5 is
+not qualified.

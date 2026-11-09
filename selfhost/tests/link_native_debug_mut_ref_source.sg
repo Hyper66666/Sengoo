@@ -1,0 +1,8 @@
+def bump(value: &mut i64) -> i64 {
+    *value = *value + 2;
+    return *value;
+}
+def main() -> i64 {
+    let mut answer: i64 = 40;
+    return bump(&mut answer);
+}

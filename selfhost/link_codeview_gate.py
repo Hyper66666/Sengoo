@@ -52,7 +52,7 @@ def mutations(raw):
         ("symbol-length", change(symbols[0x1101], 0, "<H"), 7301),
         ("procedure-type", change(symbols[0x1110] + 28, 0x1000), 7303),
         ("frame-flags", change(symbols[0x1012] + 26, 0), 7303),
-        ("local-type", change(symbols[0x113E] + 4, 0x1505), 7303),
+        ("local-type", change(symbols[0x113E] + 4, 14), 7303),
         ("local-stack-range", change(symbols[0x1142] + 4, 0xFFFFFFFF), 7301),
         ("local-lifetime", change(symbols[0x1142] + 14, 65535, "<H"), 7301),
         ("source-checksum", change(fragments[0xF4][1] + 6, raw[fragments[0xF4][1] + 6] ^ 128, "<B"), 7301),
@@ -116,7 +116,8 @@ def type_mutations(raw):
         ("argument-count", change(arguments + 4, 3), 7301),
         ("argument-void", change(arguments + 8, 3), 7303),
         ("procedure-parameter-count", change(procedure + 10, 3, "<H"), 7301),
-        ("procedure-result-kind", change(procedure + 4, 0x1505), 7303),
+        ("procedure-result-kind", change(procedure + 4, 14), 7303),
+        ("procedure-result-reference", change(procedure + 4, 0x1505), 7301),
         ("procedure-forward-list", change(procedure + 12, 0x1003), 7301),
         ("procedure-calling-convention", change(procedure + 8, 1, "<H"), 7303),
     ]
@@ -128,6 +129,7 @@ def main():
         parser.add_argument("--" + name, type=Path, required=True)
     parser.add_argument("--ranges", action="store_true")
     parser.add_argument("--primitives", action="store_true")
+    parser.add_argument("--references", action="store_true")
     args = parser.parse_args()
     output = args.output.resolve()
     if not output.is_relative_to(ROOT / "target"):
@@ -147,6 +149,10 @@ def main():
         inputs.append(ROOT / "selfhost/tests/link_debug_ranges_probe.c")
     if args.primitives:
         inputs += [ROOT / "selfhost/tests" / name for name in ("link_cv_types.sg", "link_cv_types_debug.sg", "link_native_debug_types_source.sg")]
+    if args.references:
+        if not args.primitives:
+            raise ValueError("--references requires --primitives")
+        inputs.append(ROOT / "selfhost/tests/link_cv_pointer_probe.cpp")
     for folder in (ROOT / "tools/stdlib", ROOT / "runtime"):
         inputs += [path for path in folder.rglob("*") if path.is_file() and not any(part in {"target", "build", "__pycache__"} for part in path.relative_to(folder).parts)]
     revision = lambda: subprocess.check_output(["git", "rev-parse", "HEAD"], cwd=ROOT, text=True).strip()
@@ -159,6 +165,7 @@ def main():
                          "debug contributions currently remain in mapped PE sections; complete debug stripping/public CLI policy is later integration work"]}
     report["multiple_return_ranges"] = args.ranges
     report["primitive_signatures"] = args.primitives
+    report["pointer_reference_types"] = args.references
     env = dict(os.environ)
     for name in list(env):
         if name.upper().startswith(("SENGOO_", "SGPLATFORM_", "SDL2_", "PYTHON", "LLDB_")):
@@ -294,6 +301,88 @@ def main():
             typed_pdb.write_bytes(typed_bytes[2])
             report["artifacts"].update({path.name: sha(path) for path in (type_test, type_debug, typed_obj, typed_image, typed_pdb)})
             report["primitive_resource_scopes"] = {"type_pool": 100, "typed_coff_pdb_per_invocation": 20}
+            if args.references:
+                independent = output / "clang-pointer.obj"
+                run("build-independent-pointer-types", [tools["clang"], "-g", "-gcodeview", "-O0", "-Werror", "-c", ROOT / "selfhost/tests/link_cv_pointer_probe.cpp", "-o", independent])
+                run("inspect-independent-pointer-types", [tools["coff_inspector"], "--codeview", independent], marker=b"const __int64&")
+                raw = independent.read_bytes()
+                types_data = None
+                for index in range(u16(raw, 2)):
+                    row = 20 + index * 40
+                    if raw[row:row + 8] == b".debug$T":
+                        at, size = u32(raw, row + 20), u32(raw, row + 16)
+                        types_data = raw[at:at + size]
+                if types_data is None:
+                    raise AssertionError("independent COFF type stream missing")
+                end = 4
+                for expected_kind in (0x1001, 0x1002, 0x1201, 0x1008):
+                    length, kind = struct.unpack_from("<HH", types_data, end)
+                    if kind != expected_kind:
+                        raise AssertionError("independent pointer prefix layout differs")
+                    end += length + 2
+                prefix, roundtrip = output / "independent-pointer-prefix.cv", output / "sg-pointer-prefix.cv"
+                prefix.write_bytes(types_data[:end])
+                run("sg-remap-independent-pointer-types", [type_test, prefix, roundtrip], pure=True)
+                if prefix.read_bytes() != roundtrip.read_bytes():
+                    raise AssertionError("SG pointer/modifier encoding differs from clang's prefix")
+                duplicate_prefix = output / "64-record-type-prefix.cv"
+                duplicate_prefix.write_bytes(types_data[:4] + types_data[4:end] * 16)
+                run("sg-deduplicate-64-valid-type-records", [type_test, duplicate_prefix, roundtrip], pure=True)
+                if prefix.read_bytes() != roundtrip.read_bytes():
+                    raise AssertionError("valid duplicate type records did not canonicalize")
+                full = output / "unsupported-full-clang-types.cv"
+                full.write_bytes(types_data)
+                sentinel = b"preserve previous type output"
+                roundtrip.write_bytes(sentinel)
+                rejected = run("reject-unsupported-clang-type-leaves", [type_test, full, roundtrip], 65, pure=True)
+                if rejected.strip() != b"7323" or roundtrip.read_bytes() != sentinel:
+                    raise AssertionError("unsupported native type leaves were silently accepted")
+                report["negative_cases"].append({"name": "unsupported-clang-type-leaves", "expected_code": 7323, "input_sha256": sha(full), "previous_outputs_preserved": True})
+                roundtrip.write_bytes(prefix.read_bytes())
+                pointer_negatives = [("pointer-size", 12 + 8, 32780, 7323), ("pointer-mode", 12 + 8, 65612, 7323),
+                                     ("pointer-forward-target", 12 + 4, 4097, 7321), ("modifier-flags", 8, 3, 7323),
+                                     ("modifier-forward-target", 4, 4096, 7321)]
+                for name, offset, value, expected in pointer_negatives:
+                    changed = bytearray(types_data[:end])
+                    struct.pack_into("<I" if "flags" not in name else "<H", changed, 4 + offset, value)
+                    path = output / (name + ".cv")
+                    path.write_bytes(changed)
+                    roundtrip.write_bytes(sentinel)
+                    rejected = run("reject-" + name, [type_test, path, roundtrip], 65, pure=True)
+                    if rejected.strip() != str(expected).encode() or roundtrip.read_bytes() != sentinel:
+                        raise AssertionError("pointer/modifier failure diagnostic/output differs: " + repr(rejected))
+                    report["negative_cases"].append({"name": name, "expected_code": expected, "input_sha256": sha(path), "previous_outputs_preserved": True})
+                roundtrip.write_bytes(prefix.read_bytes())
+                for count, modified, accepted in ((64, False, True), (65, False, False), (63, True, True), (64, True, False)):
+                    chain = bytearray(struct.pack("<I", 4))
+                    base = 19
+                    for index in range(count):
+                        chain += struct.pack("<HHII", 10, 0x1002, base, 65548)
+                        base = 4096 + index
+                    if modified:
+                        chain += struct.pack("<HHIHH", 10, 0x1001, base, 1, 0xF1F2)
+                    name = f"type-depth-{count}-{'modifier' if modified else 'pointer'}"
+                    path = output / (name + ".cv")
+                    path.write_bytes(chain)
+                    roundtrip.write_bytes(sentinel)
+                    result = run(name, [type_test, path, roundtrip], 0 if accepted else 65, pure=True)
+                    if accepted:
+                        if roundtrip.read_bytes() != chain:
+                            raise AssertionError("maximum supported pointer/modifier depth differs")
+                    else:
+                        if result.strip() != b"7323" or roundtrip.read_bytes() != sentinel:
+                            raise AssertionError("unsupported pointer/modifier depth was accepted")
+                        report["negative_cases"].append({"name": name, "expected_code": 7323, "input_sha256": sha(path), "previous_outputs_preserved": True})
+                for length in (2, 6):
+                    path = output / (f"short-pointer-{length}.cv")
+                    path.write_bytes(struct.pack("<IHH", 4, length, 0x1002) + bytes(length - 2))
+                    roundtrip.write_bytes(sentinel)
+                    result = run(f"reject-short-pointer-{length}", [type_test, path, roundtrip], 65, pure=True)
+                    if result.strip() != b"7321" or roundtrip.read_bytes() != sentinel:
+                        raise AssertionError("short pointer record diagnostic/output differs")
+                    report["negative_cases"].append({"name": f"short-pointer-{length}", "expected_code": 7321, "input_sha256": sha(path), "previous_outputs_preserved": True})
+                roundtrip.write_bytes(prefix.read_bytes())
+                report["artifacts"].update({path.name: sha(path) for path in (independent, prefix, roundtrip, full, duplicate_prefix)})
     except BaseException as error:
         report.update(result="failed", error=repr(error))
         raise

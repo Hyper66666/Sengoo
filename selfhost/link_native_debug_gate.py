@@ -100,7 +100,9 @@ def main():
         tools["debug-dependency-" + path.name] = path
     lock = json.loads((ROOT / "selfhost/bootstrap.lock").read_text())
     fixtures = [("multiple-functions", ROOT / "selfhost/tests/link_native_debug_source.sg", 6), ("multiple-returns", ROOT / "selfhost/tests/link_debug_ranges_source.sg", 4),
-                ("floating-parameters", ROOT / "selfhost/tests/link_native_debug_types_source.sg", 3), ("mixed-scalar-parameters", ROOT / "selfhost/tests/link_native_debug_scalars_source.sg", 4)]
+                ("floating-parameters", ROOT / "selfhost/tests/link_native_debug_types_source.sg", 3), ("mixed-scalar-parameters", ROOT / "selfhost/tests/link_native_debug_scalars_source.sg", 4),
+                ("readonly-reference", ROOT / "selfhost/tests/link_native_debug_refs_source.sg", 3), ("mutable-reference", ROOT / "selfhost/tests/link_native_debug_mut_ref_source.sg", 2),
+                ("raw-void-pointer", ROOT / "selfhost/tests/link_native_debug_raw_ptr_source.sg", 6)]
     inputs = [Path(__file__).resolve(), ROOT / "selfhost/link_debug_gate.py", ROOT / "selfhost/tests/link_native_debug.sg", ROOT / "selfhost/bootstrap.lock", ROOT / "Cargo.toml", ROOT / "Cargo.lock", ROOT / "rust-toolchain.toml"]
     inputs += [source for _, source, _ in fixtures] + list(modules.values())
     for folder in (ROOT / "tools/stdlib", ROOT / "runtime"):
@@ -109,7 +111,7 @@ def main():
     report = {"schema": 1, "result": "running", "stage": "automatic-sg-source-native-codeview-pdb", "m5_complete": False,
               "source_revision": revision(), "started_at": dt.datetime.now(dt.timezone.utc).isoformat(), "host": platform.platform(), "python": sys.version,
               "sources": {str(p.relative_to(ROOT)): sha(p) for p in sorted(set(inputs))}, "modules": sorted(modules), "tools": {}, "steps": [],
-              "limits": ["one unchanged UTF-8 source; builtin scalar function signatures/parameters/locals with an entry-block direct store dominating all blocks; main remains signed-i64()",
+              "limits": ["one unchanged UTF-8 source; builtin scalar and supported scalar/void-pointer/reference signatures/parameters/locals with entry-block initialization; main remains signed-i64()",
                          "instruction/terminator/prologue/epilogue code ranges and stack slots come from the SG native compiler, not fixture addresses",
                          "locals with moves/storage-dead/unsupported lexical scope or unproven initialization fail explicitly; full generic/aggregate/async/reflection/SDK debug corpus remains open",
                          "MIR maps are checked and deterministically merged in SG; product source-to-object-to-link-to-PDB runs have no compiler/linker tools in PATH",
@@ -166,13 +168,15 @@ def main():
             run(name + "-execute", [image], 42, pure=True)
             run(name + "-inspect-coff", [tools["coff_inspector"], "--codeview", "--relocations", obj], marker=b"S_LOCAL")
             run(name + "-inspect-pdb", [tools["pdb_inspector"], "dump", "--summary", "--modules", "--symbols", "--types", "--globals", "--publics", pdb], marker=b"answer")
-            variables = "left right answer" if name == "floating-parameters" else "flag small big answer" if name == "mixed-scalar-parameters" else "answer"
-            commands = ["breakpoint set --file " + source.name + " --line " + str(line), "run", "frame variable " + variables, "thread step-over", "frame variable answer", "continue"]
+            if name == "raw-void-pointer":
+                run(name + "-inspect-imports", [tools["coff_inspector"], "--coff-imports", image], marker=b"GetCurrentProcess")
+            variables = "left right answer" if name == "floating-parameters" else "flag small big answer" if name == "mixed-scalar-parameters" else "value answer" if name in ("readonly-reference", "raw-void-pointer") else "value" if name == "mutable-reference" else "answer"
+            commands = ["breakpoint set --file " + source.name + " --line " + str(line), "run", "frame variable " + variables, "thread step-over", "frame variable " + ("value" if name == "mutable-reference" else "answer"), "continue"]
             debugged = run(name + "-live-source-step-local", [tools["debugger"], "--batch", "--no-lldbinit", *[item for command in commands for item in ("-o", command)], image], debugger=True)
-            for marker in (b"stop reason = breakpoint", b"answer = 40", b"stop reason = step over", b"answer = 42", b"exited with status = 42"):
+            for marker in (b"stop reason = breakpoint", b"(&value = 40)" if name == "mutable-reference" else b"answer = 40", b"stop reason = step over", b"(&value = 42)" if name == "mutable-reference" else b"answer = 42", b"exited with status = 42"):
                 if marker not in debugged:
                     raise AssertionError("automatic source debugger evidence missing: " + repr(marker))
-            additional = (b"(double) left = 20", b"(double) right = 20", b"(double) answer = 42") if name == "floating-parameters" else (b"flag = true", b"small = 40", b"big = 2") if name == "mixed-scalar-parameters" else ()
+            additional = (b"(double) left = 20", b"(double) right = 20", b"(double) answer = 42") if name == "floating-parameters" else (b"flag = true", b"small = 40", b"big = 2") if name == "mixed-scalar-parameters" else (b"(const long long &)", b"(&value = 40)") if name == "readonly-reference" else (b"(long long &)",) if name == "mutable-reference" else (b"(void *)", b"0xffffffffffffffff") if name == "raw-void-pointer" else ()
             if any(marker not in debugged for marker in additional):
                 raise AssertionError("automatic typed parameter values differ")
             artifacts.update({path.name: sha(path) for path in (obj, image, pdb)})
@@ -191,7 +195,8 @@ def main():
             negatives.append({"case": number, "expected_code": expected, "previous_outputs_preserved": True})
         unsupported = {
             "floating-return": "def main() -> f64 { return 42.0; }\n",
-            "pointer-parameter": "def other(value: &i64) -> i64 { return *value; }\ndef main() -> i64 { return 42; }\n",
+            "aggregate-reference": "struct Pair { left: i64, right: i64 }\ndef other(value: &Pair) -> i64 { return 0; }\ndef main() -> i64 { return 42; }\n",
+            "nested-reference": "def other(value: & &i64) -> i64 { return 0; }\ndef main() -> i64 { return 42; }\n",
             "nested-entry-local": "def main() -> i64 { { let answer: i64 = 40; }; return 42; }\n",
             "branch-local-init": "def main() -> i64 { if true { let answer: i64 = 42; return answer; }; return 1; }\n",
         }
