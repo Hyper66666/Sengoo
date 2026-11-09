@@ -43,6 +43,8 @@ explicit external-toolchain procedures outside the no-external-tools gate.
 | Windows x64 code generator, target ABI and optimization | `add-selfhost-native-backend` |
 | COFF/PE linker, CodeView and PDB | `add-selfhost-linker-debug` |
 | Native SDK manifests, declarations and permitted provider packaging | `add-selfhost-native-sdk` |
+| Allocation-free SG UTF-8 validation and validated byte boundaries | `add-selfhost-runtime-text-core` |
+| General bounded raw DEFLATE decoding and its framing follow-up | `add-selfhost-deflate-core` |
 | Remaining SG runtime algorithms, package manager, LSP and compatibility ports | Future toolchain-port children |
 
 Registered children own their concrete deltas and verification; their presence
