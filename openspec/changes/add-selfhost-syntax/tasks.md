@@ -43,7 +43,7 @@ Final audited parser SHA-256:
 The component report (revision `ca3a163e361619b17e5829f26ac2575ac031e89d`)
 has SHA-256 `5527ae359a1b9d5b08e78de9978a1892d7396c09caa547ad5f203de6c1b4d61e`;
 its source and tool change lists are empty. The subsequent transformation
-report at revision `4aa6e5d` has SHA-256
+report at revision `4aa6e5d219ba4b491af05da8cea258f4ff32d96d` has SHA-256
 `1f2c16f0430d4ba47f535d8346ae04528e7fe9513aca5659d8b4e158c8982902`;
 the formatter CLI report has SHA-256
 `3d0eeb6fcfe38f502f4477db5f61e8d2875c9b460584085b32ffcb0340dbf8aa`.

@@ -22,6 +22,12 @@ Validated MIR SHALL lower to native code with the documented numeric, control,
 aggregate, ownership, FFI and async behavior. Windows ABI, alignment, preserved
 registers, stack probing and unwind records SHALL describe the emitted code.
 
+#### Scenario: A concrete MIR type needs target storage
+- **WHEN** a supported concrete type with nominal definitions is laid out for Windows x64
+- **THEN** its size, alignment, array stride and field offsets match the documented reference representation
+- **AND** invalid physical claims, recursive values and bounded-size overflow fail before code emission
+- **AND** unresolved types fail explicitly rather than receiving guessed storage
+
 #### Scenario: A supported program executes natively
 - **WHEN** typed MIR includes calls, aggregates, branches, loops or cleanup
 - **THEN** its native output and side effects match the supported reference behavior

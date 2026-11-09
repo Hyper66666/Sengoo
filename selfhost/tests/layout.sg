@@ -1,0 +1,152 @@
+import selfhost_layout;
+
+import std::assert;
+
+import std::args;
+
+extern "C" {
+    fn sengoo_string_live_handle_count() -> i64;
+    fn sengoo_buffer_live_handle_count() -> i64;
+    fn sengoo_opaque_live_handle_count() -> i64;
+}
+
+def sh_lt_nominal(mir: &ShMir, name: &str, enumeration: bool) -> Result<i64, i64> {
+    let text = string_from_str(name)?;
+    let symbol = sh_intern(&mir.symbols, &text)?;
+    let arguments = vec_new_i64();
+    sh_type_intern(&mir.types, 12, if enumeration { 1; } else { 0; }, 0, symbol, &arguments);
+}
+
+def sh_lt_layout(mir: &ShMir, ty: i64, variant: i64, fields: &Vec<i64>) -> Result<i64, i64> {
+    let offsets = vec_new_i64();
+    let mut index = 0;
+    while index < fields.len() { offsets.push(-1); index = index + 1; };
+    sh_mir_add_layout(mir, ty, variant, fields, &offsets, -1, -1, -1);
+}
+
+def sh_lt_check(mir: &ShMir, ty: i64, size: i64, alignment: i64) {
+    let layout = sh_target_layout(mir, ty, 2147483647);
+    assert_eq_i64(layout.error, 0, "layout.sg", 28);
+    assert_eq_i64(sh_layout_at(&layout.sizes, ty), size, "layout.sg", 29);
+    assert_eq_i64(sh_layout_at(&layout.alignments, ty), alignment, "layout.sg", 30);
+    ();
+}
+
+def sh_test_layout(emit: bool) -> Result<bool, i64> {
+    let mir = sh_mir_new(1000);
+    let unit = sh_type_primitive(&mir.types, 0, 0, 0)?;
+    let byte = sh_type_primitive(&mir.types, 2, 8, 0)?;
+    let short = sh_type_primitive(&mir.types, 2, 16, 0)?;
+    let integer = sh_type_primitive(&mir.types, 2, 64, 1)?;
+    let character = sh_type_primitive(&mir.types, 4, 0, 0)?;
+    let floating = sh_type_primitive(&mir.types, 3, 64, 0)?;
+    let small = sh_lt_nominal(&mir, "Small", false)?;
+    let fields = vec_new_i64();
+    fields.push(byte);
+    fields.push(integer);
+    fields.push(short);
+    let small_row = sh_lt_layout(&mir, small, -1, &fields)?;
+    let tuple = sh_type_intern(&mir.types, 10, 0, 0, -1, &fields)?;
+    fields.clear();
+    fields.push(small);
+    let array = sh_type_intern(&mir.types, 8, 3, 0, -1, &fields)?;
+    let nested = sh_lt_nominal(&mir, "Nested", false)?;
+    fields.clear();
+    fields.push(byte);
+    fields.push(array);
+    fields.push(floating);
+    sh_lt_layout(&mir, nested, -1, &fields)?;
+    let enumeration = sh_lt_nominal(&mir, "Choice", true)?;
+    fields.clear();
+    fields.push(small);
+    sh_lt_layout(&mir, enumeration, 0, &fields)?;
+    fields.clear();
+    sh_lt_layout(&mir, enumeration, 1, &fields)?;
+    sh_lt_check(&mir, unit, 0, 1);
+    sh_lt_check(&mir, byte, 1, 1);
+    sh_lt_check(&mir, short, 2, 2);
+    sh_lt_check(&mir, character, 4, 4);
+    sh_lt_check(&mir, floating, 8, 8);
+    sh_lt_check(&mir, small, 24, 8);
+    sh_lt_check(&mir, tuple, 24, 8);
+    sh_lt_check(&mir, array, 72, 8);
+    sh_lt_check(&mir, nested, 88, 8);
+    sh_lt_check(&mir, enumeration, 32, 8);
+    let layout = sh_target_layout(&mir, nested, 2147483647);
+    assert_eq_i64(sh_target_field_offset(&layout, &mir, nested, -1, 1)?, 8, "layout.sg", 73);
+    assert_eq_i64(sh_target_field_offset(&layout, &mir, nested, -1, 2)?, 80, "layout.sg", 74);
+    assert_eq_i64(sh_target_field_offset(&layout, &mir, small, -1, 2)?, 16, "layout.sg", 75);
+    assert_eq_i64(sh_target_field_offset(&layout, &mir, array, -1, 2)?, 48, "layout.sg", 76);
+    let tuple_layout = sh_target_layout(&mir, tuple, 100);
+    assert_eq_i64(sh_target_field_offset(&tuple_layout, &mir, tuple, -1, 2)?, 16, "layout.sg", 78);
+    let enum_layout = sh_target_layout(&mir, enumeration, 100);
+    assert_eq_i64(sh_target_field_offset(&enum_layout, &mir, enumeration, 0, 0)?, 8, "layout.sg", 80);
+    assert_eq_i64(sh_target_field_offset(&enum_layout, &mir, enumeration, 1, 0).error, 6301, "layout.sg", 81);
+    if emit { println(sh_layout_at(&layout.sizes, small)); println(sh_layout_at(&layout.alignments, small)); println(sh_target_field_offset(&layout, &mir, small, -1, 1)?); println(sh_target_field_offset(&layout, &mir, small, -1, 2)?); println(sh_layout_at(&layout.sizes, nested)); println(sh_target_field_offset(&layout, &mir, nested, -1, 1)?); println(sh_target_field_offset(&layout, &mir, nested, -1, 2)?); println(sh_layout_at(&enum_layout.sizes, enumeration)); println(sh_target_field_offset(&enum_layout, &mir, enumeration, 0, 0)?); println(sh_layout_at(&layout.sizes, array)); };
+    let wrong = sh_target_layout(&mir, nested, 87);
+    assert_eq_i64(wrong.error, 6304, "layout.sg", 96);
+    let invalid = sh_target_layout(&mir, -1, 100);
+    assert_eq_i64(invalid.error, 6301, "layout.sg", 98);
+    assert_eq_i64(sh_target_field_offset(&layout, &mir, nested, -1, 9223372036854775807).error, 6301, "layout.sg", 99);
+    mir.fields.set(1, 7);
+    let bad_offset = sh_target_layout(&mir, small, 100);
+    assert_eq_i64(bad_offset.error, 6305, "layout.sg", 102);
+    mir.fields.set(1, -1);
+    mir.layouts.set(small_row * 7 + 5, 23);
+    mir.layouts.set(small_row * 7 + 6, 8);
+    mir.fields.set(1, 0);
+    mir.fields.set(3, 8);
+    mir.fields.set(5, 16);
+    let bad_size = sh_target_layout(&mir, small, 100);
+    assert_eq_i64(bad_size.error, 6305, "layout.sg", 107);
+    mir.layouts.set(small_row * 7 + 5, -1);
+    mir.layouts.set(small_row * 7 + 6, -1);
+    mir.fields.set(1, -1);
+    mir.fields.set(3, -1);
+    mir.fields.set(5, -1);
+    let recursive = sh_lt_nominal(&mir, "Cycle", false)?;
+    fields.clear();
+    fields.push(recursive);
+    sh_lt_layout(&mir, recursive, -1, &fields)?;
+    let cycle = sh_target_layout(&mir, recursive, 100);
+    assert_eq_i64(cycle.error, 6303, "layout.sg", 115);
+    let reference = sh_type_intern(&mir.types, 6, 0, 0, -1, &fields)?;
+    sh_lt_check(&mir, reference, 8, 8);
+    let unresolved = sh_lt_nominal(&mir, "Opaque", false)?;
+    let absent = sh_target_layout(&mir, unresolved, 100);
+    assert_eq_i64(absent.error, 6302, "layout.sg", 121);
+    fields.clear();
+    fields.push(integer);
+    let huge = sh_type_intern(&mir.types, 8, 9223372036854775807, 0, -1, &fields)?;
+    let overflow = sh_target_layout(&mir, huge, 2147483647);
+    assert_eq_i64(overflow.error, 6304, "layout.sg", 126);
+    let zero = sh_type_intern(&mir.types, 8, 0, 0, -1, &fields)?;
+    sh_lt_check(&mir, zero, 0, 8);
+    fields.clear();
+    fields.push(unit);
+    let zero_sized = sh_type_intern(&mir.types, 8, 9223372036854775807, 0, -1, &fields)?;
+    sh_lt_check(&mir, zero_sized, 0, 1);
+    let trait_name = string_from_str("Trait")?;
+    let trait_symbol = sh_intern(&mir.symbols, &trait_name)?;
+    fields.clear();
+    let dynamic = sh_type_intern(&mir.types, 14, 0, 0, trait_symbol, &fields)?;
+    fields.push(dynamic);
+    let dynamic_ref = sh_type_intern(&mir.types, 6, 0, 0, -1, &fields)?;
+    sh_lt_check(&mir, dynamic, 16, 8);
+    sh_lt_check(&mir, dynamic_ref, 16, 8);
+    Result { is_ok: true, value: true, error: 0 };
+}
+
+def main() -> i64 {
+    if args_len() > 0 { let emitted = sh_test_layout(true); return if emitted.is_ok() { 0; } else { 1; }; };
+    let strings = sengoo_string_live_handle_count();
+    let buffers = sengoo_buffer_live_handle_count();
+    let opaque = sengoo_opaque_live_handle_count();
+    let mut round = 0;
+    while round < 100 { let result = sh_test_layout(false); if not result.is_ok() { println(result.error); return 1; }; round = round + 1; };
+    assert_eq_i64(sengoo_string_live_handle_count(), strings, "layout.sg", 154);
+    assert_eq_i64(sengoo_buffer_live_handle_count(), buffers, "layout.sg", 155);
+    assert_eq_i64(sengoo_opaque_live_handle_count(), opaque, "layout.sg", 156);
+    println("selfhost Windows x64 layout: ok");
+    0;
+}

@@ -1,0 +1,88 @@
+import selfhost_mir_validate;
+
+struct ShTargetLayout {
+    sizes: Vec<i64>,
+    alignments: Vec<i64>,
+    states: Vec<i64>,
+    field_offsets: Vec<i64>,
+    layout_sizes: Vec<i64>,
+    layout_alignments: Vec<i64>,
+    maximum: i64,
+    error: i64,
+    ty: i64,
+}
+
+def sh_layout_at(values: &Vec<i64>, index: i64) -> i64 {
+    sengoo_vec_get_or_default_i64(values.handle, index, -1);
+}
+
+def sh_layout_align(value: i64, alignment: i64, maximum: i64) -> Result<i64, i64> {
+    if value < 0 or alignment < 1 or alignment > 8 or (alignment & (alignment - 1)) != 0 or maximum < 0 or value > maximum { return sh_i64_error(6301); };
+    let padding = (alignment - value % alignment) % alignment;
+    if padding > maximum - value { return sh_i64_error(6304); };
+    sh_i64_ok(value + padding);
+}
+
+def sh_layout_aggregate(cache: &ShTargetLayout, mir: &ShMir, ty: i64, row: i64, depth: i64) -> i64 {
+    let tuple = row < 0;
+    let count = if tuple { sh_mir_type_word(mir, ty, 5); } else { sh_mir_word(&mir.layouts, 7, row, 3); };
+    let first = if tuple { 0; } else { sh_mir_word(&mir.layouts, 7, row, 2); };
+    let base = if sh_mir_type_word(mir, ty, 0) == 12 and sh_mir_type_word(mir, ty, 1) == 1 { 8; } else { 0; };
+    let mut size = 0;
+    let mut alignment = 1;
+    let mut index = 0;
+    while index < count { let field_type = if tuple { sh_mir_type_arg(mir, ty, index); } else { sh_mir_word(&mir.fields, 2, first + index, 0); }; let error = sh_layout_visit(cache, mir, field_type, depth + 1); if error != 0 { return error; }; let field_size = sh_layout_at(&cache.sizes, field_type); let field_alignment = sh_layout_at(&cache.alignments, field_type); let aligned = sh_layout_align(size, field_alignment, cache.maximum); if not aligned.is_ok() { return aligned.error; }; size = aligned.value; if not tuple { if base > cache.maximum - size { return 6304; }; let offset = size + base; let claimed = sh_mir_word(&mir.fields, 2, first + index, 1); if claimed >= 0 and claimed != offset { return 6305; }; if not cache.field_offsets.set(first + index, offset) { return 6301; }; }; if field_size > cache.maximum - size { return 6304; }; size = size + field_size; if field_alignment > alignment { alignment = field_alignment; }; index = index + 1; };
+    let padded = sh_layout_align(size, alignment, cache.maximum);
+    if not padded.is_ok() { return padded.error; };
+    if tuple { if not cache.sizes.set(ty, padded.value) or not cache.alignments.set(ty, alignment) { return 6301; }; } else { if not cache.layout_sizes.set(row, padded.value) or not cache.layout_alignments.set(row, alignment) { return 6301; }; };
+    0;
+}
+
+def sh_layout_visit(cache: &ShTargetLayout, mir: &ShMir, ty: i64, depth: i64) -> i64 {
+    if ty < 0 or ty >= cache.states.len() { return 6301; };
+    let state = sh_layout_at(&cache.states, ty);
+    if state == 2 { return 0; };
+    if state == 1 or depth > 128 { return 6303; };
+    if not cache.states.set(ty, 1) { return 6301; };
+    let kind = sh_mir_type_word(mir, ty, 0);
+    let mut size = -1;
+    let mut alignment = -1;
+    if kind == 0 or kind == 17 { size = 0; alignment = 1; };
+    if kind == 1 { size = 1; alignment = 1; };
+    if kind == 2 or kind == 3 { size = sh_mir_type_word(mir, ty, 1) / 8; alignment = size; };
+    if kind == 4 { size = 4; alignment = 4; };
+    if kind == 5 or kind == 6 or kind == 7 or kind == 11 or kind == 16 { size = 8; alignment = 8; };
+    if kind == 14 or kind == 6 and sh_mir_type_word(mir, sh_mir_type_arg(mir, ty, 0), 0) == 14 { size = 16; alignment = 8; };
+    if kind == 8 { let element = sh_mir_type_arg(mir, ty, 0); let error = sh_layout_visit(cache, mir, element, depth + 1); if error != 0 { return error; }; alignment = sh_layout_at(&cache.alignments, element); let stride = sh_layout_align(sh_layout_at(&cache.sizes, element), alignment, cache.maximum); if not stride.is_ok() { return stride.error; }; let count = sh_mir_type_word(mir, ty, 1); if count < 0 or stride.value > 0 and count > cache.maximum / stride.value { return 6304; }; size = count * stride.value; };
+    if kind == 10 { let error = sh_layout_aggregate(cache, mir, ty, -1, depth); if error != 0 { return error; }; size = sh_layout_at(&cache.sizes, ty); alignment = sh_layout_at(&cache.alignments, ty); };
+    if kind == 12 { let enumeration = sh_mir_type_word(mir, ty, 1) == 1; let mut count = 0; let mut payload_size = if enumeration { 1; } else { 0; }; let mut row = 0; alignment = if enumeration { 8; } else { 1; }; while row < cache.layout_sizes.len() { if sh_mir_word(&mir.layouts, 7, row, 0) == ty { let error = sh_layout_aggregate(cache, mir, ty, row, depth); if error != 0 { return error; }; let current_size = sh_layout_at(&cache.layout_sizes, row); let current_alignment = sh_layout_at(&cache.layout_alignments, row); if current_size > payload_size { payload_size = current_size; }; if current_alignment > alignment { alignment = current_alignment; }; count = count + 1; }; row = row + 1; }; if count == 0 or not enumeration and count != 1 { return 6302; }; if enumeration { if payload_size > cache.maximum - 8 { return 6304; }; let aligned = sh_layout_align(8 + payload_size, 8, cache.maximum); if not aligned.is_ok() { return aligned.error; }; size = aligned.value; } else { size = payload_size; }; row = 0; while row < cache.layout_sizes.len() { if sh_mir_word(&mir.layouts, 7, row, 0) == ty { let claimed_size = sh_mir_word(&mir.layouts, 7, row, 5); let claimed_alignment = sh_mir_word(&mir.layouts, 7, row, 6); if claimed_size >= 0 and claimed_size != size or claimed_alignment >= 0 and claimed_alignment != alignment { return 6305; }; }; row = row + 1; }; };
+    if size < 0 or alignment < 1 { return 6302; };
+    if size > cache.maximum { return 6304; };
+    if not cache.sizes.set(ty, size) or not cache.alignments.set(ty, alignment) or not cache.states.set(ty, 2) { return 6301; };
+    0;
+}
+
+def sh_target_layout(mir: &ShMir, ty: i64, maximum: i64) -> ShTargetLayout {
+    let mut cache = ShTargetLayout { sizes: vec_new_i64(), alignments: vec_new_i64(), states: vec_new_i64(), field_offsets: vec_new_i64(), layout_sizes: vec_new_i64(), layout_alignments: vec_new_i64(), maximum: maximum, error: 0, ty: ty };
+    if mir.schema != 1 or mir.target != 1 or mir.runtime_abi != 1 or mir.pointer_width != 64 or maximum < 0 or maximum > 2147483647 or not sh_mir_limit(mir) { cache.error = 6301; return cache; };
+    if sh_mir_count(&mir.layouts, 7) < 0 or sh_mir_count(&mir.fields, 2) < 0 or sh_mir_count(&mir.types.words, 6) < 0 or sh_type_count(&mir.types) > mir.limit or sh_mir_count(&mir.layouts, 7) > mir.limit or sh_mir_count(&mir.fields, 2) > mir.limit or sh_mir_validate_types(mir) != 0 { cache.error = 6301; return cache; };
+    let mut index = 0;
+    while index < sh_type_count(&mir.types) { if not cache.sizes.push(-1) or not cache.alignments.push(-1) or not cache.states.push(0) { cache.error = 6301; return cache; }; index = index + 1; };
+    index = 0;
+    while index < sh_mir_count(&mir.fields, 2) { if not cache.field_offsets.push(-1) { cache.error = 6301; return cache; }; index = index + 1; };
+    index = 0;
+    while index < sh_mir_count(&mir.layouts, 7) { if not cache.layout_sizes.push(-1) or not cache.layout_alignments.push(-1) { cache.error = 6301; return cache; }; index = index + 1; };
+    cache.error = sh_layout_visit(&cache, mir, ty, 0);
+    cache;
+}
+
+def sh_target_field_offset(cache: &ShTargetLayout, mir: &ShMir, ty: i64, variant: i64, field: i64) -> Result<i64, i64> {
+    if cache.error != 0 { return sh_i64_error(cache.error); };
+    if sh_layout_at(&cache.states, ty) != 2 or field < 0 or field >= sh_mir_field_count(mir, ty, variant) { return sh_i64_error(6301); };
+    let kind = sh_mir_type_word(mir, ty, 0);
+    if kind == 8 { return sh_i64_ok(field * sh_layout_at(&cache.sizes, sh_mir_type_arg(mir, ty, 0))); };
+    if kind == 10 { let mut offset = 0; let mut index = 0; while index <= field { let child = sh_mir_type_arg(mir, ty, index); offset = sh_layout_align(offset, sh_layout_at(&cache.alignments, child), cache.maximum)?; if index == field { return sh_i64_ok(offset); }; offset = offset + sh_layout_at(&cache.sizes, child); index = index + 1; }; };
+    let mut row = 0;
+    while row < cache.layout_sizes.len() { if sh_mir_word(&mir.layouts, 7, row, 0) == ty and sh_mir_word(&mir.layouts, 7, row, 1) == variant { return sh_i64_ok(sh_layout_at(&cache.field_offsets, sh_mir_word(&mir.layouts, 7, row, 2) + field)); }; row = row + 1; };
+    sh_i64_error(6301);
+}

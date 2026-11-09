@@ -1,8 +1,9 @@
 ## Encoding and object foundation
 
 - [x] Implement bounded binary writer and deterministic x64 byte/COFF foundation (`target/selfhost/native-foundations/evidence.json`; full MIR/backend remains open).
-- [ ] Implement x64 register/memory/immediate encodings and branch/call fixups with independent byte/disassembly tests.
-- [ ] Emit valid deterministic COFF sections, symbols, data and relocations.
+- [x] Implement x64 register/memory/immediate encodings and branch/call fixups with independent byte/CPU tests (`target/selfhost/native-foundations/evidence.json`).
+- [x] Emit and inspect a deterministic single-text COFF object with short/long symbols; full sections/data/relocations remain open (`target/selfhost/native-foundations/evidence.json`).
+- [x] Resolve bounded concrete Windows x64 type sizes, alignments, array strides and nominal/tuple/enum field offsets; verify recursive/overflow/claim failures and exact resources, and compare ten layout results with independently compiled C (`target/selfhost/m4-layout-final/evidence.json`). Full calling conventions remain open.
 
 ## Supported target behavior
 
@@ -16,7 +17,14 @@
 ## Integration
 
 - [ ] Run native ABI/C interop and cross-compiler semantic corpus with exact inputs and output checks.
-- [ ] Reject malformed MIR/oversized objects before emission and preserve source diagnostics.
+- [x] Reject malformed binary operands, patch ranges and oversized objects before emission (`target/selfhost/native-foundations/evidence.json`).
 - [ ] Verify source-level debugging through the SG linker when available.
 - [ ] Record full revision/host/tool/input/commands/results and validate change/all specs strictly.
 - [ ] Close M4 only after complete supported backend behavior passes; keep M5-M8 integration open.
+
+Concrete layout evidence: report SHA-256
+`dedfdb9d9ac5334b9c4d7205e8a6679d90907e35d7d87c3b8c072ecafb39c28f`,
+revision `4aa6e5d219ba4b491af05da8cea258f4ff32d96d`, Windows 11 x64.
+Seven commands passed with unchanged source/tool identities. The SG fixture
+ran 100 success/failure scopes with exact String/Buffer/opaque resource recovery;
+its ten emitted layout results matched the C probe. `m4_complete` remains false.
