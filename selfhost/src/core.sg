@@ -1,0 +1,162 @@
+import std::collections;
+
+import std::string;
+
+import std::file_snapshot;
+
+struct ShSpan {
+    source: i64,
+    start: i64,
+    end: i64,
+}
+
+struct ShText {
+    text: String,
+}
+
+struct ShSources {
+    texts: Vec<ShText>,
+    limit: i64,
+    max_bytes: i64,
+}
+
+struct ShSymbols {
+    names: Vec<ShText>,
+    limit: i64,
+}
+
+struct ShNode {
+    kind: i64,
+    span: ShSpan,
+    payload: i64,
+    child: i64,
+}
+
+struct ShNodes {
+    words: Vec<i64>,
+    limit: i64,
+}
+
+def sh_i64_ok(value: i64) -> Result<i64, i64> {
+    Result { is_ok: true, value: value, error: 0 };
+}
+
+def sh_i64_error(code: i64) -> Result<i64, i64> {
+    Result { is_ok: false, value: 0, error: code };
+}
+
+def sh_sources_new(limit: i64, max_bytes: i64) -> ShSources {
+    let texts: Vec<ShText> = vec_new();
+    ShSources { texts: texts, limit: limit, max_bytes: max_bytes };
+}
+
+def sh_source_count(sources: &ShSources) -> i64 {
+    sources.texts.len();
+}
+
+def sh_source_add(sources: &ShSources, text: &String) -> Result<i64, i64> {
+    if sources.limit < 0 or sources.max_bytes < 0 or text.len() > sources.max_bytes { return sh_i64_error(1004); };
+    if sources.texts.len() >= sources.limit { return sh_i64_error(1004); };
+    if not text.char_count().is_ok() { return sh_i64_error(1003); };
+    let copied = text.clone();
+    if not copied.is_ok() { return sh_i64_error(1004); };
+    let index = sources.texts.len();
+    let entry = ShText { text: copied.value };
+    if not sources.texts.push(entry) { return sh_i64_error(1004); };
+    sh_i64_ok(index);
+}
+
+def sh_source_len(sources: &ShSources, source: i64) -> Result<i64, i64> {
+    if source < 0 or source >= sources.texts.len() { return sh_i64_error(1001); };
+    sh_i64_ok(sources.texts.get(source).text.len());
+}
+
+def sh_source_load(sources: &ShSources, path: &str) -> Result<i64, i64> {
+    if sources.max_bytes < 0 or sources.limit < 0 or sources.texts.len() >= sources.limit { return sh_i64_error(1004); };
+    let opened = file_snapshot_open(path, sources.max_bytes);
+    if not opened.is_ok() { if opened.error == STATUS_OVERFLOW() or opened.error == STATUS_BUFFER_TOO_SMALL() or opened.error == STATUS_OUT_OF_MEMORY() { return sh_i64_error(1004); }; return sh_i64_error(1007); };
+    let snapshot = opened.value;
+    let length = snapshot.len();
+    if not length.is_ok() { return sh_i64_error(1007); };
+    let allocated = ffi_buffer_new(length.value);
+    if not allocated.is_ok() { return sh_i64_error(1004); };
+    let mut bytes = allocated.value;
+    let copied = snapshot.copy_bytes(&mut bytes);
+    if not copied.is_ok() or copied.value != length.value { return sh_i64_error(1007); };
+    let text = string_from_utf8(bytes, copied.value);
+    if not text.is_ok() { return sh_i64_error(1003); };
+    sh_source_add(sources, &text.value);
+}
+
+def sh_span_error(code: i64) -> Result<ShSpan, i64> {
+    Result { is_ok: false, value: ShSpan { source: -1, start: 0, end: 0 }, error: code };
+}
+
+def sh_span_make(sources: &ShSources, source: i64, start: i64, end: i64) -> Result<ShSpan, i64> {
+    let length = sh_source_len(sources, source);
+    if not length.is_ok() { return sh_span_error(length.error); };
+    if start < 0 or end < start or end > length.value { return sh_span_error(1002); };
+    let text = sources.texts.get(source);
+    let left = text.text.get(start, start);
+    let right = text.text.get(end, end);
+    if not left.is_ok() or not right.is_ok() { return sh_span_error(1003); };
+    Result { is_ok: true, value: ShSpan { source: source, start: start, end: end }, error: 0 };
+}
+
+def sh_span_text(sources: &ShSources, span: ShSpan) -> Result<String, i64> {
+    let checked = sh_span_make(sources, span.source, span.start, span.end);
+    if not checked.is_ok() { return Result { is_ok: false, value: String { handle: 0 }, error: checked.error }; };
+    sources.texts.get(span.source).text.get(span.start, span.end);
+}
+
+def sh_symbols_new(limit: i64) -> ShSymbols {
+    let names: Vec<ShText> = vec_new();
+    ShSymbols { names: names, limit: limit };
+}
+
+def sh_symbol_count(symbols: &ShSymbols) -> i64 {
+    symbols.names.len();
+}
+
+def sh_intern(symbols: &ShSymbols, text: &String) -> Result<i64, i64> {
+    let mut index = 0;
+    while index < symbols.names.len() { if sengoo_string_eq(symbols.names.get(index).text.handle, text.handle) != 0 { return sh_i64_ok(index); }; index = index + 1; };
+    if symbols.limit < 0 or symbols.names.len() >= symbols.limit { return sh_i64_error(1004); };
+    if not text.char_count().is_ok() { return sh_i64_error(1003); };
+    let copied = text.clone();
+    if not copied.is_ok() { return sh_i64_error(1004); };
+    let entry = ShText { text: copied.value };
+    if not symbols.names.push(entry) { return sh_i64_error(1004); };
+    sh_i64_ok(index);
+}
+
+def sh_symbol_text(symbols: &ShSymbols, symbol: i64) -> Result<String, i64> {
+    if symbol < 0 or symbol >= symbols.names.len() { return Result { is_ok: false, value: String { handle: 0 }, error: 1006 }; };
+    symbols.names.get(symbol).text.clone();
+}
+
+def sh_nodes_new(limit: i64) -> ShNodes {
+    ShNodes { words: vec_new_i64(), limit: limit };
+}
+
+def sh_node_count(nodes: &ShNodes) -> i64 {
+    nodes.words.len() / 6;
+}
+
+def sh_node_add(nodes: &ShNodes, sources: &ShSources, node: ShNode) -> Result<i64, i64> {
+    let count = sh_node_count(nodes);
+    if node.kind < 0 or node.child < -1 or node.child >= count { return sh_i64_error(1005); };
+    let checked = sh_span_make(sources, node.span.source, node.span.start, node.span.end);
+    if not checked.is_ok() { return sh_i64_error(checked.error); };
+    if nodes.limit < 0 or count >= nodes.limit { return sh_i64_error(1004); };
+    let before = nodes.words.len();
+    let stored = nodes.words.push(node.kind) and nodes.words.push(node.span.source) and nodes.words.push(node.span.start) and nodes.words.push(node.span.end) and nodes.words.push(node.payload) and nodes.words.push(node.child);
+    if not stored { while nodes.words.len() > before { nodes.words.pop(); }; return sh_i64_error(1004); };
+    sh_i64_ok(count);
+}
+
+def sh_node_get(nodes: &ShNodes, id: i64) -> Result<ShNode, i64> {
+    if id < 0 or id >= sh_node_count(nodes) { return Result { is_ok: false, value: ShNode { kind: 0, span: ShSpan { source: -1, start: 0, end: 0 }, payload: 0, child: -1 }, error: 1005 }; };
+    let base = id * 6;
+    Result { is_ok: true, value: ShNode { kind: nodes.words.get(base).unwrap_or(0), span: ShSpan { source: nodes.words.get(base + 1).unwrap_or(0), start: nodes.words.get(base + 2).unwrap_or(0), end: nodes.words.get(base + 3).unwrap_or(0) }, payload: nodes.words.get(base + 4).unwrap_or(0), child: nodes.words.get(base + 5).unwrap_or(-1) }, error: 0 };
+}

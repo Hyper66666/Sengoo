@@ -1,0 +1,43 @@
+{
+  "schema": 1,
+  "stage": "m1-stage0-source-development",
+  "target": "x86_64-pc-windows-msvc",
+  "source_revision": "fc1a686a2953adcbd14731cc6f93270cfb9cf34d",
+  "source_objects": {
+    "compiler": "7d3054bde1f09f5575c77ba59c0bd6a9e0311207",
+    "runtime": "0243e1f6573ead7b03b5f3205bd660140d534ff1",
+    "tools/sgc": "f48fd65dee971a55f101dc5c6ee6d9ee38e876ee",
+    "tools/stdlib": "f65d1ce05f028bac37cab5cd38d4cd36d868a45f",
+    "Cargo.lock": "03032d6debfbcfd5bffd69fa6cbb9ace43de544c",
+    "Cargo.toml": "c1d15d11390ed16148047860da47e4304ced27df",
+    "rust-toolchain.toml": "8823dbef4891093cd076b1187bb64baad8d1fb46"
+  },
+  "seed": {
+    "sha256": "9b1055c5a5cb7f09c016228a44f7427b7519b6a92e69cad5993004831c3aa1e5",
+    "version": "sgc 0.2.1-dev.0 (ea803f1913f9)",
+    "distribution": "local-verified-artifact",
+    "embedded_revision_is_source_checkpoint": false
+  },
+  "formatter": {
+    "sha256": "d075a1a0fd51a8e2434650ea542f5f252f526198ff1bf0ba27a7fce3ea7ba814",
+    "version": "sgfmt 0.2.1-dev.0 (ea803f1913f9)"
+  },
+  "clang": {
+    "sha256": "56ef1abd0df11a3b1b77822193e927c6345078c24511567ae10b3afd803d03a3",
+    "version_contains": "clang version 19.1.7"
+  },
+  "rustc_version_prefix": "rustc 1.94.0 ",
+  "cargo_version_prefix": "cargo 1.94.0 ",
+  "rust_toolchain": "1.94.0",
+  "rustc_sha256": "6a0699e427ee9c1492ef1c9ea967d035dc4660e92c7fe32f2c6a1038116700e5",
+  "cargo_sha256": "cbfdfc04b61ba49d184c6d3996502a00391d570cb5cb71a00faeb8c0ce12a4c9",
+  "runtime_mode": "source-development",
+  "optimization": 0,
+  "native_sdk": null,
+  "final_cutover": {
+    "max_time_ratio": 1.10,
+    "max_peak_memory_ratio": 1.15,
+    "require_existing_performance_gates": true,
+    "require_s2_s3_byte_identity": true
+  }
+}

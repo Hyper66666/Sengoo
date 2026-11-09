@@ -1,0 +1,81 @@
+import std::args;
+
+import std::ffi;
+
+import std::hash;
+
+import std::io;
+
+import std::process;
+
+import std::string;
+
+def bootstrap_seed_sha256() -> &str {
+    "9b1055c5a5cb7f09c016228a44f7427b7519b6a92e69cad5993004831c3aa1e5";
+}
+
+def bootstrap_argument(index: i64) -> Result<String, i64> {
+    let size = arg_len(index)?;
+    let bytes = ffi_buffer_new(size)?;
+    let copied = arg_copy(index, bytes)?;
+    string_from_utf8(bytes, copied);
+}
+
+def bootstrap_usage() {
+    println("bootstrap build SEED ROOT SOURCE OUTPUT");
+    println("bootstrap check SEED ROOT SOURCE");
+    println("Stage0 source-development: requires the locked seed, clang and Rust runtime.");
+}
+
+def bootstrap_error(message: &str, code: i64) -> i64 {
+    io_stderr_write(message);
+    io_stderr_write("\n");
+    code;
+}
+
+def bootstrap_compile(mode: &str, seed: &str, root: &str, source: &str, output: &str) -> Result<i64, i64> {
+    let identity = hash_sha256_file(seed, 536870912)?;
+    if identity.as_str() != bootstrap_seed_sha256() { return Result { is_ok: true, value: bootstrap_error("bootstrap::seed_mismatch", 65), error: 0 }; };
+    let command = process_command(seed)?;
+    command.cwd(root)?;
+    let stdlib = string_from_str(root)?;
+    stdlib.push_str("/tools/stdlib")?;
+    let runtime = string_from_str(root)?;
+    runtime.push_str("/tools/stdlib/runtime.c")?;
+    let modules = string_from_str("selfhost_core=")?;
+    modules.push_str(root)?;
+    modules.push_str("/selfhost/src/core.sg")?;
+    command.env_set("SENGOO_STDLIB", stdlib.as_str())?;
+    command.env_set("SENGOO_RUNTIME", runtime.as_str())?;
+    command.env_set("SENGOO_MODULE_MAP", modules.as_str())?;
+    command.capture_stdout(false)?;
+    command.capture_stderr(false)?;
+    command.timeout_ms(300000)?;
+    command.arg("--runtime-mode")?;
+    command.arg("source-development")?;
+    command.arg(mode)?;
+    command.arg(source)?;
+    if mode == "build" { command.arg("--force-rebuild")?; command.arg("-O")?; command.arg("0")?; command.arg("-o")?; command.arg(output)?; (); };
+    let result = command.run()?;
+    if result.timed_out() { return Result { is_ok: true, value: bootstrap_error("bootstrap::timeout", 124), error: 0 }; };
+    let code = result.exit_code()?;
+    Result { is_ok: true, value: code, error: 0 };
+}
+
+def main() -> i64 {
+    if args_len() == 0 { bootstrap_usage(); return 0; };
+    let action = bootstrap_argument(0);
+    if not action.is_ok() { return bootstrap_error("bootstrap::argument", 64); };
+    if action.value.as_str() == "--version" and args_len() == 1 { println("sengoo bootstrap M1 (stage0 source-development)"); return 0; };
+    if action.value.as_str() == "--help" and args_len() == 1 { bootstrap_usage(); return 0; };
+    let mode = action.value.as_str();
+    if (mode != "build" and mode != "check") or (mode == "build" and args_len() != 5) or (mode == "check" and args_len() != 4) { return bootstrap_error("bootstrap::usage", 64); };
+    let seed = bootstrap_argument(1);
+    let root = bootstrap_argument(2);
+    let source = bootstrap_argument(3);
+    if not seed.is_ok() or not root.is_ok() or not source.is_ok() { return bootstrap_error("bootstrap::argument", 64); };
+    if mode == "build" { let output = bootstrap_argument(4); if not output.is_ok() { return bootstrap_error("bootstrap::argument", 64); }; let built = bootstrap_compile(mode, seed.value.as_str(), root.value.as_str(), source.value.as_str(), output.value.as_str()); if built.is_ok() { return built.value; }; return bootstrap_error("bootstrap::input_or_process", 66); };
+    let checked = bootstrap_compile(mode, seed.value.as_str(), root.value.as_str(), source.value.as_str(), "");
+    if checked.is_ok() { return checked.value; };
+    bootstrap_error("bootstrap::input_or_process", 66);
+}

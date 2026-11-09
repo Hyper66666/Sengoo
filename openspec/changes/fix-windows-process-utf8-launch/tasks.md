@@ -11,4 +11,4 @@
 - [x] SG generated program passes 20 synchronous Unicode launches with exact production-runtime resource baselines.
 - [x] Record source/tool identities, commands and output in `target/selfhost/process-utf8/evidence.json` with no changed sources (Windows x64, 2026-11-09; frozen baseline `cc70247ec5bd9531bea751a08288980da40ecc68` plus recorded runtime/test source hashes).
 - [x] Run `openspec validate fix-windows-process-utf8-launch --strict`.
-- [ ] Re-run the complete M1 gate with a reviewed frozen-source checkpoint/lock update and the original Unicode-path fixture.
+- [x] Re-run the complete M1 gate with frozen correction `fc1a686a2953adcbd14731cc6f93270cfb9cf34d`, updated source lock and original Unicode-path fixture (`target/selfhost/m1-run2/evidence.json`, 44 steps passed, no changed sources).
