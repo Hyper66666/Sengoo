@@ -1,0 +1,233 @@
+import selfhost_link_debug_modules;
+
+def sh_lpm_equal(a: &ShBinary, b: &ShBinary) -> bool {
+    if sh_binary_len(a) != sh_binary_len(b) { return false; };
+    let mut at = 0;
+    while at < sh_binary_len(a) { if sh_binary_get(a, at).unwrap_or(-1) != sh_binary_get(b, at).unwrap_or(-2) { return false; }; at = at + 1; };
+    true;
+}
+
+def sh_lpm_words_equal(a: &Vec<i64>, b: &Vec<i64>) -> bool {
+    if a.len() != b.len() { return false; };
+    let mut at = 0;
+    while at < a.len() { if sengoo_vec_get_or_default_i64(a.handle, at, -1) != sengoo_vec_get_or_default_i64(b.handle, at, -2) { return false; }; at = at + 1; };
+    true;
+}
+
+def sh_lpm_source(program: &ShLinkDebugModules, file: i64) -> Result<ShBinary, i64> {
+    if file < 0 or file >= program.catalog.files.len() / 4 { return sh_coff_error(7331); };
+    let source = sh_binary_new(1048576);
+    let first = sh_link_word(&program.catalog.files, 4, file, 1);
+    let size = sh_link_word(&program.catalog.files, 4, file, 2);
+    let mut at = 0;
+    while at < size { sh_binary_byte(&source, sengoo_vec_get_or_default_i64(program.catalog.file_data.handle, first + at, -1))?; at = at + 1; };
+    Result { is_ok: true, value: source, error: 0 };
+}
+
+def sh_lpm_module(program: &ShLinkDebugModules, module: i64) -> Result<ShBinary, i64> {
+    let first = sh_link_word(&program.streams.ranges, 2, module, 0);
+    let size = sh_link_word(&program.streams.ranges, 2, module, 1);
+    if first < 0 or size < 4 or size > 1048576 or first > program.streams.bytes.len() or size > program.streams.bytes.len() - first { return sh_coff_error(7331); };
+    let output = sh_binary_new(1048576);
+    let mut at = 0;
+    while at < size { sh_binary_byte(&output, sengoo_vec_get_or_default_i64(program.streams.bytes.handle, first + at, -1))?; at = at + 1; };
+    Result { is_ok: true, value: output, error: 0 };
+}
+
+def sh_lpm_check_module(program: &ShLinkDebugModules, module: i64, types: &ShBinary) -> Result<i64, i64> {
+    let mut checked = sh_link_debug_new();
+    let file_first = sh_link_word(&program.modules, 12, module, 2);
+    let file_count = sh_link_word(&program.modules, 12, module, 3);
+    let function_first = sh_link_word(&program.modules, 12, module, 4);
+    let function_count = sh_link_word(&program.modules, 12, module, 5);
+    let mut file = 0;
+    while file < file_count { let global = sengoo_vec_get_or_default_i64(program.file_map.handle, file_first + file, -1); let path = sh_symbol_text(&program.catalog.names, sh_link_word(&program.catalog.files, 4, global, 0))?; let source = sh_lpm_source(program, global)?; sh_link_debug_source_file(&mut checked, sengoo_vec_get_or_default_i64(program.source_ids.handle, file_first + file, -1), &path, &source)?; file = file + 1; };
+    let mut function = 0;
+    while function < function_count { let row = function_first + function; if sh_link_word(&program.registry, 4, row, 0) != module or sh_link_word(&program.registry, 4, row, 1) != sh_link_word(&program.functions, 8, row, 1) { return sh_i64_error(7331); }; let id = sh_link_word(&program.registry, 4, row, 2); let local = sh_link_debug_file_row(&checked, id); if local < 0 or sh_link_word(&program.registry, 4, row, 3) != sengoo_vec_get_or_default_i64(program.file_map.handle, file_first + local, -1) { return sh_i64_error(7331); }; let name = sh_symbol_text(&program.catalog.names, sh_link_word(&program.registry, 4, row, 1))?; sh_link_debug_function_origin(&checked, &name, id)?; function = function + 1; };
+    sh_link_debug_registry_validate(&checked)?;
+    let imported = sh_link_cv_types_read(&checked.types, types);
+    if not imported.is_ok() { return sh_i64_error(7331); };
+    let remap = imported.value;
+    let stream = sh_lpm_module(program, module)?;
+    let symbols = sh_link_word(&program.modules, 12, module, 6);
+    let lines = sh_link_word(&program.modules, 12, module, 7);
+    if symbols < 4 or lines < 8 or symbols > sh_binary_len(&stream) or lines != sh_binary_len(&stream) - symbols - 4 or sh_link_uint(&stream, 0, 4)? != 4 or sh_link_uint(&stream, symbols + lines, 4)? != 0 { return sh_i64_error(7331); };
+    let object_name = sh_link_cv_text(&stream, 12, 4 + sh_link_uint(&stream, 4, 2)? + 2)?;
+    let expected_name = sh_symbol_text(&program.catalog.names, sh_link_word(&program.modules, 12, module, 1))?;
+    if sengoo_string_eq(object_name.handle, expected_name.handle) == 0 { return sh_i64_error(7331); };
+    let mut at = 4;
+    let mut end = -1;
+    while at < symbols { let length = sh_link_uint(&stream, at, 2)?; if length < 2 or length + 2 > symbols - at { return sh_i64_error(7331); }; let kind = sh_link_uint(&stream, at + 2, 2)?; if kind == 4367 or kind == 4368 { if end >= 0 { return sh_i64_error(7331); }; end = sh_link_uint(&stream, at + 8, 4)?; sh_binary_patch(&stream, at + 8, 0, 4)?; (); }; if kind == 6 { if end != at { return sh_i64_error(7331); }; end = -1; }; at = at + length + 2; };
+    if at != symbols or end != -1 { return sh_i64_error(7331); };
+    let scopes = vec_new_i64();
+    sh_link_cv_symbols_scoped(&checked, &stream, 4, symbols - 4, &remap, true, &scopes)?;
+    if checked.functions.len() / 8 != function_count or scopes.len() != function_count { return sh_i64_error(7331); };
+    function = 0;
+    while function < function_count { let row = function_first + function; let name = sh_symbol_text(&checked.names, sh_link_word(&checked.functions, 8, function, 0))?; let expected = sh_symbol_text(&program.catalog.names, sh_link_word(&program.functions, 8, row, 1))?; let storage = sh_link_word(&program.functions, 8, row, 5); if sengoo_string_eq(name.handle, expected.handle) == 0 or sh_link_word(&checked.functions, 8, function, 1) != sh_link_word(&program.functions, 8, row, 2) or sh_link_word(&checked.functions, 8, function, 2) != sh_link_word(&program.functions, 8, row, 3) or sh_link_word(&checked.functions, 8, function, 3) != sh_link_word(&program.functions, 8, row, 4) or sh_link_word(&checked.functions, 8, function, 7) != sh_link_word(&program.functions, 8, row, 7) or sengoo_vec_get_or_default_i64(scopes.handle, function, -1) != if storage == 3 { 1; } else { 0; } { return sh_i64_error(7331); }; function = function + 1; };
+    let mut checksum_seen = false;
+    let mut fragments = 0;
+    at = symbols;
+    while at < symbols + lines { let kind = sh_link_uint(&stream, at, 4)?; let size = sh_link_uint(&stream, at + 4, 4)?; if size > symbols + lines - at - 8 { return sh_i64_error(7331); }; if kind == 242 { sh_link_cv_lines(&checked, &stream, at + 8, size)?; fragments = fragments + 1; } else { if kind != 244 or checksum_seen or size != file_count * 40 { return sh_i64_error(7331); }; checksum_seen = true; file = 0; while file < file_count { let row = at + 8 + file * 40; let global = sengoo_vec_get_or_default_i64(program.file_map.handle, file_first + file, -1); if sh_link_uint(&stream, row, 4)? != sh_link_pdb_file_offset(&program.catalog, global)? or sh_link_uint(&stream, row + 4, 1)? != 32 or sh_link_uint(&stream, row + 5, 1)? != 3 or sh_link_uint(&stream, row + 38, 2)? != 0 { return sh_i64_error(7331); }; let source = sh_lpm_source(program, global)?; let digest = sh_link_sha256(&source)?; let mut byte = 0; while byte < 32 { if sh_binary_get(&stream, row + 6 + byte)? != sh_binary_get(&digest, byte)? { return sh_i64_error(7331); }; byte = byte + 1; }; file = file + 1; }; }; at = at + size + 8; };
+    if at != symbols + lines or not checksum_seen or fragments != function_count { return sh_i64_error(7331); };
+    sh_link_debug_validate(&checked, &program.image)?;
+    sh_i64_ok(module);
+}
+
+def sh_link_debug_modules_validate(program: &ShLinkDebugModules) -> Result<i64, i64> {
+    if program.error != 0 { return sh_i64_error(program.error); };
+    if program.expected < 1 or program.expected > 32 or program.modules.len() != program.expected * 12 or program.functions.len() % 8 != 0 or program.registry.len() != program.functions.len() / 2 or program.source_ids.len() != program.file_map.len() or program.streams.ranges.len() != program.expected * 2 or program.path < 0 or program.path >= sh_symbol_count(&program.catalog.names) { return sh_i64_error(7331); };
+    if program.functions.len() / 8 > 256 or program.file_map.len() > 8192 or program.contributions.len() % 5 != 0 or program.contributions.len() / 5 > 1024 { return sh_i64_error(7332); };
+    let state = sh_ldm_state_hash(program)?;
+    if not sh_lpm_equal(&state, &program.seal) { return sh_i64_error(7331); };
+    let binding = sh_ldm_binding_hash(program)?;
+    if not sh_lpm_equal(&binding, &program.bound_hash) { return sh_i64_error(7331); };
+    sh_link_debug_files_validate(&program.catalog)?;
+    let image_hash = sh_link_sha256(&program.image)?;
+    if not sh_lpm_equal(&image_hash, &program.image_hash) { return sh_i64_error(7331); };
+    let type_input = sh_binary_new(1048580);
+    sh_binary_unsigned(&type_input, 4, 4)?;
+    sh_link_debug_append(&type_input, &program.catalog.types.records)?;
+    let canonical = sh_link_cv_types_new();
+    let imported = sh_link_cv_types_read(&canonical, &type_input);
+    if not imported.is_ok() or not sh_lpm_equal(&canonical.records, &program.catalog.types.records) or not sh_lpm_words_equal(&canonical.offsets, &program.catalog.types.offsets) or not sh_lpm_words_equal(&canonical.depths, &program.catalog.types.depths) { return sh_i64_error(7331); };
+    let symbols = sh_binary_new(1048576);
+    let globals = vec_new_i64();
+    let publics = vec_new_i64();
+    let addresses = vec_new_i64();
+    let mut module = 0;
+    let mut file_end = 0;
+    let mut function_end = 0;
+    let mut stream_end = 0;
+    let mut contribution_end = 0;
+    while module < program.expected { let file_count = sh_link_word(&program.modules, 12, module, 3); let function_count = sh_link_word(&program.modules, 12, module, 5); let section_count = sh_link_word(&program.modules, 12, module, 11); if sh_link_word(&program.modules, 12, module, 0) != module or sh_link_word(&program.modules, 12, module, 2) != file_end or sh_link_word(&program.modules, 12, module, 4) != function_end or sh_link_word(&program.modules, 12, module, 8) != module or sh_link_word(&program.modules, 12, module, 10) != contribution_end or sh_link_word(&program.streams.ranges, 2, module, 0) != stream_end or file_count < 1 or file_count > 256 or function_count < 1 or function_count > 256 or section_count < 1 or section_count > 96 { return sh_i64_error(7331); }; let mut file = file_end; while file < file_end + file_count { let global = sengoo_vec_get_or_default_i64(program.file_map.handle, file, -1); if global < 0 or global >= program.catalog.files.len() / 4 or sengoo_vec_get_or_default_i64(program.source_ids.handle, file, -1) < 0 { return sh_i64_error(7331); }; file = file + 1; }; let mut function = function_end; let mut statics = 0; while function < function_end + function_count { if sh_link_word(&program.functions, 8, function, 0) != module { return sh_i64_error(7331); }; let name = sh_symbol_text(&program.catalog.names, sh_link_word(&program.functions, 8, function, 1))?; let bound_storage = sh_ldm_symbol_storage(&program.bound_names, &program.bound_sections, &program.bound_symbols, module, &name, sh_link_word(&program.functions, 8, function, 2), sh_link_word(&program.functions, 8, function, 3), sh_link_word(&program.functions, 8, function, 4))?; let storage = sh_link_word(&program.functions, 8, function, 5); if storage != bound_storage or storage != 2 and storage != 3 { return sh_i64_error(7331); }; if storage == 3 { statics = statics + 1; }; sh_ldm_write_global(&symbols, &globals, &publics, &addresses, &program.catalog.names, module, sh_link_word(&program.functions, 8, function, 1), sh_link_word(&program.functions, 8, function, 2), sh_link_word(&program.functions, 8, function, 3), sh_link_word(&program.functions, 8, function, 6), storage)?; function = function + 1; }; if statics != sh_link_word(&program.modules, 12, module, 9) { return sh_i64_error(7331); }; sh_lpm_check_module(program, module, &type_input)?; file_end = file_end + file_count; function_end = function_end + function_count; contribution_end = contribution_end + section_count; stream_end = stream_end + sh_link_word(&program.streams.ranges, 2, module, 1); module = module + 1; };
+    if file_end != program.file_map.len() or function_end != program.functions.len() / 8 or stream_end != program.streams.bytes.len() or contribution_end != program.contributions.len() / 5 or not sh_lpm_equal(&symbols, &program.symbols) or not sh_lpm_words_equal(&globals, &program.globals) or not sh_lpm_words_equal(&publics, &program.publics) or not sh_lpm_words_equal(&addresses, &program.public_addresses) { return sh_i64_error(7331); };
+    let mut section = 0;
+    while section < contribution_end { let owner = sh_link_word(&program.contributions, 5, section, 0); let segment = sh_link_word(&program.contributions, 5, section, 1); let offset = sh_link_word(&program.contributions, 5, section, 2); let size = sh_link_word(&program.contributions, 5, section, 3); if owner < 0 or owner >= program.expected or segment < 1 or segment > sh_link_uint(&program.image, 70, 2)? or offset < 0 or size < 1 { return sh_i64_error(7331); }; let row = 328 + (segment - 1) * 40; if offset > sh_link_uint(&program.image, row + 8, 4)? or size > sh_link_uint(&program.image, row + 8, 4)? - offset or sh_link_word(&program.contributions, 5, section, 4) != sh_link_uint(&program.image, row + 36, 4)? { return sh_i64_error(7331); }; section = section + 1; };
+    if program.expected == 1 and sh_link_word(&program.modules, 12, 0, 9) == 0 { let first = sh_link_sha256(&program.single_image)?; let second = sh_link_sha256(&program.single_pdb)?; let hashes = sh_binary_new(64); sh_link_debug_append(&hashes, &first)?; sh_link_debug_append(&hashes, &second)?; if not sh_lpm_equal(&hashes, &program.single_hash) { return sh_i64_error(7331); }; } else { if sh_binary_len(&program.single_image) != 0 or sh_binary_len(&program.single_pdb) != 0 or sh_binary_len(&program.single_hash) != 0 { return sh_i64_error(7331); }; };
+    sh_i64_ok(program.expected);
+}
+
+def sh_lpm_identity(program: &ShLinkDebugModules) -> Result<ShBinary, i64> {
+    let input = sh_binary_new(256);
+    let domain = string_from_str("Sengoo-PDB-modules-v1")?;
+    sh_link_debug_text(&input, &domain)?;
+    let state = sh_ldm_state_hash(program)?;
+    sh_link_debug_append(&input, &state)?;
+    sh_link_sha256(&input);
+}
+
+def sh_lpm_publics(program: &ShLinkDebugModules, hash: &ShBinary) -> Result<ShBinary, i64> {
+    let output = sh_binary_new(1048576);
+    sh_binary_unsigned(&output, sh_binary_len(hash), 4)?;
+    sh_binary_unsigned(&output, program.publics.len() / 2 * 4, 4)?;
+    sh_link_debug_zeros(&output, 20)?;
+    sh_link_debug_append(&output, hash)?;
+    let used = vec_new_i64();
+    let mut at = 0;
+    while at < program.publics.len() / 2 { sh_link_push(&used, 0)?; at = at + 1; };
+    let mut count = 0;
+    while count < program.publics.len() / 2 { let mut chosen = -1; at = 0; while at < program.publics.len() / 2 { if sengoo_vec_get_or_default_i64(used.handle, at, 0) == 0 { if chosen < 0 or sh_link_word(&program.public_addresses, 2, at, 0) < sh_link_word(&program.public_addresses, 2, chosen, 0) or (sh_link_word(&program.public_addresses, 2, at, 0) == sh_link_word(&program.public_addresses, 2, chosen, 0) and sh_link_word(&program.public_addresses, 2, at, 1) < sh_link_word(&program.public_addresses, 2, chosen, 1)) { chosen = at; }; }; at = at + 1; }; if chosen < 0 { return sh_coff_error(7331); }; sh_binary_unsigned(&output, sh_link_word(&program.publics, 2, chosen, 1), 4)?; used.set(chosen, 1); count = count + 1; };
+    Result { is_ok: true, value: output, error: 0 };
+}
+
+def sh_lpm_dbi(program: &ShLinkDebugModules, image: &ShBinary) -> Result<ShBinary, i64> {
+    let output = sh_binary_new(1048576);
+    sh_link_debug_zeros(&output, 64)?;
+    let modules = sh_binary_len(&output);
+    let mut module = 0;
+    while module < program.expected { let record = sh_binary_len(&output); sh_link_debug_zeros(&output, 64)?; let contribution = sh_link_word(&program.modules, 12, module, 10); sh_binary_patch(&output, record + 4, sh_link_word(&program.contributions, 5, contribution, 1), 2)?; sh_binary_patch(&output, record + 8, sh_link_word(&program.contributions, 5, contribution, 2), 4)?; sh_binary_patch(&output, record + 12, sh_link_word(&program.contributions, 5, contribution, 3), 4)?; sh_binary_patch(&output, record + 16, sh_link_word(&program.contributions, 5, contribution, 4), 4)?; sh_binary_patch(&output, record + 20, module, 2)?; sh_binary_patch(&output, record + 34, 6 + module, 2)?; sh_binary_patch(&output, record + 36, sh_link_word(&program.modules, 12, module, 6), 4)?; sh_binary_patch(&output, record + 44, sh_link_word(&program.modules, 12, module, 7), 4)?; sh_binary_patch(&output, record + 48, sh_link_word(&program.modules, 12, module, 3), 2)?; let path = sh_symbol_text(&program.catalog.names, sh_link_word(&program.modules, 12, module, 1))?; sh_link_debug_text(&output, &path)?; sh_link_debug_text(&output, &path)?; sh_binary_align(&output, 4, 0)?; module = module + 1; };
+    let module_size = sh_binary_len(&output) - modules;
+    let contributions = sh_binary_len(&output);
+    sh_binary_unsigned(&output, 4046371373, 4)?;
+    let mut contribution = 0;
+    while contribution < program.contributions.len() / 5 { sh_binary_unsigned(&output, sh_link_word(&program.contributions, 5, contribution, 1), 2)?; sh_binary_unsigned(&output, 0, 2)?; sh_binary_unsigned(&output, sh_link_word(&program.contributions, 5, contribution, 2), 4)?; sh_binary_unsigned(&output, sh_link_word(&program.contributions, 5, contribution, 3), 4)?; sh_binary_unsigned(&output, sh_link_word(&program.contributions, 5, contribution, 4), 4)?; sh_binary_unsigned(&output, sh_link_word(&program.contributions, 5, contribution, 0), 2)?; sh_link_debug_zeros(&output, 10)?; contribution = contribution + 1; };
+    let contribution_size = sh_binary_len(&output) - contributions;
+    let map = sh_binary_len(&output);
+    let sections = sh_link_uint(image, 70, 2)?;
+    sh_binary_unsigned(&output, sections + 1, 2)?;
+    sh_binary_unsigned(&output, sections + 1, 2)?;
+    let mut section = 0;
+    while section <= sections { let flags = if section == sections { 520; } else { let bits = sh_link_uint(image, 328 + section * 40 + 36, 4)?; 264 | (if (bits & 1073741824) != 0 { 1; } else { 0; }) | (if (bits & 2147483648) != 0 { 2; } else { 0; }) | (if (bits & 536870912) != 0 { 4; } else { 0; }); }; sh_binary_unsigned(&output, flags, 2)?; sh_binary_unsigned(&output, 0, 4)?; sh_binary_unsigned(&output, section + 1, 2)?; sh_binary_unsigned(&output, 4294967295, 4)?; sh_binary_unsigned(&output, 0, 4)?; sh_binary_unsigned(&output, if section == sections { 4294967295; } else { sh_link_uint(image, 328 + section * 40 + 8, 4)?; }, 4)?; section = section + 1; };
+    let map_size = sh_binary_len(&output) - map;
+    let files = sh_binary_len(&output);
+    sh_binary_unsigned(&output, program.expected, 2)?;
+    sh_binary_unsigned(&output, program.file_map.len(), 2)?;
+    module = 0;
+    while module < program.expected { sh_binary_unsigned(&output, module, 2)?; module = module + 1; };
+    module = 0;
+    while module < program.expected { sh_binary_unsigned(&output, sh_link_word(&program.modules, 12, module, 3), 2)?; module = module + 1; };
+    let mut file = 0;
+    while file < program.file_map.len() { sh_binary_unsigned(&output, sh_link_pdb_file_offset(&program.catalog, sengoo_vec_get_or_default_i64(program.file_map.handle, file, -1))? - 1, 4)?; file = file + 1; };
+    let strings = sh_link_pdb_file_strings(&program.catalog)?;
+    file = 1;
+    while file < sh_binary_len(&strings) { sh_binary_byte(&output, sh_binary_get(&strings, file)?)?; file = file + 1; };
+    sh_binary_align(&output, 4, 0)?;
+    let file_size = sh_binary_len(&output) - files;
+    sh_binary_unsigned(&output, 4026462206, 4)?;
+    sh_binary_unsigned(&output, 1, 4)?;
+    sh_binary_unsigned(&output, 1, 4)?;
+    sh_binary_byte(&output, 0)?;
+    sh_binary_unsigned(&output, 1, 4)?;
+    sh_binary_unsigned(&output, 0, 4)?;
+    sh_binary_unsigned(&output, 0, 4)?;
+    let mut index = 0;
+    while index < 11 { sh_binary_unsigned(&output, if index == 5 { 6 + program.expected; } else { 65535; }, 2)?; index = index + 1; };
+    sh_binary_patch(&output, 0, 4294967295, 4)?;
+    sh_binary_patch(&output, 4, 19990903, 4)?;
+    sh_binary_patch(&output, 8, 1, 4)?;
+    sh_binary_patch(&output, 12, 8 + program.expected, 2)?;
+    sh_binary_patch(&output, 14, 32769, 2)?;
+    sh_binary_patch(&output, 16, 9 + program.expected, 2)?;
+    sh_binary_patch(&output, 20, 7 + program.expected, 2)?;
+    sh_binary_patch(&output, 24, module_size, 4)?;
+    sh_binary_patch(&output, 28, contribution_size, 4)?;
+    sh_binary_patch(&output, 32, map_size, 4)?;
+    sh_binary_patch(&output, 36, file_size, 4)?;
+    sh_binary_patch(&output, 48, 22, 4)?;
+    sh_binary_patch(&output, 52, 25, 4)?;
+    sh_binary_patch(&output, 58, 34404, 2)?;
+    Result { is_ok: true, value: output, error: 0 };
+}
+
+def sh_link_debug_modules_image(program: &ShLinkDebugModules) -> Result<ShBinary, i64> {
+    sh_link_debug_modules_validate(program)?;
+    let output = sh_binary_new(16777216);
+    if sh_binary_len(&program.single_image) != 0 { sh_link_debug_append(&output, &program.single_image)?; return Result { is_ok: true, value: output, error: 0 }; };
+    let digest = sh_lpm_identity(program)?;
+    let path = sh_symbol_text(&program.catalog.names, program.path)?;
+    sh_link_debug_image_digest(&program.image, &path, &digest);
+}
+
+def sh_link_pdb_modules(program: &ShLinkDebugModules) -> Result<ShBinary, i64> {
+    sh_link_debug_modules_validate(program)?;
+    if sh_binary_len(&program.single_pdb) != 0 { let output = sh_binary_new(16777216); sh_link_debug_append(&output, &program.single_pdb)?; return Result { is_ok: true, value: output, error: 0 }; };
+    let digest = sh_lpm_identity(program)?;
+    let path = sh_symbol_text(&program.catalog.names, program.path)?;
+    let image = sh_link_debug_image_digest(&program.image, &path, &digest)?;
+    let empty = sh_binary_new(0);
+    let info = sh_link_pdb_info(&program.catalog, &digest)?;
+    let types = sh_link_pdb_debug_types(&program.catalog)?;
+    let ids = sh_link_pdb_types(false)?;
+    let names = sh_link_pdb_names(&program.catalog)?;
+    let dbi = sh_lpm_dbi(program, &image)?;
+    let headers = sh_binary_new(4096);
+    let mut at = 0;
+    while at < sh_link_uint(&image, 70, 2)? * 40 { sh_binary_byte(&headers, sh_binary_get(&image, 328 + at)?)?; at = at + 1; };
+    let globals = sh_link_pdb_gsi(&program.catalog, &program.globals)?;
+    let public_hash = sh_link_pdb_gsi(&program.catalog, &program.publics)?;
+    let publics = sh_lpm_publics(program, &public_hash)?;
+    let streams = sh_link_msf_new(16777216);
+    sh_link_msf_add(&streams, &empty)?;
+    sh_link_msf_add(&streams, &info)?;
+    sh_link_msf_add(&streams, &types)?;
+    sh_link_msf_add(&streams, &dbi)?;
+    sh_link_msf_add(&streams, &ids)?;
+    sh_link_msf_add(&streams, &names)?;
+    let mut module = 0;
+    while module < program.expected { let data = sh_lpm_module(program, module)?; sh_link_msf_add(&streams, &data)?; module = module + 1; };
+    sh_link_msf_add(&streams, &headers)?;
+    sh_link_msf_add(&streams, &program.symbols)?;
+    sh_link_msf_add(&streams, &globals)?;
+    sh_link_msf_add(&streams, &publics)?;
+    sh_link_msf_emit(&streams);
+}

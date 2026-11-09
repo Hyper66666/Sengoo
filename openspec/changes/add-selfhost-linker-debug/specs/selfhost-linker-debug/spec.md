@@ -121,4 +121,15 @@ and final process/equality/performance gates SHALL retain their own evidence.
 - **AND** a real debugger resolves exact physical paths, crosses a source-file boundary while stepping and reads expected locals
 - **AND** every input file block agrees with the independent typed-MIR function-source registry
 - **AND** malformed, duplicate, unresolved, missing or excessive file/registry records fail before output publication
-- **AND** the existing single-source API remains available while independent input COFF modules and mixed-file function origins remain unsupported
+- **AND** the existing single-source API remains available while mixed-file function origins remain unsupported; independent input COFF units use their separately qualified module contract
+
+
+#### Scenario: Independent supported SG objects retain separate PDB modules
+- **WHEN** every object in a bounded SG link supplies an independently checked source registry, COFF debug records and actual native code facts
+- **THEN** PDB output SHALL retain a separate module symbol/C13 stream for every object and remap each object's local type indices into the shared TPI
+- **AND** same-named static procedures SHALL remain scoped to their own module while real external calls resolve across objects
+- **AND** a shared physical file SHALL retain each contributing module's DBI/FileInfo association with its exact source bytes
+- **AND** a real debugger SHALL cross an object boundary and read each module's correctly typed locals
+- **AND** invalid types, source ownership, module/stream metadata and incomplete or poisoned programs SHALL reject before output publication
+- **AND** one supported all-global unit SHALL preserve legacy raw PE/PDB bytes at identical input paths/options
+- **AND** this SHALL NOT claim nondebug SDK/archive units, automatic compiler internalization, different source checkout roots or complete M5/M6/M8 qualification

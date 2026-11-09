@@ -173,7 +173,12 @@ physical file IDs and original UTF-8 byte intervals. This keeps expansion and
 specialization origins available to later consumers. `link_multi_debug_gate.py`
 qualifies multiple physical files in one SG object/compile unit, including real
 debugger source switching and local values. Independent COFF compile-unit
-merging remains open.
+merging is qualified separately by `link_units_gate.py`: it preserves each
+object's source registry and type-index namespace, merges PDB module streams,
+and verifies real cross-object calls, same-named static functions and debugger
+stepping. This focused library gate requires supported debug records for every
+input object; mixed nondebug SDK objects, archive debug units and automatic
+native symbol internalization remain open.
 It is not yet the public `sgc` command interface. Resolved root and structural
 cleanup, stack probing and unwind records have focused execution gates; pending
 runtime glue, conditional field cleanup, async, full module/tool compatibility,

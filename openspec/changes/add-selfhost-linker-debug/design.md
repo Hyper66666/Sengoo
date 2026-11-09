@@ -480,3 +480,78 @@ checks every remaining byte after explicitly accounting for that path,
 derived identity and copied debug-section extents; it does not assert raw
 PE/PDB equality. Independent COFF modules and mixed-file function origins stay
 outside this admission.
+
+
+## Independent supported SG COFF debug units
+
+This admission keeps each COFF contribution in its own `ShLinkDebug` until
+its physical source registry, local type namespace and relocated code facts
+pass. `ShLinkDebugModules` binds an ordered set of at most 32 all-debug SG
+objects to an immutable linked-image/name/section/symbol/group snapshot. Every
+actual COFF object must be represented once; missing, duplicate, unordered or
+unsupported units reject. C/SDK objects without debug input, archive unit
+selection and type-server forms are not admitted by this contract.
+
+`sh_link_debug_modules_begin` fixes the image and RSDS path;
+`sh_link_debug_modules_read` consumes one independently registered fresh unit.
+A reader failure poisons the program and repeated reads reject without further
+mutation. Successful units are copied into flat owned module storage. Their
+source/file IDs remain local to their module; registries are never combined
+before the unit check. A same physical path is interned globally only when raw
+bytes agree; each module retains its own DBI file contribution and checksum-row
+order. The source registry is derived from validated typed MIR, never inferred
+from the line block being checked.
+
+A fresh local-to-global type map imports each unit into the program-wide TPI.
+Serialization patches procedure/local type references without changing the
+unit's local types. Two objects may both use type 4098 for unrelated records.
+The target fixtures also use same-named `Local` structs with different real
+member names, whose program TPI indices and debugger views must remain distinct.
+Static procedures are checked against their own COFF storage/address, use
+S_LPROC32 and module-specific S_LPROCREF records, and do not become publics.
+External functions alone enter the public address map. The test caller marks
+its same-named helper symbols storage 3 after native emission; native machine
+addresses are unchanged. Automatic compiler visibility/internalization is a
+separate concern and is not claimed by that fixture.
+
+Streams 0..5 retain their fixed meanings; N separate module streams start at
+6, followed by section headers, symbol records, GSI and publics. DBI contains N
+module descriptors, actual per-object contributions, dynamic stream indices
+and per-module file associations into a deduplicated physical-name table. Each
+module's F2 references remain byte offsets into its own F4 table; its F4 path
+indices point into the shared /names buffer. Procedure references carry the
+one-based owning module and that module's symbol byte offset.
+
+Completion seals all ordered module/source/registry/visibility/type/symbol/line
+bytes and bound code facts. Export validates the seal, bound link metadata,
+full type pool, each independently reconstructed module's symbols/lines/source
+checksums and image ranges before serializing. Mutated or incomplete programs
+fail before publishing outputs. One all-global unit delegates to the legacy
+writer with the same image/path and retains its exact raw PE/PDB bytes.
+
+Two fresh artifact directories use the same explicit logical module names
+`sg-main.obj`/`sg-worker.obj`, actual physical source paths and fixed RSDS path.
+This is an equal-input/options determinism test. Logical object identities do
+not replace physical source identities. It does not prove different source
+checkout roots, path remapping or M6/M8 reproducibility. This admission retains
+256 total functions, 256 unique files, 1 MiB per file / 8 MiB combined physical
+source, 4,096 type records / 1 MiB and a 16 MiB MSF bound. Full SDK/debug support,
+inline origins and complete M5 remain open pending their own evidence.
+
+
+The production evidence for this bounded independent-unit contract is
+`target/selfhost/m5-independent-units-checkout-bound/evidence.json`, SHA-256
+`3c271fba6c7d22fb273ee19753b343f86fba50d8fe3edc8403a2016fc55af2a0`.
+Its 109 commands include 52 SG rejection/resource cases, nine exact legacy
+single-unit PE/PDB comparisons, two true independent-object programs, and two
+fresh artifact directories per program. One variant deliberately gives both
+objects different LF_FIELDLIST records at local type 4098; its distinct Local
+structs remain global TPI IDs 4099 and 4101. Independent byte inspection checks
+module stream indices, global member types/names/offsets, two static helper
+references, public exclusion and shared physical-source associations. Four
+malformed-byte negative controls verify that inspector. LLVM and real LLDB
+confirm two independent modules and source/stack/local behavior. Full revision
+`efed463dc06be086d97718089e5d4cc1322333e0` is recorded at both ends with no
+changed captured sources, tools, Cargo configurations or original checkout
+inputs. Complete previous 93/79/44-command debug gates also pass as listed in
+the tasks. These bounded results do not close the broader exclusions above.

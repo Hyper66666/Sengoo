@@ -243,6 +243,15 @@ def sh_link_debug_identity(debug: &ShLinkDebug, image: &ShBinary, pdb_path: &Str
 
 def sh_link_debug_image(debug: &ShLinkDebug, image: &ShBinary, pdb_path: &String) -> Result<ShBinary, i64> {
     let digest = sh_link_debug_identity(debug, image, pdb_path)?;
+    sh_link_debug_image_digest(image, pdb_path, &digest);
+}
+
+def sh_link_debug_image_digest(image: &ShBinary, pdb_path: &String, digest: &ShBinary) -> Result<ShBinary, i64> {
+    if sh_binary_len(digest) != 32 or pdb_path.len() < 1 or pdb_path.len() > 65535 { return sh_coff_error(7301); };
+    if sh_binary_len(image) < 512 or sh_link_uint(image, 0, 2)? != 23117 or sh_link_uint(image, 60, 4)? != 64 or sh_link_uint(image, 64, 4)? != 17744 or sh_link_uint(image, 68, 2)? != 34404 or sh_link_uint(image, 88, 2)? != 523 or sh_link_uint(image, 70, 2)? < 1 or sh_link_uint(image, 70, 2)? >= 96 or 328 + sh_link_uint(image, 70, 2)? * 40 > sh_link_uint(image, 148, 4)? or sh_link_uint(image, 148, 4)? > sh_binary_len(image) or sh_link_uint(image, 248, 8)? != 0 { return sh_coff_error(7301); };
+    let encoded_path = sh_coff_symbol_bytes(pdb_path)?;
+    let mut path_at = 0;
+    while path_at < pdb_path.len() { if encoded_path.get_u8(path_at)? == 0 { return sh_coff_error(7301); }; path_at = path_at + 1; };
     let sections = sh_link_uint(image, 70, 2)?;
     let headers = sh_link_uint(image, 148, 4)?;
     let needed = sh_link_align(328 + (sections + 1) * 40, 512, 16777216)?;
@@ -278,7 +287,7 @@ def sh_link_debug_image(debug: &ShLinkDebug, image: &ShBinary, pdb_path: &String
     sh_binary_patch(&output, raw + 24, raw + 28, 4)?;
     sh_binary_patch(&output, raw + 28, 1396986706, 4)?;
     index = 0;
-    while index < 16 { sh_binary_patch(&output, raw + 32 + index, sh_binary_get(&digest, index)?, 1)?; index = index + 1; };
+    while index < 16 { sh_binary_patch(&output, raw + 32 + index, sh_binary_get(digest, index)?, 1)?; index = index + 1; };
     sh_binary_patch(&output, raw + 48, 1, 4)?;
     let path_bytes = sh_coff_symbol_bytes(pdb_path)?;
     index = 0;

@@ -345,6 +345,11 @@ def main():
                 run("sg-remap-independent-pointer-types", [type_test, prefix, roundtrip], pure=True)
                 if prefix.read_bytes() != roundtrip.read_bytes():
                     raise AssertionError("SG pointer/modifier encoding differs from clang's prefix")
+                qualified_roundtrip = output / "sg-pointer-prefix-qualified.cv"
+                qualified_bytes = roundtrip.read_bytes()
+                qualified_roundtrip.write_bytes(qualified_bytes)
+                if qualified_roundtrip.read_bytes() != qualified_bytes:
+                    raise AssertionError("qualified SG pointer prefix copy differs")
                 duplicate_prefix = output / "64-record-type-prefix.cv"
                 duplicate_prefix.write_bytes(types_data[:4] + types_data[4:end] * 16)
                 run("sg-deduplicate-64-valid-type-records", [type_test, duplicate_prefix, roundtrip], pure=True)
@@ -402,7 +407,7 @@ def main():
                         raise AssertionError("short pointer record diagnostic/output differs")
                     report["negative_cases"].append({"name": f"short-pointer-{length}", "expected_code": 7321, "input_sha256": sha(path), "previous_outputs_preserved": True})
                 roundtrip.write_bytes(prefix.read_bytes())
-                report["artifacts"].update({path.name: sha(path) for path in (independent, prefix, roundtrip, full, duplicate_prefix)})
+                report["artifacts"].update({path.name: sha(path) for path in (independent, prefix, qualified_roundtrip, full, duplicate_prefix)})
                 if args.aggregates:
                     aggregate_test = output / "aggregate-types.exe"
                     run("build-aggregate-type-pool", [tools["seed"], "--runtime-mode", "source-development", "build", ROOT / "selfhost/tests/link_cv_aggregate.sg", "-o", aggregate_test])
@@ -479,12 +484,14 @@ def main():
     finally:
         changed = [name for name, digest in report["sources"].items() if not (ROOT / name).is_file() or sha(ROOT / name) != digest]
         changed_tools = [name for name, identity in report["tools"].items() if not Path(identity["path"]).is_file() or sha(Path(identity["path"])) != identity["sha256"]]
+        changed_artifacts = [name for name, digest in report.get("artifacts", {}).items() if not (output / name).is_file() or sha(output / name) != digest]
+        report["changed_artifacts"] = changed_artifacts
         report.update(changed_sources=changed, changed_tools=changed_tools, source_revision_end=revision(), completed_at=dt.datetime.now(dt.timezone.utc).isoformat())
         report["producer_stdlib_checkout_changes"] = [name for name, digest in std_origins.items() if not (ROOT / name).is_file() or sha(ROOT / name) != digest]
-        if changed or changed_tools:
+        if changed or changed_tools or changed_artifacts:
             report.update(result="failed", error="CodeView input identity changed")
         (output / "evidence.json").write_text(json.dumps(report, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
-        if changed or changed_tools:
+        if changed or changed_tools or changed_artifacts:
             raise AssertionError("CodeView input identity changed")
 
 

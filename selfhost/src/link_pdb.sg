@@ -16,11 +16,15 @@ def sh_link_pdb_end(output: &ShBinary, first: i64) -> Result<i64, i64> {
 }
 
 def sh_link_pdb_symbols(debug: &ShLinkDebug, output: &ShBinary) -> Result<i64, i64> {
+    let path = sh_symbol_text(&debug.names, debug.path)?;
+    sh_link_pdb_symbols_named(debug, output, &path);
+}
+
+def sh_link_pdb_symbols_named(debug: &ShLinkDebug, output: &ShBinary, path: &String) -> Result<i64, i64> {
     sh_binary_unsigned(output, 4, 4)?;
     let object = sh_link_pdb_begin(output, 4353)?;
     sh_binary_unsigned(output, 0, 4)?;
-    let path = sh_symbol_text(&debug.names, debug.path)?;
-    sh_link_debug_text(output, &path)?;
+    sh_link_debug_text(output, path)?;
     sh_link_pdb_end(output, object)?;
     let compile = sh_link_pdb_begin(output, 4412)?;
     sh_binary_unsigned(output, 0, 4)?;

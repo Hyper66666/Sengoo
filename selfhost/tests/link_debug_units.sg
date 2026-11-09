@@ -1,0 +1,94 @@
+import selfhost_link_pdb_modules;
+
+import selfhost_link_pe;
+
+import std::args;
+
+import std::file;
+
+import std::io;
+
+import std::assert;
+
+extern "C" {
+    fn sengoo_string_live_handle_count() -> i64;
+    fn sengoo_buffer_live_handle_count() -> i64;
+    fn sengoo_opaque_live_handle_count() -> i64;
+    fn sengoo_file_snapshot_live_handle_count() -> i64;
+    fn sengoo_file_snapshot_live_bytes() -> i64;
+}
+
+def sh_lut_argument(index: i64) -> Result<String, i64> {
+    let buffer = ffi_buffer_new(arg_len(index).unwrap_or(0))?;
+    let length = arg_copy(index, buffer)?;
+    string_from_utf8(buffer, length);
+}
+
+def sh_lut_scope(input: &String, source_path: &String, output: &String, pdb_path: &String, invalid: i64, write: bool) -> Result<i64, i64> {
+    let raw = sh_link_load(input.as_str(), 1048576)?;
+    let source = sh_link_load(source_path.as_str(), 1048576)?;
+    let mut link = sh_link_new(1048576);
+    let object = sh_link_coff(&mut link, &raw)?;
+    let mut symbol = 0;
+    while symbol < link.symbols.len() / 6 { if sh_link_word(&link.symbols, 6, symbol, 3) == 0 { let name = sh_symbol_text(&link.names, sh_link_word(&link.symbols, 6, symbol, 1))?; if name.as_str() == "GetCurrentProcess" { let imported = sh_link_import_name(&link, "GetCurrentProcess")?; let dll = sh_link_import_name(&link, "KERNEL32.dll")?; sh_link_import_add(&link, imported, dll, imported, -1, 0, 0)?; (); }; }; symbol = symbol + 1; };
+    let entry = string_from_str("main")?;
+    let image = sh_link_pe(&mut link, &entry)?;
+    let mut legacy = sh_link_debug_new();
+    sh_link_debug_source(&mut legacy, source_path, &source)?;
+    sh_link_codeview_read(&legacy, &link, &image, object)?;
+    let old_image = sh_link_debug_image(&legacy, &image, pdb_path)?;
+    let old_pdb = sh_link_pdb(&legacy, &image, pdb_path)?;
+    let mut program = sh_link_debug_modules_new();
+    sh_link_debug_modules_begin(&mut program, &link, &image, pdb_path)?;
+    if invalid == 19 { link.sections.set(7, 1); (); };
+    if invalid == 20 { link.symbols.set(2, 1); (); };
+    let mut unit = sh_link_debug_new();
+    sh_link_debug_source(&mut unit, source_path, &source)?;
+    if invalid == 21 { let name = sh_symbol_text(&unit.names, unit.path)?; sh_link_debug_function_origin(&unit, &name, 999)?; (); };
+    sh_link_debug_modules_read(&mut program, &unit, &link, &image, object, input)?;
+    if invalid == 1 { program.expected = 2; };
+    if invalid == 2 { program.modules.pop(); (); };
+    if invalid == 3 { program.file_map.set(0, 999); (); };
+    if invalid == 4 { program.registry.set(2, 999); (); };
+    if invalid == 5 { program.source_ids.set(0, 999); (); };
+    if invalid == 6 { program.catalog.types.records.bytes.set(2, 255); (); };
+    if invalid == 7 { program.streams.bytes.set(0, 0); (); };
+    if invalid == 8 { program.streams.ranges.set(1, 0); (); };
+    if invalid == 9 { program.functions.set(3, 1); (); };
+    if invalid == 10 { program.functions.set(5, 3); (); };
+    if invalid == 11 { program.contributions.set(0, 9); (); };
+    if invalid == 12 { program.symbols.bytes.set(0, 0); (); };
+    if invalid == 13 { program.bound_sections.set(7, 1); (); };
+    if invalid == 14 { program.bound_symbols.set(2, 1); (); };
+    if invalid == 15 { program.image.bytes.set(0, 0); (); };
+    if invalid == 16 { program.single_image.bytes.set(0, 0); (); };
+    if invalid == 17 { program.single_pdb.bytes.set(0, 0); (); };
+    if invalid == 18 { program.catalog.file_data.set(0, 0); (); };
+    if invalid == 22 { program.error = 7331; };
+    let linked = sh_link_debug_modules_image(&program)?;
+    let pdb = sh_link_pdb_modules(&program)?;
+    if not sh_lpm_equal(&old_image, &linked) or not sh_lpm_equal(&old_pdb, &pdb) { return sh_i64_error(7993); };
+    if write { let image_bytes = sh_binary_buffer(&linked)?; let pdb_bytes = sh_binary_buffer(&pdb)?; file_write_str_raw(sengoo_stdlib_str_ptr(output.as_str()), image_bytes.ptr(), image_bytes.used_len())?; file_write_str_raw(sengoo_stdlib_str_ptr(pdb_path.as_str()), pdb_bytes.ptr(), pdb_bytes.used_len())?; (); };
+    sh_i64_ok(0);
+}
+
+def main() -> i64 {
+    if args_len() != 4 and args_len() != 5 { return 64; };
+    let input = sh_lut_argument(0);
+    let source = sh_lut_argument(1);
+    let image = sh_lut_argument(2);
+    let pdb = sh_lut_argument(3);
+    if not input.is_ok() or not source.is_ok() or not image.is_ok() or not pdb.is_ok() { return 64; };
+    let invalid = if args_len() == 5 { let mode = sh_lut_argument(4); if not mode.is_ok() { return 64; }; let bytes = sh_coff_symbol_bytes(&mode.value); if not bytes.is_ok() { return 64; }; bytes.value.get_u8(0).unwrap_or(64) - 64; } else { 0; };
+    let strings = sengoo_string_live_handle_count();
+    let buffers = sengoo_buffer_live_handle_count();
+    let opaque = sengoo_opaque_live_handle_count();
+    let snapshots = sengoo_file_snapshot_live_handle_count();
+    let bytes = sengoo_file_snapshot_live_bytes();
+    let mut round = 0;
+    let mut code = -1;
+    while round < 5 { let result = sh_lut_scope(&input.value, &source.value, &image.value, &pdb.value, invalid, round == 0); let actual = if result.is_ok() { 0; } else { result.error; }; assert_eq_i64(sengoo_string_live_handle_count(), strings, "link_debug_units.sg", 1); assert_eq_i64(sengoo_buffer_live_handle_count(), buffers, "link_debug_units.sg", 1); assert_eq_i64(sengoo_opaque_live_handle_count(), opaque, "link_debug_units.sg", 1); assert_eq_i64(sengoo_file_snapshot_live_handle_count(), snapshots, "link_debug_units.sg", 1); assert_eq_i64(sengoo_file_snapshot_live_bytes(), bytes, "link_debug_units.sg", 1); if code < 0 { code = actual; } else { assert_eq_i64(actual, code, "link_debug_units.sg", 2); (); }; round = round + 1; };
+    if code != 0 { println(code); return 65; };
+    println("one-unit exact legacy bytes and first-call resources: ok");
+    0;
+}

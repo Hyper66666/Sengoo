@@ -409,3 +409,96 @@ a failed report because an unflushed LLDB Python print did not satisfy the
 full-path oracle; it is not qualification evidence. Independent COFF/PDB
 modules, mixed-file functions, inline-origin policies and complete M5 remain
 open.
+
+
+## Independent supported SG COFF units
+
+- [x] Keep ordered all-debug objects in separate source/registry/type namespaces before their unit readers pass.
+- [x] Merge global TPI references and preserve independent module streams, DBI contributions and per-module shared-file associations.
+- [x] Preserve same-named static procedures with module-specific local references and only real externals in publics.
+- [x] Execute true cross-object SG calls, same-index distinct aggregate types and exact physical source/debugger observations.
+- [x] Reject malformed input types/sources, missing/duplicate units and program/stream/link/image mutations with first-call resource checks and poisoned-program behavior.
+- [x] Prove nine legacy N=1 raw PE/PDB byte comparisons, equal-input/options two-fresh-artifact-directory bytes and complete existing pure/native debug regressions.
+- [x] Record exact snapshot/tool/host/revision evidence and strict spec validation without closing full M5 or later reproducibility/runtime milestones.
+
+The target current-boundary proof is preserved in
+`target/selfhost/m5-independent-coff-review/evidence.json` (SHA-256
+`f134cb54a600dc283573f57e82c8caf9fbaae6c1505b4b33fbfb51f7b0595dc3`),
+frozen by `freeze.json` SHA-256
+`8fa2b41ab8930fefcec5a8fb8154cd97a232ed3931c11c37981b7ab47d05a09f`.
+It proves two real SG objects/cross-call 42 but only a legacy partial one-module
+PDB: adding a second unit to the old model rejects 7303, and the worker's
+physical-file breakpoint stays pending. It is not production multi-module
+qualification. The production tasks above require the new named full gates.
+
+
+Production admission for the independent SG unit subset passes these reports:
+
+- `target/selfhost/m5-independent-units-checkout-bound/evidence.json`, SHA-256
+  `3c271fba6c7d22fb273ee19753b343f86fba50d8fe3edc8403a2016fc55af2a0`:
+  109 commands, 408 consumed input hashes and 42 tools. The original SG/stdlib
+  checkout manifest is recorded explicitly; any change to it fails the gate,
+  as do changes to consumed snapshots, tools or present/absent Cargo configs.
+  Two independently lowered SG objects call a real external worker, preserve
+  separate physical registries and remap incompatible local type indices.
+  A second variant has distinct LF_FIELDLIST records at local index 4098 in
+  both objects; its differently named Local members survive as distinct global
+  types. Two same-named static helpers retain module-specific S_LPROC32 and
+  S_LPROCREF records and have two actual debugger locations. Both modules refer
+  to the same physical common.sg: /names stores it once and DBI preserves four
+  file contributions over three unique paths. LLVM inspection and an
+  independent byte oracle check module/stream/file/type/global-reference
+  ownership with four negative controls. LLDB reads main state 38/2 and input
+  40, crosses into worker state 40/2, reads answer 42, unwinds back to main and
+  exits 42; a shared-file breakpoint independently hits both helper frames.
+  Each variant emits two fresh artifact directories with byte-identical
+  objects, PE and PDB using the recorded equal logical module names and RSDS
+  path. This uses the same physical source inputs and does not qualify changed
+  source roots or path remapping. Nine legacy all-global one-unit fixtures
+  compare the old and new raw PE/PDB bytes at exactly equal image/path inputs.
+  Twenty-two one-unit state mutations, twenty-five multiple-unit source/
+  registry/module/stream/link/image mutations and five malformed COFF records
+  reject with exact diagnostics. Each success/failure invocation compares all
+  five resource counters after every one of five scopes beginning before the
+  first call; reader failure poisoning is tested by a repeated read without
+  further program mutation. Both assertion negative controls actually exit 1.
+- `target/selfhost/m5-codeview-independent-unit-artifacts/evidence.json`,
+  SHA-256 `74a1124ca3639110214bbbedacc27200e53a8456a7f301777ae0ccb75f2606dd`:
+  all 93 existing pure CodeView/unwind/range/primitive/pointer/aggregate commands.
+- `target/selfhost/m5-native-independent-unit-regression/evidence.json`,
+  SHA-256 `a0d84e17f6b2286970a4354edf4c048b19990c958cd0c301a7710f7c18fa686d`:
+  all 79 existing real-source native/COFF/PDB/LLDB commands.
+- `target/selfhost/m5-physical-files-independent-unit-regression/evidence.json`,
+  SHA-256 `fed54f822c826f7114d69b489cdb27238d3c4d4b2a3719e2a374a852f2c2cfee`:
+  all 44 existing one-object/multiple-physical-file commands and 18 refusals.
+
+The 109-, 79- and 44-command reports start and end at full revision
+`efed463dc06be086d97718089e5d4cc1322333e0`. The replacement 93-command pure
+report starts at that revision and ends at
+`836777a0fd1e7083d59d80af8053d33691959e63` on the recorded Windows host.
+That concurrent DEFLATE commit changed none of the pure report's consumed
+inputs; its source, tool and artifact guards remain empty. All four reports
+have empty source/tool/config and reported checkout-change arrays. The new
+runner pins actual Cargo/rustc, observes the selected rustc execute build-script
+and library compilation, snapshots the complete 46-entry SG import closure
+and whole stdlib/C runtime, and guards actual Rust runtime/Cargo inputs. Product
+source/object/link/PDB commands run with an empty PATH. Development compilation
+still uses C/Rust and does not complete M6. Nondebug SDK objects, archive debug
+unit admission, automatic native internalization, mixed-file functions/inline
+origins, complete PDB/SDK support, M5 and different-checkout M8 reproduction
+remain open. Failed development trials are retained and are not qualifications.
+
+
+Terminal artifact retention is checked separately from command success. The
+first pure regression report, `m5-codeview-independent-unit-regression`, is
+retained with an identified retention limitation: its listed SG pointer prefix
+was later overwritten by an aggregate-test scratch output. That historical
+report is not used for terminal-artifact qualification here. The replacement
+93-command `m5-codeview-independent-unit-artifacts` gate saves the actual SG
+pointer output once as `sg-pointer-prefix-qualified.cv` and verifies every
+listed artifact hash at completion. Its `changed_artifacts`, source and tool
+arrays are empty; the retained prefix SHA-256 is
+`fc7303ab8b2cbb325270d46c3b26f374a03cdc6112b6f65397d689b71631e7af`.
+The 109/79/44-command reports do not consume this pure runner in their recorded
+or actual Python import closures; their input hashes remain matched after this
+runner-only repair.
