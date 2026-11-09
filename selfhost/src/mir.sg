@@ -38,6 +38,8 @@ struct ShMir {
     edges: Vec<i64>,
     layouts: Vec<i64>,
     fields: Vec<i64>,
+    instances: Vec<i64>,
+    substitutions: Vec<i64>,
     sources: Vec<i64>,
     spans: Vec<i64>,
 }
@@ -60,7 +62,7 @@ struct ShLowered {
 }
 
 def sh_mir_new(limit: i64) -> ShMir {
-    ShMir { schema: 1, target: 1, runtime_abi: 1, pointer_width: 64, limit: limit, types: sh_types_new(limit), symbols: sh_symbols_new(limit), functions: vec_new_i64(), locals: vec_new_i64(), scopes: vec_new_i64(), blocks: vec_new_i64(), instructions: vec_new_i64(), operands: vec_new_i64(), parameters: vec_new_i64(), terminators: vec_new_i64(), edges: vec_new_i64(), layouts: vec_new_i64(), fields: vec_new_i64(), sources: vec_new_i64(), spans: vec_new_i64() };
+    ShMir { schema: 1, target: 1, runtime_abi: 1, pointer_width: 64, limit: limit, types: sh_types_new(limit), symbols: sh_symbols_new(limit), functions: vec_new_i64(), locals: vec_new_i64(), scopes: vec_new_i64(), blocks: vec_new_i64(), instructions: vec_new_i64(), operands: vec_new_i64(), parameters: vec_new_i64(), terminators: vec_new_i64(), edges: vec_new_i64(), layouts: vec_new_i64(), fields: vec_new_i64(), instances: vec_new_i64(), substitutions: vec_new_i64(), sources: vec_new_i64(), spans: vec_new_i64() };
 }
 
 def sh_mir_limit(mir: &ShMir) -> bool {
@@ -392,3 +394,8 @@ def sh_mir_field_type(mir: &ShMir, ty: i64, variant: i64, field: i64) -> i64 {
     while i < sh_mir_count(&mir.layouts, 7) { if sh_mir_word(&mir.layouts, 7, i, 0) == ty and sh_mir_word(&mir.layouts, 7, i, 1) == variant { return sh_mir_word(&mir.fields, 2, sh_mir_word(&mir.layouts, 7, i, 2) + field, 0); }; i = i + 1; };
     -1;
 }
+
+// instance[5]: concreteFunction, templateSymbol, templateSignature, substitutionFirst, pairCount.
+// substitution[2]: abstract type parameter, concrete type. No abstract function body is emitted.
+def sh_mir_instance_count(mir: &ShMir) -> i64 { sh_mir_count(&mir.instances, 5); }
+def sh_mir_instance(mir: &ShMir, instance: i64, field: i64) -> i64 { sh_mir_word(&mir.instances, 5, instance, field); }

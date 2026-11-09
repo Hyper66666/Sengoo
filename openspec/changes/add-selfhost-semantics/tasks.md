@@ -97,6 +97,55 @@ parity result. The typed-HIR checkpoint above remains limited to its named
 positive/negative fixtures, and this gap must close before the complete HIR
 validation/M3 gate can be checked off.
 
+## HIR schema 2, ownership ABI and concrete generic checkpoint
+
+- [x] Preserve per-node callable signatures in HIR schema 2; reject the named same-signature callee/target mismatch and cross-function cleanup-binding corruptions.
+- [x] Preserve the explicit observed-parameter contract through HIR encoding/decoding and MIR lowering, including transitive wrappers and by-value method receivers, with no callee Drop or caller-owner move and one caller cleanup.
+- [x] Validate the recorded observed-parameter certificate against the resolved body without rerunning semantic/ownership analysis or replacing the supplied facts; reject the named forged-contract case.
+- [x] Emit concrete generic function instances with separate locals/scopes/CFG, structural signature reuse and explicit template/substitution metadata; verify multiple types, repeated calls, recursion, nested generic calls and generic field substitution in the named fixture subset.
+- [x] Reject the named malformed instance metadata and explicitly reject ownership-sensitive generic actuals and generic foreign declarations with `5009` pending their complete lowering contract.
+
+The earlier poisoned-call discovery is now rejected by its independent
+regression. The original exit-86 discovery log remains historical evidence;
+it is not relabeled as a pass.
+
+`selfhost/verify_mir.py` is the reproducible gate. It verifies seed and clang
+identity/version before execution, invalidates stale passed reports, records
+the complete revision/host/Python identity, bounds process time, and verifies
+the complete declared frontend import closure plus stdlib/runtime, both test
+programs and the runner before and after execution. Each `selfhost_` import
+must belong to that declared closure. Independent native backend source files
+are outside this frontend test's input graph; earlier reports which guarded
+those sibling files and observed a change remain failed trial reports.
+
+Final evidence: `target/selfhost/m3-mir-contracts/evidence.json`, SHA-256
+`ddb676d01657c1555b554419a2159ad3e746c54b5b10b6c388625770af4bcecd`.
+Both starting and ending revisions are
+`9a62b4e2c24d9610451b18915dea5629ce356b9e`, on Windows 11 AMD64, with the
+verified development seed, clang, source-development runtime and O0. All 175
+input records were unchanged; `source_changes` and `tool_changes` are empty.
+The forced borrow build/native run and forced MIR build/native run all exited
+zero (22.60 s, 7.15 s, 31.04 s and 1.60 s). Ownership cases, lifetime/action
+checks and contract checks ran fifty resource rounds. HIR schema-2 roundtrip,
+poisoned-call/owner/contract rejection, observed-parameter ABI, five generic
+fixtures, 21 source fixtures and five exact cleanup fixtures ran ten rounds;
+raw CFG/SSA/memory/ABI/limit cases ran thirty rounds. String/Buffer/opaque
+resources recovered exactly after each applicable round. Test executable
+SHA-256 values are
+`b782067545aebcd539e3df1bc01e007ddd22ed65bc9d99e46c5641c69ed25664`
+(ownership) and
+`f09452607585423ffb686af4175c94919436f4cc8766ffbcd368ba588a849294`
+(HIR/MIR).
+
+MIR schema 1 adds `instances` records with concrete function, template symbol,
+template signature and a range of type substitutions. It emits no abstract
+template function body. The ordinary function/local/block/instruction table
+widths and runtime ABI remain unchanged. Complete ownership-aware generic
+lowering, owned pattern/variant cleanup, inherited/dynamic methods, builtin
+callable facts, error propagation, closures/contracts/async/concurrency and
+cancellation remain open, as does full supported-corpus parity.
+`m3_complete` remains `false`; the complete M3 tasks above stay unchecked.
+
 ## Additional semantic and ownership checkpoint
 
 - [x] Verify the named 107 semantic fixtures and 100 exact resource scopes for numeric inference, associated projection normalization, callable/closure owner identities, core trait/FFI contracts and inherited class field facts (`target/selfhost/m3-semantic/evidence.json`).
@@ -117,3 +166,31 @@ The semantic replay records identical start/end revision
 `8182d7931ab882963c4fe583201f16d07ac50531` and empty tool/source changes.
 The earlier 107-case report without revision/host metadata is retained as
 `evidence-107-before-revision-host.json`; the replay supersedes its provenance.
+
+## Numeric/callable/Future semantic checkpoint
+
+- [x] Verify 124 named semantic fixtures and 100 exact resource scopes for explicit numeric widths, call signature facts, method arity/ambiguity and the implemented Future/dynamic-trait cases (`target/selfhost/m3-semantic/evidence.json`).
+
+Report SHA-256:
+`04f7661301da5a9220b12113732b14911c6e49872c59389669cf613a7c010f78`.
+The report records identical start/end revision
+`9a62b4e2c24d9610451b18915dea5629ce356b9e`, Windows 11 AMD64, unchanged
+source/tool identities and a fresh 49-case comparison with the same five
+reviewed differences. The preceding 107-fixture report is preserved as
+`target/selfhost/m3-semantic/evidence-107-cbe289d.json`.
+
+This is a partial regression checkpoint. Subsequent full-corpus discovery
+identified an overly broad rejection of direct Future local bindings; those
+are supported by the reference and must be corrected. The discovery counts
+are not parity passes, and the rejected local bindings are not approved
+soundness exceptions. Complete dynamic/operator/Future/ownership coverage and
+the remaining M3 gate stay open.
+
+The final committed-source preparation removed one trailing whitespace span in
+`mir_lower.sg`; the full identical runner was rerun after that edit. Final
+checkpoint evidence is `target/selfhost/m3-mir-checkpoint/evidence.json`, SHA-256
+`6b88ffa5ea14244db12dab8ef032d43060959682b5476bb2670772f8c026d546`,
+revision `94946f71f133e0ec28fd9bcf725e69dec45d9173`, Windows 11 AMD64.
+All four build/native commands passed, with empty source/tool change lists.
+This final run supersedes the earlier `ddb676...` source snapshot for the
+whitespace-normalized source; earlier reports remain preserved.

@@ -22,6 +22,12 @@ def sh_semantic_case(source: &str, expected: i64) -> Result<bool, i64> {
 }
 
 def sh_semantic_positive() -> Result<bool, i64> {
+    sh_semantic_case("trait Show{def show(&self)->i64{}} struct Value{n:i64} impl Show for Value{def show(&self)->i64{self.n}} def take(x:dyn Show)->i64{x.show()} def main()->i64{take(Value{n:42})}", 0)?;
+    sh_semantic_case("struct Poll<T>{is_ready:bool,value:T} struct AsyncContext{handle:i64} trait Future<T>{def poll(&mut self,ctx:AsyncContext)->Poll<T>{}} struct Ready{} impl Future<i64> for Ready{def poll(&mut self,ctx:AsyncContext)->Poll<i64>{Poll{is_ready:true,value:42}}} async def main()->i64{let ready=Ready{};await ready}", 0)?;
+    sh_semantic_case("trait Zero{def show(self)->i64{1}} trait One{def show(self,x:i64)->i64{x}} impl Zero for i64{} impl One for i64{} def main()->i64{42.show()}", 0)?;
+    sh_semantic_case("trait Numbers{def show(self,x:i64)->i64{x}} trait Booleans{def show(self,x:bool)->i64{1}} impl Numbers for i64{} impl Booleans for i64{} def main()->i64{42.show(true)}", 0)?;
+    sh_semantic_case("def add8(a:i8,b:i8)->i8{a+b} def main()->i64{let x=40i8;let y=2i8;let z=add8(x,y);z as i64}", 0)?;
+    sh_semantic_case("def ret()->f32{1.5f32} def main()->i64{ret() as i64}", 0)?;
     sh_semantic_case("class Animal{age:i64;} class Dog:Animal{weight:i64;} def main()->i64{let d=Dog{age:2,weight:40};d.age+d.weight}", 0)?;
     sh_semantic_case("class Parent{def score(&self)->i64{42}} class Child:Parent{} def main()->i64{let c=Child{};c.score()}", 0)?;
     sh_semantic_case("trait Service{def ping(&self)->i64{42}} class Worker:Service{} def main()->i64{let w=Worker{};w.ping()}", 0)?;
@@ -80,6 +86,17 @@ def sh_semantic_positive() -> Result<bool, i64> {
 }
 
 def sh_semantic_negative() -> Result<bool, i64> {
+    sh_semantic_case("trait Read{} trait Write{} def stream(x:dyn Read+Write)->i64{0}", 5116)?;
+    sh_semantic_case("struct Poll<T>{is_ready:bool,value:T} struct AsyncContext{handle:i64} trait Future<T>{def poll(&mut self,ctx:AsyncContext)->Poll<T>{}} struct Bad{} impl Future<i64> for Bad{def poll(&self,ctx:AsyncContext)->i64{42}}", 5104)?;
+    sh_semantic_case("trait A{def show(self)->i64{1}} trait B{def show(self)->i64{2}} impl A for i64{} impl B for i64{} def main()->i64{42.show()}", 5123)?;
+    sh_semantic_case("def main()->i64{let x:i8=40;let y:i8=2;(x+y) as i64}", 5104)?;
+    sh_semantic_case("def arg(x:i8){} def main(){arg(40);}", 5104)?;
+    sh_semantic_case("def ret()->i8{40}", 5104)?;
+    sh_semantic_case("def ret()->f32{1.5}", 5104)?;
+    sh_semantic_case("def main(){let x:f32=1.5;}", 5104)?;
+    sh_semantic_case("def main(){let x:u64=42;}", 5104)?;
+    sh_semantic_case("def unsupported(x:i128){}", 5126)?;
+    sh_semantic_case("def unsupported(x:u128){}", 5126)?;
     sh_semantic_case("class A{} class B{} class C:A,B{}", 5123)?;
     sh_semantic_case("class A{} trait T{} class C:T,A{}", 5123)?;
     sh_semantic_case("class A:B{} class B:A{}", 5123)?;
@@ -130,7 +147,7 @@ def sh_semantic_negative() -> Result<bool, i64> {
     sh_semantic_case("async def main(){select(sleep(1));}", 5105)?;
     sh_semantic_case("async def child()->bool{true} async def main(){select(child(),sleep(1));}", 5104)?;
     sh_semantic_case("async def child(x:&i64)->i64{*x} async def main(){let x=42;spawn(child(&x));}", 5115)?;
-    sh_semantic_case("async def child()->i64{42} async def main(){let f=child();spawn(f);}", 5115)?;
+    sh_semantic_case("async def child()->i64{42} async def main(){let f=child();spawn(f);}", 5124)?;
     Result { is_ok: true, value: true, error: 0 };
 }
 

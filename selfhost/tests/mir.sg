@@ -335,9 +335,75 @@ def sh_mt_lower() -> Result<bool, i64> {
     Result { is_ok: true, value: true, error: 0 };
 }
 
+def sh_mt_generic_case(source: &str, instances: i64, expected: i64) -> Result<bool, i64> {
+    let text = string_from_str(source)?; let parsed = sh_parse(&text, 0, 10000); if parsed.error != 0 { println("generic parse"); println(parsed.error); return result_err_bool(parsed.error); };
+    let checked = sh_check(&text, &parsed.ast, 100); if checked.error != 0 { println(source); println("generic check"); println(checked.error); return result_err_bool(checked.error); };
+    let lowered = sh_lower(&text, &parsed.ast, &checked, 10000);
+    if lowered.error != expected { println(source); println("generic lower"); println(lowered.error); println(lowered.start); println(lowered.end); return result_err_bool(lowered.error); };
+    if expected == 0 { assert_eq_i64(sh_mir_instance_count(&lowered.mir), instances, "generic.sg", 11); let valid = sh_mir_validate(&lowered.mir); assert_eq_i64(valid.error, 0, "generic.sg", 12); if instances > 0 { let saved = sh_mir_instance(&lowered.mir, 0, 0); lowered.mir.instances.set(0, 99999); assert_eq_i64(sh_mir_validate(&lowered.mir).error, 5009, "generic.sg", 13); lowered.mir.instances.set(0, saved); let key = sh_mir_word(&lowered.mir.substitutions, 2, 0, 0); lowered.mir.substitutions.set(0, 99999); assert_eq_i64(sh_mir_validate(&lowered.mir).error, 5009, "generic.sg", 14); lowered.mir.substitutions.set(0, key); (); }; };
+    Result { is_ok: true, value: true, error: 0 };
+}
+
+def sh_mt_generics() -> Result<bool, i64> {
+    sh_mt_generic_case("def identity<T>(value: T) -> T { value; } def main() -> i64 { let flag = identity(true); if flag { identity(40) + identity(2); } else { 0; }; }", 2, 0)?;
+    sh_mt_generic_case("def identity<T>(value: T) -> T { value; } def wrapper<U>(value: U) -> U { identity(value); } def main() -> i64 { wrapper(42); }", 2, 0)?;
+    sh_mt_generic_case("def descend<T>(value: T, depth: i64) -> T { if depth == 0 { value; } else { descend(value, depth - 1); }; } def main() -> i64 { descend(42, 3); }", 1, 0)?;
+    sh_mt_generic_case("struct Holder<T> { value: T, } def unwrap<T>(holder: Holder<T>) -> T { holder.value; } def main() -> i64 { unwrap(Holder { value: 42 }); }", 1, 0)?;
+    sh_mt_generic_case("struct Owner { value: i64, } impl Drop for Owner { def drop(&mut self) {} } def identity<T>(value: T) -> T { value; } def main() -> i64 { let owner = identity(Owner { value: 42 }); 42; }", 0, 5009)?;
+    Result { is_ok: true, value: true, error: 0 };
+}
+
 def sh_mt_words_equal(a: &Vec<i64>, b: &Vec<i64>) {
     assert_eq_i64(a.len(), b.len(), "mir.sg", 401);
     let mut index = 0; while index < a.len() { assert_eq_i64(sengoo_vec_get_or_default_i64(a.handle, index, -1), sengoo_vec_get_or_default_i64(b.handle, index, -2), "mir.sg", 402); index = index + 1; };
+}
+
+def sh_mt_observed() -> Result<bool, i64> {
+    let text = string_from_str("struct String { handle: i64, } extern \"C\" { fn sengoo_string_len(value: i64) -> i64; } def observe(value: String) -> i64 { sengoo_string_len(value.handle); } def wrapper(value: String) -> i64 { observe(value); } impl String { def observed_length(self) -> i64 { sengoo_string_len(self.handle); } } def main() -> i64 { let owner = String { handle: 1 }; wrapper(owner); wrapper(owner); owner.observed_length(); owner.observed_length(); 42; }")?;
+    let parsed = sh_parse(&text, 0, 10000); let checked = sh_check(&text, &parsed.ast, 100);
+    let hir = sh_hir_lift(&text, &parsed.ast, &checked, 10000);
+    if hir.error != 0 { println("observed HIR"); println(hir.error); return Result { is_ok: false, value: false, error: hir.error }; };
+    let image = sh_hir_encode(&hir, 1000000); let decoded = sh_hir_decode(&image.words, 1000000);
+    assert_eq_i64(decoded.error, 0, "observe.sg", 15);
+    let lowered = sh_lower_hir(&decoded, 10000);
+    if lowered.error != 0 { println("observed MIR"); println(lowered.error); return Result { is_ok: false, value: false, error: lowered.error }; };
+    let mut observed = 0; let mut action = 0;
+    while action < sh_ownership_action_count(&hir.ownership) { if sh_ownership_action(&hir.ownership, action, 2) == 8 { observed = observed + 1; }; action = action + 1; };
+    assert_true(observed >= 2, "observe.sg", 20);
+    let mut local = 0; let mut params = 0;
+    while local < sh_mir_local_count(&lowered.mir) { if sh_mir_local(&lowered.mir, local, 3) == 1 and sh_mir_type_word(&lowered.mir, sh_mir_local(&lowered.mir, local, 1), 0) == 12 { assert_eq_i64(sh_mir_local(&lowered.mir, local, 4), 1, "observe.sg", 22); params = params + 1; }; local = local + 1; };
+    assert_eq_i64(params, 3, "observe.sg", 23);
+    let mut instruction = 0; let mut drops = 0; let mut moved = 0;
+    while instruction < sh_mir_inst_count(&lowered.mir) { if sh_mir_inst(&lowered.mir, instruction, 2) == 21 { drops = drops + 1; }; if sh_mir_inst(&lowered.mir, instruction, 2) == 25 and sh_mir_inst(&lowered.mir, instruction, 7) == 0 and sh_mir_local(&lowered.mir, sh_mir_inst(&lowered.mir, instruction, 6), 3) != 2 { moved = moved + 1; }; instruction = instruction + 1; };
+    assert_eq_i64(drops, 1, "observe.sg", 26);
+    assert_eq_i64(moved, 0, "observe.sg", 27);
+    Result { is_ok: true, value: true, error: 0 };
+}
+
+def sh_mt_poison_action(hir: &ShHir, index: i64, value: i64) -> bool { sengoo_vec_set_i64(hir.ownership.actions.handle, index, value) == 0; }
+
+def sh_mt_hir_poison() -> Result<bool, i64> {
+    let text = string_from_str("struct Owner { value: i64, } impl Drop for Owner { def drop(&mut self) {} } def first(x: i64) -> i64 { let first_owner = Owner { value: x }; x + 1; } def second(x: i64) -> i64 { let second_owner = Owner { value: x }; x + 2; } def main() -> i64 { first(41); }")?;
+    let parsed = sh_parse(&text, 0, 10000); let checked = sh_check(&text, &parsed.ast, 100); let hir = sh_hir_lift(&text, &parsed.ast, &checked, 10000);
+    if hir.error != 0 { println("HIR poison setup"); println(hir.error); let mut action = 0; while action < sh_ownership_action_count(&hir.ownership) { let node = sh_ownership_action(&hir.ownership, action, 0); let binding = sh_ownership_action(&hir.ownership, action, 1); let scope = sh_ownership_action(&hir.ownership, action, 3); println("owner action"); println(action); println(node); println(sh_ast_word(&hir.ast, node, 0)); println(binding); println(sh_ownership_action(&hir.ownership, action, 2)); println(sh_hir_node_owner(&hir, node)); println(sh_binding_word(&hir.checked, binding, 6)); println(scope); println(sh_scope_word(&hir.checked, scope, 1)); println(sh_node_scope(&hir.checked, node)); action = action + 1; }; return Result { is_ok: false, value: false, error: hir.error }; };
+    let mut second = -1; let mut second_owner = -1; let mut binding = 0;
+    while binding < sh_binding_count(&hir.checked) { let name = sh_symbol_text(&hir.checked.symbols, sh_binding_word(&hir.checked, binding, 0)); if name.is_ok() { if sh_s_text_equal(&name.value, "second") { second = binding; }; if sh_s_text_equal(&name.value, "second_owner") { second_owner = binding; }; }; binding = binding + 1; };
+    let mut node = 0; while node < sh_ast_count(&hir.ast) { if sh_ast_word(&hir.ast, node, 0) == 53 { let saved = sh_node_binding(&hir.checked, node); hir.checked.resolution.set(node, second); assert_eq_i64(sh_hir_validate(&hir), 5504, "mir.sg", 454); hir.checked.resolution.set(node, saved); (); }; node = node + 1; };
+    let mut action = 0; let mut poisoned = false;
+    while action < sh_ownership_action_count(&hir.ownership) { if sh_ownership_action(&hir.ownership, action, 2) == 3 { let saved = sh_ownership_action(&hir.ownership, action, 1); if sh_binding_word(&hir.checked, saved, 6) != second { sh_mt_poison_action(&hir, action * 5 + 1, second_owner); assert_eq_i64(sh_hir_validate(&hir), 5506, "mir.sg", 457); sh_mt_poison_action(&hir, action * 5 + 1, saved); poisoned = true; break; }; }; action = action + 1; };
+    assert_true(poisoned, "mir.sg", 458);
+    action = 0; let mut contract_poisoned = false;
+    while action < sh_ownership_action_count(&hir.ownership) {
+        let parameter = sh_ownership_action(&hir.ownership, action, 1);
+        if sh_ownership_action(&hir.ownership, action, 2) == 1 and sh_binding_word(&hir.checked, parameter, 2) == 1 and sh_s_kind(&hir.checked, sh_binding_word(&hir.checked, parameter, 3)) == 2 {
+            sh_mt_poison_action(&hir, action * 5 + 2, 8);
+            assert_eq_i64(sh_hir_validate(&hir), 5506, "mir.sg", 465);
+            sh_mt_poison_action(&hir, action * 5 + 2, 1); contract_poisoned = true; break;
+        };
+        action = action + 1;
+    };
+    assert_true(contract_poisoned, "mir.sg", 470);
+    Result { is_ok: true, value: true, error: 0 };
 }
 
 def sh_mt_hir() -> Result<bool, i64> {
@@ -367,9 +433,11 @@ def sh_mt_hir() -> Result<bool, i64> {
     sh_mt_words_equal(&direct.mir.edges, &restored.mir.edges);
     sh_mt_words_equal(&direct.mir.layouts, &restored.mir.layouts);
     sh_mt_words_equal(&direct.mir.fields, &restored.mir.fields);
+    sh_mt_words_equal(&direct.mir.instances, &restored.mir.instances);
+    sh_mt_words_equal(&direct.mir.substitutions, &restored.mir.substitutions);
     sh_mt_words_equal(&direct.mir.types.words, &restored.mir.types.words);
     sh_mt_words_equal(&direct.mir.types.arguments, &restored.mir.types.arguments);
-    image.words.set(1, 99); let bad_version = sh_hir_decode(&image.words, 1000000); assert_eq_i64(bad_version.error, 5502, "mir.sg", 436); image.words.set(1, 1);
+    image.words.set(1, 99); let bad_version = sh_hir_decode(&image.words, 1000000); assert_eq_i64(bad_version.error, 5502, "mir.sg", 436); image.words.set(1, 2);
     image.words.push(123); let trailing = sh_hir_decode(&image.words, 1000000); assert_eq_i64(trailing.error, 5502, "mir.sg", 437); sh_mir_trim(&image.words, image.words.len() - 1);
     let capped = sh_hir_encode(&hir, 2); assert_eq_i64(capped.error, 5501, "mir.sg", 438);
     let invalid_limit = sh_hir_decode(&image.words, -1); assert_eq_i64(invalid_limit.error, 5501, "mir.sg", 439);
@@ -384,6 +452,12 @@ def main() -> i64 {
     let opaque = sengoo_opaque_live_handle_count();
     let mut round = 0;
     while round < 10 {
+        let generics = sh_mt_generics();
+        if not generics.is_ok() { println(generics.error); return 10; };
+        let observed = sh_mt_observed();
+        if not observed.is_ok() { println(observed.error); return 9; };
+        let poison = sh_mt_hir_poison();
+        if not poison.is_ok() { println(poison.error); return 8; };
         let hir = sh_mt_hir();
         if not hir.is_ok() { println(hir.error); return 7; };
         let lowering = sh_mt_lower();

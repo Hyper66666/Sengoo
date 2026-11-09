@@ -64,6 +64,16 @@ def sh_test_borrow_round() -> Result<bool, i64> {
     sh_borrow_case("struct Owner { value: i64, } impl Owner { def borrow(&self) -> &i64 { &self.value } } def observe(value: &i64, other: &mut Owner) {} def f() { let mut owner = Owner { value: 1 }; observe(owner.borrow(), &mut owner); }", 6103)?;
     sh_borrow_case("def f(flag: bool) { let mut first = 1; let mut second = 2; let alias = if flag { &mut first } else { &mut second }; let copied = *alias; (); }", 6111)?;
     sh_borrow_case("struct Owner { value: i64, } impl Drop for Owner { def drop(&mut self) {} } def consume(value: Owner) {} def f(value: &Owner) { consume(*value); }", 6112)?;
+    sh_borrow_case("struct String { handle: i64, } extern \"C\" { fn sengoo_string_len(value: i64) -> i64; } def length(value: String) -> i64 { sengoo_string_len(value.handle) } def f() { let owner = String { handle: 1 }; length(owner); length(owner); (); }", 0)?;
+    sh_borrow_case("struct String { handle: i64, } extern \"C\" { fn sengoo_string_len(value: i64) -> i64; } def outer(value: String) -> i64 { inner(value) } def inner(value: String) -> i64 { sengoo_string_len(value.handle) } def f() { let owner = String { handle: 1 }; outer(owner); outer(owner); (); }", 0)?;
+    sh_borrow_case("struct String { handle: i64, } def unused(value: String) {} def f() { let owner = String { handle: 1 }; unused(owner); unused(owner); (); }", 0)?;
+    sh_borrow_case("struct String { handle: i64, } def sengoo_string_len(value: i64) -> i64 { value } def length(value: String) -> i64 { sengoo_string_len(value.handle) } def f() { let owner = String { handle: 1 }; length(owner); length(owner); (); }", 6101)?;
+    sh_borrow_case("struct String { handle: i64, } extern \"C\" { fn sengoo_string_len(value: i64, other: i64) -> i64; } def length(value: String) -> i64 { sengoo_string_len(value.handle, 0) } def f() { let owner = String { handle: 1 }; length(owner); length(owner); (); }", 6101)?;
+    sh_borrow_case("struct String { handle: i64, } extern \"C\" { fn sengoo_string_len(value: i64) -> i64; } def length(value: String) -> i64 { let alias = value.handle; sengoo_string_len(alias) } def f() { let owner = String { handle: 1 }; length(owner); length(owner); (); }", 6101)?;
+    sh_borrow_case("struct String { handle: i64, } def equal(left: String, right: String) -> bool { left.handle == right.handle } def f() { let owner = String { handle: 1 }; equal(owner, owner); equal(owner, owner); (); }", 0)?;
+    sh_borrow_case("struct Owner { value: i64, } impl Drop for Owner { def drop(&mut self) {} } def consume(value: Owner) -> bool { true } def f(flag: bool) { let owner = Owner { value: 1 }; flag and consume(owner); consume(owner); (); }", 6101)?;
+    sh_borrow_case("struct Owner { value: i64, } impl Drop for Owner { def drop(&mut self) {} } def consume(value: Owner) -> bool { true } def f(flag: bool) -> bool { let owner = Owner { value: 1 }; flag and { consume(owner); return true; }; consume(owner); false }", 0)?;
+    sh_borrow_case("struct String { handle: i64, } def equal(left: String, right: String) -> bool { left == right } def f() { let owner = String { handle: 1 }; equal(owner, owner); equal(owner, owner); (); }", 0)?;
     Result { is_ok: true, value: true, error: 0 };
 }
 
@@ -183,12 +193,56 @@ def sh_test_facts_constructor() -> Result<bool, i64> {
     Result { is_ok: true, value: true, error: 0 };
 }
 
+def sh_test_observed_contract() -> Result<bool, i64> {
+    let text = string_from_str("struct String { handle: i64, } extern \"C\" { fn sengoo_string_len(value: i64) -> i64; } def length(value: String) -> i64 { sengoo_string_len(value.handle) } def f() { let owner = String { handle: 1 }; length(owner); length(owner); (); }")?;
+    let parsed = sh_parse(&text, 0, 10000);
+    let checked = sh_check(&text, &parsed.ast, 100);
+    assert_eq_i64(checked.error, 0, "observe.sg", 1);
+    let ownership = sh_check_ownership(&text, &parsed.ast, &checked, 100);
+    assert_eq_i64(ownership.error, 0, "observe.sg", 2);
+    let mut observed = 0;
+    let mut drops = 0;
+    let mut index = 0;
+    while index < sh_ownership_action_count(&ownership) { let kind = sh_ownership_action(&ownership, index, 2); let binding = sh_ownership_action(&ownership, index, 1); if kind == 8 { assert_true(sh_ownership_parameter_observed(&ownership, binding), "observe.sg", 3); assert_eq_i64(sh_ownership_action_path(&ownership, index), -1, "observe.sg", 4); let mut other = 0; while other < sh_ownership_action_count(&ownership) { if sh_ownership_action(&ownership, other, 1) == binding { assert_true(sh_ownership_action(&ownership, other, 2) != 3 and sh_ownership_action(&ownership, other, 2) != 6, "observe.sg", 5); (); }; other = other + 1; }; observed = observed + 1; }; if kind == 3 { drops = drops + 1; }; index = index + 1; };
+    assert_eq_i64(observed, 1, "observe.sg", 6);
+    assert_eq_i64(drops, 1, "observe.sg", 7);
+    Result { is_ok: true, value: true, error: 0 };
+}
+
+def sh_test_logical_cleanup() -> Result<bool, i64> {
+    let text = string_from_str("struct Owner { value: i64, } impl Drop for Owner { def drop(&mut self) {} } def consume(value: Owner) -> bool { true } def f(flag: bool) { let owner = Owner { value: 1 }; flag and consume(owner); (); }")?;
+    let parsed = sh_parse(&text, 0, 10000);
+    let checked = sh_check(&text, &parsed.ast, 100);
+    assert_eq_i64(checked.error, 0, "observe.sg", 11);
+    let ownership = sh_check_ownership(&text, &parsed.ast, &checked, 100);
+    assert_eq_i64(ownership.error, 0, "observe.sg", 12);
+    let mut drops = 0;
+    let mut index = 0;
+    while index < sh_ownership_action_count(&ownership) { let binding = sh_ownership_action(&ownership, index, 1); if sh_ownership_action(&ownership, index, 2) == 3 and sh_binding_word(&checked, binding, 2) == 0 { assert_eq_i64(sh_ownership_action(&ownership, index, 4), 1, "observe.sg", 13); drops = drops + 1; }; index = index + 1; };
+    assert_eq_i64(drops, 1, "observe.sg", 14);
+    Result { is_ok: true, value: true, error: 0 };
+}
+
+def sh_test_raw_identity_transfer() -> Result<bool, i64> {
+    let text = string_from_str("struct String { handle: i64, } def identity(value: String) -> i64 { value.handle } def f() { let owner = String { handle: 1 }; identity(owner); (); }")?;
+    let parsed = sh_parse(&text, 0, 10000);
+    let checked = sh_check(&text, &parsed.ast, 100);
+    assert_eq_i64(checked.error, 0, "observe.sg", 21);
+    let ownership = sh_check_ownership(&text, &parsed.ast, &checked, 100);
+    assert_eq_i64(ownership.error, 0, "observe.sg", 22);
+    let mut drops = 0;
+    let mut index = 0;
+    while index < sh_ownership_action_count(&ownership) { if sh_ownership_action(&ownership, index, 2) == 3 { drops = drops + 1; }; index = index + 1; };
+    assert_eq_i64(drops, 0, "observe.sg", 23);
+    Result { is_ok: true, value: true, error: 0 };
+}
+
 def main() -> i64 {
     let strings = sengoo_string_live_handle_count();
     let buffers = sengoo_buffer_live_handle_count();
     let opaque = sengoo_opaque_live_handle_count();
     let mut round = 0;
-    while round < 50 { let facts = sh_test_facts_constructor(); if not facts.is_ok() { return 7; }; let result = sh_test_borrow_round(); if not result.is_ok() { return 1; }; let lifetimes = sh_test_temporary_lifetimes(); if not lifetimes.is_ok() { return 6; }; round = round + 1; };
+    while round < 50 { let logical = sh_test_logical_cleanup(); if not logical.is_ok() { return 9; }; let identity = sh_test_raw_identity_transfer(); if not identity.is_ok() { return 10; }; let contract = sh_test_observed_contract(); if not contract.is_ok() { return 8; }; let facts = sh_test_facts_constructor(); if not facts.is_ok() { return 7; }; let result = sh_test_borrow_round(); if not result.is_ok() { return 1; }; let lifetimes = sh_test_temporary_lifetimes(); if not lifetimes.is_ok() { return 6; }; round = round + 1; };
     let overwrite = sh_test_overwrite_phase();
     if not overwrite.is_ok() { return 4; };
     let precise = sh_test_exact_move_span();

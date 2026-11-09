@@ -143,6 +143,37 @@ def sh_mir_validate_ownership(mir: &ShMir) -> ShMirValidation {
     sh_mir_problem(mir, 0, -1, -1, -1);
 }
 
+def sh_mir_instance_type(mir: &ShMir, template: i64, actual: i64, first: i64, count: i64, depth: i64) -> bool {
+    if depth >= 128 or not sh_mir_valid_type(mir, template) or not sh_mir_valid_type(mir, actual) { return false; };
+    let kind = sh_mir_type_word(mir, template, 0);
+    if kind == 13 { let mut pair = 0; while pair < count { if sh_mir_word(&mir.substitutions, 2, first + pair, 0) == template { return sh_mir_word(&mir.substitutions, 2, first + pair, 1) == actual; }; pair = pair + 1; }; return false; };
+    if kind != sh_mir_type_word(mir, actual, 0) or sh_mir_type_word(mir, template, 1) != sh_mir_type_word(mir, actual, 1) or sh_mir_type_word(mir, template, 2) != sh_mir_type_word(mir, actual, 2) or sh_mir_type_word(mir, template, 3) != sh_mir_type_word(mir, actual, 3) or sh_mir_type_word(mir, template, 5) != sh_mir_type_word(mir, actual, 5) { return false; };
+    let mut index = 0; while index < sh_mir_type_word(mir, template, 5) { if not sh_mir_instance_type(mir, sh_mir_type_arg(mir, template, index), sh_mir_type_arg(mir, actual, index), first, count, depth + 1) { return false; }; index = index + 1; }; true;
+}
+
+def sh_mir_validate_instances(mir: &ShMir) -> i64 {
+    if sh_mir_instance_count(mir) < 0 or sh_mir_instance_count(mir) > mir.limit or sh_mir_count(&mir.substitutions, 2) < 0 or sh_mir_count(&mir.substitutions, 2) > mir.limit { return 5001; };
+    let mut instance = 0;
+    while instance < sh_mir_instance_count(mir) {
+        let function = sh_mir_instance(mir, instance, 0); let symbol = sh_mir_instance(mir, instance, 1); let template = sh_mir_instance(mir, instance, 2); let first = sh_mir_instance(mir, instance, 3); let count = sh_mir_instance(mir, instance, 4);
+        if function < 0 or function >= sh_mir_fn_count(mir) or symbol < 0 or symbol >= sh_symbol_count(&mir.symbols) or sh_mir_type_word(mir, template, 0) != 11 or first < 0 or count < 0 or first > sh_mir_count(&mir.substitutions, 2) or count > sh_mir_count(&mir.substitutions, 2) - first { return 5009; };
+        let mut previous = 0; while previous < instance { if sh_mir_instance(mir, previous, 0) == function { return 5009; }; previous = previous + 1; };
+        let mut pair = 0;
+        while pair < count { let key = sh_mir_word(&mir.substitutions, 2, first + pair, 0); let value = sh_mir_word(&mir.substitutions, 2, first + pair, 1); if sh_mir_type_word(mir, key, 0) != 13 or not sh_mir_concrete_type(mir, value, 0) { return 5009; }; previous = 0; while previous < pair { if sh_mir_word(&mir.substitutions, 2, first + previous, 0) == key { return 5009; }; previous = previous + 1; }; pair = pair + 1; };
+        if not sh_mir_instance_type(mir, template, sh_mir_fn(mir, function, 1), first, count, 0) { return 5009; };
+        instance = instance + 1;
+    };
+    let mut pair = 0;
+    while pair < sh_mir_count(&mir.substitutions, 2) { let mut owners = 0; instance = 0; while instance < sh_mir_instance_count(mir) { let first = sh_mir_instance(mir, instance, 3); if pair >= first and pair - first < sh_mir_instance(mir, instance, 4) { owners = owners + 1; }; instance = instance + 1; }; if owners != 1 { return 5009; }; pair = pair + 1; };
+    0;
+}
+
+def sh_mir_concrete_type(mir: &ShMir, ty: i64, depth: i64) -> bool {
+    if depth >= 128 or not sh_mir_valid_type(mir, ty) { return false; };
+    let kind = sh_mir_type_word(mir, ty, 0); if kind == 13 or kind == 15 or kind == 19 { return false; };
+    let mut index = 0; while index < sh_mir_type_word(mir, ty, 5) { if not sh_mir_concrete_type(mir, sh_mir_type_arg(mir, ty, index), depth + 1) { return false; }; index = index + 1; }; true;
+}
+
 def sh_mir_validate(mir: &ShMir) -> ShMirValidation {
     if mir.schema != 1 or mir.target != 1 or mir.runtime_abi != 1 or mir.pointer_width != 64 or not sh_mir_limit(mir) { return sh_mir_problem(mir, 5001, -1, -1, -1); };
     let counts = [sh_mir_fn_count(mir), sh_mir_local_count(mir), sh_mir_scope_count(mir), sh_mir_block_count(mir), sh_mir_inst_count(mir), sh_mir_term_count(mir), sh_mir_edge_count(mir), sh_mir_count(&mir.layouts, 7), sh_mir_count(&mir.fields, 2), sh_mir_count(&mir.sources, 2), sh_mir_count(&mir.spans, 3)];
@@ -151,6 +182,8 @@ def sh_mir_validate(mir: &ShMir) -> ShMirValidation {
     if mir.operands.len() > mir.limit or mir.parameters.len() > mir.limit or sh_type_count(&mir.types) > mir.limit or sh_symbol_count(&mir.symbols) > mir.limit { return sh_mir_problem(mir, 5001, -1, -1, -1); };
     let type_problem = sh_mir_validate_types(mir);
     if type_problem != 0 { return sh_mir_problem(mir, type_problem, -1, -1, -1); };
+    let instance_problem = sh_mir_validate_instances(mir);
+    if instance_problem != 0 { return sh_mir_problem(mir, instance_problem, -1, -1, -1); };
     let ownership_problem = sh_mir_validate_ownership(mir);
     if ownership_problem.error != 0 { return ownership_problem; };
     i = 0;

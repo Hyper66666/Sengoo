@@ -16,6 +16,7 @@ struct ShChecked {
     types: ShTypes,
     symbols: ShSymbols,
     node_types: Vec<i64>,
+    call_types: Vec<i64>,
     resolution: Vec<i64>,
     node_scopes: Vec<i64>,
     bindings: Vec<i64>,
@@ -73,6 +74,10 @@ def sh_scope_word(checked: &ShChecked, scope: i64, field: i64) -> i64 {
 
 def sh_node_type(checked: &ShChecked, node: i64) -> i64 {
     checked.node_types.get(node).unwrap_or(-1);
+}
+
+def sh_node_callable_type(checked: &ShChecked, node: i64) -> i64 {
+    checked.call_types.get(node).unwrap_or(-1);
 }
 
 def sh_node_binding(checked: &ShChecked, node: i64) -> i64 {
@@ -230,6 +235,8 @@ def sh_s_unify(checked: &ShChecked, expected: i64, actual: i64, depth: i64) -> b
     if left == right { return true; };
     let a = sh_s_kind(checked, left);
     let b = sh_s_kind(checked, right);
+    if a == 14 and b == 12 and sh_s_implements(checked, right, sh_s_nominal(checked, left)) { return true; };
+    if a == 14 and b == 6 and sh_s_kind(checked, sh_s_argument(checked, right, 0)) == 12 and sh_s_implements(checked, sh_s_argument(checked, right, 0), sh_s_nominal(checked, left)) { return true; };
     if a == 18 or b == 18 or a == 17 or b == 17 { return true; };
     if a == 19 { if sh_s_occurs(checked, left, right, 0) { return false; }; return sh_s_substitute(checked, left, right); };
     if b == 19 { if sh_s_occurs(checked, right, left, 0) { return false; }; return sh_s_substitute(checked, right, left); };
@@ -257,10 +264,10 @@ def sh_s_new(ast: &ShAst, maximum: i64) -> ShChecked {
     let never = sh_type_primitive(&types, 17, 0, 0).unwrap_or(-1);
     let error = sh_type_primitive(&types, 18, 0, 0).unwrap_or(-1);
     let diagnostics: Vec<ShDiagnostic> = vec_new();
-    let mut result = ShChecked { types: types, symbols: sh_symbols_new(1000000), node_types: vec_new_i64(), resolution: vec_new_i64(), node_scopes: vec_new_i64(), bindings: vec_new_i64(), scopes: vec_new_i64(), diagnostics: diagnostics, substitutions: vec_new_i64(), generic_parameters: vec_new_i64(), constraints: vec_new_i64(), trait_types: vec_new_i64(), class_parents: vec_new_i64(), propagation: vec_new_i64(), loop_values: vec_new_i64(), async_depth: 0, unsafe_depth: 0, error: 0, start: 0, end: 0, diagnostic_limit: maximum, current_scope: 0, current_owner: -1, current_return: -1, loop_depth: 0, depth: 0, unit_type: unit, bool_type: boolean, integer_type: integer, float_type: floating, char_type: character, str_type: string, never_type: never, error_type: error };
+    let mut result = ShChecked { types: types, symbols: sh_symbols_new(1000000), node_types: vec_new_i64(), call_types: vec_new_i64(), resolution: vec_new_i64(), node_scopes: vec_new_i64(), bindings: vec_new_i64(), scopes: vec_new_i64(), diagnostics: diagnostics, substitutions: vec_new_i64(), generic_parameters: vec_new_i64(), constraints: vec_new_i64(), trait_types: vec_new_i64(), class_parents: vec_new_i64(), propagation: vec_new_i64(), loop_values: vec_new_i64(), async_depth: 0, unsafe_depth: 0, error: 0, start: 0, end: 0, diagnostic_limit: maximum, current_scope: 0, current_owner: -1, current_return: -1, loop_depth: 0, depth: 0, unit_type: unit, bool_type: boolean, integer_type: integer, float_type: floating, char_type: character, str_type: string, never_type: never, error_type: error };
     sh_s_scope(&result, -1, -1, 0);
     let mut index = 0;
-    while index < sh_ast_count(ast) { if not result.node_types.push(-1) or not result.resolution.push(-1) or not result.node_scopes.push(-1) { result.error = 5117; return result; }; index = index + 1; };
+    while index < sh_ast_count(ast) { if not result.node_types.push(-1) or not result.call_types.push(-1) or not result.resolution.push(-1) or not result.node_scopes.push(-1) { result.error = 5117; return result; }; index = index + 1; };
     if maximum < 1 or maximum > 1000000 { result.error = 5117; };
     result;
 }
