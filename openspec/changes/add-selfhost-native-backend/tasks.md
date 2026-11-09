@@ -20,6 +20,7 @@
 - [x] Emit typed array/raw-pointer index strides and unsafe opcode-22 byte memmove; independently execute 76,875 overlap cases across u8/u64/aggregate pointees, unaligned/separate ranges, zero-count null pointers, protected-page boundaries and 1/3/8/16-byte strides (`target/selfhost/m4-memory-ranges/evidence.json`). Slices, full runtime extents and supported-corpus closure remain open.
 - [x] Emit decoded string literals into readonly `.rdata` with private symbols and checked RIP-relative relocations; independently verify UTF-8, escapes, empty/interior-NUL strings, repeated storage identity and Windows page permissions (`target/selfhost/m4-string-data-checked/evidence.json`). Owned String/runtime SDK behavior remains open.
 - [x] Replay HIR schema 3 through the native source CLI for 46 programs, including arrays, string literal ABI, impl discarded contexts and aggregate operator calls; retain 43 actual frozen-reference equal executions and three explicitly unequal reference gaps (`target/selfhost/m4-source-hir3-qualified/evidence.json`). Full parity remains open.
+- [x] Separate validated native object construction from serialization and optionally collect instruction/terminator/prologue/epilogue addresses for an external debug adapter; verify all ranges, fresh-state rejection and byte-identical objects (`target/selfhost/m4-native-object-debug-api/evidence.json`). Automatic source/local/PDB integration is a separate M5 gate.
 
 ## Supported target behavior
 
@@ -255,3 +256,16 @@ Adjacent simple array loops and tuple field reads still require both executions.
 Five negative cases preserve the previous output, including constant array
 bounds and pending nested destructor glue. This checkpoint consumes HIR schema
 3 but does not qualify complete semantics, ABI, ownership, runtime or M4.
+
+Native object/debug address API evidence:
+`target/selfhost/m4-native-object-debug-api/evidence.json`, SHA-256
+`0facf37dfd7c481c6c701bbdc16d45cde427f41f8942b6180ab7edcc7c2a6d6f`,
+revision `f1967f2f3167d3ef802f6dff17b2fcaa8d558d9f`, Windows 11 AMD64.
+All 29 commands passed with unchanged inputs/tools. Ten resource scopes verify
+optional address tables cover every emitted MIR instruction/terminator, all
+prologues and every return epilogue. Reusing a populated builder/object rejects
+with 6401. Debug collection on/off produces identical objects, also identical
+to the preceding string checkpoint's `checked.obj`, SHA-256
+`1d0b25ae1f50e18f165c050267ea241bc27405f53f5acef9709dc4c8a0374b61`.
+All previous C ABI, numeric, cleanup, strings, memory, stack and unwind checks
+remain green. These are machine-address facts, not qualified source debugging.

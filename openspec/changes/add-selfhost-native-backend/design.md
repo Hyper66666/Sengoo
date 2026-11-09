@@ -223,6 +223,18 @@ RIP-relative references target readonly `.rdata`. The object writer accounts
 for total code/data capacity; literal emission does not authorize resource
 allocation or resolve pending owned String glue.
 
+`sh_native_new` and `sh_native_emit_into` provide a fresh-state object builder
+before serialization, allowing a separate debug adapter to attach COFF records
+without introducing a debug/linker dependency into normal native emission.
+The ordinary `sh_native_object` wrapper retains its byte output. Optional
+`collect_debug` records global MIR instruction/terminator start/end tables,
+per-function prologue ends and `(function,start,end)` epilogue triples. Addresses
+are absolute `.text` offsets and ends are exclusive. Frame allocation and local
+slot offsets remain separate; a Windows SP-relative local is allocation minus
+slot, and frame metadata includes the separately saved RBP. The caller must
+discard partially built state on failure. Source/initialization/lifetime facts
+must still be proved by the external adapter before claiming debug variables.
+
 Primary references:
 
 - Intel instruction reference: https://www.intel.com/content/www/us/en/content-details/671110/intel-64-and-ia-32-architectures-software-developer-s-manual-combined-volumes-2a-2b-2c-and-2d-instruction-set-reference-a-z.html

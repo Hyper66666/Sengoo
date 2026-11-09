@@ -43,3 +43,9 @@ SHALL not call an external compiler or assembler or silently fall back to LLVM.
 - **WHEN** a supported validated module is compiled with the SG native backend
 - **THEN** the resulting object is independently inspectable and linkable with its declared target/ABI
 - **AND** final SG self-build process evidence contains no external compiler or assembler
+
+#### Scenario: An adapter requests native address facts before serialization
+- **WHEN** a fresh native builder optionally collects debug addresses into an empty object
+- **THEN** each emitted instruction, terminator, prologue and return epilogue has a bounded machine-code range
+- **AND** enabling address collection preserves the object's emitted bytes before debug records are attached
+- **AND** reusing populated construction state fails rather than appending conflicting addresses

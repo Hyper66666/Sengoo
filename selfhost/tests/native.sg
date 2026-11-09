@@ -664,6 +664,31 @@ def sh_nt_fixture(mir: &ShMir) -> Result<bool, i64> {
     Result { is_ok: true, value: true, error: 0 };
 }
 
+def sh_nt_debug_maps(mir: &ShMir, expected: &ShBinary) -> Result<bool, i64> {
+    let mut native = sh_native_new(mir, 65536, true);
+    native.collect_debug = true;
+    let object = sh_object_new(65536);
+    sh_native_emit_into(&mut native, mir, &object)?;
+    let emitted = sh_object_emit(&object)?;
+    assert_eq_i64(sh_binary_len(&emitted), sh_binary_len(expected), "native.sg", 1201);
+    let mut index = 0;
+    while index < sh_binary_len(&emitted) { assert_eq_i64(sh_binary_get(&emitted, index)?, sh_binary_get(expected, index)?, "native.sg", 1203); index = index + 1; };
+    assert_eq_i64(native.instruction_starts.len(), sh_mir_inst_count(mir), "native.sg", 1205);
+    assert_eq_i64(native.instruction_ends.len(), sh_mir_inst_count(mir), "native.sg", 1206);
+    assert_eq_i64(native.terminator_starts.len(), sh_mir_term_count(mir), "native.sg", 1207);
+    index = 0;
+    while index < sh_mir_inst_count(mir) { let function = sh_mir_inst(mir, index, 0); let start = sh_native_at(&native.instruction_starts, index); let end = sh_native_at(&native.instruction_ends, index); assert_true(start >= sh_native_at(&native.prologue_ends, function), "native.sg", 1212); assert_true(end >= start and end <= sh_native_at(&native.ends, function), "native.sg", 1213); index = index + 1; };
+    index = 0;
+    let mut returns = 0;
+    while index < sh_mir_term_count(mir) { let function = sh_mir_term(mir, index, 0); let start = sh_native_at(&native.terminator_starts, index); let end = sh_native_at(&native.terminator_ends, index); assert_true(start >= sh_native_at(&native.prologue_ends, function) and end > start and end <= sh_native_at(&native.ends, function), "native.sg", 1220); if sh_mir_term(mir, index, 2) == 3 { returns = returns + 1; }; index = index + 1; };
+    assert_eq_i64(native.epilogues.len(), returns * 3, "native.sg", 1224);
+    index = 0;
+    while index < native.epilogues.len() / 3 { let function = sh_mir_word(&native.epilogues, 3, index, 0); let start = sh_mir_word(&native.epilogues, 3, index, 1); let end = sh_mir_word(&native.epilogues, 3, index, 2); assert_true(start >= sh_native_at(&native.prologue_ends, function) and end > start and end <= sh_native_at(&native.ends, function), "native.sg", 1230); assert_eq_i64(sh_binary_get(&native.code, end - 1)?, 195, "native.sg", 1231); index = index + 1; };
+    let reused = sh_native_emit_into(&mut native, mir, &object);
+    assert_eq_i64(reused.error, 6401, "native.sg", 1235);
+    Result { is_ok: true, value: true, error: 0 };
+}
+
 def sh_test_native() -> Result<bool, i64> {
     let short_move = sh_binary_new(20);
     sh_binary_byte(&short_move, 42)?;
@@ -691,6 +716,7 @@ def sh_test_native() -> Result<bool, i64> {
     assert_eq_i64(sh_mir_validate(&mir).error, 0, "native.sg", 168);
     let checked = sh_native_object(&mir, 65536, true)?;
     let repeated = sh_native_object(&mir, 65536, true)?;
+    sh_nt_debug_maps(&mir, &checked)?;
     assert_eq_i64(sh_binary_len(&checked), sh_binary_len(&repeated), "native.sg", 171);
     let mut index = 0;
     while index < sh_binary_len(&checked) { assert_eq_i64(sh_binary_get(&checked, index)?, sh_binary_get(&repeated, index)?, "native.sg", 173); index = index + 1; };
