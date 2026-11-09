@@ -3,6 +3,7 @@ extern "C" {
     fn sengoo_ffi_last_error_code() -> i64;
     fn sengoo_ffi_last_error_len() -> i64;
     fn sengoo_ffi_last_error_copy(buffer: i64, capacity: i64) -> i64;
+    fn sengoo_ffi_last_error_copy_to_buffer(buffer_handle: i64) -> i64;
     fn sengoo_ffi_last_error_clear() -> i64;
     fn sengoo_ffi_c_open(path: i64) -> i64;
     fn sengoo_ffi_c_close(handle: i64) -> i64;
@@ -87,7 +88,7 @@ def ffi_last_error_copy_raw(buffer_ptr: i64, capacity: i64) -> i64 {
 }
 
 def ffi_last_error_copy(buffer: Buffer) -> Result<i64, i64> {
-    let copied = ffi_last_error_copy_raw(sengoo_ffi_buffer_ptr(buffer.handle), sengoo_ffi_buffer_len(buffer.handle));
+    let copied = sengoo_ffi_last_error_copy_to_buffer(buffer.handle);
     if copied >= 0 {
         Result { is_ok: true, value: copied, error: 0 }
     } else {

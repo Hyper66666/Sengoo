@@ -1170,6 +1170,19 @@ long long sengoo_ffi_buffer_ptr(long long buffer_handle) {
     return (long long)(intptr_t)buffer->bytes;
 }
 
+long long sengoo_ffi_last_error_copy_to_buffer(long long buffer_handle) {
+    SengooFfiBuffer* buffer = sengoo_ffi_buffer_from_handle(buffer_handle);
+    if (!buffer) {
+        return sengoo_ffi_set_error(SENGOO_FFI_ERR_INVALID_HANDLE, "buffer handle not found");
+    }
+    long long copied = sengoo_ffi_last_error_copy(
+        (long long)(intptr_t)buffer->bytes, (long long)buffer->capacity);
+    if (copied >= 0) {
+        buffer->used_len = (size_t)copied;
+    }
+    return copied;
+}
+
 long long sengoo_ffi_buffer_copy_out(long long buffer_handle, long long out_buffer, long long out_capacity) {
     sengoo_ffi_clear_error_state();
     char* out = (char*)(intptr_t)out_buffer;

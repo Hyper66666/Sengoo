@@ -23,6 +23,9 @@ def sh_borrow_case(raw: &str, expected: i64) -> Result<bool, i64> {
 }
 
 def sh_test_borrow_round() -> Result<bool, i64> {
+    sh_borrow_case("struct Buffer{handle:i64} impl Drop for Buffer{def drop(&mut self){}} extern \"C\"{fn sengoo_ffi_last_error_copy_to_buffer(handle:i64)->i64;} def copy(value:Buffer)->i64{sengoo_ffi_last_error_copy_to_buffer(value.handle)} def run(){let output=Buffer{handle:1};copy(output);copy(output);();}", 0)?;
+    sh_borrow_case("struct Buffer{handle:i64} impl Drop for Buffer{def drop(&mut self){}} def sengoo_ffi_last_error_copy_to_buffer(handle:i64)->i64{handle} def copy(value:Buffer)->i64{sengoo_ffi_last_error_copy_to_buffer(value.handle)} def run(){let output=Buffer{handle:1};copy(output);copy(output);();}", 6101)?;
+    sh_borrow_case("struct Buffer{handle:i64} impl Drop for Buffer{def drop(&mut self){}} extern \"C\"{fn sengoo_ffi_last_error_copy_to_buffer(handle:i64,other:i64)->i64;} def copy(value:Buffer)->i64{sengoo_ffi_last_error_copy_to_buffer(value.handle,0)} def run(){let output=Buffer{handle:1};copy(output);copy(output);();}", 6101)?;
     sh_borrow_case("struct Owner{n:i64} impl Drop for Owner{def drop(&mut self){}} impl Owner{def observe(&self)->i64{self.n} def update(&mut self){self.n=42;();}} struct Holder{owner:Owner} def run(holder:&mut Holder)->i64{holder.owner.update();holder.owner.observe()}", 0)?;
     sh_borrow_case("struct Owner{n:i64} impl Drop for Owner{def drop(&mut self){}} impl Owner{def consume(self)->i64{self.n}} struct Holder{owner:Owner} def run(holder:&Holder)->i64{holder.owner.consume()}", 6112)?;
     sh_borrow_case("struct Owner{n:i64} impl Drop for Owner{def drop(&mut self){}} def run(value:&Owner)->Owner{*value}", 6112)?;
@@ -310,14 +313,14 @@ def sh_test_propagation_cleanup() -> Result<bool, i64> {
 }
 
 def sh_test_native_input_signatures() -> Result<bool, i64> {
-    let text = string_from_str("extern \"C\"{fn sengoo_ffi_buffer_ptr(value:i64)->i64;fn sengoo_unicode_version_copy(output:i64,capacity:i64)->i64;}")?;
+    let text = string_from_str("extern \"C\"{fn sengoo_ffi_buffer_ptr(value:i64)->i64;fn sengoo_unicode_version_copy(output:i64,capacity:i64)->i64;fn sengoo_ffi_last_error_copy_to_buffer(handle:i64)->i64;}")?;
     let parsed = sh_parse(&text, 0, 10000);
     let checked = sh_check(&text, &parsed.ast, 100);
     assert_eq_i64(checked.error, 0, "native-input.sg", 1);
     let mut index = 0;
     let mut count = 0;
     while index < sh_binding_count(&checked) { if sh_binding_word(&checked, index, 2) == 2 and (sh_binding_word(&checked, index, 5) & 8) != 0 { let ty = sh_s_resolve(&checked, sh_binding_word(&checked, index, 3)); let projects = sh_b_native_projects(&checked, index, 0); let observes = sh_b_native_contract(&checked, index, 0); assert_true(projects or observes, "native-input.sg", 2); checked.types.words.set(ty * 6 + 2, 1); assert_true(not sh_b_native_projects(&checked, index, 0), "native-input.sg", 3); assert_true(not sh_b_native_contract(&checked, index, 0), "native-input.sg", 4); checked.types.words.set(ty * 6 + 2, 0); assert_eq_i64(if sh_b_native_projects(&checked, index, 0) { 1; } else { 0; }, if projects { 1; } else { 0; }, "native-input.sg", 5); assert_eq_i64(if sh_b_native_contract(&checked, index, 0) { 1; } else { 0; }, if observes { 1; } else { 0; }, "native-input.sg", 6); count = count + 1; }; index = index + 1; };
-    assert_eq_i64(count, 2, "native-input.sg", 7);
+    assert_eq_i64(count, 3, "native-input.sg", 7);
     Result { is_ok: true, value: true, error: 0 };
 }
 
