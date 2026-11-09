@@ -6,6 +6,8 @@ import selfhost_object;
 
 import selfhost_unwind;
 
+import selfhost_x64_sse;
+
 struct ShNative {
     code: ShBinary,
     values: Vec<i64>,
@@ -29,7 +31,7 @@ def sh_native_width(mir: &ShMir, ty: i64) -> i64 {
     let kind = sh_mir_type_word(mir, ty, 0);
     if kind == 0 { return 0; };
     if kind == 1 { return 1; };
-    if kind == 2 { return sh_mir_type_word(mir, ty, 1) / 8; };
+    if kind == 2 or kind == 3 { return sh_mir_type_word(mir, ty, 1) / 8; };
     if kind == 4 { return 4; };
     if kind == 6 and sh_mir_type_word(mir, sh_mir_type_arg(mir, ty, 0), 0) == 14 { return -1; };
     if kind == 5 or kind == 6 or kind == 7 or kind == 11 or kind == 16 { return 8; };
@@ -78,10 +80,41 @@ def sh_native_edge(native: &ShNative, mir: &ShMir, edge: i64) -> Result<i64, i64
     sh_i64_ok(patch);
 }
 
+def sh_native_float_load(native: &ShNative, mir: &ShMir, id: i64, xmm: i64) -> Result<i64, i64> {
+    let offset = sh_native_at(&native.values, id);
+    if offset < 8 { return sh_i64_error(6501); };
+    sh_x64_sse_memory(&native.code, false, sh_native_width(mir, sh_mir_value_type(mir, id)) == 4, xmm, 5, -offset);
+}
+
+def sh_native_float_save(native: &ShNative, mir: &ShMir, id: i64, xmm: i64) -> Result<i64, i64> {
+    let offset = sh_native_at(&native.values, id);
+    if offset < 8 { return sh_i64_error(6501); };
+    sh_x64_sse_memory(&native.code, true, sh_native_width(mir, sh_mir_value_type(mir, id)) == 4, xmm, 5, -offset);
+}
+
+def sh_native_float_binary(native: &ShNative, mir: &ShMir, id: i64) -> Result<i64, i64> {
+    let lhs = sh_mir_inst_arg(mir, id, 0);
+    let rhs = sh_mir_inst_arg(mir, id, 1);
+    let operator = sh_mir_inst(mir, id, 6);
+    let single = sh_native_width(mir, sh_mir_value_type(mir, lhs)) == 4;
+    sh_native_float_load(native, mir, lhs, 0)?;
+    sh_native_float_load(native, mir, rhs, 1)?;
+    let arithmetic = if operator == sh_kind("+") { 0; } else { if operator == sh_kind("-") { 1; } else { if operator == sh_kind("*") { 2; } else { if operator == sh_kind("/") { 3; } else { -1; }; }; }; };
+    if arithmetic >= 0 { sh_x64_sse_binary(&native.code, single, arithmetic, 0, 1)?; return sh_native_float_save(native, mir, id, 0); };
+    let condition = if operator == sh_kind("==") { 4; } else { if operator == sh_kind("!=") { 5; } else { if operator == sh_kind("<") { 2; } else { if operator == sh_kind("<=") { 6; } else { if operator == sh_kind(">") { 7; } else { if operator == sh_kind(">=") { 3; } else { -1; }; }; }; }; }; };
+    if condition < 0 { return sh_i64_error(6502); };
+    sh_x64_sse_compare(&native.code, single, 0, 1)?;
+    sh_x64_set_condition(&native.code, condition, 0)?;
+    if condition == 4 or condition == 2 or condition == 6 { sh_x64_set_condition(&native.code, 11, 10)?; sh_x64_binary(&native.code, 2, 0, 10)?; (); };
+    if condition == 5 { sh_x64_set_condition(&native.code, 10, 10)?; sh_x64_binary(&native.code, 3, 0, 10)?; (); };
+    sh_native_save(native, id, 0);
+}
+
 def sh_native_binary(native: &ShNative, mir: &ShMir, id: i64) -> Result<i64, i64> {
     let lhs = sh_mir_inst_arg(mir, id, 0);
     let rhs = sh_mir_inst_arg(mir, id, 1);
     let ty = sh_mir_value_type(mir, lhs);
+    if sh_mir_type_word(mir, ty, 0) == 3 { return sh_native_float_binary(native, mir, id); };
     let operator = sh_mir_inst(mir, id, 6);
     if sh_native_width(mir, ty) < 0 { return sh_i64_error(6502); };
     sh_native_load(native, lhs, 0)?;
@@ -110,14 +143,15 @@ def sh_native_instruction(native: &ShNative, mir: &ShMir, id: i64) -> Result<i64
     if opcode == 1 or opcode == 2 { return sh_i64_ok(0); };
     if opcode == 25 { sh_x64_mov_imm(&native.code, 0, 0)?; return sh_native_finish(native, mir, id); };
     if opcode == 11 { return sh_native_binary(native, mir, id); };
+    if opcode == 5 { if sh_mir_inst(mir, id, 8) != 0 { return sh_i64_error(6502); }; sh_x64_mov_imm(&native.code, 0, aux)?; return sh_native_finish(native, mir, id); };
     if opcode == 3 or opcode == 4 or opcode == 6 or opcode == 7 { sh_x64_mov_imm(&native.code, 0, if opcode == 3 { 0; } else { aux; })?; return sh_native_finish(native, mir, id); };
     if opcode == 9 { let patch = sh_x64_rip_address(&native.code, 0)?; if not native.calls.push(patch) or not native.calls.push(aux) { return sh_i64_error(6503); }; return sh_native_finish(native, mir, id); };
-    if opcode == 10 { sh_native_load(native, first, 0)?; if aux == sh_kind("-") or aux == sh_kind("~") { sh_x64_unary(&native.code, if aux == sh_kind("-") { 1; } else { 0; }, 0)?; } else { sh_x64_mov_imm(&native.code, 10, 1)?; sh_x64_binary(&native.code, 4, 0, 10)?; }; return sh_native_finish(native, mir, id); };
-    if opcode == 12 { sh_native_load(native, first, 0)?; return sh_native_finish(native, mir, id); };
+    if opcode == 10 { sh_native_load(native, first, 0)?; if sh_mir_type_word(mir, ty, 0) == 3 { if aux != sh_kind("-") { return sh_i64_error(6502); }; sh_x64_mov_imm(&native.code, 10, if sh_native_width(mir, ty) == 4 { 2147483648; } else { -9223372036854775807 - 1; })?; sh_x64_binary(&native.code, 4, 0, 10)?; return sh_native_finish(native, mir, id); }; if aux == sh_kind("-") or aux == sh_kind("~") { sh_x64_unary(&native.code, if aux == sh_kind("-") { 1; } else { 0; }, 0)?; } else { sh_x64_mov_imm(&native.code, 10, 1)?; sh_x64_binary(&native.code, 4, 0, 10)?; }; return sh_native_finish(native, mir, id); };
+    if opcode == 12 { if sh_mir_type_word(mir, ty, 0) == 3 or sh_mir_type_word(mir, sh_mir_value_type(mir, first), 0) == 3 { return sh_i64_error(6502); }; sh_native_load(native, first, 0)?; return sh_native_finish(native, mir, id); };
     if opcode == 13 { let offset = sh_native_at(&native.locals, aux); if offset < 8 { return sh_i64_error(6501); }; sh_x64_memory(&native.code, 2, 0, 5, -offset)?; return sh_native_finish(native, mir, id); };
     if opcode == 14 { sh_native_load(native, first, 10)?; let width = sh_native_width(mir, ty); if width == 0 { sh_x64_mov_imm(&native.code, 0, 0)?; } else { sh_x64_scalar_memory(&native.code, false, 0, 10, 0, width, sh_native_signed(mir, ty))?; }; return sh_native_finish(native, mir, id); };
     if opcode == 15 { let rhs = sh_mir_inst_arg(mir, id, 1); let value_type = sh_mir_value_type(mir, rhs); let width = sh_native_width(mir, value_type); if width < 0 { return sh_i64_error(6502); }; sh_native_load(native, first, 10)?; sh_native_load(native, rhs, 0)?; if width > 0 { sh_x64_scalar_memory(&native.code, true, 0, 10, 0, width, false)?; (); }; sh_x64_mov_imm(&native.code, 0, 0)?; return sh_native_finish(native, mir, id); };
-    if opcode == 20 { let prefix = if aux < 0 { 1; } else { 0; }; let count = sh_mir_inst(mir, id, 5) - prefix; let mut index = 0; while index < count { let argument = sh_mir_inst_arg(mir, id, index + prefix); if sh_native_width(mir, sh_mir_value_type(mir, argument)) <= 0 { return sh_i64_error(6502); }; let register = if index == 0 { 1; } else { if index == 1 { 2; } else { if index == 2 { 8; } else { if index == 3 { 9; } else { 0; }; }; }; }; sh_native_load(native, argument, register)?; if index >= 4 { sh_x64_memory(&native.code, 1, 0, 4, 32 + (index - 4) * 8)?; (); }; index = index + 1; }; if aux >= 0 { sh_native_call_fixup(native, aux)?; } else { sh_native_load(native, first, 11)?; sh_x64_call_register(&native.code, 11)?; }; return sh_native_finish(native, mir, id); };
+    if opcode == 20 { let prefix = if aux < 0 { 1; } else { 0; }; let count = sh_mir_inst(mir, id, 5) - prefix; let mut index = 0; while index < count { let argument = sh_mir_inst_arg(mir, id, index + prefix); if sh_native_width(mir, sh_mir_value_type(mir, argument)) <= 0 { return sh_i64_error(6502); }; let register = if index == 0 { 1; } else { if index == 1 { 2; } else { if index == 2 { 8; } else { if index == 3 { 9; } else { 0; }; }; }; }; if index < 4 and sh_mir_type_word(mir, sh_mir_value_type(mir, argument), 0) == 3 { sh_native_float_load(native, mir, argument, index)?; } else { sh_native_load(native, argument, register)?; }; if index >= 4 { sh_x64_memory(&native.code, 1, 0, 4, 32 + (index - 4) * 8)?; (); }; index = index + 1; }; if aux >= 0 { sh_native_call_fixup(native, aux)?; } else { sh_native_load(native, first, 11)?; sh_x64_call_register(&native.code, 11)?; }; if sh_mir_type_word(mir, ty, 0) == 3 { return sh_native_float_save(native, mir, id, 0); }; return sh_native_finish(native, mir, id); };
     sh_i64_error(6502);
 }
 
@@ -126,7 +160,7 @@ def sh_native_terminator(native: &ShNative, mir: &ShMir, term: i64) -> Result<i6
     let first_edge = sh_mir_term(mir, term, 4);
     if kind == 1 { return sh_native_edge(native, mir, first_edge); };
     if kind == 2 { sh_native_load(native, sh_mir_term(mir, term, 3), 0)?; sh_x64_mov_imm(&native.code, 10, 0)?; sh_x64_binary(&native.code, 5, 0, 10)?; let false_patch = sh_x64_branch(&native.code, 2, 4)?; sh_native_edge(native, mir, first_edge)?; sh_x64_fix_branch(&native.code, false_patch, sh_binary_len(&native.code))?; return sh_native_edge(native, mir, first_edge + 1); };
-    if kind == 3 { let value = sh_mir_term(mir, term, 3); if value >= 0 { sh_native_load(native, value, 0)?; } else { sh_x64_mov_imm(&native.code, 0, 0)?; }; sh_x64_stack_adjust(&native.code, native.frame, true)?; sh_x64_stack_register(&native.code, 5, true)?; return sh_x64_ret(&native.code); };
+    if kind == 3 { let value = sh_mir_term(mir, term, 3); if value >= 0 { if sh_mir_type_word(mir, sh_mir_value_type(mir, value), 0) == 3 { sh_native_float_load(native, mir, value, 0)?; } else { sh_native_load(native, value, 0)?; }; } else { sh_x64_mov_imm(&native.code, 0, 0)?; }; sh_x64_stack_adjust(&native.code, native.frame, true)?; sh_x64_stack_register(&native.code, 5, true)?; return sh_x64_ret(&native.code); };
     if kind == 4 { sh_binary_byte(&native.code, 15)?; return sh_binary_byte(&native.code, 11); };
     if kind == 5 { let value = sh_mir_term(mir, term, 3); let count = sh_mir_term(mir, term, 5); let mut index = 0; let mut default_edge = -1; while index < count { let edge = first_edge + index; if sh_mir_edge(mir, edge, 5) == 1 { default_edge = edge; } else { sh_native_load(native, value, 0)?; sh_x64_mov_imm(&native.code, 10, sh_mir_edge(mir, edge, 4))?; sh_x64_binary(&native.code, 5, 0, 10)?; let next = sh_x64_branch(&native.code, 2, 5)?; sh_native_edge(native, mir, edge)?; sh_x64_fix_branch(&native.code, next, sh_binary_len(&native.code))?; (); }; index = index + 1; }; return sh_native_edge(native, mir, default_edge); };
     sh_i64_error(6502);
@@ -157,7 +191,7 @@ def sh_native_function(native: &mut ShNative, mir: &ShMir, function: i64) -> Res
     sh_x64_mov(&native.code, 5, 4)?;
     if native.frame > 4096 { let probe = sh_x64_probe_stack(&native.code, native.frame)?; if not native.calls.push(probe + 11) or not native.calls.push(sh_mir_fn_count(mir) + 1) { return sh_i64_error(6503); }; (); } else { sh_x64_stack_adjust(&native.code, native.frame, false)?; (); };
     index = 0;
-    while index < sh_mir_inst_count(mir) { if sh_mir_inst(mir, index, 0) == function and sh_mir_inst(mir, index, 2) == 1 { let ordinal = sh_mir_inst(mir, index, 6); if ordinal < 4 { let register = if ordinal == 0 { 1; } else { if ordinal == 1 { 2; } else { if ordinal == 2 { 8; } else { 9; }; }; }; sh_x64_mov(&native.code, 0, register)?; } else { sh_x64_memory(&native.code, 0, 0, 5, 48 + (ordinal - 4) * 8)?; }; sh_native_normalize(native, mir, sh_mir_value_type(mir, index), 0)?; sh_native_save(native, index, 0)?; (); }; index = index + 1; };
+    while index < sh_mir_inst_count(mir) { if sh_mir_inst(mir, index, 0) == function and sh_mir_inst(mir, index, 2) == 1 { let ordinal = sh_mir_inst(mir, index, 6); if ordinal < 4 and sh_mir_type_word(mir, sh_mir_value_type(mir, index), 0) == 3 { sh_native_float_save(native, mir, index, ordinal)?; (); } else { if ordinal < 4 { let register = if ordinal == 0 { 1; } else { if ordinal == 1 { 2; } else { if ordinal == 2 { 8; } else { 9; }; }; }; sh_x64_mov(&native.code, 0, register)?; } else { sh_x64_memory(&native.code, 0, 0, 5, 48 + (ordinal - 4) * 8)?; }; sh_native_normalize(native, mir, sh_mir_value_type(mir, index), 0)?; sh_native_save(native, index, 0)?; (); }; (); }; index = index + 1; };
     let entry = sh_x64_branch(&native.code, 0, 0)?;
     if not native.branches.push(entry) or not native.branches.push(sh_mir_fn(mir, function, 2)) { return sh_i64_error(6503); };
     let mut block = 0;

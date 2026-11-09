@@ -106,6 +106,17 @@ loads/stores and a f64 bit pattern; negative mutation must fail before executing
 the buffer. This encoder checkpoint does not yet integrate floating MIR, full
 NaN comparison rules, conversions or the complete float call ABI.
 
+The scalar MIR consumer now also accepts IEEE-bit float constants, f32/f64
+arithmetic, unary sign changes, scalar memory and direct/indirect floating
+returns/calls. Windows floating arguments use XMM0-XMM3 by argument position,
+integer arguments retain their corresponding general-purpose positions and
+fifth/later arguments use stack slots. Comparisons use UCOMIS plus explicit
+parity handling to preserve ordered equality/relations and unordered inequality,
+including NaN and signed zero. The C gate independently checks NaN, infinities,
+mixed six-argument calls, f32 arithmetic and constant bits. Decimal literal
+conversion and integer/float conversions remain explicit unsupported errors at
+this checkpoint; an implicit integer bit copy is not a valid numeric cast.
+
 `tools/native.sg` joins the SG frontend, semantic checker, owned HIR/MIR and
 scalar consumer into a single-source development CLI. Its positional interface
 is `INPUT OUTPUT.obj [--wrap]`; JSON schema-version-1 diagnostics identify the

@@ -24,7 +24,7 @@ def sh_x64_sse_compare(output: &ShBinary, single: bool, destination: i64, source
     if destination < 0 or destination > 15 or source < 0 or source > 15 { return sh_i64_error(6101); };
     let start = sh_binary_len(output);
     let prefix = single or sh_binary_byte(output, 102).is_ok();
-    let valid = prefix and sh_binary_byte(output, 64 | ((destination >> 3) << 2) | (source >> 3)).is_ok() and sh_binary_byte(output, 15).is_ok() and sh_binary_byte(output, 47).is_ok() and sh_binary_byte(output, 192 | ((destination & 7) << 3) | (source & 7)).is_ok();
+    let valid = prefix and sh_binary_byte(output, 64 | ((destination >> 3) << 2) | (source >> 3)).is_ok() and sh_binary_byte(output, 15).is_ok() and sh_binary_byte(output, 46).is_ok() and sh_binary_byte(output, 192 | ((destination & 7) << 3) | (source & 7)).is_ok();
     if not valid { return sh_x64_rewind(output, start, 6001); };
     sh_i64_ok(start);
 }

@@ -9,6 +9,7 @@
 - [x] Verify the initial SG source-to-native-object CLI through frontend/semantics/owned HIR/MIR/x64/COFF against the frozen qualified Rust/LLVM reference for nine exact source programs and three output-preserving rejections (`target/selfhost/m4-source-supported/evidence.json`). Public sgc/module/tool parity remains open.
 - [x] Emit fixed-frame Windows x64 `.pdata/.xdata` unwind records and checked `__chkstk` probes for >4 KiB frames; verify LLVM inspection, `RtlLookupFunctionEntry`, `RtlVirtualUnwind`, deterministic objects and exact resource recovery (`target/selfhost/m4-unwind-final3/evidence.json`). Exception handlers, XMM saves and CodeView remain open.
 - [x] Verify bounded scalar SSE f32/f64 instruction encoding with independently specified bytes, CPU arithmetic/load/store/bit-pattern execution, damaged-byte rejection and 100 exact resource scopes (`target/selfhost/m4-sse-final/evidence.json`). Floating MIR and complete ABI/NaN/conversion behavior remain open.
+- [x] Execute scalar floating MIR arithmetic, constant bits, memory/call/return storage and ordered/unordered comparisons against independent C tests, including NaN/infinities/signed zero and mixed six-position Windows integer/float calls (`target/selfhost/m4-float/evidence.json`). Decimal literals and numeric conversions remain open.
 - [x] Emit fixed-frame Windows x64 `.pdata/.xdata` unwind records and checked `__chkstk` probes for >4 KiB frames; verify LLVM inspection, `RtlLookupFunctionEntry`, `RtlVirtualUnwind`, deterministic objects and exact resource recovery (`target/selfhost/m4-unwind-final3/evidence.json`). Exception handlers, XMM saves and CodeView remain open.
 
 ## Supported target behavior
@@ -98,3 +99,12 @@ success/failure scopes recovered tracked resources exactly, repeated byte
 streams matched, the independent C probe compared known instruction bytes and
 executed f32/f64 arithmetic/memory/bit-pattern fixtures, and a deliberately
 corrupted instruction stream was rejected with exit 66 before execution.
+
+Initial floating MIR evidence: `target/selfhost/m4-float/evidence.json`,
+SHA-256 `0d5d48803b91e2b4170ee713518d691fe8ede80e57ee58a406f7c7d7adb1c547`,
+revision `abb12a966a25fe34c5f23f401ad04c01aba84824`, Windows 11 x64.
+Twenty-one commands passed with unchanged sources/tools; all preceding integer,
+large-frame, unwind and overflow/wrapping regressions remained green. C callers
+verified scalar f32/f64 arithmetic, mixed ABI positions and NaN/infinity/zero
+comparison behavior. This does not qualify decimal parsing, numeric conversions,
+aggregates or complete M4 behavior.
