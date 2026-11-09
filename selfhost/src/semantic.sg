@@ -53,8 +53,8 @@ def sh_adt_binding(checked: &ShChecked, input_type: i64) -> i64 {
     let ty = sh_s_resolve(checked, input_type);
     if sh_s_kind(checked, ty) != 12 { return -1; };
     let symbol = sh_s_nominal(checked, ty);
-    let mut id = 0;
-    while id < sh_binding_count(checked) { let kind = sh_binding_word(checked, id, 2); if (kind == 3 or kind == 4) and sh_binding_word(checked, id, 0) == symbol { return id; }; id = id + 1; };
+    let mut id = sh_binding_count(checked) - 1;
+    while id >= 0 { let kind = sh_binding_word(checked, id, 2); if (kind == 3 or kind == 4) and sh_binding_word(checked, id, 0) == symbol { return id; }; id = id - 1; };
     -1;
 }
 
@@ -80,7 +80,7 @@ def sh_s_projection_resolve(checked: &ShChecked, projection: i64) -> i64 {
     let trait_name = sh_s_data(checked, projection);
     let item_name = sh_s_nominal(checked, projection);
     let mut record = 0;
-    while record < checked.constraints.len() { if checked.constraints.get(record + 2).unwrap_or(-1) == -2 and checked.constraints.get(record + 1).unwrap_or(-1) == trait_name { let target = checked.constraints.get(record).unwrap_or(-1); let owner = checked.constraints.get(record + 3).unwrap_or(-1); if sh_s_nominal(checked, target) == sh_s_nominal(checked, resolved) { let mut binding = 0; while binding < sh_binding_count(checked) { if sh_binding_word(checked, binding, 2) == 8 and sh_binding_word(checked, binding, 6) == owner and sh_binding_word(checked, binding, 0) == item_name { let ty = sh_binding_word(checked, binding, 3); if sh_s_kind(checked, ty) != 19 { return ty; }; }; binding = binding + 1; }; }; }; record = record + 4; };
+    while record < checked.constraints.len() { if checked.constraints.get(record + 2).unwrap_or(-1) == -2 and checked.constraints.get(record + 1).unwrap_or(-1) == trait_name { let target = checked.constraints.get(record).unwrap_or(-1); let owner = checked.constraints.get(record + 3).unwrap_or(-1); if sh_s_nominal(checked, target) == sh_s_nominal(checked, resolved) { let mut binding = 0; while binding < sh_binding_count(checked) { if sh_binding_word(checked, binding, 2) == 8 and sh_binding_word(checked, binding, 6) == owner and sh_binding_word(checked, binding, 0) == item_name { let ty = sh_binding_word(checked, binding, 3); if sh_s_kind(checked, ty) != 19 { let keys = vec_new_i64(); let values = vec_new_i64(); if sh_s_pattern_keys(checked, target, resolved, &keys, &values, 0) { return sh_s_type_replace(checked, ty, &keys, &values, 0); }; }; }; binding = binding + 1; }; }; }; record = record + 4; };
     projection;
 }
 
@@ -112,14 +112,55 @@ def sh_s_projection_ast(checked: &mut ShChecked, text: &String, ast: &ShAst, pat
     sh_s_projection_resolve(checked, projection);
 }
 
+def sh_class_parent(checked: &ShChecked, actual: i64) -> i64 {
+    let owner = sh_adt_binding(checked, actual);
+    let mut index = 0;
+    while index < checked.class_parents.len() { if checked.class_parents.get(index).unwrap_or(-1) == owner { let keys = vec_new_i64(); sh_s_parameter_types(checked, owner, &keys); let values = vec_new_i64(); let mut argument = 0; while argument < sh_s_arity(checked, actual) { values.push(sh_s_argument(checked, actual, argument)); argument = argument + 1; }; return sh_s_type_replace(checked, checked.class_parents.get(index + 1).unwrap_or(-1), &keys, &values, 0); }; index = index + 2; };
+    -1;
+}
+
+def sh_s_class_ancestor(checked: &ShChecked, actual: i64, ancestor: i64) -> i64 {
+    let mut current = actual;
+    let mut depth = 0;
+    while current >= 0 and depth < 128 { if sh_adt_binding(checked, current) == ancestor { return current; }; current = sh_class_parent(checked, current); depth = depth + 1; };
+    -1;
+}
+
+def sh_layout_field_count(checked: &ShChecked, actual: i64) -> i64 {
+    if sh_s_kind(checked, actual) != 12 or sh_adt_binding(checked, actual) < 0 { return -1; };
+    let mut current = actual;
+    let mut depth = 0;
+    let mut count = 0;
+    while current >= 0 and depth < 128 { let owner = sh_adt_binding(checked, current); let mut binding = 0; while binding < sh_binding_count(checked) { if sh_binding_word(checked, binding, 2) == 6 and sh_binding_word(checked, binding, 6) == owner { count = count + 1; }; binding = binding + 1; }; current = sh_class_parent(checked, current); depth = depth + 1; };
+    if current >= 0 { return -1; };
+    count;
+}
+
+def sh_layout_field_binding(checked: &ShChecked, actual: i64, index: i64) -> i64 {
+    if index < 0 { return -1; };
+    let chain = vec_new_i64();
+    let mut current = actual;
+    let mut depth = 0;
+    while current >= 0 and depth < 128 { chain.push(current); current = sh_class_parent(checked, current); depth = depth + 1; };
+    if current >= 0 { return -1; };
+    let mut at = chain.len() - 1;
+    let mut ordinal = 0;
+    while at >= 0 { let owner = sh_adt_binding(checked, chain.get(at).unwrap_or(-1)); let mut binding = 0; while binding < sh_binding_count(checked) { if sh_binding_word(checked, binding, 2) == 6 and sh_binding_word(checked, binding, 6) == owner { if ordinal == index { return binding; }; ordinal = ordinal + 1; }; binding = binding + 1; }; at = at - 1; };
+    -1;
+}
+
 def sh_resolved_field_type(checked: &ShChecked, adt_type: i64, field: i64) -> i64 {
-    let owner = sh_adt_binding(checked, adt_type);
-    if owner < 0 or sh_binding_word(checked, field, 6) != owner or sh_binding_word(checked, field, 2) != 6 { return checked.error_type; };
+    let mut actual = adt_type;
+    let mut owner = sh_adt_binding(checked, actual);
+    let field_owner = sh_binding_word(checked, field, 6);
+    let variant_field = sh_binding_word(checked, field_owner, 2) == 5 and sh_binding_word(checked, field_owner, 6) == owner;
+    if field_owner != owner and not variant_field { actual = sh_s_class_ancestor(checked, actual, field_owner); owner = sh_adt_binding(checked, actual); };
+    if owner < 0 or field_owner != owner and not variant_field or sh_binding_word(checked, field, 2) != 6 { return checked.error_type; };
     let source_keys = vec_new_i64();
     let target_values = vec_new_i64();
     let mut record = 0;
     let mut index = 0;
-    while record < checked.generic_parameters.len() { if checked.generic_parameters.get(record).unwrap_or(-1) == owner { source_keys.push(checked.generic_parameters.get(record + 2).unwrap_or(-1)); target_values.push(sh_s_argument(checked, adt_type, index)); index = index + 1; }; record = record + 3; };
+    while record < checked.generic_parameters.len() { if checked.generic_parameters.get(record).unwrap_or(-1) == owner { source_keys.push(checked.generic_parameters.get(record + 2).unwrap_or(-1)); target_values.push(sh_s_argument(checked, actual, index)); index = index + 1; }; record = record + 3; };
     sh_s_type_replace(checked, sh_binding_word(checked, field, 3), &source_keys, &target_values, 0);
 }
 
@@ -154,6 +195,7 @@ def sh_s_register(checked: &mut ShChecked, text: &String, ast: &ShAst, node: i64
     let name_node = sh_s_name_child(ast, node);
     if kind < 0 or name_node < 0 { sh_s_diagnose(checked, ast, node, 5116, 1, -1, -1); return -1; };
     let symbol = sh_s_symbol(checked, text, ast, name_node);
+    if kind == 7 { let label = sh_s_symbol_text(checked, symbol); if label.is_ok() and (sh_s_text_equal(&label.value, "Drop") or sh_s_text_equal(&label.value, "Copy")) { sh_s_diagnose(checked, ast, node, 5123, 1, -1, -1); }; };
     let previous = sh_s_lookup_scope(checked, symbol, scope, sh_s_type_binding_kind(kind));
     if previous >= 0 and kind != 2 and sh_binding_word(checked, previous, 2) != 13 and (sh_binding_word(checked, previous, 5) & 4096) == 0 { sh_s_diagnose(checked, ast, name_node, 5103, 1, previous, -1); return previous; };
     let flags = sh_ast_word(ast, node, 4) | extra_flags;
@@ -267,7 +309,8 @@ def sh_s_self_alias(checked: &ShChecked, scope: i64, owner: i64, ty: i64) {
 
 def sh_s_collect(checked: &mut ShChecked, text: &String, ast: &ShAst, node: i64, scope: i64, owner: i64, flags: i64) {
     let kind = sh_ast_word(ast, node, 0);
-    if kind == 1 or kind == 31 { let mut index = 0; while index < sh_ast_word(ast, node, 6) { let child = sh_ast_child(ast, node, index); if sh_ast_word(ast, child, 0) != 11 { sh_s_collect(checked, text, ast, child, scope, owner, flags | if kind == 31 { 8; } else { 0; }); }; index = index + 1; }; return; };
+    if kind == 33 { sh_s_set_type(checked, node, checked.unit_type); return; };
+    if kind == 1 or kind == 31 { let mut index = 0; while index < sh_ast_word(ast, node, 6) { let child = sh_ast_child(ast, node, index); if sh_ast_word(ast, child, 0) != 11 { sh_s_collect(checked, text, ast, child, scope, owner, flags | if kind == 31 { 8 | sh_ast_word(ast, node, 4); } else { 0; }); }; index = index + 1; }; return; };
     if kind == 30 { sh_s_set_type(checked, node, checked.unit_type); return; };
     if kind == 26 { let label = string_from_str("@impl:"); if not label.is_ok() { sh_s_diagnose(checked, ast, node, 5117, 1, -1, -1); return; }; label.value.push_i64(node); let symbol = sh_intern(&checked.symbols, &label.value).unwrap_or(-1); let binding = sh_s_binding(checked, symbol, scope, 14, sh_s_fresh(checked), node, sh_ast_word(ast, node, 4), owner, -1); let local = sh_s_scope(checked, scope, binding, 0); sh_s_binding_set(checked, binding, 7, local); sh_s_generics(checked, text, ast, node, binding, local); let mut index = 0; while index < sh_ast_word(ast, node, 6) { let child = sh_ast_child(ast, node, index); let child_kind = sh_ast_word(ast, child, 0); if child_kind == 20 or child_kind == 28 or child_kind == 29 { sh_s_collect(checked, text, ast, child, local, binding, flags); }; index = index + 1; }; return; };
     let binding = sh_s_register(checked, text, ast, node, scope, owner, flags);
@@ -292,6 +335,20 @@ def sh_s_field(checked: &mut ShChecked, text: &String, ast: &ShAst, field: i64, 
     sh_s_bind_node(checked, name_node, binding);
     sh_s_set_type(checked, field, ty);
     binding;
+}
+
+def sh_s_class_headers(checked: &mut ShChecked, text: &String, ast: &ShAst) {
+    let old_scope = checked.current_scope;
+    let mut binding = 0;
+    while binding < sh_binding_count(checked) { let declaration = sh_binding_word(checked, binding, 4); if sh_binding_word(checked, binding, 2) == 3 and sh_ast_word(ast, declaration, 0) == 32 { checked.current_scope = sh_binding_word(checked, binding, 7); let mut child = 0; let mut header_count = 0; while child < sh_ast_word(ast, declaration, 6) { let part = sh_ast_child(ast, declaration, child); let kind = sh_ast_word(ast, part, 0); if kind == 70 { let ty = sh_s_type_ast(checked, text, ast, part); let owner = sh_adt_binding(checked, ty); if sh_s_kind(checked, ty) == 14 { checked.constraints.push(sh_binding_word(checked, binding, 3)); checked.constraints.push(sh_s_nominal(checked, ty)); checked.constraints.push(-2); checked.constraints.push(binding); checked.trait_types.push(binding); checked.trait_types.push(ty); (); } else if owner >= 0 and sh_ast_word(ast, sh_binding_word(checked, owner, 4), 0) == 32 and header_count == 0 { checked.class_parents.push(binding); checked.class_parents.push(ty); (); } else { sh_s_diagnose(checked, ast, part, 5123, 1, -1, ty); }; header_count = header_count + 1; }; child = child + 1; }; }; binding = binding + 1; };
+    checked.current_scope = old_scope;
+    ();
+}
+
+def sh_s_validate_classes(checked: &mut ShChecked, ast: &ShAst) {
+    let mut index = 0;
+    while index < checked.class_parents.len() { let owner = checked.class_parents.get(index).unwrap_or(-1); let declaration = sh_binding_word(checked, owner, 4); let seen = vec_new_i64(); seen.push(owner); let mut current = checked.class_parents.get(index + 1).unwrap_or(-1); let mut depth = 0; while current >= 0 and depth < 128 { let binding = sh_adt_binding(checked, current); if seen.contains(binding) { sh_s_diagnose(checked, ast, declaration, 5123, 1, -1, binding); break; }; seen.push(binding); current = sh_class_parent(checked, current); depth = depth + 1; }; if current >= 0 and depth >= 128 { sh_s_diagnose(checked, ast, declaration, 5117, 1, -1, -1); }; let parent = checked.class_parents.get(index + 1).unwrap_or(-1); let parent_owner = sh_adt_binding(checked, parent); let mut field = 0; while field < sh_binding_count(checked) { if sh_binding_word(checked, field, 2) == 6 and sh_binding_word(checked, field, 6) == owner { let inherited = sh_s_find_field(checked, parent_owner, sh_binding_word(checked, field, 0)); if inherited >= 0 { sh_s_diagnose(checked, ast, sh_binding_word(checked, field, 4), 5123, 1, inherited, field); }; }; field = field + 1; }; index = index + 2; };
+    ();
 }
 
 def sh_s_fill_nominal(checked: &mut ShChecked, text: &String, ast: &ShAst, binding: i64) {
@@ -331,6 +388,7 @@ def sh_s_fill_impl(checked: &mut ShChecked, text: &String, ast: &ShAst, binding:
 
 def sh_s_fill_function(checked: &mut ShChecked, text: &String, ast: &ShAst, binding: i64) {
     let node = sh_binding_word(checked, binding, 4);
+    if node < 0 { return; };
     let scope = sh_binding_word(checked, binding, 7);
     let owner = sh_binding_word(checked, binding, 6);
     let old = checked.current_scope;
@@ -364,6 +422,11 @@ def sh_s_fill_bounds(checked: &mut ShChecked, text: &String, ast: &ShAst, owner:
 }
 
 def sh_s_implements(checked: &ShChecked, original: i64, trait_symbol: i64) -> bool {
+    sh_s_implements_depth(checked, original, trait_symbol, 0);
+}
+
+def sh_s_implements_depth(checked: &ShChecked, original: i64, trait_symbol: i64, depth: i64) -> bool {
+    if depth > 128 { return false; };
     let ty = sh_s_resolve(checked, original);
     let kind = sh_s_kind(checked, ty);
     if kind == 18 or kind == 19 { return true; };
@@ -372,12 +435,13 @@ def sh_s_implements(checked: &ShChecked, original: i64, trait_symbol: i64) -> bo
     let label = sh_s_symbol_text(checked, trait_symbol);
     if not label.is_ok() { return false; };
     if kind == 2 or kind == 3 or kind == 1 or kind == 4 or kind == 5 or kind == 6 { let name = label.value.as_str(); if name == "Clone" or name == "Copy" or name == "PartialEq" or name == "Eq" or name == "PartialOrd" or name == "Ord" or name == "Default" or name == "Display" or name == "Debug" or name == "Send" or name == "Sync" or name == "Hash" { return true; }; if kind == 2 or kind == 3 { return name == "Add" or name == "Sub" or name == "Mul" or name == "Div" or name == "Rem" or name == "Neg"; }; };
+    if kind == 12 { let parent = sh_class_parent(checked, ty); if parent >= 0 { return sh_s_implements_depth(checked, parent, trait_symbol, depth + 1); }; };
     false;
 }
 
 def sh_s_validate_impls(checked: &mut ShChecked, text: &String, ast: &ShAst) {
     let mut implementation = 0;
-    while implementation < sh_binding_count(checked) { if sh_binding_word(checked, implementation, 2) == 14 and (sh_binding_word(checked, implementation, 5) & 8) == 0 { let mut record = 0; let mut trait_symbol = -1; while record < checked.constraints.len() { if checked.constraints.get(record + 2).unwrap_or(-1) == -2 and checked.constraints.get(record + 3).unwrap_or(-1) == implementation { trait_symbol = checked.constraints.get(record + 1).unwrap_or(-1); break; }; record = record + 4; }; if trait_symbol >= 0 { let trait_binding = sh_s_lookup(checked, trait_symbol, 0, true); let mut method = 0; while method < sh_binding_count(checked) { if sh_binding_word(checked, method, 2) == 2 and sh_binding_word(checked, method, 6) == trait_binding { let mut candidate = 0; let mut found = -1; while candidate < sh_binding_count(checked) { if sh_binding_word(checked, candidate, 2) == 2 and sh_binding_word(checked, candidate, 6) == implementation and sh_binding_word(checked, candidate, 0) == sh_binding_word(checked, method, 0) { found = candidate; break; }; candidate = candidate + 1; }; let required_node = sh_binding_word(checked, method, 4); if found < 0 { let required_body = sh_s_child_kind(ast, required_node, 40); if required_body < 0 or sh_ast_word(ast, required_body, 6) == 0 { let declaration = sh_binding_word(checked, implementation, 4); sh_s_diagnose(checked, ast, declaration, 5115, 1, method, -1); }; } else { let keys = vec_new_i64(); let values = vec_new_i64(); let self_name = sh_s_named_symbol(checked, "Self"); let self_binding = sh_s_lookup(checked, self_name, sh_binding_word(checked, trait_binding, 7), true); if self_binding >= 0 { keys.push(sh_binding_word(checked, self_binding, 3)); values.push(sh_binding_word(checked, implementation, 3)); (); }; let mut trait_actual = -1; let mut trait_at = 0; while trait_at < checked.trait_types.len() { if checked.trait_types.get(trait_at).unwrap_or(-1) == implementation { trait_actual = checked.trait_types.get(trait_at + 1).unwrap_or(-1); break; }; trait_at = trait_at + 2; }; let mut generic_at = 0; let mut ordinal = 0; while generic_at < checked.generic_parameters.len() { if checked.generic_parameters.get(generic_at).unwrap_or(-1) == trait_binding { keys.push(checked.generic_parameters.get(generic_at + 2).unwrap_or(-1)); values.push(sh_s_argument(checked, trait_actual, ordinal)); ordinal = ordinal + 1; }; generic_at = generic_at + 3; }; let wanted = sh_s_type_replace(checked, sh_binding_word(checked, method, 3), &keys, &values, 0); let actual = sh_binding_word(checked, found, 3); let declaration = sh_binding_word(checked, found, 4); sh_s_expect(checked, ast, declaration, wanted, actual); (); }; }; method = method + 1; }; }; }; implementation = implementation + 1; };
+    while implementation < sh_binding_count(checked) { if sh_binding_word(checked, implementation, 2) == 14 and (sh_binding_word(checked, implementation, 5) & 8) == 0 { let mut record = 0; let mut trait_symbol = -1; while record < checked.constraints.len() { if checked.constraints.get(record + 2).unwrap_or(-1) == -2 and checked.constraints.get(record + 3).unwrap_or(-1) == implementation { trait_symbol = checked.constraints.get(record + 1).unwrap_or(-1); break; }; record = record + 4; }; if trait_symbol >= 0 { let trait_binding = sh_s_lookup(checked, trait_symbol, 0, true); let mut method = 0; while method < sh_binding_count(checked) { if sh_binding_word(checked, method, 2) == 2 and sh_binding_word(checked, method, 6) == trait_binding { let mut candidate = 0; let mut found = -1; while candidate < sh_binding_count(checked) { if sh_binding_word(checked, candidate, 2) == 2 and sh_binding_word(checked, candidate, 6) == implementation and sh_binding_word(checked, candidate, 0) == sh_binding_word(checked, method, 0) { found = candidate; break; }; candidate = candidate + 1; }; let required_node = sh_binding_word(checked, method, 4); if found < 0 { let required_body = sh_s_child_kind(ast, required_node, 40); if required_node >= 0 and (required_body < 0 or sh_ast_word(ast, required_body, 6) == 0) { let declaration = sh_binding_word(checked, implementation, 4); sh_s_diagnose(checked, ast, declaration, 5115, 1, method, -1); }; } else { let keys = vec_new_i64(); let values = vec_new_i64(); let self_name = sh_s_named_symbol(checked, "Self"); let self_binding = sh_s_lookup(checked, self_name, sh_binding_word(checked, trait_binding, 7), true); if self_binding >= 0 { keys.push(sh_binding_word(checked, self_binding, 3)); values.push(sh_binding_word(checked, implementation, 3)); (); }; let mut trait_actual = -1; let mut trait_at = 0; while trait_at < checked.trait_types.len() { if checked.trait_types.get(trait_at).unwrap_or(-1) == implementation { trait_actual = checked.trait_types.get(trait_at + 1).unwrap_or(-1); break; }; trait_at = trait_at + 2; }; let mut generic_at = 0; let mut ordinal = 0; while generic_at < checked.generic_parameters.len() { if checked.generic_parameters.get(generic_at).unwrap_or(-1) == trait_binding { keys.push(checked.generic_parameters.get(generic_at + 2).unwrap_or(-1)); values.push(sh_s_argument(checked, trait_actual, ordinal)); ordinal = ordinal + 1; }; generic_at = generic_at + 3; }; let wanted = sh_s_type_replace(checked, sh_binding_word(checked, method, 3), &keys, &values, 0); let actual = sh_binding_word(checked, found, 3); let declaration = sh_binding_word(checked, found, 4); sh_s_expect(checked, ast, declaration, wanted, actual); (); }; }; method = method + 1; }; }; }; implementation = implementation + 1; };
     ();
 }
 
@@ -428,8 +492,9 @@ def sh_s_base_type(checked: &ShChecked, original: i64) -> i64 {
 }
 
 def sh_s_find_field(checked: &ShChecked, owner: i64, symbol: i64) -> i64 {
-    let mut field = 0;
-    while field < sh_binding_count(checked) { if sh_binding_word(checked, field, 2) == 6 and sh_binding_word(checked, field, 6) == owner and sh_binding_word(checked, field, 0) == symbol { return field; }; field = field + 1; };
+    let mut current = owner;
+    let mut depth = 0;
+    while current >= 0 and depth < 128 { let mut field = 0; while field < sh_binding_count(checked) { if sh_binding_word(checked, field, 2) == 6 and sh_binding_word(checked, field, 6) == current and sh_binding_word(checked, field, 0) == symbol { return field; }; field = field + 1; }; current = sh_adt_binding(checked, sh_class_parent(checked, sh_binding_word(checked, current, 3))); depth = depth + 1; };
     -1;
 }
 
@@ -452,10 +517,31 @@ def sh_s_field_expr(checked: &mut ShChecked, text: &String, ast: &ShAst, node: i
 
 def sh_s_mutable_place(checked: &ShChecked, ast: &ShAst, node: i64) -> bool {
     let kind = sh_ast_word(ast, node, 0);
+    if kind == 58 and sh_ast_word(ast, node, 4) == 0 and sh_ast_word(ast, node, 6) == 1 { return sh_s_mutable_place(checked, ast, sh_ast_child(ast, node, 0)); };
     if kind == 12 { let binding = sh_node_binding(checked, node); if binding < 0 { return false; }; return (sh_binding_word(checked, binding, 5) & 1) != 0; };
     if kind == 50 and sh_ast_word(ast, node, 4) % 1000 == sh_kind("*") { let ty = sh_s_resolve(checked, sh_node_type(checked, sh_ast_child(ast, node, 0))); return (sh_s_kind(checked, ty) == 6 or sh_s_kind(checked, ty) == 7) and sh_s_flags(checked, ty) == 1; };
     if kind == 54 or kind == 55 { let base = sh_ast_child(ast, node, 0); let ty = sh_s_resolve(checked, sh_node_type(checked, base)); if sh_s_kind(checked, ty) == 6 { return sh_s_flags(checked, ty) == 1; }; return sh_s_mutable_place(checked, ast, base); };
     false;
+}
+
+def sh_s_fresh_place(checked: &ShChecked, ast: &ShAst, node: i64) -> bool {
+    let kind = sh_ast_word(ast, node, 0);
+    if kind == 58 and sh_ast_word(ast, node, 4) == 0 and sh_ast_word(ast, node, 6) == 1 { return sh_s_fresh_place(checked, ast, sh_ast_child(ast, node, 0)); };
+    if kind == 54 or kind == 55 { return sh_s_fresh_place(checked, ast, sh_ast_child(ast, node, 0)); };
+    if kind == 12 or kind == 10 or kind == 50 and sh_ast_word(ast, node, 4) % 1000 == sh_kind("*") { return false; };
+    let ty = sh_s_resolve(checked, sh_node_type(checked, node));
+    sh_s_kind(checked, ty) == 12 or sh_s_kind(checked, ty) == 8 or sh_s_kind(checked, ty) == 10;
+}
+
+def sh_s_destructor_field(checked: &ShChecked, ast: &ShAst, receiver: i64) -> bool {
+    let implementation = sh_binding_word(checked, checked.current_owner, 6);
+    if sh_s_impl_symbol(checked, implementation) != sh_s_named_symbol(checked, "Drop") or sh_ast_word(ast, receiver, 0) != 55 { return false; };
+    let mut root = receiver;
+    let mut depth = 0;
+    while depth < 128 { let kind = sh_ast_word(ast, root, 0); if kind == 55 or kind == 54 or kind == 58 and sh_ast_word(ast, root, 4) == 0 and sh_ast_word(ast, root, 6) == 1 { root = sh_ast_child(ast, root, 0); } else { break; }; depth = depth + 1; };
+    let binding = sh_node_binding(checked, root);
+    let declaration = sh_binding_word(checked, binding, 4);
+    sh_binding_word(checked, binding, 2) == 1 and sh_binding_word(checked, binding, 6) == checked.current_owner and (sh_ast_word(ast, declaration, 4) & 4) != 0;
 }
 
 def sh_s_bind_pattern(checked: &mut ShChecked, text: &String, ast: &ShAst, pattern: i64, ty: i64, mutable: bool, declaration: i64) {
@@ -491,8 +577,15 @@ def sh_s_struct(checked: &mut ShChecked, text: &String, ast: &ShAst, node: i64, 
     let mut index = 1;
     let mut update = false;
     while index < sh_ast_word(ast, node, 6) { let field_node = sh_ast_child(ast, node, index); if sh_ast_word(ast, field_node, 4) == 1 { let base = sh_s_expr(checked, text, ast, sh_ast_child(ast, field_node, 0), ty); sh_s_expect(checked, ast, field_node, ty, base); update = true; } else { let name_node = sh_ast_child(ast, field_node, 0); let symbol = sh_s_field_symbol(checked, text, ast, name_node); let binding = sh_s_find_field(checked, owner, symbol); if binding < 0 { sh_s_diagnose(checked, ast, name_node, 5106, 1, -1, -1); } else { if seen.contains(binding) { sh_s_diagnose(checked, ast, name_node, 5103, 1, binding, binding); }; seen.push(binding); sh_s_bind_node(checked, field_node, binding); sh_s_bind_node(checked, name_node, binding); let required = sh_resolved_field_type(checked, ty, binding); let mut value = checked.error_type; if sh_ast_word(ast, field_node, 6) > 1 { value = sh_s_expr(checked, text, ast, sh_ast_child(ast, field_node, 1), required); } else { let local = sh_s_lookup(checked, symbol, checked.current_scope, false); if local < 0 { sh_s_diagnose(checked, ast, name_node, 5101, 1, -1, -1); } else { value = sh_binding_word(checked, local, 3); sh_s_bind_node(checked, name_node, local); }; }; sh_s_expect(checked, ast, field_node, required, value); sh_s_set_type(checked, field_node, required); (); }; }; index = index + 1; };
-    if not update { let mut field = 0; while field < sh_binding_count(checked) { if sh_binding_word(checked, field, 2) == 6 and sh_binding_word(checked, field, 6) == owner and not seen.contains(field) { sh_s_diagnose(checked, ast, node, 5106, 1, field, -1); }; field = field + 1; }; };
+    if not update { let mut index = 0; let count = sh_layout_field_count(checked, ty); while index < count { let field = sh_layout_field_binding(checked, ty, index); if not seen.contains(field) { sh_s_diagnose(checked, ast, node, 5106, 1, field, -1); }; index = index + 1; }; };
     ty;
+}
+
+def sh_s_legacy_handle(checked: &ShChecked, ty: i64) -> bool {
+    let label = sh_s_symbol_text(checked, sh_s_nominal(checked, ty));
+    if not label.is_ok() { return false; };
+    let name = label.value.as_str();
+    name == "String" or name == "Buffer" or name == "JsonDoc" or name == "ProcessCommand" or name == "ProcessOutput" or name == "ProcessHandle" or name == "TcpStream" or name == "UdpSocket" or name == "HttpClient" or name == "HttpServer" or name == "HttpServerRequest" or name == "WsClient" or name == "TextList" or name == "TextListIter" or name == "StringMapI64" or name == "StringMapBool" or name == "StringMapKeyIter" or name == "StringMapString" or name == "StringMapStringKeyIter" or name == "VecStringIter" or name == "Vec" or name == "VecIter" or name == "HashMap" or name == "HashMapIter";
 }
 
 def sh_s_method(checked: &mut ShChecked, text: &String, ast: &ShAst, field: i64) -> i64 {
@@ -508,11 +601,77 @@ def sh_s_method(checked: &mut ShChecked, text: &String, ast: &ShAst, field: i64)
     let mut chosen = -1;
     let mut chosen_type = checked.error_type;
     let mut rank = -1;
-    while candidate < sh_binding_count(checked) { if sh_binding_word(checked, candidate, 2) == 2 and sh_binding_word(checked, candidate, 0) == symbol { let owner = sh_binding_word(checked, candidate, 6); let owner_kind = sh_binding_word(checked, owner, 2); let owner_type = sh_binding_word(checked, owner, 3); if (owner_kind == 14 and sh_s_nominal(checked, sh_s_base_type(checked, owner_type)) == nominal) or (owner_kind == 3 and sh_binding_word(checked, owner, 0) == nominal) or (owner_kind == 7 and sh_s_implements(checked, base, sh_binding_word(checked, owner, 0))) { let fn_type = sh_s_instantiate(checked, sh_binding_word(checked, candidate, 3)); let self_type = sh_s_argument(checked, fn_type, 0); let mut required = self_type; if sh_s_kind(checked, self_type) == 6 and sh_s_kind(checked, actual) != 6 { required = sh_s_argument(checked, self_type, 0); }; let mut score = if owner_kind == 7 { 0; } else { 10; }; let mut argument = 0; while argument < sh_s_arity(checked, owner_type) { let inner = sh_s_argument(checked, owner_type, argument); if sh_s_kind(checked, inner) != 13 { score = score + 1; }; argument = argument + 1; }; if score > rank and sh_s_unify(checked, required, actual, 0) { if sh_s_kind(checked, self_type) == 6 and sh_s_flags(checked, self_type) == 1 and sh_s_kind(checked, actual) != 6 and not sh_s_mutable_place(checked, ast, receiver) { sh_s_diagnose(checked, ast, receiver, 5107, 1, self_type, actual); }; rank = score; chosen = candidate; chosen_type = fn_type; }; }; }; candidate = candidate + 1; };
-    if chosen < 0 { sh_s_diagnose(checked, ast, member, 5106, 1, -1, -1); return checked.error_type; };
+    let mut ambiguous = false;
+    while candidate < sh_binding_count(checked) { if sh_binding_word(checked, candidate, 2) == 2 and sh_binding_word(checked, candidate, 0) == symbol { let owner = sh_binding_word(checked, candidate, 6); let owner_kind = sh_binding_word(checked, owner, 2); let owner_type = sh_binding_word(checked, owner, 3); let ancestor = if owner_kind == 3 { sh_s_class_ancestor(checked, base, owner); } else { -1; }; if owner_kind == 14 and sh_s_nominal(checked, sh_s_base_type(checked, owner_type)) == nominal or ancestor >= 0 or owner_kind == 7 and sh_s_implements(checked, base, sh_binding_word(checked, owner, 0)) { let keys = vec_new_i64(); let values = vec_new_i64(); if ancestor >= 0 { sh_s_pattern_keys(checked, owner_type, ancestor, &keys, &values, 0); (); }; let template = sh_s_type_replace(checked, sh_binding_word(checked, candidate, 3), &keys, &values, 0); let fn_type = sh_s_instantiate(checked, template); let self_type = sh_s_argument(checked, fn_type, 0); let mut required = self_type; if sh_s_kind(checked, self_type) == 6 and sh_s_kind(checked, actual) != 6 { required = sh_s_argument(checked, self_type, 0); }; let mut compared = actual; if sh_s_kind(checked, actual) == 6 and sh_s_kind(checked, self_type) != 6 and member_name.is_ok() and not sh_s_text_equal(&member_name.value, "into_iter") and sh_s_legacy_handle(checked, base) { compared = base; }; let mut inherited = ancestor >= 0 and sh_s_nominal(checked, ancestor) != nominal; if sh_s_kind(checked, actual) == 6 { inherited = inherited and sh_s_kind(checked, self_type) == 6 and not (sh_s_flags(checked, self_type) == 1 and sh_s_flags(checked, actual) == 0); }; let mut score = if owner_kind == 7 { 0; } else { if owner_kind == 14 and sh_s_impl_symbol(checked, owner) >= 0 { 10; } else { 20; }; }; if ancestor >= 0 { score = if sh_s_nominal(checked, ancestor) == nominal { 40; } else { 30; }; }; let mut argument = 0; while argument < sh_s_arity(checked, owner_type) { let inner = sh_s_argument(checked, owner_type, argument); if sh_s_kind(checked, inner) != 13 { score = score + 1; }; argument = argument + 1; }; if score >= rank and (inherited or sh_s_unify(checked, required, compared, 0)) { if sh_s_kind(checked, self_type) == 6 and sh_s_flags(checked, self_type) == 1 and sh_s_kind(checked, actual) != 6 and not sh_s_mutable_place(checked, ast, receiver) and not sh_s_fresh_place(checked, ast, receiver) { sh_s_diagnose(checked, ast, receiver, 5107, 1, self_type, actual); }; let previous_owner = sh_binding_word(checked, chosen, 6); if score == rank and chosen >= 0 and owner != previous_owner and sh_s_impl_symbol(checked, owner) >= 0 and sh_s_impl_symbol(checked, previous_owner) >= 0 { ambiguous = true; } else { if score > rank { ambiguous = false; }; chosen = candidate; chosen_type = fn_type; rank = score; }; }; }; }; candidate = candidate + 1; };
+    if chosen < 0 or ambiguous { sh_s_diagnose(checked, ast, member, if ambiguous { 5123; } else { 5106; }, 1, -1, -1); return checked.error_type; };
     sh_s_bind_node(checked, field, chosen);
     sh_s_bind_node(checked, member, chosen);
     sh_s_set_type(checked, field, chosen_type);
+}
+
+def sh_s_normalize(checked: &ShChecked, ty: i64) -> i64 {
+    let empty = vec_new_i64();
+    sh_s_type_replace(checked, ty, &empty, &empty, 0);
+}
+
+def sh_s_pattern_keys(checked: &ShChecked, pattern: i64, actual: i64, keys: &Vec<i64>, values: &Vec<i64>, depth: i64) -> bool {
+    if depth > 128 { return false; };
+    let left = sh_s_resolve(checked, pattern);
+    let right = sh_s_resolve(checked, actual);
+    if sh_s_kind(checked, left) == 13 { let mut index = 0; while index < keys.len() { if sh_s_vector(keys, index) == left { return sh_s_normalize(checked, sh_s_vector(values, index)) == sh_s_normalize(checked, right); }; index = index + 1; }; keys.push(left); values.push(right); return true; };
+    if sh_s_kind(checked, left) != sh_s_kind(checked, right) or sh_s_data(checked, left) != sh_s_data(checked, right) or sh_s_flags(checked, left) != sh_s_flags(checked, right) or sh_s_nominal(checked, left) != sh_s_nominal(checked, right) or sh_s_arity(checked, left) != sh_s_arity(checked, right) { return false; };
+    let mut index = 0;
+    while index < sh_s_arity(checked, left) { if not sh_s_pattern_keys(checked, sh_s_argument(checked, left, index), sh_s_argument(checked, right, index), keys, values, depth + 1) { return false; }; index = index + 1; };
+    true;
+}
+
+def sh_s_trait_actual(checked: &ShChecked, implementation: i64) -> i64 {
+    let mut index = 0;
+    while index < checked.trait_types.len() { if checked.trait_types.get(index).unwrap_or(-1) == implementation { return checked.trait_types.get(index + 1).unwrap_or(-1); }; index = index + 2; };
+    -1;
+}
+
+def sh_s_trait_actual_for(checked: &ShChecked, implementation: i64, trait_symbol: i64) -> i64 {
+    let mut index = 0;
+    while index < checked.trait_types.len() { let ty = checked.trait_types.get(index + 1).unwrap_or(-1); if checked.trait_types.get(index).unwrap_or(-1) == implementation and sh_s_nominal(checked, ty) == trait_symbol { return ty; }; index = index + 2; };
+    -1;
+}
+
+def sh_s_bound_satisfied(checked: &ShChecked, input: i64, bound: i64) -> bool {
+    sh_s_bound_satisfied_depth(checked, input, bound, 0);
+}
+
+def sh_s_bound_satisfied_depth(checked: &ShChecked, input: i64, bound: i64, depth: i64) -> bool {
+    if depth > 128 { return false; };
+    let actual = sh_s_normalize(checked, input);
+    let trait_symbol = sh_s_nominal(checked, bound);
+    let mut record = 0;
+    while record < checked.constraints.len() { if checked.constraints.get(record + 1).unwrap_or(-1) == trait_symbol { let target = checked.constraints.get(record).unwrap_or(-1); let source = checked.constraints.get(record + 2).unwrap_or(-1); if source >= 0 and target == actual { let existing = sh_s_normalize(checked, sh_node_type(checked, source)); if sh_s_arity(checked, bound) == 0 or existing == bound { return true; }; }; if source == -2 { let implementation = checked.constraints.get(record + 3).unwrap_or(-1); let keys = vec_new_i64(); let values = vec_new_i64(); if sh_s_pattern_keys(checked, target, actual, &keys, &values, 0) { if (sh_binding_word(checked, implementation, 5) & 8) != 0 { return false; }; let instance = sh_s_type_replace(checked, sh_s_trait_actual_for(checked, implementation, trait_symbol), &keys, &values, 0); if sh_s_arity(checked, bound) == 0 or instance == bound { return true; }; }; }; }; record = record + 4; };
+    let parent = sh_class_parent(checked, actual);
+    if parent >= 0 and sh_s_bound_satisfied_depth(checked, parent, bound, depth + 1) { return true; };
+    if sh_s_arity(checked, bound) != 0 { return false; };
+    let label = sh_s_symbol_text(checked, trait_symbol);
+    if label.is_ok() and (sh_s_text_equal(&label.value, "Send") or sh_s_text_equal(&label.value, "Sync")) { let visiting = vec_new_i64(); return sh_s_auto_marker(checked, actual, trait_symbol, &visiting, 0); };
+    sh_s_implements(checked, actual, trait_symbol);
+}
+
+def sh_s_require_bounds(checked: &mut ShChecked, ast: &ShAst, node: i64, owner: i64, keys: &Vec<i64>, values: &Vec<i64>, strict_inference: bool) {
+    let mut record = 0;
+    while record < checked.constraints.len() { let source = checked.constraints.get(record + 2).unwrap_or(-1); if source >= 0 and checked.constraints.get(record + 3).unwrap_or(-1) == owner { let param = checked.constraints.get(record).unwrap_or(-1); let actual = sh_s_type_replace(checked, param, keys, values, 0); let bound = sh_s_type_replace(checked, sh_node_type(checked, source), keys, values, 0); if strict_inference and (actual == param or sh_s_kind(checked, actual) == 19) { sh_s_diagnose(checked, ast, node, 5114, 1, param, actual); } else { if not sh_s_bound_satisfied(checked, actual, bound) { sh_s_diagnose(checked, ast, node, 5115, 1, bound, actual); }; }; }; record = record + 4; };
+    ();
+}
+
+def sh_s_type_bounds(checked: &mut ShChecked, ast: &ShAst, node: i64, ty: i64) {
+    if sh_s_kind(checked, ty) != 12 { return; };
+    let owner = sh_adt_binding(checked, ty);
+    if owner < 0 { return; };
+    let keys = vec_new_i64();
+    sh_s_parameter_types(checked, owner, &keys);
+    let values = vec_new_i64();
+    let mut index = 0;
+    while index < sh_s_arity(checked, ty) { values.push(sh_s_argument(checked, ty, index)); index = index + 1; };
+    if keys.len() == values.len() { sh_s_require_bounds(checked, ast, node, owner, &keys, &values, false); };
+    ();
 }
 
 def sh_s_call(checked: &mut ShChecked, text: &String, ast: &ShAst, node: i64, expected: i64) -> i64 {
@@ -525,13 +684,21 @@ def sh_s_call(checked: &mut ShChecked, text: &String, ast: &ShAst, node: i64, ex
     if sh_s_kind(checked, fn_type) != 11 { sh_s_diagnose(checked, ast, callee, 5105, 1, -1, fn_type); return checked.error_type; };
     let target = sh_node_binding(checked, callee);
     sh_s_bind_node(checked, node, target);
+    if method and sh_s_impl_symbol(checked, sh_binding_word(checked, target, 6)) == sh_s_named_symbol(checked, "Drop") and not sh_s_destructor_field(checked, ast, sh_ast_child(ast, callee, 0)) { sh_s_diagnose(checked, ast, node, 5123, 1, -1, target); };
     let result = sh_s_argument(checked, fn_type, sh_s_arity(checked, fn_type) - 1);
-    if expected >= 0 { sh_s_expect(checked, ast, node, expected, result); (); };
     let mut argument = if method { 1; } else { 0; };
     let mut child_at = 1;
-    while child_at < sh_ast_word(ast, node, 6) { let child = sh_ast_child(ast, node, child_at); if sh_ast_word(ast, child, 0) == 10 { child_at = child_at + 1; } else { let required = if argument < sh_s_arity(checked, fn_type) - 1 { sh_s_argument(checked, fn_type, argument); } else { -1; }; let actual = sh_s_expr(checked, text, ast, child, required); if required >= 0 { sh_s_expect(checked, ast, child, required, actual); (); } else { if sh_s_flags(checked, fn_type) == 0 { let required_count = sh_s_arity(checked, fn_type) - 1; sh_s_diagnose(checked, ast, child, 5105, 1, required_count, argument + 1); }; }; argument = argument + 1; child_at = child_at + 1; }; };
+    while child_at < sh_ast_word(ast, node, 6) { let child = sh_ast_child(ast, node, child_at); if sh_ast_word(ast, child, 0) == 10 { child_at = child_at + 1; } else { let required = if argument < sh_s_arity(checked, fn_type) - 1 { sh_s_normalize(checked, sh_s_argument(checked, fn_type, argument)); } else { -1; }; let actual = sh_s_expr(checked, text, ast, child, required); if required >= 0 { sh_s_expect(checked, ast, child, required, actual); (); } else { if sh_s_flags(checked, fn_type) == 0 { let required_count = sh_s_arity(checked, fn_type) - 1; sh_s_diagnose(checked, ast, child, 5105, 1, required_count, argument + 1); }; }; argument = argument + 1; child_at = child_at + 1; }; };
     if argument < sh_s_arity(checked, fn_type) - 1 { let required_count = sh_s_arity(checked, fn_type) - 1; sh_s_diagnose(checked, ast, node, 5105, 1, required_count, argument); };
-    result;
+    let normalized = sh_s_normalize(checked, result);
+    if expected >= 0 { sh_s_expect(checked, ast, node, expected, normalized); (); };
+    let instance = sh_s_normalize(checked, fn_type);
+    sh_s_set_type(checked, callee, instance);
+    let keys = vec_new_i64();
+    let values = vec_new_i64();
+    sh_s_pattern_keys(checked, sh_binding_word(checked, target, 3), instance, &keys, &values, 0);
+    sh_s_require_bounds(checked, ast, node, target, &keys, &values, true);
+    sh_s_normalize(checked, normalized);
 }
 
 def sh_s_printable(checked: &ShChecked, ty: i64) -> bool {
@@ -588,19 +755,25 @@ def sh_s_runtime_adt(checked: &ShChecked, name: &str) -> i64 {
 }
 
 def sh_s_send_type(checked: &ShChecked, original: i64, visiting: &Vec<i64>, depth: i64) -> bool {
+    sh_s_auto_marker(checked, original, sh_s_named_symbol(checked, "Send"), visiting, depth);
+}
+
+def sh_s_auto_marker(checked: &ShChecked, original: i64, marker: i64, visiting: &Vec<i64>, depth: i64) -> bool {
     if depth > 128 { return false; };
     let ty = sh_s_resolve(checked, original);
     let kind = sh_s_kind(checked, ty);
     if kind == 0 or kind == 1 or kind == 2 or kind == 3 or kind == 5 or kind == 11 or kind == 18 { return true; };
-    if kind == 13 { return sh_s_implements(checked, ty, sh_s_named_symbol(checked, "Send")); };
+    if kind == 13 { return sh_s_implements(checked, ty, marker); };
     if kind != 8 and kind != 9 and kind != 10 and kind != 12 { return false; };
     let mut seen = 0;
     while seen < visiting.len() { if sh_s_vector(visiting, seen) == ty { return true; }; seen = seen + 1; };
-    if kind == 12 { let name = sh_s_symbol_text(checked, sh_s_nominal(checked, ty)); if name.is_ok() and sh_s_text_equal(&name.value, "AsyncContext") { return false; }; let send = sh_s_named_symbol(checked, "Send"); let mut record = 0; while record < checked.constraints.len() { if checked.constraints.get(record + 2).unwrap_or(-1) == -2 and checked.constraints.get(record + 1).unwrap_or(-1) == send { let target = checked.constraints.get(record).unwrap_or(-1); let implementation = checked.constraints.get(record + 3).unwrap_or(-1); if (sh_binding_word(checked, implementation, 5) & 8) != 0 and sh_s_nominal(checked, target) == sh_s_nominal(checked, ty) { return false; }; }; record = record + 4; }; };
+    if kind == 12 { let name = sh_s_symbol_text(checked, sh_s_nominal(checked, ty)); if name.is_ok() and sh_s_text_equal(&name.value, "AsyncContext") { return false; }; let send = marker; let mut record = 0; while record < checked.constraints.len() { if checked.constraints.get(record + 2).unwrap_or(-1) == -2 and checked.constraints.get(record + 1).unwrap_or(-1) == send { let target = checked.constraints.get(record).unwrap_or(-1); let implementation = checked.constraints.get(record + 3).unwrap_or(-1); if (sh_binding_word(checked, implementation, 5) & 8) != 0 and sh_s_nominal(checked, target) == sh_s_nominal(checked, ty) { return false; }; }; record = record + 4; }; };
     visiting.push(ty);
     let mut index = 0;
-    while index < sh_s_arity(checked, ty) { if not sh_s_send_type(checked, sh_s_argument(checked, ty, index), visiting, depth + 1) { visiting.pop(); return false; }; index = index + 1; };
-    if kind == 12 { let owner = sh_adt_binding(checked, ty); let mut binding = 0; while binding < sh_binding_count(checked) { let field_owner = sh_binding_word(checked, binding, 6); if sh_binding_word(checked, binding, 2) == 6 and owner >= 0 and (field_owner == owner or sh_binding_word(checked, field_owner, 2) == 5 and sh_binding_word(checked, field_owner, 6) == owner) { let field_type = sh_resolved_field_type(checked, ty, binding); if not sh_s_send_type(checked, field_type, visiting, depth + 1) { visiting.pop(); return false; }; }; binding = binding + 1; }; };
+    while index < sh_s_arity(checked, ty) { if not sh_s_auto_marker(checked, sh_s_argument(checked, ty, index), marker, visiting, depth + 1) { visiting.pop(); return false; }; index = index + 1; };
+    if kind == 12 { let owner = sh_adt_binding(checked, ty); let mut binding = 0; while binding < sh_binding_count(checked) { let field_owner = sh_binding_word(checked, binding, 6); if sh_binding_word(checked, binding, 2) == 6 and owner >= 0 and (field_owner == owner or sh_binding_word(checked, field_owner, 2) == 5 and sh_binding_word(checked, field_owner, 6) == owner) { let field_type = sh_resolved_field_type(checked, ty, binding); if not sh_s_auto_marker(checked, field_type, marker, visiting, depth + 1) { visiting.pop(); return false; }; }; binding = binding + 1; }; };
+    let parent = sh_class_parent(checked, ty);
+    if parent >= 0 and not sh_s_auto_marker(checked, parent, marker, visiting, depth + 1) { visiting.pop(); return false; };
     visiting.pop();
     true;
 }
@@ -692,6 +865,41 @@ def sh_s_control(checked: &mut ShChecked, text: &String, ast: &ShAst, node: i64,
     checked.error_type;
 }
 
+def sh_s_lambda(checked: &mut ShChecked, text: &String, ast: &ShAst, node: i64, expected: i64) -> i64 {
+    let old_scope = checked.current_scope;
+    let old_owner = checked.current_owner;
+    let old_return = checked.current_return;
+    let old_loop = checked.loop_depth;
+    let label = string_from_str("@closure:");
+    if not label.is_ok() { sh_s_diagnose(checked, ast, node, 5117, 1, -1, -1); return checked.error_type; };
+    label.value.push_i64(node);
+    let symbol = sh_intern(&checked.symbols, &label.value).unwrap_or(-1);
+    let binding = sh_s_binding(checked, symbol, old_scope, 15, sh_s_fresh(checked), node, 0, old_owner, -1);
+    let scope = sh_s_scope(checked, old_scope, binding, 0);
+    sh_s_binding_set(checked, binding, 7, scope);
+    sh_s_bind_node(checked, node, binding);
+    checked.current_scope = scope;
+    checked.current_owner = binding;
+    checked.loop_depth = 0;
+    let count = sh_ast_word(ast, node, 6);
+    let args = vec_new_i64();
+    let mut index = 0;
+    while index + 1 < count { let name = sh_ast_child(ast, node, index); let name_symbol = sh_s_symbol(checked, text, ast, name); let mut ty = if sh_s_kind(checked, expected) == 11 { sh_s_argument(checked, expected, args.len()); } else { sh_s_fresh(checked); }; if index + 2 < count and sh_ast_word(ast, sh_ast_child(ast, node, index + 1), 0) >= 70 and sh_ast_word(ast, sh_ast_child(ast, node, index + 1), 0) <= 76 { index = index + 1; ty = sh_s_type_ast(checked, text, ast, sh_ast_child(ast, node, index)); }; if sh_s_lookup_scope(checked, name_symbol, scope, false) >= 0 { sh_s_diagnose(checked, ast, name, 5103, 1, -1, -1); }; let parameter = sh_s_binding(checked, name_symbol, scope, 1, ty, name, 0, binding, args.len()); sh_s_bind_node(checked, name, parameter); sh_s_set_type(checked, name, ty); args.push(ty); index = index + 1; };
+    let required = if sh_s_kind(checked, expected) == 11 { sh_s_argument(checked, expected, sh_s_arity(checked, expected) - 1); } else { sh_s_fresh(checked); };
+    checked.current_return = required;
+    let body = sh_ast_child(ast, node, count - 1);
+    let actual = sh_s_expr(checked, text, ast, body, required);
+    sh_s_expect(checked, ast, body, required, actual);
+    args.push(sh_s_resolve(checked, required));
+    let fn_type = sh_s_type(checked, 11, 0, 0, -1, &args);
+    sh_s_binding_set(checked, binding, 3, fn_type);
+    checked.current_scope = old_scope;
+    checked.current_owner = old_owner;
+    checked.current_return = old_return;
+    checked.loop_depth = old_loop;
+    fn_type;
+}
+
 def sh_s_expr(checked: &mut ShChecked, text: &String, ast: &ShAst, node: i64, expected: i64) -> i64 {
     if node < 0 { return checked.unit_type; };
     if checked.depth >= 128 { sh_s_diagnose(checked, ast, node, 5117, 1, -1, -1); return checked.error_type; };
@@ -713,8 +921,8 @@ def sh_s_expr_inner(checked: &mut ShChecked, text: &String, ast: &ShAst, node: i
     if kind == 60 { return sh_s_struct(checked, text, ast, node, expected); };
     if kind >= 61 and kind <= 65 { return sh_s_control(checked, text, ast, node, expected); };
     if kind == 42 { let value_node = sh_ast_child(ast, node, 0); if payload == sh_kind("return") { if checked.current_return < 0 { sh_s_diagnose(checked, ast, node, 5108, 1, -1, -1); return checked.error_type; }; let actual = if value_node >= 0 { sh_s_expr(checked, text, ast, value_node, checked.current_return); } else { checked.unit_type; }; sh_s_expect(checked, ast, node, checked.current_return, actual); (); } else if payload == sh_kind("break") or payload == sh_kind("continue") { if checked.loop_depth <= 0 { sh_s_diagnose(checked, ast, node, 5109, 1, -1, -1); } else if payload == sh_kind("break") { let target = checked.loop_values.get(checked.loop_values.len() - 1).unwrap_or(checked.unit_type); let actual = if value_node >= 0 { sh_s_expr(checked, text, ast, value_node, target); } else { checked.unit_type; }; sh_s_expect(checked, ast, node, target, actual); (); }; } else { sh_s_diagnose(checked, ast, node, 5116, 1, -1, -1); }; return checked.never_type; };
-    if kind == 50 { let operand = sh_ast_child(ast, node, 0); let operation = payload % 1000; let actual = sh_s_expr(checked, text, ast, operand, if operation == sh_kind("&") or operation == sh_kind("*") or operation == sh_kind("await") { -1; } else { expected; }); let ty = sh_s_resolve(checked, actual); let type_kind = sh_s_kind(checked, ty); if operation == sh_kind("&") { if payload >= 1000 and not sh_s_mutable_place(checked, ast, operand) { sh_s_diagnose(checked, ast, operand, 5107, 1, -1, ty); }; return sh_s_unary_type(checked, 6, 0, if payload >= 1000 { 1; } else { 0; }, ty); }; if operation == sh_kind("*") { if type_kind == 6 or type_kind == 7 { return sh_s_argument(checked, ty, 0); }; sh_s_diagnose(checked, ast, operand, 5104, 1, -1, ty); return checked.error_type; }; if operation == sh_kind("await") { if checked.async_depth < 1 or type_kind != 16 { sh_s_diagnose(checked, ast, node, 5120, 1, -1, ty); return checked.error_type; }; return sh_s_argument(checked, ty, 0); }; if operation == sh_kind("!") or operation == sh_kind("not") { sh_s_expect(checked, ast, operand, checked.bool_type, ty); return checked.bool_type; }; if type_kind != 2 and type_kind != 3 and type_kind != 13 { sh_s_diagnose(checked, ast, operand, 5104, 1, checked.integer_type, ty); }; return ty; };
-    if kind == 51 or kind == 52 { let left_node = sh_ast_child(ast, node, 0); let right_node = sh_ast_child(ast, node, 1); let comparison = payload == sh_kind("==") or payload == sh_kind("!=") or payload == sh_kind("<") or payload == sh_kind(">") or payload == sh_kind("<=") or payload == sh_kind(">="); let left = sh_s_expr(checked, text, ast, left_node, if kind == 52 or comparison or sh_ast_word(ast, left_node, 0) != 11 { -1; } else { expected; }); if kind == 51 and (payload == sh_kind("..") or payload == 1242) { let right = if right_node >= 0 { sh_s_expr(checked, text, ast, right_node, left); } else { left; }; sh_s_expect(checked, ast, node, left, right); let args = vec_new_i64(); args.push(left); return sh_s_type(checked, 12, if payload == 1242 { 1; } else { 0; }, 0, sh_s_named_symbol(checked, "@range"), &args); }; let right = sh_s_expr(checked, text, ast, right_node, if kind == 52 or sh_ast_word(ast, right_node, 0) == 11 { left; } else { -1; }); if kind == 52 { if not sh_s_mutable_place(checked, ast, left_node) { sh_s_diagnose(checked, ast, left_node, 5107, 1, -1, left); }; sh_s_expect(checked, ast, node, left, right); return checked.unit_type; }; if payload == sh_kind("..") { sh_s_expect(checked, ast, node, left, right); let args = vec_new_i64(); args.push(left); return sh_s_type(checked, 12, 0, 0, sh_s_named_symbol(checked, "@range"), &args); }; if payload == sh_kind("and") or payload == sh_kind("or") or payload == sh_kind("&&") or payload == sh_kind("||") { sh_s_expect(checked, ast, left_node, checked.bool_type, left); sh_s_expect(checked, ast, right_node, checked.bool_type, right); return checked.bool_type; }; let a = sh_s_resolve(checked, left); let b = sh_s_resolve(checked, right); let a_kind = sh_s_kind(checked, a); let b_kind = sh_s_kind(checked, b); if a_kind == 2 and b_kind == 2 and (sh_s_flags(checked, a) & 1) == (sh_s_flags(checked, b) & 1) or a_kind == 3 and b_kind == 3 { if comparison { return checked.bool_type; }; return if sh_s_data(checked, a) >= sh_s_data(checked, b) { a; } else { b; }; }; if payload == sh_kind("+") { let a_base = sh_s_base_type(checked, a); let b_base = sh_s_base_type(checked, b); let a_name = sh_s_symbol_text(checked, sh_s_nominal(checked, a_base)); let b_name = sh_s_symbol_text(checked, sh_s_nominal(checked, b_base)); let a_string = a_name.is_ok() and sh_s_text_equal(&a_name.value, "String"); let b_string = b_name.is_ok() and sh_s_text_equal(&b_name.value, "String"); if sh_s_kind(checked, a_base) == 5 and sh_s_kind(checked, b_base) == 5 or a_string and sh_s_kind(checked, b_base) == 5 { return a; }; if sh_s_kind(checked, a_base) == 5 and b_string { return b; }; }; sh_s_expect(checked, ast, node, left, right); if payload == sh_kind("==") or payload == sh_kind("!=") or payload == sh_kind("<") or payload == sh_kind(">") or payload == sh_kind("<=") or payload == sh_kind(">=") { return checked.bool_type; }; let resolved = sh_s_resolve(checked, left); let type_kind = sh_s_kind(checked, resolved); if type_kind != 2 and type_kind != 3 and type_kind != 13 { sh_s_diagnose(checked, ast, node, 5115, 1, -1, a); }; return resolved; };
+    if kind == 50 { let operand = sh_ast_child(ast, node, 0); let operation = payload % 1000; let actual = sh_s_expr(checked, text, ast, operand, if operation == sh_kind("&") or operation == sh_kind("*") or operation == sh_kind("await") { -1; } else { expected; }); let ty = sh_s_resolve(checked, actual); let type_kind = sh_s_kind(checked, ty); if operation == sh_kind("&") { if payload >= 1000 and not sh_s_mutable_place(checked, ast, operand) { sh_s_diagnose(checked, ast, operand, 5107, 1, -1, ty); }; let receiver_binding = sh_node_binding(checked, operand); let receiver_param = sh_binding_word(checked, receiver_binding, 4); if type_kind == 6 and sh_binding_word(checked, receiver_binding, 2) == 1 and (sh_ast_word(ast, receiver_param, 4) & 5) == 5 { return sh_s_unary_type(checked, 6, 0, if payload >= 1000 { 1; } else { 0; }, sh_s_argument(checked, ty, 0)); }; return sh_s_unary_type(checked, 6, 0, if payload >= 1000 { 1; } else { 0; }, ty); }; if operation == sh_kind("*") { if type_kind == 6 or type_kind == 7 { return sh_s_argument(checked, ty, 0); }; sh_s_diagnose(checked, ast, operand, 5104, 1, -1, ty); return checked.error_type; }; if operation == sh_kind("await") { if checked.async_depth < 1 or type_kind != 16 { sh_s_diagnose(checked, ast, node, 5120, 1, -1, ty); return checked.error_type; }; return sh_s_argument(checked, ty, 0); }; if operation == sh_kind("!") or operation == sh_kind("not") { sh_s_expect(checked, ast, operand, checked.bool_type, ty); return checked.bool_type; }; if type_kind != 2 and type_kind != 3 and type_kind != 13 { sh_s_diagnose(checked, ast, operand, 5104, 1, checked.integer_type, ty); }; return ty; };
+    if kind == 51 or kind == 52 { let left_node = sh_ast_child(ast, node, 0); let right_node = sh_ast_child(ast, node, 1); let comparison = payload == sh_kind("==") or payload == sh_kind("!=") or payload == sh_kind("<") or payload == sh_kind(">") or payload == sh_kind("<=") or payload == sh_kind(">="); let left = sh_s_expr(checked, text, ast, left_node, if kind == 52 or comparison or sh_ast_word(ast, left_node, 0) != 11 { -1; } else { expected; }); if kind == 51 and (payload == sh_kind("..") or payload == 1242) { let right = if right_node >= 0 { sh_s_expr(checked, text, ast, right_node, left); } else { left; }; sh_s_expect(checked, ast, node, left, right); let args = vec_new_i64(); args.push(left); return sh_s_type(checked, 12, if payload == 1242 { 1; } else { 0; }, 0, sh_s_named_symbol(checked, "@range"), &args); }; let right = sh_s_expr(checked, text, ast, right_node, if kind == 52 { left; } else { -1; }); if kind == 52 { if not sh_s_mutable_place(checked, ast, left_node) { sh_s_diagnose(checked, ast, left_node, 5107, 1, -1, left); }; sh_s_expect(checked, ast, node, left, right); return checked.unit_type; }; if payload == sh_kind("..") { sh_s_expect(checked, ast, node, left, right); let args = vec_new_i64(); args.push(left); return sh_s_type(checked, 12, 0, 0, sh_s_named_symbol(checked, "@range"), &args); }; if payload == sh_kind("and") or payload == sh_kind("or") or payload == sh_kind("&&") or payload == sh_kind("||") { sh_s_expect(checked, ast, left_node, checked.bool_type, left); sh_s_expect(checked, ast, right_node, checked.bool_type, right); return checked.bool_type; }; let a = sh_s_resolve(checked, left); let b = sh_s_resolve(checked, right); let a_kind = sh_s_kind(checked, a); let b_kind = sh_s_kind(checked, b); if a_kind == 2 and b_kind == 2 and (sh_s_flags(checked, a) & 1) == (sh_s_flags(checked, b) & 1) or a_kind == 3 and b_kind == 3 { if comparison { return checked.bool_type; }; return if sh_s_data(checked, a) >= sh_s_data(checked, b) { a; } else { b; }; }; if payload == sh_kind("+") { let a_base = sh_s_base_type(checked, a); let b_base = sh_s_base_type(checked, b); let a_name = sh_s_symbol_text(checked, sh_s_nominal(checked, a_base)); let b_name = sh_s_symbol_text(checked, sh_s_nominal(checked, b_base)); let a_string = a_name.is_ok() and sh_s_text_equal(&a_name.value, "String"); let b_string = b_name.is_ok() and sh_s_text_equal(&b_name.value, "String"); if sh_s_kind(checked, a_base) == 5 and sh_s_kind(checked, b_base) == 5 or a_string and sh_s_kind(checked, b_base) == 5 { return a; }; if sh_s_kind(checked, a_base) == 5 and b_string { return b; }; }; sh_s_expect(checked, ast, node, left, right); if payload == sh_kind("==") or payload == sh_kind("!=") or payload == sh_kind("<") or payload == sh_kind(">") or payload == sh_kind("<=") or payload == sh_kind(">=") { return checked.bool_type; }; let resolved = sh_s_resolve(checked, left); let type_kind = sh_s_kind(checked, resolved); if type_kind != 2 and type_kind != 3 and type_kind != 13 { sh_s_diagnose(checked, ast, node, 5115, 1, -1, a); }; return resolved; };
     if kind == 54 { let source = sh_ast_child(ast, node, 0); let index_node = sh_ast_child(ast, node, 1); let base_raw = sh_s_expr(checked, text, ast, source, -1); let base = sh_s_base_type(checked, base_raw); let index_type = sh_s_expr(checked, text, ast, index_node, checked.integer_type); if sh_s_kind(checked, sh_s_resolve(checked, index_type)) != 2 { sh_s_diagnose(checked, ast, index_node, 5104, 1, checked.integer_type, index_type); }; if sh_s_kind(checked, base) != 8 and sh_s_kind(checked, base) != 9 { sh_s_diagnose(checked, ast, source, 5106, 1, -1, base); return checked.error_type; }; if sh_s_kind(checked, base) == 8 and sh_ast_word(ast, index_node, 0) == 11 { let index = sh_s_integer_value(text, ast, index_node); if index < 0 or index >= sh_s_data(checked, base) { let limit = sh_s_data(checked, base); sh_s_diagnose(checked, ast, index_node, 5119, 1, limit, index); }; }; return sh_s_argument(checked, base, 0); };
     if kind == 57 { let value = sh_s_expr(checked, text, ast, sh_ast_child(ast, node, 0), -1); let target = sh_s_type_ast(checked, text, ast, sh_ast_child(ast, node, 1)); let source_keys = sh_s_kind(checked, sh_s_resolve(checked, value)); let target_values = sh_s_kind(checked, sh_s_resolve(checked, target)); if not ((source_keys == 2 or source_keys == 3) and (target_values == 2 or target_values == 3) or source_keys == 1 and target_values == 2 or source_keys == 2 and target_values == 1) { sh_s_diagnose(checked, ast, node, 5113, 1, target, value); }; return target; };
     if kind == 58 { if count == 0 { return checked.unit_type; }; if count == 1 and payload == 0 { return sh_s_expr(checked, text, ast, sh_ast_child(ast, node, 0), expected); }; let args = vec_new_i64(); let mut index = 0; while index < count { let required = if sh_s_kind(checked, expected) == 10 { sh_s_argument(checked, expected, index); } else { -1; }; let item = sh_s_expr(checked, text, ast, sh_ast_child(ast, node, index), required); args.push(item); index = index + 1; }; return sh_s_type(checked, 10, 0, 0, -1, &args); };
@@ -722,7 +930,7 @@ def sh_s_expr_inner(checked: &mut ShChecked, text: &String, ast: &ShAst, node: i
     if kind == 56 { let source = sh_ast_child(ast, node, 0); let wrapped = sh_s_expr(checked, text, ast, source, -1); let ty = sh_s_resolve(checked, wrapped); let name = sh_s_symbol_text(checked, sh_s_nominal(checked, ty)); if sh_s_kind(checked, ty) != 12 or not name.is_ok() or not (sh_s_text_equal(&name.value, "Result") or sh_s_text_equal(&name.value, "Option")) { sh_s_diagnose(checked, ast, node, 5104, 1, -1, ty); return checked.error_type; }; let mode = if sh_s_text_equal(&name.value, "Option") { 2; } else { 1; }; if checked.propagation.len() >= 3 { let at = checked.propagation.len() - 3; let old_mode = checked.propagation.get(at).unwrap_or(-1); if old_mode != 0 and old_mode != mode { sh_s_diagnose(checked, ast, node, 5104, 1, old_mode, mode); } else { checked.propagation.set(at, mode); let required = checked.propagation.get(at + if mode == 2 { 1; } else { 2; }).unwrap_or(-1); let actual = sh_s_argument(checked, ty, if mode == 2 { 0; } else { 1; }); sh_s_expect(checked, ast, node, required, actual); (); }; } else if checked.current_return < 0 { sh_s_diagnose(checked, ast, node, 5108, 1, -1, -1); } else { let return_type = sh_s_resolve(checked, checked.current_return); let return_name = sh_s_nominal(checked, return_type); if return_name != sh_s_nominal(checked, ty) or sh_s_arity(checked, return_type) != if mode == 2 { 1; } else { 2; } { sh_s_diagnose(checked, ast, node, 5104, 1, checked.current_return, ty); } else { let actual = sh_s_argument(checked, ty, if mode == 2 { 0; } else { 1; }); let required = sh_s_argument(checked, return_type, if mode == 2 { 0; } else { 1; }); sh_s_expect(checked, ast, node, required, actual); (); }; }; return sh_s_argument(checked, ty, 0); };
     if kind == 68 { if payload == sh_kind("try") { let old_count = checked.propagation.len(); let inner = sh_s_fresh(checked); let error = sh_s_fresh(checked); checked.propagation.push(0); checked.propagation.push(inner); checked.propagation.push(error); let result = sh_s_expr(checked, text, ast, sh_ast_child(ast, node, 0), -1); let mode = checked.propagation.get(old_count).unwrap_or(-1); checked.propagation.pop(); checked.propagation.pop(); checked.propagation.pop(); let symbol = sh_s_named_symbol(checked, if mode == 2 { "Option"; } else { "Result"; }); if sh_s_kind(checked, result) == 12 and sh_s_nominal(checked, result) == symbol { return result; }; let args = vec_new_i64(); args.push(result); if mode != 2 { args.push(sh_s_resolve(checked, error)); (); }; return sh_s_type(checked, 12, 0, 0, symbol, &args); }; let old_async = checked.async_depth; let old_unsafe = checked.unsafe_depth; if payload == sh_kind("async") { checked.async_depth = old_async + 1; }; if payload == sh_kind("unsafe") { checked.unsafe_depth = old_unsafe + 1; }; let result = sh_s_expr(checked, text, ast, sh_ast_child(ast, node, 0), -1); checked.async_depth = old_async; checked.unsafe_depth = old_unsafe; if payload == sh_kind("async") { return sh_s_unary_type(checked, 16, 0, 0, result); }; return result; };
     if kind == 69 { let mut index = 0; while index < count { let child = sh_ast_child(ast, node, index); let actual = sh_s_expr(checked, text, ast, child, -1); if not sh_s_printable(checked, actual) { sh_s_diagnose(checked, ast, child, 5115, 1, -1, actual); }; index = index + 1; }; let args = vec_new_i64(); return sh_s_type(checked, 12, 0, 0, sh_s_named_symbol(checked, "String"), &args); };
-    if kind == 67 { let old_scope = checked.current_scope; checked.current_scope = sh_s_scope(checked, old_scope, checked.current_owner, 0); let args = vec_new_i64(); let mut index = 0; while index + 1 < count { let name = sh_ast_child(ast, node, index); let symbol = sh_s_symbol(checked, text, ast, name); let mut ty = if sh_s_kind(checked, expected) == 11 { sh_s_argument(checked, expected, args.len()); } else { sh_s_fresh(checked); }; if index + 2 < count and sh_ast_word(ast, sh_ast_child(ast, node, index + 1), 0) >= 70 and sh_ast_word(ast, sh_ast_child(ast, node, index + 1), 0) <= 76 { index = index + 1; ty = sh_s_type_ast(checked, text, ast, sh_ast_child(ast, node, index)); }; let binding = sh_s_binding(checked, symbol, checked.current_scope, 1, ty, name, 0, node, args.len()); sh_s_bind_node(checked, name, binding); args.push(ty); index = index + 1; }; let required = if sh_s_kind(checked, expected) == 11 { sh_s_argument(checked, expected, sh_s_arity(checked, expected) - 1); } else { -1; }; let result = sh_s_expr(checked, text, ast, sh_ast_child(ast, node, count - 1), required); args.push(result); checked.current_scope = old_scope; return sh_s_type(checked, 11, 0, 0, -1, &args); };
+    if kind == 67 { return sh_s_lambda(checked, text, ast, node, expected); };
     sh_s_diagnose(checked, ast, node, 5116, 1, -1, -1);
     checked.error_type;
 }
@@ -734,6 +942,22 @@ def sh_s_builtin_trait(checked: &ShChecked, name: &str) {
     let binding = sh_s_binding(checked, symbol, 0, 7, ty, -1, 4096, -1, -1);
     let scope = sh_s_scope(checked, 0, binding, 0);
     sh_s_binding_set(checked, binding, 7, scope);
+    let self_name = sh_s_named_symbol(checked, "Self");
+    let self_args = vec_new_i64();
+    let self_type = sh_s_type(checked, 13, scope, 0, self_name, &self_args);
+    sh_s_self_alias(checked, scope, binding, self_type);
+    if name == "Hash" { let args = vec_new_i64(); args.push(sh_s_unary_type(checked, 6, 0, 0, self_type)); args.push(checked.integer_type); let fn_type = sh_s_type(checked, 11, 0, 0, -1, &args); let method = sh_s_binding(checked, sh_s_named_symbol(checked, "hash"), scope, 2, fn_type, -1, 4096, binding, -1); let method_scope = sh_s_scope(checked, scope, method, 0); sh_s_binding_set(checked, method, 7, method_scope); (); };
+    if name == "Iterator" or name == "IntoIterator" { sh_s_binding(checked, sh_s_named_symbol(checked, "Item"), scope, 8, checked.error_type, -1, 4096, binding, scope); if name == "IntoIterator" { sh_s_binding(checked, sh_s_named_symbol(checked, "IntoIter"), scope, 8, checked.error_type, -1, 4096, binding, scope); (); }; };
+    ();
+}
+
+def sh_s_support_type(checked: &ShChecked, name: &str) {
+    let symbol = sh_s_named_symbol(checked, name);
+    let ty = sh_s_runtime_adt(checked, name);
+    let binding = sh_s_binding(checked, symbol, 0, 3, ty, -1, 4096, -1, -1);
+    let scope = sh_s_scope(checked, 0, binding, 0);
+    sh_s_binding_set(checked, binding, 7, scope);
+    sh_s_self_alias(checked, scope, binding, ty);
     ();
 }
 
@@ -747,6 +971,9 @@ def sh_s_builtin_function(checked: &ShChecked, name: &str, code: i64) {
 }
 
 def sh_s_builtins(checked: &ShChecked) {
+    sh_s_support_type(checked, "Ordering");
+    sh_s_support_type(checked, "Formatter");
+    sh_s_support_type(checked, "Hasher");
     sh_s_builtin_trait(checked, "Drop");
     sh_s_builtin_trait(checked, "Clone");
     sh_s_builtin_trait(checked, "Copy");
@@ -800,6 +1027,55 @@ def sh_s_builtins(checked: &ShChecked) {
     ();
 }
 
+def sh_s_ffi_safe(checked: &ShChecked, ty: i64, depth: i64) -> bool {
+    if depth > 128 { return false; };
+    let resolved = sh_s_resolve(checked, ty);
+    let kind = sh_s_kind(checked, resolved);
+    if kind == 0 or kind == 1 or kind == 2 or kind == 3 or kind == 4 { return true; };
+    if kind == 7 { return sh_s_ffi_safe(checked, sh_s_argument(checked, resolved, 0), depth + 1); };
+    kind == 6 and sh_s_flags(checked, resolved) == 0 and sh_s_kind(checked, sh_s_argument(checked, resolved, 0)) == 5;
+}
+
+def sh_s_has_pointer(checked: &ShChecked, ty: i64, depth: i64) -> bool {
+    if depth > 128 { return true; };
+    if sh_s_kind(checked, ty) == 7 { return true; };
+    let mut index = 0;
+    while index < sh_s_arity(checked, ty) { if sh_s_has_pointer(checked, sh_s_argument(checked, ty, index), depth + 1) { return true; }; index = index + 1; };
+    false;
+}
+
+def sh_s_impl_symbol(checked: &ShChecked, implementation: i64) -> i64 {
+    let mut record = 0;
+    while record < checked.constraints.len() { if checked.constraints.get(record + 2).unwrap_or(-1) == -2 and checked.constraints.get(record + 3).unwrap_or(-1) == implementation { return checked.constraints.get(record + 1).unwrap_or(-1); }; record = record + 4; };
+    -1;
+}
+
+def sh_s_copy_type(checked: &ShChecked, ty: i64, depth: i64) -> bool {
+    if depth > 128 { return false; };
+    let actual = sh_s_resolve(checked, ty);
+    let kind = sh_s_kind(checked, actual);
+    if kind == 0 or kind == 1 or kind == 2 or kind == 3 or kind == 4 or kind == 7 or kind == 11 or kind == 18 { return true; };
+    if kind == 6 { return sh_s_flags(checked, actual) == 0; };
+    if kind == 8 or kind == 10 { let mut index = 0; while index < sh_s_arity(checked, actual) { if not sh_s_copy_type(checked, sh_s_argument(checked, actual, index), depth + 1) { return false; }; index = index + 1; }; return true; };
+    sh_s_implements(checked, actual, sh_s_named_symbol(checked, "Copy")) and not sh_s_implements(checked, actual, sh_s_named_symbol(checked, "Drop"));
+}
+
+def sh_s_core_contracts(checked: &mut ShChecked, ast: &ShAst) {
+    let drop = sh_s_named_symbol(checked, "Drop");
+    let copy = sh_s_named_symbol(checked, "Copy");
+    let mut implementation = 0;
+    while implementation < sh_binding_count(checked) { if sh_binding_word(checked, implementation, 2) == 14 { let trait_symbol = sh_s_impl_symbol(checked, implementation); let target = sh_binding_word(checked, implementation, 3); let declaration = sh_binding_word(checked, implementation, 4); let trait_binding = sh_s_lookup(checked, trait_symbol, 0, true); let label = sh_s_symbol_text(checked, trait_symbol); let negative = (sh_binding_word(checked, implementation, 5) & 8) != 0; if trait_symbol >= 0 { if sh_s_kind(checked, target) != 12 and (sh_binding_word(checked, trait_binding, 5) & 4096) != 0 { sh_s_diagnose(checked, ast, declaration, 5123, 1, -1, target); }; let mut method = 0; let mut items = 0; let mut drops = 0; let mut rendered = false; while method < sh_binding_count(checked) { if sh_binding_word(checked, method, 6) == implementation { let kind = sh_binding_word(checked, method, 2); let method_node = sh_binding_word(checked, method, 4); let name = sh_s_symbol_text(checked, sh_binding_word(checked, method, 0)); if (kind == 2 or kind == 8) and method_node >= 0 { items = items + 1; }; if kind == 2 and name.is_ok() { let fn_type = sh_binding_word(checked, method, 3); if trait_symbol == drop { drops = drops + 1; let param = sh_s_child_kind(ast, method_node, 21); let receiver = sh_s_argument(checked, fn_type, 0); let result = sh_s_argument(checked, fn_type, sh_s_arity(checked, fn_type) - 1); let mut has_return = false; let mut child = 0; while child < sh_ast_word(ast, method_node, 6) { let part = sh_ast_child(ast, method_node, child); let part_kind = sh_ast_word(ast, part, 0); if part_kind >= 70 and part_kind <= 76 { has_return = true; }; child = child + 1; }; if not sh_s_text_equal(&name.value, "drop") or sh_ast_word(ast, param, 4) != 7 or sh_s_arity(checked, fn_type) != 2 or sh_s_kind(checked, receiver) != 6 or sh_s_flags(checked, receiver) != 1 or sh_s_kind(checked, result) != 0 or has_return or (sh_binding_word(checked, method, 5) & 12) != 0 { sh_s_diagnose(checked, ast, method_node, 5123, 1, -1, fn_type); }; }; if sh_s_text_equal(&name.value, "__derived_debug_marker") and label.is_ok() and sh_s_text_equal(&label.value, "Debug") { rendered = true; }; if sh_s_text_equal(&name.value, "to_string") { let receiver = sh_s_child_kind(ast, method_node, 21); let result = sh_s_argument(checked, fn_type, sh_s_arity(checked, fn_type) - 1); let result_name = sh_s_symbol_text(checked, sh_s_nominal(checked, result)); if (sh_ast_word(ast, receiver, 4) & 4) != 0 and result_name.is_ok() and sh_s_text_equal(&result_name.value, "String") { rendered = true; }; }; }; if kind == 8 and method_node >= 0 { let name = sh_binding_word(checked, method, 0); let member = sh_s_lookup_scope(checked, name, sh_binding_word(checked, trait_binding, 7), true); if member < 0 or sh_binding_word(checked, member, 2) != 8 { sh_s_diagnose(checked, ast, method_node, 5123, 1, -1, name); }; }; }; method = method + 1; }; if negative { if not label.is_ok() or not (sh_s_text_equal(&label.value, "Send") or sh_s_text_equal(&label.value, "Sync")) or items != 0 or sh_s_arity(checked, sh_s_trait_actual(checked, implementation)) != 0 { sh_s_diagnose(checked, ast, declaration, 5123, 1, 0, items); }; } else { if trait_symbol == drop and drops != 1 { sh_s_diagnose(checked, ast, declaration, 5123, 1, 1, drops); }; if trait_symbol == drop or trait_symbol == copy { if sh_s_implements(checked, target, drop) and sh_s_implements(checked, target, copy) { sh_s_diagnose(checked, ast, declaration, 5123, 1, -1, target); }; }; if trait_symbol == copy { let owner = sh_adt_binding(checked, target); let mut field = 0; while field < sh_binding_count(checked) { let field_owner = sh_binding_word(checked, field, 6); if sh_binding_word(checked, field, 2) == 6 and (field_owner == owner or sh_binding_word(checked, field_owner, 2) == 5 and sh_binding_word(checked, field_owner, 6) == owner) { let ty = sh_resolved_field_type(checked, target, field); if not sh_s_copy_type(checked, ty, 0) { sh_s_diagnose(checked, ast, declaration, 5123, 1, -1, ty); }; }; field = field + 1; }; }; if label.is_ok() and (sh_s_text_equal(&label.value, "Display") or sh_s_text_equal(&label.value, "Debug")) and not rendered { sh_s_diagnose(checked, ast, declaration, 5123, 1, -1, target); }; let mut member = 0; while member < sh_binding_count(checked) { if sh_binding_word(checked, member, 2) == 8 and sh_binding_word(checked, member, 6) == trait_binding and sh_binding_word(checked, member, 0) != sh_s_named_symbol(checked, "Self") { let name = sh_binding_word(checked, member, 0); let found = sh_s_lookup_scope(checked, name, sh_binding_word(checked, implementation, 7), true); if found < 0 { sh_s_diagnose(checked, ast, declaration, 5123, 1, name, -1); }; }; member = member + 1; }; }; let mut other = 0; while other < implementation { if sh_binding_word(checked, other, 2) == 14 and sh_s_impl_symbol(checked, other) == trait_symbol { let keys = vec_new_i64(); let values = vec_new_i64(); let other_target = sh_binding_word(checked, other, 3); if sh_s_pattern_keys(checked, other_target, target, &keys, &values, 0) { let other_trait = sh_s_type_replace(checked, sh_s_trait_actual(checked, other), &keys, &values, 0); if other_trait == sh_s_trait_actual(checked, implementation) { sh_s_diagnose(checked, ast, declaration, 5123, 1, other, implementation); }; }; }; other = other + 1; }; }; }; implementation = implementation + 1; };
+    ();
+}
+
+def sh_s_validate_ffi(checked: &mut ShChecked, text: &String, ast: &ShAst) {
+    let mut node = 0;
+    while node < sh_ast_count(ast) { if sh_ast_word(ast, node, 0) == 31 { let abi = sh_s_child_kind(ast, node, 11); let token = ShToken { kind: 5, start: sh_ast_word(ast, abi, 2), end: sh_ast_word(ast, abi, 3) }; let label = sh_literal_decode(text, token); if not label.is_ok() or not (sh_s_text_equal(&label.value, "C") or sh_s_text_equal(&label.value, "cdecl") or sh_s_text_equal(&label.value, "system")) { sh_s_diagnose(checked, ast, node, 5122, 1, -1, -1); }; }; node = node + 1; };
+    let mut binding = 0;
+    while binding < sh_binding_count(checked) { if sh_binding_word(checked, binding, 2) == 2 and (sh_binding_word(checked, binding, 5) & 8) != 0 { let declaration = sh_binding_word(checked, binding, 4); let fn_type = sh_binding_word(checked, binding, 3); let generic = vec_new_i64(); sh_s_parameter_types(checked, binding, &generic); if generic.len() != 0 { sh_s_diagnose(checked, ast, declaration, 5122, 1, 0, generic.len()); }; let mut index = 0; while index < sh_s_arity(checked, fn_type) { let ty = sh_s_argument(checked, fn_type, index); if not sh_s_ffi_safe(checked, ty, 0) { sh_s_diagnose(checked, ast, declaration, 5122, 1, -1, ty); }; index = index + 1; }; if (sh_binding_word(checked, binding, 5) & 2) == 0 and sh_s_has_pointer(checked, fn_type, 0) { sh_s_diagnose(checked, ast, declaration, 5122, 1, -1, fn_type); }; }; binding = binding + 1; };
+    ();
+}
+
 def sh_s_check_function(checked: &mut ShChecked, text: &String, ast: &ShAst, binding: i64) {
     let declaration = sh_binding_word(checked, binding, 4);
     let body = sh_s_child_kind(ast, declaration, 40);
@@ -821,7 +1097,9 @@ def sh_s_check_function(checked: &mut ShChecked, text: &String, ast: &ShAst, bin
     checked.async_depth = if (flags & 4) != 0 { 1; } else { 0; };
     checked.unsafe_depth = if (flags & 2) != 0 { 1; } else { 0; };
     let actual = sh_s_block(checked, text, ast, body, result);
-    sh_s_expect(checked, ast, body, result, actual);
+    let function_name = sh_s_symbol_text(checked, sh_binding_word(checked, binding, 0));
+    let implicit_main = function_name.is_ok() and sh_s_text_equal(&function_name.value, "main") and sh_binding_word(checked, binding, 6) < 0 and sh_s_kind(checked, actual) == 0 and sh_s_kind(checked, result) == 2;
+    if not implicit_main { sh_s_expect(checked, ast, body, result, actual); (); };
     checked.current_scope = old_scope;
     checked.current_owner = old_owner;
     checked.current_return = old_return;
@@ -836,6 +1114,7 @@ def sh_check(text: &String, ast: &ShAst, max_diagnostics: i64) -> ShChecked {
     if ast.root < 0 or sh_ast_word(ast, ast.root, 0) != 1 { checked.error = 5117; return checked; };
     sh_s_builtins(&checked);
     sh_s_collect(&mut checked, text, ast, ast.root, 0, -1, 0);
+    sh_s_class_headers(&mut checked, text, ast);
     let mut binding = 0;
     while binding < sh_binding_count(&checked) { let binding_kind = sh_binding_word(&checked, binding, 2); if binding_kind == 14 { sh_s_fill_impl(&mut checked, text, ast, binding); }; binding = binding + 1; };
     binding = 0;
@@ -845,12 +1124,15 @@ def sh_check(text: &String, ast: &ShAst, max_diagnostics: i64) -> ShChecked {
     let declaration_count = sh_binding_count(&checked);
     binding = 0;
     while binding < declaration_count { let node = sh_binding_word(&checked, binding, 4); if node >= 0 { sh_s_fill_bounds(&mut checked, text, ast, binding); }; binding = binding + 1; };
+    sh_s_validate_classes(&mut checked, ast);
     sh_s_validate_impls(&mut checked, text, ast);
+    sh_s_validate_ffi(&mut checked, text, ast);
+    sh_s_core_contracts(&mut checked, ast);
     binding = 0;
     while binding < declaration_count { let kind = sh_binding_word(&checked, binding, 2); if kind == 2 { sh_s_check_function(&mut checked, text, ast, binding); }; if kind == 10 { let node = sh_binding_word(&checked, binding, 4); let old = checked.current_scope; checked.current_scope = sh_binding_word(&checked, binding, 7); let ty = sh_s_type_ast(&mut checked, text, ast, sh_ast_child(ast, node, 1)); let value = sh_s_expr(&mut checked, text, ast, sh_ast_child(ast, node, 2), ty); sh_s_expect(&mut checked, ast, node, ty, value); sh_s_binding_set(&checked, binding, 3, ty); sh_s_set_type(&checked, node, ty); checked.current_scope = old; }; binding = binding + 1; };
     let empty = vec_new_i64();
     let mut node = 0;
-    while node < sh_ast_count(ast) { let original = sh_node_type(&checked, node); if original >= 0 { let resolved = sh_s_type_replace(&checked, original, &empty, &empty, 0); checked.node_types.set(node, resolved); (); }; node = node + 1; };
+    while node < sh_ast_count(ast) { let original = sh_node_type(&checked, node); if original >= 0 { let resolved = sh_s_type_replace(&checked, original, &empty, &empty, 0); checked.node_types.set(node, resolved); sh_s_type_bounds(&mut checked, ast, node, resolved); (); }; node = node + 1; };
     binding = 0;
     while binding < sh_binding_count(&checked) { let original = sh_binding_word(&checked, binding, 3); if original >= 0 { let resolved = sh_s_type_replace(&checked, original, &empty, &empty, 0); sh_s_binding_set(&checked, binding, 3, resolved); (); }; binding = binding + 1; };
     checked;

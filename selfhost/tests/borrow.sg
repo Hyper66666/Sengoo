@@ -39,6 +39,31 @@ def sh_test_borrow_round() -> Result<bool, i64> {
     sh_borrow_case("def use_ref(value: &i64) {} def f(flag: bool) { let mut value = 1; let alias = &value; while flag { use_ref(alias); value = 2; } }", 6106)?;
     sh_borrow_case("struct Owner { value: i64, } impl Drop for Owner { def drop(&mut self) {} } struct Pair { left: Owner, right: Owner, } def consume(value: Owner) {} def f() { let pair = Pair { left: Owner { value: 1 }, right: Owner { value: 2 } }; consume(pair.left); consume(pair.right); }", 0)?;
     sh_borrow_case("struct Owner { value: i64, } impl Drop for Owner { def drop(&mut self) {} } struct Pair { left: Owner, right: Owner, } impl Drop for Pair { def drop(&mut self) {} } def consume(value: Owner) {} def f() { let pair = Pair { left: Owner { value: 1 }, right: Owner { value: 2 } }; consume(pair.left); }", 6107)?;
+    sh_borrow_case("struct Owner { value: i64, } impl Drop for Owner { def drop(&mut self) {} } def make() -> Owner { Owner { value: 1 } } def observe(value: &Owner) {} def f() { make().value; observe(&make()); let alias = &make(); observe(alias); let second = &make(); let third = second; observe(third); }", 0)?;
+    sh_borrow_case("struct Owner { value: i64, } impl Drop for Owner { def drop(&mut self) {} } def make() -> Owner { Owner { value: 1 } } def f() -> &Owner { let alias = &make(); alias }", 6105)?;
+    sh_borrow_case("struct Owner { value: i64, } impl Drop for Owner { def drop(&mut self) {} } def consume(value: Owner) {} def f() { let mut owner = Owner { value: 1 }; consume(owner); owner = Owner { value: 2 }; consume(owner); }", 0)?;
+    sh_borrow_case("struct Owner { value: i64, } impl Drop for Owner { def drop(&mut self) {} } struct Pair { left: Owner, right: Owner, } def consume(value: Owner) {} def consume_pair(value: Pair) {} def f() { let mut pair = Pair { left: Owner { value: 1 }, right: Owner { value: 2 } }; consume(pair.left); pair.left = Owner { value: 3 }; consume_pair(pair); }", 0)?;
+    sh_borrow_case("struct Owner { value: i64, } impl Drop for Owner { def drop(&mut self) {} } struct Pair { left: Owner, right: Owner, } def consume(value: Pair) {} def f() { let mut pair = Pair { left: Owner { value: 1 }, right: Owner { value: 2 } }; consume(pair); pair.left = Owner { value: 3 }; }", 6101)?;
+    sh_borrow_case("def f(value: i64) -> i64 { match value { item => item } }", 0)?;
+    sh_borrow_case("def f() { for value in [1, 2] { let copy = value; } }", 0)?;
+    sh_borrow_case("struct Owner { value: i64, } impl Drop for Owner { def drop(&mut self) {} } enum Choice { Value(Owner), Empty, } def consume(value: Owner) {} def f(choice: Choice) { match choice { Choice::Value(value) => consume(value), Choice::Empty => {} } }", 6111)?;
+    sh_borrow_case("def read(value: i64) {} def mutate(value: &mut i64) {} def f() { let mut value = 1; let alias = &mut value; read(value); mutate(alias); }", 6103)?;
+    sh_borrow_case("def mutate(value: &mut i64) {} def f() { let mut value = 1; let first = &mut value; let second = first; mutate(second); mutate(first); }", 6101)?;
+    sh_borrow_case("def mutate(value: &mut i64) {} def f() { let mut value = 1; let first = &mut value; let second = first; mutate(second); }", 0)?;
+    sh_borrow_case("def mutate(value: &mut i64) {} def f() { let mut value = 1; let first = &mut value; let second = &mut *first; mutate(second); mutate(first); }", 0)?;
+    sh_borrow_case("def mutate(value: &mut i64) {} def f() { let mut value = 1; let first = &mut value; let second = &mut *first; mutate(first); mutate(second); }", 6102)?;
+    sh_borrow_case("def mutate(left: &mut i64, right: &mut i64) {} def f() { let mut value = 1; let alias = &mut value; mutate(alias, alias); }", 6102)?;
+    sh_borrow_case("def f(value: &mut i64) { let alias = &mut *value; *alias = 3; }", 0)?;
+    sh_borrow_case("struct Pair { left: i64, right: i64, } def mutate(left: &mut i64, right: &mut i64) {} def f() { let mut pair = Pair { left: 1, right: 2 }; let left = &mut pair.left; let right = &mut pair.right; mutate(left, right); }", 0)?;
+    sh_borrow_case("def mutate(value: &mut i64) {} def f() { let mut value = 1; let first = &mut value; let second = &mut *first; let copy = *first; mutate(second); }", 6103)?;
+    sh_borrow_case("def mutate(value: &mut i64) {} def f() { let mut value = 1; let first = &mut value; let second = &mut *first; *first = 2; mutate(second); }", 6106)?;
+    sh_borrow_case("def mutate(left: &mut i64, right: &mut i64) {} def f() { let mut value = 1; mutate(&mut value, &mut value); }", 6102)?;
+    sh_borrow_case("def nested(value: &mut i64) -> i64 { 0 } def mutate(left: &mut i64, middle: i64, right: &mut i64) {} def f() { let mut first = 1; let mut second = 2; mutate(&mut first, nested(&mut second), &mut first); }", 6102)?;
+    sh_borrow_case("def identity(value: &i64) -> &i64 { value } def observe(value: &i64) {} def f() { let mut value = 1; let alias = identity(&value); value = 2; observe(alias); }", 6106)?;
+    sh_borrow_case("def identity(value: &i64) -> &i64 { value } def observe(value: &i64, other: &mut i64) {} def f() { let mut value = 1; observe(identity(&value), &mut value); }", 6103)?;
+    sh_borrow_case("struct Owner { value: i64, } impl Owner { def borrow(&self) -> &i64 { &self.value } } def observe(value: &i64, other: &mut Owner) {} def f() { let mut owner = Owner { value: 1 }; observe(owner.borrow(), &mut owner); }", 6103)?;
+    sh_borrow_case("def f(flag: bool) { let mut first = 1; let mut second = 2; let alias = if flag { &mut first } else { &mut second }; let copied = *alias; (); }", 6111)?;
+    sh_borrow_case("struct Owner { value: i64, } impl Drop for Owner { def drop(&mut self) {} } def consume(value: Owner) {} def f(value: &Owner) { consume(*value); }", 6112)?;
     Result { is_ok: true, value: true, error: 0 };
 }
 
@@ -60,12 +85,116 @@ def sh_test_borrow_actions() -> Result<bool, i64> {
     Result { is_ok: true, value: true, error: 0 };
 }
 
+def sh_test_temporary_actions() -> Result<bool, i64> {
+    let text = string_from_str("struct Owner { value: i64, } impl Drop for Owner { def drop(&mut self) {} } struct Pair { left: Owner, right: Owner, } def make() -> Pair { Pair { left: Owner { value: 1 }, right: Owner { value: 2 } } } def f() { let moved = make().left; }")?;
+    let parsed = sh_parse(&text, 0, 10000);
+    let checked = sh_check(&text, &parsed.ast, 100);
+    assert_eq_i64(checked.error, 0, "temp.sg", 1);
+    let ownership = sh_check_ownership(&text, &parsed.ast, &checked, 100);
+    assert_eq_i64(ownership.error, 0, "temp.sg", 2);
+    let mut temporary_drops = 0;
+    let mut local_drops = 0;
+    let mut index = 0;
+    while index < sh_ownership_action_count(&ownership) { if sh_ownership_action(&ownership, index, 2) == 3 { let binding = sh_ownership_action(&ownership, index, 1); if binding < 0 { let path = sh_ownership_action_path(&ownership, index); assert_true(path >= 0, "temp.sg", 3); assert_true(sh_ownership_path_word(&ownership, path, 1) >= 0, "temp.sg", 4); temporary_drops = temporary_drops + 1; } else { local_drops = local_drops + 1; }; }; index = index + 1; };
+    assert_eq_i64(temporary_drops, 1, "temp.sg", 5);
+    assert_eq_i64(local_drops, 1, "temp.sg", 6);
+    Result { is_ok: true, value: true, error: 0 };
+}
+
+def sh_test_overwrite_phase() -> Result<bool, i64> {
+    let text = string_from_str("struct Owner { value: i64, } impl Drop for Owner { def drop(&mut self) {} } def f() { let mut owner = Owner { value: 1 }; owner = Owner { value: 2 }; }")?;
+    let parsed = sh_parse(&text, 0, 10000);
+    let checked = sh_check(&text, &parsed.ast, 100);
+    assert_eq_i64(checked.error, 0, "borrow.sg", 111);
+    let ownership = sh_check_ownership(&text, &parsed.ast, &checked, 100);
+    assert_eq_i64(ownership.error, 0, "borrow.sg", 113);
+    let mut before_store = 0;
+    let mut after_store = 0;
+    let mut index = 0;
+    while index < sh_ownership_action_count(&ownership) { let kind = sh_ownership_action(&ownership, index, 2); if kind == 6 { assert_eq_i64(sh_ast_word(&parsed.ast, sh_ownership_action(&ownership, index, 0), 0), 52, "borrow.sg", 117); before_store = before_store + 1; }; if kind == 3 { after_store = after_store + 1; }; index = index + 1; };
+    assert_eq_i64(before_store, 1, "borrow.sg", 120);
+    assert_eq_i64(after_store, 1, "borrow.sg", 121);
+    Result { is_ok: true, value: true, error: 0 };
+}
+
+def sh_test_exact_move_span() -> Result<bool, i64> {
+    let text = string_from_str("struct Owner { value: i64, } impl Drop for Owner { def drop(&mut self) {} } def consume(value: Owner) {} def f() { let owner = Owner { value: 1 }; consume(owner); consume(owner); }")?;
+    let parsed = sh_parse(&text, 0, 10000);
+    let checked = sh_check(&text, &parsed.ast, 100);
+    let ownership = sh_check_ownership(&text, &parsed.ast, &checked, 100);
+    assert_eq_i64(ownership.error, 6101, "borrow.sg", 131);
+    let token = ShToken { kind: 1, start: ownership.start, end: ownership.end };
+    let spelling = sh_token_text(&text, token)?;
+    assert_true(sh_s_text_equal(&spelling, "owner"), "borrow.sg", 134);
+    assert_eq_i64(ownership.start, text.len() - 9, "borrow.sg", 136);
+    Result { is_ok: true, value: true, error: 0 };
+}
+
+def sh_test_temporary_alias_order(raw: &str, expected_drops: i64, expected_conditional: i64) -> Result<bool, i64> {
+    let text = string_from_str(raw)?;
+    let parsed = sh_parse(&text, 0, 10000);
+    let checked = sh_check(&text, &parsed.ast, 100);
+    if checked.error != 0 { println(checked.error); println(raw); (); };
+    assert_eq_i64(checked.error, 0, "borrow.sg", 145);
+    let ownership = sh_check_ownership(&text, &parsed.ast, &checked, 100);
+    if ownership.error != 0 { println(ownership.error); println(raw); (); };
+    assert_eq_i64(ownership.error, 0, "borrow.sg", 148);
+    let mut drops = 0;
+    let mut conditional = 0;
+    let mut index = 0;
+    while index < sh_ownership_action_count(&ownership) { let binding = sh_ownership_action(&ownership, index, 1); if binding < 0 and sh_ownership_action(&ownership, index, 2) == 3 { let node = sh_ownership_action(&ownership, index, 0); let end = sh_ast_word(&parsed.ast, node, 3); let mut loan = 0; while loan < ownership.loans.len() { let path = ownership.loans.get(loan).unwrap_or(-1); if sh_ownership_path_word(&ownership, path, 0) == binding { let holder = ownership.loans.get(loan + 1).unwrap_or(-1); if holder >= 0 { assert_true(end >= ownership.last_uses.get(holder).unwrap_or(-1), "borrow.sg", 159); (); }; }; loan = loan + 5; }; drops = drops + 1; conditional = conditional + sh_ownership_action(&ownership, index, 4); }; index = index + 1; };
+    assert_eq_i64(drops, expected_drops, "borrow.sg", 166);
+    assert_eq_i64(conditional, expected_conditional, "borrow.sg", 167);
+    Result { is_ok: true, value: true, error: 0 };
+}
+
+def sh_test_temporary_lifetimes() -> Result<bool, i64> {
+    sh_test_temporary_alias_order("struct Owner { value: i64, } impl Drop for Owner { def drop(&mut self) {} } def make() -> Owner { Owner { value: 1 } } def observe(value: &Owner) {} def f() { let first = &make(); let second = first; observe(second); observe(first); }", 1, 0)?;
+    sh_test_temporary_alias_order("struct Owner { value: i64, } impl Drop for Owner { def drop(&mut self) {} } def make() -> Owner { Owner { value: 1 } } def observe(value: &Owner) {} def f(flag: bool) { let alias = if flag { &make() } else { &make() }; observe(alias); }", 2, 2)?;
+    sh_test_temporary_alias_order("struct Owner { value: i64, } impl Drop for Owner { def drop(&mut self) {} } def make() -> Owner { Owner { value: 1 } } def observe(value: &Owner) {} def f() { let alias = &{ make() }; observe(alias); }", 1, 0)?;
+    sh_test_temporary_alias_order("struct Owner { value: i64, } impl Drop for Owner { def drop(&mut self) {} } def make() -> Owner { Owner { value: 1 } } def observe(value: &Owner) {} def f(flag: bool) { let alias = &make(); while flag { observe(alias); } }", 1, 0)?;
+    Result { is_ok: true, value: true, error: 0 };
+}
+
+def sh_test_facts_constructor() -> Result<bool, i64> {
+    let actions = vec_new_i64();
+    actions.push(2);
+    actions.push(3);
+    actions.push(1);
+    actions.push(0);
+    actions.push(0);
+    let action_paths = vec_new_i64();
+    action_paths.push(0);
+    let paths = vec_new_i64();
+    paths.push(3);
+    paths.push(-1);
+    paths.push(-1);
+    paths.push(7);
+    let facts = sh_ownership_from_facts(actions, action_paths, paths, 100);
+    assert_eq_i64(facts.error, 0, "borrow.sg", 211);
+    assert_eq_i64(sh_ownership_action_count(&facts), 1, "borrow.sg", 212);
+    assert_eq_i64(sh_ownership_action(&facts, 0, 1), 3, "borrow.sg", 213);
+    assert_eq_i64(sh_ownership_action_path(&facts, 0), 0, "borrow.sg", 214);
+    assert_eq_i64(sh_ownership_path_word(&facts, 0, 3), 7, "borrow.sg", 215);
+    let invalid_actions = vec_new_i64();
+    invalid_actions.push(1);
+    let invalid = sh_ownership_from_facts(invalid_actions, vec_new_i64(), vec_new_i64(), 100);
+    assert_eq_i64(invalid.error, 6110, "borrow.sg", 218);
+    Result { is_ok: true, value: true, error: 0 };
+}
+
 def main() -> i64 {
     let strings = sengoo_string_live_handle_count();
     let buffers = sengoo_buffer_live_handle_count();
     let opaque = sengoo_opaque_live_handle_count();
     let mut round = 0;
-    while round < 50 { let result = sh_test_borrow_round(); if not result.is_ok() { return 1; }; round = round + 1; };
+    while round < 50 { let facts = sh_test_facts_constructor(); if not facts.is_ok() { return 7; }; let result = sh_test_borrow_round(); if not result.is_ok() { return 1; }; let lifetimes = sh_test_temporary_lifetimes(); if not lifetimes.is_ok() { return 6; }; round = round + 1; };
+    let overwrite = sh_test_overwrite_phase();
+    if not overwrite.is_ok() { return 4; };
+    let precise = sh_test_exact_move_span();
+    if not precise.is_ok() { return 5; };
+    let temporary = sh_test_temporary_actions();
+    if not temporary.is_ok() { return 3; };
     let actions = sh_test_borrow_actions();
     if not actions.is_ok() { return 2; };
     assert_eq_i64(sengoo_string_live_handle_count(), strings, "borrow.sg", 83);

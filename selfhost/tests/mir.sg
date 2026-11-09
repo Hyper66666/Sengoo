@@ -258,7 +258,7 @@ def sh_mt_lower_case(source: &str, expected: i64) -> Result<bool, i64> {
     if parsed.error != 0 { println("MIR fixture parse"); println(parsed.error); return Result { is_ok: false, value: false, error: parsed.error }; };
     let checked = sh_check(&text, &parsed.ast, 100);
     let lowered = sh_lower(&text, &parsed.ast, &checked, 10000);
-    if lowered.error != expected { println(source); println("MIR error"); println(lowered.error); println(lowered.start); println(lowered.end); return Result { is_ok: false, value: false, error: 99 }; };
+    if lowered.error != expected { println(source); println("MIR error"); println(lowered.error); println(lowered.start); println(lowered.end); if lowered.error == 5504 { let mut binding = 0; while binding < sh_binding_count(&checked) { let owner = sh_binding_word(&checked, binding, 6); let symbol = sh_binding_word(&checked, binding, 0); if owner < -1 or owner >= binding or symbol < 0 or symbol >= sh_symbol_count(&checked.symbols) or sh_binding_word(&checked, binding, 4) < -1 or sh_binding_word(&checked, binding, 4) >= sh_ast_count(&parsed.ast) { println("bad HIR binding"); println(binding); let mut field = 0; while field < 8 { println(sh_binding_word(&checked, binding, field)); field = field + 1; }; }; binding = binding + 1; }; println("HIR constraints"); let mut word = 0; while word < checked.constraints.len() { println(sengoo_vec_get_or_default_i64(checked.constraints.handle, word, -1)); word = word + 1; }; }; return Result { is_ok: false, value: false, error: 99 }; };
     if expected == 0 { let validated = sh_mir_validate(&lowered.mir); assert_eq_i64(validated.error, 0, "mir.sg", 180); assert_true(sh_mir_fn_count(&lowered.mir) > 0, "mir.sg", 181); (); };
     Result { is_ok: true, value: true, error: 0 };
 }
@@ -316,12 +316,65 @@ def sh_mt_lower() -> Result<bool, i64> {
     sh_mt_lower_case("def main() -> i64 { let mut value = 41; let reference = &mut value; *reference = 42; value; }", 0)?;
     sh_mt_lower_case("def main() -> i64 { loop { break 42; }; }", 0)?;
     sh_mt_lower_case("def main() -> i64 { if true and false or true { return 42; } else { return 0; }; }", 0)?;
+    sh_mt_lower_case("enum Choice { No, Value(i64), } def choose(value: Choice) -> i64 { match value { Choice::No => 0, Choice::Value(x) => x, }; } def main() -> i64 { choose(Choice::Value(42)); }", 0)?;
+    sh_mt_lower_case("def main() -> i64 { match 42 { x if x < 0 => 0, 42 => 42, _ => 1, }; }", 0)?;
+    sh_mt_lower_case("def main() -> i64 { match (20, 22) { (a, b) => a + b, _ => 0, }; }", 0)?;
+    sh_mt_lower_case("struct Point { x: i64, y: i64, } impl Point { def sum(&self) -> i64 { self.x + self.y; } } def main() -> i64 { let point = Point { x: 20, y: 22 }; point.sum(); }", 0)?;
+    sh_mt_lower_case("def main() -> i64 { let mut sum = 0; for value in 0..4 { if value == 1 { continue; }; sum = sum + value; }; sum; }", 0)?;
+    sh_mt_lower_case("def main() -> i64 { let mut sum = 0; for value in [20, 22, 99] { if value == 99 { break; }; sum = sum + value; }; sum; }", 0)?;
+    sh_mt_lower_case("def main() -> i64 { let mut sum = 0; for (a, b) in [(20, 22), (1, 2)] { sum = sum + a + b; }; sum; }", 0)?;
+    sh_mt_lower_case("def main() -> i64 {}", 0)?;
     sh_mt_lower_case("struct Owner { value: i64, } impl Drop for Owner { def drop(&mut self) {} } def main() -> i64 { let value = Owner { value: 42 }; 42; }", 0)?;
     sh_mt_lower_case("struct Owner { value: i64, } impl Drop for Owner { def drop(&mut self) {} } struct Pair { left: Owner, right: Owner, } def main() -> i64 { let pair = Pair { left: Owner { value: 1 }, right: Owner { value: 2 } }; let moved = pair.left; 42; }", 0)?;
     sh_mt_cleanup_case("struct Owner { value: i64, } impl Drop for Owner { def drop(&mut self) {} } def main() -> i64 { let value = Owner { value: 42 }; 42; }", 1, 0)?;
     sh_mt_cleanup_case("struct Owner { value: i64, } impl Drop for Owner { def drop(&mut self) {} } struct Pair { left: Owner, right: Owner, } def main() -> i64 { let pair = Pair { left: Owner { value: 1 }, right: Owner { value: 2 } }; let moved = pair.left; 42; }", 2, 1)?;
     sh_mt_cleanup_case("struct Owner { value: i64, } impl Drop for Owner { def drop(&mut self) {} } def consume(value: Owner, flag: bool) -> i64 { if flag { let moved = value; 0; } else { 0; }; 42; } def main() -> i64 { consume(Owner { value: 42 }, true); }", 2, 0)?;
+    sh_mt_cleanup_case("struct Owner { value: i64, } impl Drop for Owner { def drop(&mut self) {} } def make() -> Owner { Owner { value: 42 }; } def observe(value: &Owner) {} def main() -> i64 { make().value; observe(&make()); let alias = &make(); observe(alias); 42; }", 3, 0)?;
+    sh_mt_cleanup_case("struct Owner { value: i64, } impl Drop for Owner { def drop(&mut self) {} } def main() -> i64 { let mut value = Owner { value: 1 }; value = Owner { value: 2 }; 42; }", 2, 0)?;
     sh_mt_lower_case("def main() -> i64 { missing; }", 5101)?;
+    Result { is_ok: true, value: true, error: 0 };
+}
+
+def sh_mt_words_equal(a: &Vec<i64>, b: &Vec<i64>) {
+    assert_eq_i64(a.len(), b.len(), "mir.sg", 401);
+    let mut index = 0; while index < a.len() { assert_eq_i64(sengoo_vec_get_or_default_i64(a.handle, index, -1), sengoo_vec_get_or_default_i64(b.handle, index, -2), "mir.sg", 402); index = index + 1; };
+}
+
+def sh_mt_hir() -> Result<bool, i64> {
+    let text = string_from_str("// 涓栫晫 & UTF8 bridge\ndef main() -> i64 { let mut sum = 0; for value in 0..4 { sum = sum + value; }; match sum { 6 => 42, _ => 0, }; }")?;
+    let parsed = sh_parse(&text, 0, 10000);
+    let checked = sh_check(&text, &parsed.ast, 100);
+    let hir = sh_hir_lift(&text, &parsed.ast, &checked, 10000);
+    if hir.error != 0 { println("HIR lift"); println(hir.error); return Result { is_ok: false, value: false, error: hir.error }; };
+    let image = sh_hir_encode(&hir, 1000000);
+    assert_eq_i64(image.error, 0, "mir.sg", 414);
+    let decoded = sh_hir_decode(&image.words, 1000000);
+    assert_eq_i64(decoded.error, 0, "mir.sg", 416);
+    let image2 = sh_hir_encode(&decoded, 1000000);
+    assert_eq_i64(image2.error, 0, "mir.sg", 418);
+    sh_mt_words_equal(&image.words, &image2.words);
+    let direct = sh_lower(&text, &parsed.ast, &checked, 10000);
+    let restored = sh_lower_hir(&decoded, 10000);
+    if direct.error != 0 or restored.error != 0 { println("HIR lower"); println(direct.error); println(restored.error); println(direct.start); println(direct.end); return Result { is_ok: false, value: false, error: 98 }; };
+    sh_mt_words_equal(&direct.mir.functions, &restored.mir.functions);
+    sh_mt_words_equal(&direct.mir.locals, &restored.mir.locals);
+    sh_mt_words_equal(&direct.mir.scopes, &restored.mir.scopes);
+    sh_mt_words_equal(&direct.mir.blocks, &restored.mir.blocks);
+    sh_mt_words_equal(&direct.mir.instructions, &restored.mir.instructions);
+    sh_mt_words_equal(&direct.mir.operands, &restored.mir.operands);
+    sh_mt_words_equal(&direct.mir.parameters, &restored.mir.parameters);
+    sh_mt_words_equal(&direct.mir.terminators, &restored.mir.terminators);
+    sh_mt_words_equal(&direct.mir.edges, &restored.mir.edges);
+    sh_mt_words_equal(&direct.mir.layouts, &restored.mir.layouts);
+    sh_mt_words_equal(&direct.mir.fields, &restored.mir.fields);
+    sh_mt_words_equal(&direct.mir.types.words, &restored.mir.types.words);
+    sh_mt_words_equal(&direct.mir.types.arguments, &restored.mir.types.arguments);
+    image.words.set(1, 99); let bad_version = sh_hir_decode(&image.words, 1000000); assert_eq_i64(bad_version.error, 5502, "mir.sg", 436); image.words.set(1, 1);
+    image.words.push(123); let trailing = sh_hir_decode(&image.words, 1000000); assert_eq_i64(trailing.error, 5502, "mir.sg", 437); sh_mir_trim(&image.words, image.words.len() - 1);
+    let capped = sh_hir_encode(&hir, 2); assert_eq_i64(capped.error, 5501, "mir.sg", 438);
+    let invalid_limit = sh_hir_decode(&image.words, -1); assert_eq_i64(invalid_limit.error, 5501, "mir.sg", 439);
+    hir.checked.resolution.set(hir.ast.root, 999999); assert_eq_i64(sh_hir_validate(&hir), 5504, "mir.sg", 440); hir.checked.resolution.set(hir.ast.root, -1);
+    hir.checked.node_types.set(hir.ast.root, 999999); assert_eq_i64(sh_hir_validate(&hir), 5503, "mir.sg", 441);
     Result { is_ok: true, value: true, error: 0 };
 }
 
@@ -331,6 +384,8 @@ def main() -> i64 {
     let opaque = sengoo_opaque_live_handle_count();
     let mut round = 0;
     while round < 10 {
+        let hir = sh_mt_hir();
+        if not hir.is_ok() { println(hir.error); return 7; };
         let lowering = sh_mt_lower();
         if not lowering.is_ok() { println(lowering.error); return 6; };
         let nominal = sh_mt_nominal_indirect();
@@ -345,6 +400,6 @@ def main() -> i64 {
     assert_eq_i64(sengoo_string_live_handle_count(), strings, "mir.sg", 146);
     assert_eq_i64(sengoo_buffer_live_handle_count(), buffers, "mir.sg", 147);
     assert_eq_i64(sengoo_opaque_live_handle_count(), opaque, "mir.sg", 148);
-    println("selfhost MIR foundation: 10 typed lowering and 30 CFG/SSA/memory/ABI/bounds exact resource rounds passed");
+    println("selfhost typed HIR/MIR: 10 roundtrip/lowering/cleanup and 30 CFG/SSA/ABI exact resource rounds passed");
     0;
 }

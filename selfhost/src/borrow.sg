@@ -7,8 +7,11 @@ struct ShOwnership {
     paths: Vec<i64>,
     state: Vec<i64>,
     loans: Vec<i64>,
+    loan_parents: Vec<i64>,
+    access_mode: i64,
     last_uses: Vec<i64>,
     loops: Vec<i64>,
+    definitions: Vec<i64>,
     error: i64,
     start: i64,
     end: i64,
@@ -113,12 +116,104 @@ def sh_b_overlap(result: &ShOwnership, left: i64, right: i64) -> bool {
     false;
 }
 
+def sh_b_loan_ancestor(result: &ShOwnership, ancestor: i64, child: i64) -> bool {
+    let mut current = child;
+    let mut count = 0;
+    while current >= 0 and count <= result.loan_parents.len() { if current == ancestor { return true; }; current = result.loan_parents.get(current).unwrap_or(-1); count = count + 1; };
+    false;
+}
+
+def sh_b_alias_loan(result: &ShOwnership, alias: i64) -> i64 {
+    if alias < 0 { return -1; };
+    let mut index = result.loans.len() - 5;
+    while index >= 0 { if result.loans.get(index + 1).unwrap_or(-1) == alias and result.loans.get(index + 4).unwrap_or(0) != 0 { return index / 5; }; index = index - 5; };
+    -1;
+}
+
+def sh_b_alias_ambiguous(result: &ShOwnership, alias: i64) -> bool {
+    if alias < 0 { return false; };
+    let mut path = -1;
+    let mut index = 0;
+    while index < result.loans.len() { if result.loans.get(index + 1).unwrap_or(-1) == alias and result.loans.get(index + 4).unwrap_or(0) != 0 { let owner = result.loans.get(index).unwrap_or(-1); if path >= 0 and path != owner { return true; }; path = owner; }; index = index + 5; };
+    false;
+}
+
+def sh_b_access_alias(checked: &ShChecked, ast: &ShAst, node: i64, depth: i64) -> i64 {
+    if depth > 128 { return -1; };
+    let kind = sh_ast_word(ast, node, 0);
+    if kind == 50 and sh_ast_word(ast, node, 4) % 1000 == sh_kind("*") { return sh_node_binding(checked, sh_ast_child(ast, node, 0)); };
+    if kind == 55 or kind == 54 { let base = sh_ast_child(ast, node, 0); if sh_s_kind(checked, sh_s_resolve(checked, sh_node_type(checked, base))) == 6 { return sh_node_binding(checked, base); }; return sh_b_access_alias(checked, ast, base, depth + 1); };
+    if kind == 58 and sh_ast_word(ast, node, 4) == 0 { return sh_b_access_alias(checked, ast, sh_ast_child(ast, node, 0), depth + 1); };
+    -1;
+}
+
 def sh_b_place(result: &ShOwnership, checked: &ShChecked, ast: &ShAst, node: i64) -> i64 {
     let kind = sh_ast_word(ast, node, 0);
     if kind == 10 or kind == 12 { let binding = sh_node_binding(checked, node); let category = sh_binding_word(checked, binding, 2); if category != 0 and category != 1 { return -1; }; return sh_b_path(result, binding, -1, -1, sh_node_type(checked, node)); };
-    if kind == 55 { let parent = sh_b_place(result, checked, ast, sh_ast_child(ast, node, 0)); let field = sh_node_binding(checked, node); if parent < 0 or field < 0 { return -1; }; return sh_b_path(result, sh_b_path_root(result, parent), parent, field, sh_node_type(checked, node)); };
+    if kind == 50 and sh_ast_word(ast, node, 4) % 1000 == sh_kind("*") { let alias = sh_node_binding(checked, sh_ast_child(ast, node, 0)); let loan = sh_b_alias_loan(result, alias); if loan >= 0 { return result.loans.get(loan * 5).unwrap_or(-1); }; return -1; };
+    if kind == 55 { let base = sh_ast_child(ast, node, 0); let alias = if sh_s_kind(checked, sh_s_resolve(checked, sh_node_type(checked, base))) == 6 { sh_b_alias_loan(result, sh_node_binding(checked, base)); } else { -1; }; let parent = if alias >= 0 { result.loans.get(alias * 5).unwrap_or(-1); } else { sh_b_place(result, checked, ast, base); }; let field = sh_node_binding(checked, node); if parent < 0 or field < 0 { return -1; }; return sh_b_path(result, sh_b_path_root(result, parent), parent, field, sh_node_type(checked, node)); };
     if kind == 58 and sh_ast_word(ast, node, 4) == 0 { return sh_b_place(result, checked, ast, sh_ast_child(ast, node, 0)); };
+    let mut temporary = 0;
+    while temporary < result.paths.len() / 4 { if sh_b_path_root(result, temporary) == -node - 1 and result.paths.get(temporary * 4 + 1).unwrap_or(-1) == -1 { return temporary; }; temporary = temporary + 1; };
     -1;
+}
+
+def sh_b_definition(result: &ShOwnership, binding: i64, path: i64, scope: i64, keeper: i64) {
+    let mut index = 0;
+    while index < result.definitions.len() { if result.definitions.get(index).unwrap_or(0) == binding and result.definitions.get(index + 3).unwrap_or(-1) == result.function { return; }; index = index + 5; };
+    result.definitions.push(binding);
+    result.definitions.push(path);
+    result.definitions.push(scope);
+    result.definitions.push(result.function);
+    result.definitions.push(keeper);
+    ();
+}
+
+def sh_b_carries_borrow(checked: &ShChecked, input: i64, depth: i64) -> bool {
+    if depth > 64 { return true; };
+    let ty = sh_s_resolve(checked, input);
+    let kind = sh_s_kind(checked, ty);
+    if kind == 5 or kind == 6 or kind == 9 or kind == 13 or kind == 16 or kind == 19 { return true; };
+    if kind == 8 or kind == 10 or kind == 12 { let mut index = 0; while index < sh_s_arity(checked, ty) { if sh_b_carries_borrow(checked, sh_s_argument(checked, ty, index), depth + 1) { return true; }; index = index + 1; }; if kind == 12 { let owner = sh_adt_binding(checked, ty); index = 0; while index < sh_binding_count(checked) { let parent = sh_binding_word(checked, index, 6); let member = parent == owner or sh_binding_word(checked, parent, 2) == 5 and sh_binding_word(checked, parent, 6) == owner; if sh_binding_word(checked, index, 2) == 6 and member and sh_b_carries_borrow(checked, sh_resolved_field_type(checked, ty, index), depth + 1) { return true; }; index = index + 1; }; }; };
+    false;
+}
+
+def sh_b_temporary(result: &mut ShOwnership, checked: &ShChecked, ast: &ShAst, node: i64, moving: bool, holder: i64) {
+    let kind = sh_ast_word(ast, node, 0);
+    let produces = kind == 53 or kind == 60 or kind == 59 or kind == 58 and sh_ast_word(ast, node, 4) == 1;
+    let ty = sh_node_type(checked, node);
+    if not produces or not sh_b_drop_inner(checked, ty, 0) or result.flow != 0 { return; };
+    let binding = -node - 1;
+    let path = sh_b_path(result, binding, -1, -1, ty);
+    result.state.set(path, 1);
+    let keeper = if not moving and holder >= 0 and sh_b_carries_borrow(checked, sh_binding_word(checked, holder, 3), 0) { holder; } else { -1; };
+    let scope = if keeper >= 0 { sh_binding_word(checked, keeper, 1); } else { result.scope; };
+    sh_b_definition(result, binding, path, scope, keeper);
+    sh_b_action(result, ast, node, binding, 1, scope, 0);
+    if moving { sh_b_path_use(result, checked, ast, node, path, true); };
+}
+
+def sh_b_keeper_live(result: &ShOwnership, checked: &ShChecked, keeper: i64, at: i64) -> bool {
+    if keeper < 0 { return false; };
+    if sh_b_drop_inner(checked, sh_binding_word(checked, keeper, 3), 0) { return true; };
+    let last = result.last_uses.get(keeper).unwrap_or(-1);
+    if last > at { return true; };
+    let mut frame = 0;
+    while frame < result.loops.len() { if last >= result.loops.get(frame).unwrap_or(0) and last <= result.loops.get(frame + 1).unwrap_or(0) { return true; }; frame = frame + 3; };
+    false;
+}
+
+def sh_b_temporaries_end(result: &mut ShOwnership, checked: &ShChecked, ast: &ShAst, node: i64) {
+    let mut expression_loan = 0;
+    while expression_loan < result.loans.len() { if result.loans.get(expression_loan + 1).unwrap_or(-1) == -1 { result.loans.set(expression_loan + 4, 0); (); }; expression_loan = expression_loan + 5; };
+    let mut index = result.definitions.len() - 5;
+    while index >= 0 { let binding = result.definitions.get(index).unwrap_or(0); let keeper = result.definitions.get(index + 4).unwrap_or(-1); let keep_live = sh_b_keeper_live(result, checked, keeper, sh_ast_word(ast, node, 3)); if binding < 0 and result.definitions.get(index + 3).unwrap_or(-1) == result.function and not keep_live { let path = result.definitions.get(index + 1).unwrap_or(-1); if (result.state.get(path).unwrap_or(0) & 1) != 0 { let mut loan = 0; while loan < result.loans.len() { if sh_b_path_root(result, result.loans.get(loan).unwrap_or(-1)) == binding { result.loans.set(loan + 4, 0); (); }; loan = loan + 5; }; sh_b_drop_path(result, checked, ast, node, path, result.definitions.get(index + 2).unwrap_or(result.scope), 0, 0); }; }; index = index - 5; };
+}
+
+def sh_b_join_state(left: i64, right: i64) -> i64 {
+    let combined = left | right;
+    if (left == 0 or right == 0) and (combined & 1) != 0 { return combined | 2; };
+    combined;
 }
 
 def sh_b_state_copy(result: &ShOwnership) -> Vec<i64> {
@@ -166,8 +261,8 @@ def sh_b_drop_path(result: &mut ShOwnership, checked: &ShChecked, ast: &ShAst, n
 }
 
 def sh_b_cleanup(result: &mut ShOwnership, checked: &ShChecked, ast: &ShAst, node: i64, scope: i64, descendants: bool) {
-    let mut binding = sh_binding_count(checked) - 1;
-    while binding >= 0 { let binding_scope = sh_binding_word(checked, binding, 1); let local = sh_binding_word(checked, binding, 2) == 0 or sh_binding_word(checked, binding, 2) == 1; let inside = if descendants { sh_b_scope_inside(checked, binding_scope, scope); } else { binding_scope == scope; }; if local and inside and sh_binding_word(checked, binding, 6) == result.function and sh_b_drop_inner(checked, sh_binding_word(checked, binding, 3), 0) { let path = sh_b_path(result, binding, -1, -1, sh_binding_word(checked, binding, 3)); let state = result.state.get(path).unwrap_or(0); if (state & 1) != 0 { sh_b_drop_path(result, checked, ast, node, path, binding_scope, if (state & 2) != 0 { 1; } else { 0; }, 0); result.state.set(path, 0); (); }; }; binding = binding - 1; };
+    let mut index = result.definitions.len() - 5;
+    while index >= 0 { let binding_scope = result.definitions.get(index + 2).unwrap_or(-1); let inside = if descendants { sh_b_scope_inside(checked, binding_scope, scope); } else { binding_scope == scope; }; if inside and result.definitions.get(index + 3).unwrap_or(-1) == result.function { let path = result.definitions.get(index + 1).unwrap_or(-1); let state = result.state.get(path).unwrap_or(0); let ty = result.paths.get(path * 4 + 3).unwrap_or(-1); if (state & 1) != 0 and sh_b_drop_inner(checked, ty, 0) { sh_b_drop_path(result, checked, ast, node, path, binding_scope, if (state & 2) != 0 { 1; } else { 0; }, 0); }; }; index = index - 5; };
 }
 
 def sh_b_block_scope(checked: &ShChecked, ast: &ShAst, node: i64) -> i64 {
@@ -179,28 +274,42 @@ def sh_b_block_scope(checked: &ShChecked, ast: &ShAst, node: i64) -> i64 {
 def sh_b_expire(result: &mut ShOwnership, checked: &ShChecked, ast: &ShAst, node: i64) {
     let at = sh_ast_word(ast, node, 2);
     let mut index = 0;
-    while index < result.loans.len() { let holder = result.loans.get(index + 1).unwrap_or(-1); let active = result.loans.get(index + 4).unwrap_or(0); let mut loop_live = false; let mut frame = 0; let last = result.last_uses.get(holder).unwrap_or(-1); while frame < result.loops.len() { if last >= result.loops.get(frame).unwrap_or(0) and last <= result.loops.get(frame + 1).unwrap_or(0) { loop_live = true; }; frame = frame + 3; }; if active != 0 and holder >= 0 and not loop_live and last < at { result.loans.set(index + 4, 0); sh_b_action(result, ast, node, holder, 5, result.scope, 0); }; index = index + 5; };
+    while index < result.loans.len() { let holder = result.loans.get(index + 1).unwrap_or(-1); let active = result.loans.get(index + 4).unwrap_or(0); let mut loop_live = false; let mut frame = 0; let last = result.last_uses.get(holder).unwrap_or(-1); while frame < result.loops.len() { if last >= result.loops.get(frame).unwrap_or(0) and last <= result.loops.get(frame + 1).unwrap_or(0) { loop_live = true; }; frame = frame + 3; }; if active != 0 and holder >= 0 and not loop_live and not sh_b_drop_inner(checked, sh_binding_word(checked, holder, 3), 0) and last < at { result.loans.set(index + 4, 0); sh_b_action(result, ast, node, holder, 5, result.scope, 0); }; index = index + 5; };
 }
 
-def sh_b_loan(result: &mut ShOwnership, checked: &ShChecked, ast: &ShAst, node: i64, path: i64, holder: i64, mutable: bool) {
+def sh_b_loan_from(result: &mut ShOwnership, checked: &ShChecked, ast: &ShAst, node: i64, path: i64, holder: i64, mutable: bool, parent: i64) {
     if path < 0 { return; };
+    let root = sh_b_path_root(result, path);
+    if root < 0 and holder >= 0 { let mut definition = 0; while definition < result.definitions.len() { if result.definitions.get(definition).unwrap_or(0) == root { let prior = result.definitions.get(definition + 4).unwrap_or(-1); if prior < 0 or result.last_uses.get(holder).unwrap_or(-1) > result.last_uses.get(prior).unwrap_or(-1) { result.definitions.set(definition + 4, holder); (); }; let current_scope = result.definitions.get(definition + 2).unwrap_or(-1); let holder_scope = sh_binding_word(checked, holder, 1); if sh_b_scope_inside(checked, current_scope, holder_scope) { result.definitions.set(definition + 2, holder_scope); (); }; }; definition = definition + 5; }; };
     let mut index = 0;
-    while index < result.loans.len() { let other = result.loans.get(index).unwrap_or(-1); if other == path and result.loans.get(index + 1).unwrap_or(-1) == holder and result.loans.get(index + 3).unwrap_or(-1) == node and result.loans.get(index + 4).unwrap_or(0) != 0 { return; }; if result.loans.get(index + 4).unwrap_or(0) != 0 and sh_b_overlap(result, path, other) and (mutable or result.loans.get(index + 2).unwrap_or(0) != 0) { sh_b_error(result, ast, node, if mutable and result.loans.get(index + 2).unwrap_or(0) != 0 { 6102; } else { 6103; }, sh_b_path_root(result, path), result.loans.get(index + 3).unwrap_or(-1)); }; index = index + 5; };
+    while index < result.loans.len() { let other = result.loans.get(index).unwrap_or(-1); if other == path and result.loans.get(index + 1).unwrap_or(-1) == holder and result.loans.get(index + 3).unwrap_or(-1) == node and result.loan_parents.get(index / 5).unwrap_or(-1) == parent and result.loans.get(index + 4).unwrap_or(0) != 0 { return; }; if result.loans.get(index + 4).unwrap_or(0) != 0 and not sh_b_loan_ancestor(result, index / 5, parent) and sh_b_overlap(result, path, other) and (mutable or result.loans.get(index + 2).unwrap_or(0) != 0) { sh_b_error(result, ast, node, if mutable and result.loans.get(index + 2).unwrap_or(0) != 0 { 6102; } else { 6103; }, sh_b_path_root(result, path), result.loans.get(index + 3).unwrap_or(-1)); }; index = index + 5; };
     result.loans.push(path);
     result.loans.push(holder);
     result.loans.push(if mutable { 1; } else { 0; });
     result.loans.push(node);
     result.loans.push(1);
+    result.loan_parents.push(parent);
     sh_b_action(result, ast, node, sh_b_path_root(result, path), 4, result.scope, if mutable { 1; } else { 0; });
+}
+
+def sh_b_loan(result: &mut ShOwnership, checked: &ShChecked, ast: &ShAst, node: i64, path: i64, holder: i64, mutable: bool) {
+    sh_b_loan_from(result, checked, ast, node, path, holder, mutable, -1);
 }
 
 def sh_b_path_use(result: &mut ShOwnership, checked: &ShChecked, ast: &ShAst, node: i64, path: i64, moving: bool) {
     if path < 0 { return; };
     let mut index = 0;
     while index < result.state.len() { if sh_b_overlap(result, path, index) and (result.state.get(index).unwrap_or(0) & 2) != 0 { sh_b_error(result, ast, node, 6101, sh_b_path_root(result, path), index); }; index = index + 1; };
-    if not moving or not sh_b_drop_inner(checked, result.paths.get(path * 4 + 3).unwrap_or(-1), 0) { return; };
+    let ty = sh_s_resolve(checked, result.paths.get(path * 4 + 3).unwrap_or(-1));
+    let linear_ref = sh_s_kind(checked, ty) == 6 and sh_s_flags(checked, ty) == 1;
+    let transferring = moving and (sh_b_drop_inner(checked, ty, 0) or linear_ref);
+    let alias = sh_b_access_alias(checked, ast, node, 0);
+    let authorized = if alias >= 0 { sh_b_alias_loan(result, alias); } else { -1; };
+    if not transferring and result.access_mode == 0 and sh_s_kind(checked, ty) != 6 { index = 0; while index < result.loans.len() { if result.loans.get(index + 4).unwrap_or(0) != 0 and result.loans.get(index + 2).unwrap_or(0) != 0 and sh_b_overlap(result, path, result.loans.get(index).unwrap_or(-1)) and not sh_b_loan_ancestor(result, index / 5, authorized) { sh_b_error(result, ast, node, 6103, sh_b_path_root(result, path), result.loans.get(index + 3).unwrap_or(-1)); }; index = index + 5; }; };
+    if not transferring { return; };
+    if alias >= 0 { sh_b_error(result, ast, node, 6112, sh_b_path_root(result, path), alias); return; };
     index = 0;
-    while index < result.loans.len() { if result.loans.get(index + 4).unwrap_or(0) != 0 and sh_b_overlap(result, path, result.loans.get(index).unwrap_or(-1)) { sh_b_error(result, ast, node, 6104, sh_b_path_root(result, path), result.loans.get(index + 3).unwrap_or(-1)); }; index = index + 5; };
+    while index < result.loans.len() { if result.loans.get(index + 4).unwrap_or(0) != 0 and not (linear_ref and result.loans.get(index + 1).unwrap_or(-1) == sh_b_path_root(result, path)) and sh_b_overlap(result, path, result.loans.get(index).unwrap_or(-1)) { sh_b_error(result, ast, node, 6104, sh_b_path_root(result, path), result.loans.get(index + 3).unwrap_or(-1)); }; index = index + 5; };
     let parent = result.paths.get(path * 4 + 1).unwrap_or(-1);
     if parent >= 0 and sh_b_custom_drop(checked, result.paths.get(parent * 4 + 3).unwrap_or(-1)) { sh_b_error(result, ast, node, 6107, sh_b_path_root(result, path), parent); };
     result.state.set(path, 2);
@@ -213,7 +322,24 @@ def sh_b_initialize(result: &mut ShOwnership, checked: &ShChecked, ast: &ShAst, 
     if binding < 0 { return; };
     let path = sh_b_path(result, binding, -1, -1, sh_binding_word(checked, binding, 3));
     result.state.set(path, 1);
+    sh_b_definition(result, binding, path, sh_binding_word(checked, binding, 1), -1);
     sh_b_action(result, ast, node, binding, 1, sh_binding_word(checked, binding, 1), 0);
+    let ty = sh_s_resolve(checked, sh_binding_word(checked, binding, 3));
+    if sh_binding_word(checked, binding, 2) == 1 and sh_s_kind(checked, ty) == 6 { let pointee = sh_s_argument(checked, ty, 0); let dereference = sh_b_path(result, binding, path, -2, pointee); sh_b_loan(result, checked, ast, node, dereference, binding, sh_s_flags(checked, ty) == 1); };
+}
+
+def sh_b_pattern_initialize(result: &mut ShOwnership, checked: &ShChecked, ast: &ShAst, node: i64) {
+    let mut binding = 0;
+    while binding < sh_binding_count(checked) { if sh_binding_word(checked, binding, 2) == 0 and sh_binding_word(checked, binding, 4) == node { let ty = sh_s_resolve(checked, sh_binding_word(checked, binding, 3)); if sh_b_drop_inner(checked, ty, 0) or sh_s_kind(checked, ty) == 6 and sh_s_flags(checked, ty) == 1 { sh_b_error(result, ast, node, 6111, binding, -1); } else { sh_b_initialize(result, checked, ast, node, binding); }; }; binding = binding + 1; };
+}
+
+def sh_b_alias(result: &mut ShOwnership, checked: &ShChecked, ast: &ShAst, node: i64, path: i64, holder: i64) {
+    if path < 0 or holder < 0 { return; };
+    let source = sh_b_path_root(result, path);
+    if source == holder { return; };
+    let count = result.loans.len();
+    let mut index = 0;
+    while index < count { if result.loans.get(index + 1).unwrap_or(-1) == source and result.loans.get(index + 4).unwrap_or(0) != 0 { let owner = result.loans.get(index).unwrap_or(-1); let mutable = result.loans.get(index + 2).unwrap_or(0) != 0; if mutable { result.loans.set(index + 4, 0); (); }; sh_b_loan_from(result, checked, ast, node, owner, holder, mutable, result.loan_parents.get(index / 5).unwrap_or(-1)); }; index = index + 5; };
 }
 
 def sh_b_walk(result: &mut ShOwnership, text: &String, checked: &ShChecked, ast: &ShAst, node: i64, moving: bool, holder: i64) {
@@ -222,8 +348,16 @@ def sh_b_walk(result: &mut ShOwnership, text: &String, checked: &ShChecked, ast:
     result.depth = result.depth + 1;
     sh_b_expire(result, checked, ast, node);
     let kind = sh_ast_word(ast, node, 0);
-    let path = sh_b_place(result, checked, ast, node);
-    if path >= 0 { sh_b_path_use(result, checked, ast, node, path, moving); } else if kind == 40 { let previous_scope = result.scope; result.scope = sh_b_block_scope(checked, ast, node); let mut index = 0; while result.flow == 0 and index < sh_ast_word(ast, node, 6) { let child = sh_ast_child(ast, node, index); let tail = index + 1 == sh_ast_word(ast, node, 6) and sh_ast_word(ast, child, 0) == 43; sh_b_walk(result, text, checked, ast, child, moving and tail, if tail { holder; } else { -1; }); index = index + 1; }; let mut loan = 0; while loan < result.loans.len() { let alias = result.loans.get(loan + 1).unwrap_or(-1); if alias >= 0 and sh_binding_word(checked, alias, 1) == result.scope { result.loans.set(loan + 4, 0); (); }; loan = loan + 5; }; if result.flow == 0 { let scope = result.scope; sh_b_cleanup(result, checked, ast, node, scope, false); }; result.scope = previous_scope; } else if kind == 41 or kind == 44 { let binding = sh_node_binding(checked, sh_ast_child(ast, node, 0)); let mut index = 1; while index < sh_ast_word(ast, node, 6) { let child = sh_ast_child(ast, node, index); if sh_ast_word(ast, child, 0) < 70 { sh_b_walk(result, text, checked, ast, child, true, binding); }; index = index + 1; }; sh_b_initialize(result, checked, ast, node, binding); } else if kind == 50 and sh_ast_word(ast, node, 4) % 1000 == sh_kind("&") { let operand = sh_ast_child(ast, node, 0); sh_b_walk(result, text, checked, ast, operand, false, -1); let owner = sh_b_place(result, checked, ast, operand); sh_b_loan(result, checked, ast, node, owner, holder, sh_ast_word(ast, node, 4) >= 1000); } else if kind == 52 { let target = sh_ast_child(ast, node, 0); let value = sh_ast_child(ast, node, 1); sh_b_walk(result, text, checked, ast, value, true, sh_node_binding(checked, target)); let target_path = sh_b_place(result, checked, ast, target); if target_path >= 0 { let binding = sh_b_path_root(result, target_path); let mut loan = 0; while loan < result.loans.len() { if result.loans.get(loan + 4).unwrap_or(0) != 0 and sh_b_overlap(result, target_path, result.loans.get(loan).unwrap_or(-1)) { sh_b_error(result, ast, target, 6106, binding, result.loans.get(loan + 3).unwrap_or(-1)); }; loan = loan + 5; }; if (result.state.get(target_path).unwrap_or(0) & 1) != 0 and sh_b_drop_inner(checked, sh_node_type(checked, target), 0) { sh_b_action(result, ast, node, binding, 3, result.scope, 1); }; result.state.set(target_path, 1); sh_b_action(result, ast, node, binding, 1, result.scope, 0); }; } else if kind == 61 or kind == 65 { let condition = sh_ast_child(ast, node, 0); sh_b_walk(result, text, checked, ast, condition, false, -1); let before = sh_b_state_copy(result); let before_loans = sh_b_loans_copy(result); let joined = vec_new_i64(); let joined_loans = vec_new_i64(); let mut falling = 0; let mut index = 1; while index < sh_ast_word(ast, node, 6) { sh_b_state_restore(result, &before); sh_b_loans_restore(result, &before_loans); result.flow = 0; sh_b_walk(result, text, checked, ast, sh_ast_child(ast, node, index), moving, holder); if result.flow == 0 { let mut at = 0; while at < result.state.len() { let state = result.state.get(at).unwrap_or(0); if at >= joined.len() { joined.push(state); (); } else { joined.set(at, joined.get(at).unwrap_or(0) | state); (); }; at = at + 1; }; at = 0; while at < result.loans.len() / 5 { let active = result.loans.get(at * 5 + 4).unwrap_or(0); if at >= joined_loans.len() { joined_loans.push(active); (); } else { joined_loans.set(at, joined_loans.get(at).unwrap_or(0) | active); (); }; at = at + 1; }; falling = falling + 1; }; index = index + 1; }; if kind == 61 and sh_ast_word(ast, node, 6) < 3 { let mut at = 0; while at < result.state.len() { let state = sengoo_vec_get_or_default_i64(before.handle, at, 0); if at >= joined.len() { joined.push(state); (); } else { joined.set(at, joined.get(at).unwrap_or(0) | state); (); }; at = at + 1; }; at = 0; while at < result.loans.len() / 5 { let active = sengoo_vec_get_or_default_i64(before_loans.handle, at, 0); if at >= joined_loans.len() { joined_loans.push(active); (); } else { joined_loans.set(at, joined_loans.get(at).unwrap_or(0) | active); (); }; at = at + 1; }; falling = falling + 1; }; sh_b_state_restore(result, &joined); sh_b_loans_restore(result, &joined_loans); result.flow = if falling == 0 { 1; } else { 0; }; } else if kind == 62 or kind == 63 or kind == 64 { let body = sh_ast_child(ast, node, sh_ast_word(ast, node, 6) - 1); result.loops.push(sh_ast_word(ast, node, 2)); result.loops.push(sh_ast_word(ast, node, 3)); result.loops.push(sh_b_block_scope(checked, ast, body)); let before = sh_b_state_copy(result); let mut index = 0; while result.flow == 0 and index < sh_ast_word(ast, node, 6) { sh_b_walk(result, text, checked, ast, sh_ast_child(ast, node, index), false, -1); index = index + 1; }; let after = sh_b_state_copy(result); let back_edge = result.flow == 0 or result.flow == 3; if result.flow != 1 { result.flow = 0; index = 0; while index < result.state.len() { let joined = sengoo_vec_get_or_default_i64(before.handle, index, 0) | sengoo_vec_get_or_default_i64(after.handle, index, 0); result.state.set(index, joined); index = index + 1; }; let count = result.actions.len(); index = 0; while back_edge and result.flow == 0 and index < sh_ast_word(ast, node, 6) { sh_b_walk(result, text, checked, ast, sh_ast_child(ast, node, index), false, -1); index = index + 1; }; while result.actions.len() > count { result.actions.pop(); }; while result.action_paths.len() > count / 5 { result.action_paths.pop(); }; result.flow = 0; }; if result.flow == 1 and kind != 64 { sh_b_state_restore(result, &before); result.flow = 0; }; result.loops.pop(); result.loops.pop(); result.loops.pop(); (); } else if kind == 42 { let op = sh_ast_word(ast, node, 4); let mut index = 0; while index < sh_ast_word(ast, node, 6) { let value = sh_ast_child(ast, node, index); sh_b_walk(result, text, checked, ast, value, true, -1); if op == sh_kind("return") { sh_b_escape(result, checked, ast, value); }; index = index + 1; }; if op == sh_kind("return") { let function_scope = sh_binding_word(checked, result.function, 7); sh_b_cleanup(result, checked, ast, node, function_scope, true); result.flow = 1; } else if op == sh_kind("break") { let loop_scope = result.loops.get(result.loops.len() - 1).unwrap_or(result.scope); sh_b_cleanup(result, checked, ast, node, loop_scope, true); result.flow = 2; } else if op == sh_kind("continue") { let loop_scope = result.loops.get(result.loops.len() - 1).unwrap_or(result.scope); sh_b_cleanup(result, checked, ast, node, loop_scope, true); result.flow = 3; }; } else if kind == 53 { sh_b_call(result, text, checked, ast, node, holder); } else { let mut index = 0; while index < sh_ast_word(ast, node, 6) { let child = sh_ast_child(ast, node, index); let child_kind = sh_ast_word(ast, child, 0); if child_kind < 70 or child_kind == 80 or child_kind == 81 { sh_b_walk(result, text, checked, ast, child, moving, holder); }; index = index + 1; }; };
+    let accessing = sh_b_access_alias(checked, ast, node, 0);
+    if sh_b_alias_ambiguous(result, accessing) { sh_b_error(result, ast, node, 6111, accessing, -1); };
+    if kind == 66 or kind == 63 { sh_b_pattern_initialize(result, checked, ast, node); };
+    if kind == 50 and sh_ast_word(ast, node, 4) % 1000 == sh_kind("*") { sh_b_walk(result, text, checked, ast, sh_ast_child(ast, node, 0), false, -1); };
+    if kind == 55 { let base = sh_ast_child(ast, node, 0); if sh_b_place(result, checked, ast, base) < 0 or sh_s_kind(checked, sh_s_resolve(checked, sh_node_type(checked, base))) == 6 { sh_b_walk(result, text, checked, ast, base, false, holder); }; };
+    let producer = kind == 53 or kind == 60 or kind == 59 or kind == 58 and sh_ast_word(ast, node, 4) == 1;
+    let path = if producer { -1; } else { sh_b_place(result, checked, ast, node); };
+    if path >= 0 { sh_b_alias(result, checked, ast, node, path, holder); sh_b_path_use(result, checked, ast, node, path, moving); } else if kind == 40 { let previous_scope = result.scope; result.scope = sh_b_block_scope(checked, ast, node); let mut index = 0; while result.flow == 0 and index < sh_ast_word(ast, node, 6) { let child = sh_ast_child(ast, node, index); let tail = index + 1 == sh_ast_word(ast, node, 6) and sh_ast_word(ast, child, 0) == 43; sh_b_walk(result, text, checked, ast, child, moving and tail, if tail { holder; } else { -1; }); index = index + 1; }; let mut loan = 0; while loan < result.loans.len() { let alias = result.loans.get(loan + 1).unwrap_or(-1); if alias >= 0 and sh_binding_word(checked, alias, 1) == result.scope { result.loans.set(loan + 4, 0); (); }; loan = loan + 5; }; if result.flow == 0 { let scope = result.scope; sh_b_cleanup(result, checked, ast, node, scope, false); }; result.scope = previous_scope; } else if kind == 41 or kind == 44 { let binding = sh_node_binding(checked, sh_ast_child(ast, node, 0)); let mut index = 1; while index < sh_ast_word(ast, node, 6) { let child = sh_ast_child(ast, node, index); if sh_ast_word(ast, child, 0) < 70 { sh_b_walk(result, text, checked, ast, child, true, binding); }; index = index + 1; }; sh_b_initialize(result, checked, ast, node, binding); sh_b_temporaries_end(result, checked, ast, node); } else if kind == 50 and sh_ast_word(ast, node, 4) % 1000 == sh_kind("&") { let operand = sh_ast_child(ast, node, 0); let previous_mode = result.access_mode; result.access_mode = 1; sh_b_walk(result, text, checked, ast, operand, false, holder); result.access_mode = previous_mode; let owner = sh_b_place(result, checked, ast, operand); let alias = sh_b_access_alias(checked, ast, operand, 0); let parent = if alias >= 0 { sh_b_alias_loan(result, alias); } else { -1; }; sh_b_loan_from(result, checked, ast, node, owner, holder, sh_ast_word(ast, node, 4) >= 1000, parent); } else if kind == 52 { let target = sh_ast_child(ast, node, 0); let value = sh_ast_child(ast, node, 1); let target_path = sh_b_place(result, checked, ast, target); let target_binding = if target_path >= 0 { sh_b_path_root(result, target_path); } else { -1; }; let alias = sh_b_access_alias(checked, ast, target, 0); let authorized = if alias >= 0 { sh_b_alias_loan(result, alias); } else { -1; }; sh_b_walk(result, text, checked, ast, value, true, target_binding); if target_path >= 0 { let mut ancestor = result.paths.get(target_path * 4 + 1).unwrap_or(-1); while ancestor >= 0 { if (result.state.get(ancestor).unwrap_or(0) & 2) != 0 { sh_b_error(result, ast, target, 6101, target_binding, ancestor); }; ancestor = result.paths.get(ancestor * 4 + 1).unwrap_or(-1); }; let mut loan = 0; while loan < result.loans.len() { if result.loans.get(loan + 4).unwrap_or(0) != 0 and not sh_b_loan_ancestor(result, loan / 5, authorized) and sh_b_overlap(result, target_path, result.loans.get(loan).unwrap_or(-1)) { sh_b_error(result, ast, target, 6106, target_binding, result.loans.get(loan + 3).unwrap_or(-1)); }; loan = loan + 5; }; if (result.state.get(target_path).unwrap_or(0) & 1) != 0 and sh_b_drop_inner(checked, sh_node_type(checked, target), 0) { let first = sh_ownership_action_count(result); sh_b_drop_path(result, checked, ast, node, target_path, result.scope, 0, 0); let mut action = first; while action < sh_ownership_action_count(result) { if result.actions.get(action * 5 + 2).unwrap_or(0) == 3 { result.actions.set(action * 5 + 2, 6); (); }; action = action + 1; }; }; let mut child = 0; while child < result.state.len() { if child != target_path and sh_b_path_contains(result, target_path, child) { result.state.set(child, 0); (); }; child = child + 1; }; result.state.set(target_path, 1); sh_b_action(result, ast, node, target_binding, 1, result.scope, 0); result.action_paths.set(result.action_paths.len() - 1, target_path); (); }; } else if kind == 61 or kind == 65 { let condition = sh_ast_child(ast, node, 0); sh_b_walk(result, text, checked, ast, condition, false, -1); let before = sh_b_state_copy(result); let before_loans = sh_b_loans_copy(result); let joined = vec_new_i64(); let joined_loans = vec_new_i64(); let mut falling = 0; let mut index = 1; while index < sh_ast_word(ast, node, 6) { sh_b_state_restore(result, &before); sh_b_loans_restore(result, &before_loans); result.flow = 0; sh_b_walk(result, text, checked, ast, sh_ast_child(ast, node, index), moving, holder); if result.flow == 0 { let mut at = 0; while at < result.state.len() { let state = result.state.get(at).unwrap_or(0); if at >= joined.len() { joined.push(if falling == 0 { state; } else { sh_b_join_state(0, state); }); (); } else { joined.set(at, sh_b_join_state(joined.get(at).unwrap_or(0), state)); (); }; at = at + 1; }; at = 0; while at < result.loans.len() / 5 { let active = result.loans.get(at * 5 + 4).unwrap_or(0); if at >= joined_loans.len() { joined_loans.push(active); (); } else { joined_loans.set(at, joined_loans.get(at).unwrap_or(0) | active); (); }; at = at + 1; }; falling = falling + 1; }; index = index + 1; }; if kind == 61 and sh_ast_word(ast, node, 6) < 3 { let mut at = 0; while at < result.state.len() { let state = sengoo_vec_get_or_default_i64(before.handle, at, 0); if at >= joined.len() { joined.push(if falling == 0 { state; } else { sh_b_join_state(0, state); }); (); } else { joined.set(at, sh_b_join_state(joined.get(at).unwrap_or(0), state)); (); }; at = at + 1; }; at = 0; while at < result.loans.len() / 5 { let active = sengoo_vec_get_or_default_i64(before_loans.handle, at, 0); if at >= joined_loans.len() { joined_loans.push(active); (); } else { joined_loans.set(at, joined_loans.get(at).unwrap_or(0) | active); (); }; at = at + 1; }; falling = falling + 1; }; sh_b_state_restore(result, &joined); sh_b_loans_restore(result, &joined_loans); result.flow = if falling == 0 { 1; } else { 0; }; } else if kind == 62 or kind == 63 or kind == 64 { let body = sh_ast_child(ast, node, sh_ast_word(ast, node, 6) - 1); result.loops.push(sh_ast_word(ast, node, 2)); result.loops.push(sh_ast_word(ast, node, 3)); result.loops.push(sh_b_block_scope(checked, ast, body)); let before = sh_b_state_copy(result); let mut index = 0; while result.flow == 0 and index < sh_ast_word(ast, node, 6) { sh_b_walk(result, text, checked, ast, sh_ast_child(ast, node, index), false, -1); index = index + 1; }; let after = sh_b_state_copy(result); let back_edge = result.flow == 0 or result.flow == 3; if result.flow != 1 { result.flow = 0; index = 0; while index < result.state.len() { let joined = sh_b_join_state(sengoo_vec_get_or_default_i64(before.handle, index, 0), sengoo_vec_get_or_default_i64(after.handle, index, 0)); result.state.set(index, joined); index = index + 1; }; let joined_state = sh_b_state_copy(result); let count = result.actions.len(); index = 0; while back_edge and result.flow == 0 and index < sh_ast_word(ast, node, 6) { sh_b_walk(result, text, checked, ast, sh_ast_child(ast, node, index), false, -1); index = index + 1; }; while result.actions.len() > count { result.actions.pop(); }; while result.action_paths.len() > count / 5 { result.action_paths.pop(); }; sh_b_state_restore(result, &joined_state); result.flow = 0; }; if result.flow == 1 and kind != 64 { sh_b_state_restore(result, &before); result.flow = 0; }; result.loops.pop(); result.loops.pop(); result.loops.pop(); (); } else if kind == 42 { let op = sh_ast_word(ast, node, 4); let mut index = 0; while index < sh_ast_word(ast, node, 6) { let value = sh_ast_child(ast, node, index); sh_b_walk(result, text, checked, ast, value, true, -1); if op == sh_kind("return") { sh_b_escape(result, checked, ast, value); }; index = index + 1; }; if op == sh_kind("return") { let function_scope = sh_binding_word(checked, result.function, 7); sh_b_cleanup(result, checked, ast, node, function_scope, true); result.flow = 1; } else if op == sh_kind("break") { let loop_scope = result.loops.get(result.loops.len() - 1).unwrap_or(result.scope); sh_b_cleanup(result, checked, ast, node, loop_scope, true); result.flow = 2; } else if op == sh_kind("continue") { let loop_scope = result.loops.get(result.loops.len() - 1).unwrap_or(result.scope); sh_b_cleanup(result, checked, ast, node, loop_scope, true); result.flow = 3; }; } else if kind == 53 { sh_b_call(result, text, checked, ast, node, holder); } else if kind == 60 { let mut index = 1; while index < sh_ast_word(ast, node, 6) { let field = sh_ast_child(ast, node, index); let value = sh_ast_child(ast, field, 1); if value >= 0 { sh_b_walk(result, text, checked, ast, value, true, holder); }; index = index + 1; }; } else { let mut index = 0; while index < sh_ast_word(ast, node, 6) { let child = sh_ast_child(ast, node, index); let child_kind = sh_ast_word(ast, child, 0); if child_kind < 70 or child_kind == 80 or child_kind == 81 { sh_b_walk(result, text, checked, ast, child, if kind == 58 and sh_ast_word(ast, node, 4) == 1 or kind == 59 { true; } else { moving; }, holder); }; index = index + 1; }; };
+    sh_b_temporary(result, checked, ast, node, moving, holder);
+    if kind == 43 or kind == 52 { sh_b_temporaries_end(result, checked, ast, node); };
     result.depth = result.depth - 1;
 }
 
@@ -233,7 +367,7 @@ def sh_b_escape(result: &mut ShOwnership, checked: &ShChecked, ast: &ShAst, node
     if kind == 43 or kind == 58 or kind == 59 or kind == 60 or kind == 23 or kind == 66 { let mut index = if kind == 60 { 1; } else { 0; }; while index < sh_ast_word(ast, node, 6) { sh_b_escape(result, checked, ast, sh_ast_child(ast, node, index)); index = index + 1; }; return; };
     if kind == 61 or kind == 65 { let mut index = 1; while index < sh_ast_word(ast, node, 6) { sh_b_escape(result, checked, ast, sh_ast_child(ast, node, index)); index = index + 1; }; return; };
     let path = sh_b_place(result, checked, ast, node);
-    if path >= 0 { let binding = sh_b_path_root(result, path); let mut index = 0; while index < result.loans.len() { if result.loans.get(index + 1).unwrap_or(-1) == binding { let owner = sh_b_path_root(result, result.loans.get(index).unwrap_or(-1)); if sh_binding_word(checked, owner, 2) == 0 { sh_b_error(result, ast, node, 6105, owner, result.loans.get(index + 3).unwrap_or(-1)); }; }; index = index + 5; }; };
+    if path >= 0 { let binding = sh_b_path_root(result, path); let mut index = 0; while index < result.loans.len() { if result.loans.get(index + 1).unwrap_or(-1) == binding { let owner = sh_b_path_root(result, result.loans.get(index).unwrap_or(-1)); if owner < 0 or sh_binding_word(checked, owner, 2) == 0 or sh_binding_word(checked, owner, 2) == 1 and sh_s_kind(checked, sh_s_resolve(checked, sh_binding_word(checked, owner, 3))) != 6 { sh_b_error(result, ast, node, 6105, owner, result.loans.get(index + 3).unwrap_or(-1)); }; }; index = index + 5; }; };
     if sh_ast_word(ast, node, 0) == 50 and sh_ast_word(ast, node, 4) % 1000 == sh_kind("&") { let operand = sh_b_place(result, checked, ast, sh_ast_child(ast, node, 0)); let root = if operand < 0 { -1; } else { sh_b_path_root(result, operand); }; if root < 0 or sh_s_kind(checked, sh_s_resolve(checked, sh_binding_word(checked, root, 3))) != 6 { sh_b_error(result, ast, node, 6105, root, -1); }; };
 }
 
@@ -258,24 +392,32 @@ def sh_b_native_contract(checked: &ShChecked, function: i64, position: i64) -> b
 }
 
 def sh_b_call(result: &mut ShOwnership, text: &String, checked: &ShChecked, ast: &ShAst, node: i64, holder: i64) {
+    let first_loan = result.loans.len();
     let target = sh_ast_child(ast, node, 0);
     let function = sh_node_binding(checked, node);
-    let fn_type = sh_s_resolve(checked, sh_binding_word(checked, function, 3));
+    let target_type = sh_s_resolve(checked, sh_node_type(checked, target));
+    let fn_type = if sh_s_kind(checked, target_type) == 11 { target_type; } else { sh_s_resolve(checked, sh_binding_word(checked, function, 3)); };
     let member = sh_ast_word(ast, target, 0) == 55;
     let mut receiver = -1;
-    if member { let base = sh_ast_child(ast, target, 0); let self_type = sh_s_resolve(checked, sh_s_argument(checked, fn_type, 0)); sh_b_walk(result, text, checked, ast, base, sh_s_kind(checked, self_type) != 6, -1); receiver = sh_b_place(result, checked, ast, base); if sh_s_kind(checked, self_type) == 6 { sh_b_loan(result, checked, ast, node, receiver, -1, sh_s_flags(checked, self_type) == 1); }; };
+    if member { let base = sh_ast_child(ast, target, 0); if sh_b_alias_ambiguous(result, sh_node_binding(checked, base)) { sh_b_error(result, ast, base, 6111, sh_node_binding(checked, base), -1); }; let self_type = sh_s_resolve(checked, sh_s_argument(checked, fn_type, 0)); let previous_mode = result.access_mode; if sh_s_kind(checked, self_type) == 6 { result.access_mode = 1; }; sh_b_walk(result, text, checked, ast, base, sh_s_kind(checked, self_type) != 6, -1); result.access_mode = previous_mode; let parent = if sh_s_kind(checked, sh_s_resolve(checked, sh_node_type(checked, base))) == 6 { sh_b_alias_loan(result, sh_node_binding(checked, base)); } else { -1; }; receiver = if parent >= 0 { result.loans.get(parent * 5).unwrap_or(-1); } else { sh_b_place(result, checked, ast, base); }; if sh_s_kind(checked, self_type) == 6 { sh_b_loan_from(result, checked, ast, node, receiver, -1, sh_s_flags(checked, self_type) == 1, parent); }; };
     let mut index = 1;
-    while index < sh_ast_word(ast, node, 6) { let argument = sh_ast_child(ast, node, index); let ordinal = index - 1 + if member { 1; } else { 0; }; let parameter = sh_s_resolve(checked, sh_s_argument(checked, fn_type, ordinal)); let observes = sh_s_kind(checked, parameter) == 6 or sh_b_native_contract(checked, function, ordinal); sh_b_walk(result, text, checked, ast, argument, not observes, -1); let projected = sh_b_place(result, checked, ast, argument); if not observes and projected >= 0 and sh_ast_word(ast, argument, 0) == 55 { let root = sh_b_path_root(result, projected); let root_type = sh_binding_word(checked, root, 3); if sh_b_named(checked, root_type, "String") or sh_b_named(checked, root_type, "Buffer") { let owner = sh_b_path(result, root, -1, -1, root_type); sh_b_path_use(result, checked, ast, argument, owner, true); }; }; index = index + 1; };
-    let mut loan = 0;
-    while loan < result.loans.len() { if result.loans.get(loan + 1).unwrap_or(-1) == -1 { result.loans.set(loan + 4, 0); (); }; loan = loan + 5; };
+    while index < sh_ast_word(ast, node, 6) { let argument = sh_ast_child(ast, node, index); let ordinal = index - 1 + if member { 1; } else { 0; }; let parameter = sh_s_resolve(checked, sh_s_argument(checked, fn_type, ordinal)); let observes = sh_s_kind(checked, parameter) == 6 or sh_b_native_contract(checked, function, ordinal); sh_b_walk(result, text, checked, ast, argument, not observes, -1); let projected = sh_b_place(result, checked, ast, argument); if observes and sh_s_kind(checked, parameter) == 6 { let alias = sh_node_binding(checked, argument); let parent_count = result.loans.len(); let mut parent_at = 0; while alias >= 0 and parent_at < parent_count { if result.loans.get(parent_at + 1).unwrap_or(-1) == alias and result.loans.get(parent_at + 4).unwrap_or(0) != 0 { let owner = result.loans.get(parent_at).unwrap_or(-1); sh_b_loan_from(result, checked, ast, argument, owner, -1, sh_s_flags(checked, parameter) == 1, parent_at / 5); }; parent_at = parent_at + 5; }; }; if not observes and projected >= 0 and sh_ast_word(ast, argument, 0) == 55 { let root = sh_b_path_root(result, projected); let root_type = sh_binding_word(checked, root, 3); if sh_b_named(checked, root_type, "String") or sh_b_named(checked, root_type, "Buffer") { let owner = sh_b_path(result, root, -1, -1, root_type); sh_b_path_use(result, checked, ast, argument, owner, true); }; }; index = index + 1; };
     let return_type = sh_s_resolve(checked, sh_node_type(checked, node));
-    if member and (sh_s_kind(checked, return_type) == 6 or sh_s_kind(checked, return_type) == 5) { sh_b_loan(result, checked, ast, node, receiver, holder, false); };
-    if not member and sh_s_kind(checked, return_type) == 6 { index = 1; while index < sh_ast_word(ast, node, 6) { let argument = sh_ast_child(ast, node, index); if sh_ast_word(ast, argument, 0) == 50 and sh_ast_word(ast, argument, 4) % 1000 == sh_kind("&") { let owner = sh_b_place(result, checked, ast, sh_ast_child(ast, argument, 0)); sh_b_loan(result, checked, ast, node, owner, holder, sh_s_flags(checked, return_type) == 1); }; index = index + 1; }; };
+    let last_argument_loan = result.loans.len();
+    if sh_b_carries_borrow(checked, return_type, 0) { let mut argument_loan = first_loan; while argument_loan < last_argument_loan { if result.loans.get(argument_loan + 1).unwrap_or(-1) == -1 and result.loans.get(argument_loan + 4).unwrap_or(0) != 0 { let owner = result.loans.get(argument_loan).unwrap_or(-1); sh_b_loan_from(result, checked, ast, node, owner, holder, sh_s_kind(checked, return_type) == 6 and sh_s_flags(checked, return_type) == 1, argument_loan / 5); }; argument_loan = argument_loan + 5; }; };
+    let mut loan = first_loan;
+    while loan < last_argument_loan { if result.loans.get(loan + 1).unwrap_or(-1) == -1 { result.loans.set(loan + 4, 0); (); }; loan = loan + 5; };
+}
+
+def sh_ownership_from_facts(actions: Vec<i64>, action_paths: Vec<i64>, paths: Vec<i64>, limit: i64) -> ShOwnership {
+    let diagnostics: Vec<ShDiagnostic> = vec_new();
+    let mut result = ShOwnership { diagnostics: diagnostics, actions: actions, action_paths: action_paths, paths: paths, state: vec_new_i64(), loans: vec_new_i64(), loan_parents: vec_new_i64(), access_mode: 0, last_uses: vec_new_i64(), loops: vec_new_i64(), definitions: vec_new_i64(), error: 0, start: 0, end: 0, limit: limit, function: -1, scope: 0, flow: 0, depth: 0 };
+    if limit < 1 or limit > 1000000 or result.actions.len() % 5 != 0 or result.paths.len() % 4 != 0 or result.action_paths.len() != result.actions.len() / 5 or result.actions.len() > 5000000 or result.paths.len() > 4000000 { result.error = 6110; };
+    result;
 }
 
 def sh_check_ownership(text: &String, ast: &ShAst, checked: &ShChecked, max_diagnostics: i64) -> ShOwnership {
-    let diagnostics: Vec<ShDiagnostic> = vec_new();
-    let mut result = ShOwnership { diagnostics: diagnostics, actions: vec_new_i64(), action_paths: vec_new_i64(), paths: vec_new_i64(), state: vec_new_i64(), loans: vec_new_i64(), last_uses: vec_new_i64(), loops: vec_new_i64(), error: 0, start: 0, end: 0, limit: max_diagnostics, function: -1, scope: 0, flow: 0, depth: 0 };
+    let mut result = sh_ownership_from_facts(vec_new_i64(), vec_new_i64(), vec_new_i64(), max_diagnostics);
     if max_diagnostics < 1 or max_diagnostics > 1000000 { result.error = 6110; return result; };
     if checked.error != 0 { result.error = checked.error; result.start = checked.start; result.end = checked.end; return result; };
     let mut binding = 0;
@@ -283,7 +425,7 @@ def sh_check_ownership(text: &String, ast: &ShAst, checked: &ShChecked, max_diag
     let mut node = 0;
     while node < sh_ast_count(ast) { let resolved = sh_node_binding(checked, node); if resolved >= 0 and sh_ast_word(ast, node, 0) == 12 { let end = sh_ast_word(ast, node, 3); if end > result.last_uses.get(resolved).unwrap_or(-1) { result.last_uses.set(resolved, end); (); }; }; node = node + 1; };
     binding = 0;
-    while binding < sh_binding_count(checked) { if sh_binding_word(checked, binding, 2) == 2 { result.function = binding; result.scope = sh_binding_word(checked, binding, 7); result.flow = 0; result.loans.clear(); let function = sh_binding_word(checked, binding, 4); let body = sh_s_child_kind(ast, function, 40); if body >= 0 { let mut param = 0; while param < sh_binding_count(checked) { if sh_binding_word(checked, param, 2) == 1 and sh_binding_word(checked, param, 6) == binding { sh_b_initialize(&mut result, checked, ast, sh_binding_word(checked, param, 4), param); }; param = param + 1; }; let fn_type = sh_s_resolve(checked, sh_binding_word(checked, binding, 3)); let return_type = sh_s_argument(checked, fn_type, sh_s_arity(checked, fn_type) - 1); let tail_return = sh_s_kind(checked, sh_s_resolve(checked, return_type)) != 0; sh_b_walk(&mut result, text, checked, ast, body, tail_return, -1); if tail_return { sh_b_escape(&mut result, checked, ast, body); }; if result.flow == 0 { let scope = result.scope; sh_b_cleanup(&mut result, checked, ast, body, scope, true); }; }; }; binding = binding + 1; };
+    while binding < sh_binding_count(checked) { if sh_binding_word(checked, binding, 2) == 2 { result.function = binding; result.scope = sh_binding_word(checked, binding, 7); result.flow = 0; result.loans.clear(); result.loan_parents.clear(); let function = sh_binding_word(checked, binding, 4); let body = sh_s_child_kind(ast, function, 40); if body >= 0 { let mut param = 0; while param < sh_binding_count(checked) { if sh_binding_word(checked, param, 2) == 1 and sh_binding_word(checked, param, 6) == binding { sh_b_initialize(&mut result, checked, ast, sh_binding_word(checked, param, 4), param); }; param = param + 1; }; let fn_type = sh_s_resolve(checked, sh_binding_word(checked, binding, 3)); let return_type = sh_s_argument(checked, fn_type, sh_s_arity(checked, fn_type) - 1); let tail_return = sh_s_kind(checked, sh_s_resolve(checked, return_type)) != 0; sh_b_walk(&mut result, text, checked, ast, body, tail_return, -1); if tail_return { sh_b_escape(&mut result, checked, ast, body); }; if result.flow == 0 { let scope = result.scope; sh_b_cleanup(&mut result, checked, ast, body, scope, true); }; }; }; binding = binding + 1; };
     result;
 }
 

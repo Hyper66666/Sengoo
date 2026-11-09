@@ -78,3 +78,39 @@ stack overflow or process crashes are recorded as oracle faults and never
 converted into SG passes. Existing reference quirks and soundness corrections
 remain in this explicit compatibility ledger. The SG checker may reject an
 unsound accepted form only with a stable diagnostic and a named corpus case.
+
+## Checked callable and class facts
+
+Bindings retain eight words: symbol, lexical scope, binding kind, type,
+declaration AST ID, flags, owner binding ID and auxiliary value. Kind 15 is a
+closure callable; its declaration is the lambda AST, its owner is the outer
+callable and its auxiliary value is the closure scope. Closure parameters and
+locals refer to that binding ID. Owner fields never contain AST IDs.
+
+After argument inference, a call's callee node carries its normalized,
+instantiated function type. The resolved binding retains its declaration
+template. Projection normalization and generic obligations run after inference;
+type applications also check their declared bounds. Built-in signatures have
+declaration ID -1 and flag 4096 and do not introduce executable bodies.
+
+Class inheritance keeps the declared parent type, substitutes actual generic
+arguments through it, and exposes fields in parent-first order through
+`sh_class_parent`, `sh_layout_field_count` and `sh_layout_field_binding`.
+Inherited fields preserve the original field binding; `sh_resolved_field_type`
+resolves that binding in the actual derived type. MIR may normalize the shared
+nominal type to its explicit class/enum representation without changing these
+source binding identities.
+
+Located code 5122 covers the existing FFI signature contract, including ABI,
+supported parameter/return shapes, generic extern rejection and the raw-pointer
+declaration marker. Code 5123 covers core trait declaration/implementation
+contracts, conflicting implementations and class hierarchy errors. It does not
+invent a new unsafe-call syntax: the current supported grammar has no ordinary
+unsafe function or unsafe expression block.
+
+Direct `Drop::drop` calls remain rejected outside the existing explicit-field
+destruction pattern. The native regression
+`explicit_field_drop_free_and_close_suppress_automatic_field_cleanup` requires
+`self.child.drop()` inside a parent's destructor to run once and suppress the
+child's automatic cleanup. Preserve that scoped case and pass its ownership
+fact to lowering; do not skip implementation-body checking globally.

@@ -28,7 +28,8 @@
 
 This is a foundation checkpoint; `m3_complete` remains `false`. The complete
 typed-lowering task and the supported-semantics tasks above remain unchecked.
-The current path lowers `ShChecked` typed AST directly into MIR. A complete HIR
+At that foundation checkpoint the path lowered `ShChecked` typed AST directly
+into MIR. A complete HIR
 layer/version bridge, generic specialization, methods, enum/pattern/match/for
 lowering, closures/contracts/error propagation/async/concurrency/cancellation,
 temporary-owner facts, conditional partial-field cleanup, physical aggregate
@@ -53,3 +54,66 @@ are `foundation-build.log` and `foundation-native.log` beside the report. The
 earlier parser-input-change trials remain beside it as failed evidence, rather
 than being relabeled as a stable source run. This evidence does not qualify a
 release compiler, compare performance or demonstrate native self-compilation.
+
+## Typed HIR and expanded MIR checkpoint
+
+- [x] Add independently owned HIR schema 1 with source text, the initial syntax-DAG node shape, resolved type/symbol/binding/scope tables and explicit ownership facts.
+- [x] Encode and decode the HIR word bridge without native handles or Rust memory layout, preserving Unicode text and rejecting the tested version, trailing-data, capacity, type and resolution corruptions.
+- [x] Compare decoded-HIR lowering against direct lowering word-for-word across all MIR tables and type metadata without rerunning semantic analysis during decode or `sh_lower_hir`.
+- [x] Verify the named enum construction/payload match, scalar guard/tuple match, range/array/tuple iteration, break/continue and inherent receiver-method fixture subset.
+- [x] Verify complete-expression temporary cleanup, borrowed temporary/alias lifetime, owned parameter initialization and overwritten-owner cleanup in the five named cleanup-shape fixtures.
+
+Evidence: `target/selfhost/m3-mir/extended/evidence.json`, SHA-256
+`1d5dbdcf22684e3b336d5e70f847880c32cf85d62260b9ef940358035b0be8e9`.
+The source revision is `8182d7931ab882963c4fe583201f16d07ac50531` on Windows
+11 AMD64. The verified development seed and clang used the source-development
+runtime at O0. All 174 input records, including the evidence runner itself,
+remained identical; `source_changes` and `tool_changes` are empty. The build
+and native test exited zero in 29.41 s and 1.27 s. Ten rounds each ran 21 source
+acceptance/rejection fixtures, five exact cleanup-shape fixtures, and Unicode
+HIR bridge roundtrip/corruption/direct-lowering checks. Thirty additional
+rounds exercised raw MIR CFG/SSA/memory/ABI/limit negatives. String, Buffer and
+opaque resource counts recovered exactly after every round. The produced test
+executable SHA-256 is
+`ada756393cf0d294172f7c88f2c082af462cb92f20d4c9d1c004eaf4a496ac61`.
+
+`m3_complete` remains `false`. This HIR intentionally retains the initial AST
+node structure; comprehensive HIR desugaring and malformed-input/cross-scope
+ownership coverage remain part of the open M3 gate. Generic monomorphization,
+owned patterns with variant-aware and conditional field cleanup, the complete
+pattern/range/slice and inherited/dynamic-method subset, closures/contracts/
+error propagation/async/concurrency/cancellation, and complete frozen-corpus
+parity/native-consumer integration remain unproven. The native consumer has
+its own evidence and is not implicitly qualified by these frontend tests.
+
+- [ ] Reject a HIR call whose target binding disagrees with its resolved callee even when both function signatures match; add independent cross-callable ownership-fact corruption checks.
+
+The follow-up discovery probe
+`target/selfhost/m3-mir/extended/poison-call.sg` deliberately changes only a
+call node's binding to another function with the same signature. The current
+validator returned zero and the probe exited 86 (`poison-call-native.log`).
+This is a recorded validation gap, not a passing negative case or semantic
+parity result. The typed-HIR checkpoint above remains limited to its named
+positive/negative fixtures, and this gap must close before the complete HIR
+validation/M3 gate can be checked off.
+
+## Additional semantic and ownership checkpoint
+
+- [x] Verify the named 107 semantic fixtures and 100 exact resource scopes for numeric inference, associated projection normalization, callable/closure owner identities, core trait/FFI contracts and inherited class field facts (`target/selfhost/m3-semantic/evidence.json`).
+- [x] Verify 42 ownership fixtures and 50 repeated lifecycle/resource scopes for temporary owners, field moves, alias retention, conditional construction, overwrite cleanup and authorized parent/child reborrows (`target/selfhost/m3-borrow/reborrow-evidence.json`).
+
+The semantic report has SHA-256
+`5dfa47ba2d41d241dab3455f5119448d142518d3f6e852d244d7983fe1d98804`;
+its result is explicitly `foundation-pass-with-reference-differences`. The
+fresh 49-case reference comparison retains five approved ledger differences.
+The ownership report has SHA-256
+`c5c7dfaf9c48e983bf662285481cada058ba25375f730800d8ad6003497f4921`.
+Both have empty source-change lists and record their actual source revision,
+host, tool identities and commands. Broader positive/negative corpus discovery
+reports remain discovery evidence, not passes or M3 completion. In particular,
+method candidate arity, unsuffixed literal contexts, dynamic/operator/Future
+contracts and the other open semantic/ownership obligations still need work.
+The semantic replay records identical start/end revision
+`8182d7931ab882963c4fe583201f16d07ac50531` and empty tool/source changes.
+The earlier 107-case report without revision/host metadata is retained as
+`evidence-107-before-revision-host.json`; the replay supersedes its provenance.

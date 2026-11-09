@@ -22,6 +22,20 @@ def sh_semantic_case(source: &str, expected: i64) -> Result<bool, i64> {
 }
 
 def sh_semantic_positive() -> Result<bool, i64> {
+    sh_semantic_case("class Animal{age:i64;} class Dog:Animal{weight:i64;} def main()->i64{let d=Dog{age:2,weight:40};d.age+d.weight}", 0)?;
+    sh_semantic_case("class Parent{def score(&self)->i64{42}} class Child:Parent{} def main()->i64{let c=Child{};c.score()}", 0)?;
+    sh_semantic_case("trait Service{def ping(&self)->i64{42}} class Worker:Service{} def main()->i64{let w=Worker{};w.ping()}", 0)?;
+    sh_semantic_case("trait Service{def ping(&self)->i64{42}} class Parent:Service{} class Child:Parent{} def take<T:Service>(x:T)->i64{x.ping()} def main()->i64{take(Child{})}", 0)?;
+    sh_semantic_case("def main()->i64{let x=1;}", 0)?;
+    sh_semantic_case("extern \"C\" {fn small()->i32;} def main()->i64{small()+1}", 0)?;
+    sh_semantic_case("struct Item{active:bool} struct Holder{item:Item} def replace(value:&mut Item){*value=Item{active:false};();} def nested(value:&mut Holder){replace(&mut (*value).item);();}", 0)?;
+    sh_semantic_case("struct Owner{n:i64} def touch(value:&mut Owner){value.n=value.n+1;();} impl Drop for Owner {def drop(&mut self){touch(self);touch(&mut self);();}}", 0)?;
+    sh_semantic_case("struct Child{} impl Drop for Child{def drop(&mut self){}} struct Parent{child:Child} impl Drop for Parent{def drop(&mut self){self.child.drop();}}", 0)?;
+    sh_semantic_case("struct Owner{n:i64} def make()->Owner{Owner{n:1}} impl Owner {def close(&mut self){self.n=self.n+1;();}} def main(){make().close();}", 0)?;
+    sh_semantic_case("trait Show {def show(&self)->i64{}} struct Value{n:i64} impl Show for Value{def show(&self)->i64{self.n}} def take<T:Show>(x:T)->i64{x.show()} def main()->i64{take(Value{n:42})}", 0)?;
+    sh_semantic_case("trait Iterator {type Item;} struct Counter{} impl Iterator for Counter{type Item=i64;} def select<T:Iterator>(owner:T,value:T::Item)->T::Item{value} def main()->i64{select(Counter{},42)}", 0)?;
+    sh_semantic_case("trait Show{} struct Value{} impl Show for Value{} struct Holder<T:Show>{value:T} def main(){let h=Holder{value:Value{}};}", 0)?;
+    sh_semantic_case("unsafe extern \"C\" fn read(value:*mut u8)->i64{0} def bridge(value:*mut u8)->i64{read(value)}", 0)?;
     sh_semantic_case("def main()->i64{42}", 0)?;
     sh_semantic_case("def add(a:i64,b:i64)->i64{a+b} def main()->i64{add(20,22)}", 0)?;
     sh_semantic_case("def main()->i64{later(41)} def later(x:i64)->i64{x+1}", 0)?;
@@ -66,6 +80,31 @@ def sh_semantic_positive() -> Result<bool, i64> {
 }
 
 def sh_semantic_negative() -> Result<bool, i64> {
+    sh_semantic_case("class A{} class B{} class C:A,B{}", 5123)?;
+    sh_semantic_case("class A{} trait T{} class C:T,A{}", 5123)?;
+    sh_semantic_case("class A:B{} class B:A{}", 5123)?;
+    sh_semantic_case("class A{x:i64;} class B:A{x:i64;}", 5123)?;
+    sh_semantic_case("class A{x:i64;} class B:A{} def main(){let b=B{};}", 5106)?;
+    sh_semantic_case("def missing()->i64{}", 5104)?;
+    sh_semantic_case("trait Show {def show(&self)->i64{}} def take<T:Show>(x:T)->i64{0} def main()->i64{take(42)}", 5115)?;
+    sh_semantic_case("trait Show {def show(&self)->i64{}} def take<T>(x:T)->i64 where T:Show {0} def main()->i64{take(42)}", 5115)?;
+    sh_semantic_case("struct Local{} impl !Send for Local{} def take<T:Send>(x:T)->i64{0} def main()->i64{take(Local{})}", 5115)?;
+    sh_semantic_case("trait Show{} struct Holder<T:Show>{value:T} def take(h:Holder<i64>){}", 5115)?;
+    sh_semantic_case("extern \"stdcall\" {fn wrong()->i64;}", 5122)?;
+    sh_semantic_case("extern \"C\" fn generic<T>(x:T)->T{x}", 5122)?;
+    sh_semantic_case("struct Pair{x:i64} extern \"C\" {fn wrong(x:Pair)->i64;}", 5122)?;
+    sh_semantic_case("extern \"C\" {fn wrong(x:*mut u8)->i64;}", 5122)?;
+    sh_semantic_case("extern \"C\" {fn wrong(x:&mut str)->i64;}", 5122)?;
+    sh_semantic_case("struct Value{} impl Drop for Value {def drop(&self){}}", 5123)?;
+    sh_semantic_case("struct Value{} impl Drop for Value {def drop(&mut self,n:i64){}}", 5123)?;
+    sh_semantic_case("struct Value{} impl Drop for Value {}", 5123)?;
+    sh_semantic_case("struct Value{} impl Drop for Value{def drop(&mut self){}} def main(){let mut v=Value{};v.drop();}", 5123)?;
+    sh_semantic_case("struct Value{} impl Drop for Value {def drop(&mut self){}} impl Copy for Value{}", 5123)?;
+    sh_semantic_case("trait Drop {def drop(&mut self){}}", 5123)?;
+    sh_semantic_case("trait Copy {}", 5123)?;
+    sh_semantic_case("struct Value{} impl Display for Value{}", 5123)?;
+    sh_semantic_case("struct Value{} impl Debug for Value{def to_string(&self)->i64{0}}", 5123)?;
+    sh_semantic_case("struct Value{} impl !Send for Value{def wrong(&self){}}", 5123)?;
     sh_semantic_case("def main()->i64{missing}", 5101)?;
     sh_semantic_case("def main(x:Missing)->i64{42}", 5102)?;
     sh_semantic_case("def same()->i64{1} def same()->i64{2}", 0)?;
