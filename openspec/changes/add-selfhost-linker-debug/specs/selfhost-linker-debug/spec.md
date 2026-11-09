@@ -71,3 +71,10 @@ and final process/equality/performance gates SHALL retain their own evidence.
 - **THEN** SG resolves those addresses and reads the relocated records into the PDB model
 - **AND** an independent COFF reader and real debugger verify the resulting debug behavior
 - **AND** unknown record forms, invalid scopes/ranges and source-checksum mismatches fail explicitly
+
+
+#### Scenario: A fixed-frame function has multiple returns
+- **WHEN** a supported local occupies a stable SP-relative location across disjoint live ranges separated by epilogues
+- **THEN** COFF and PDB preserve the ordered ranges without extending the local through the stack-changing gaps
+- **AND** a real debugger reads expected live values and reports the local unavailable in a declared epilogue gap
+- **AND** Windows runtime unwinding restores caller state throughout both epilogues

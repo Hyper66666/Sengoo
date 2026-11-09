@@ -128,3 +128,35 @@ This checkpoint does not claim arbitrary native SDK CodeView or automatic
 compiler debug-address generation. Multiple modules, aggregate/generic/async/
 reflection types, RBP/native multiple-return lifetime ranges, complete static
 SDK compatibility, debug stripping and final M5 qualification remain open.
+
+
+## RBP frames and multiple-return ranges checkpoint evidence
+
+- [x] Add an explicit no-single-epilogue function form and ordered, bounded additional local lifetime ranges; bind those ranges into the deterministic identity.
+- [x] Preserve multiple defranges through real COFF writing, relocation, reading and PDB generation, and reject overlap, zero extent, out-of-function lifetime and unsupported changing SP bases.
+- [x] Debug a fixed RBP frame with two returns, read answer = 40 then 42 while stepping, and prove the local becomes unavailable on entering a declared epilogue gap.
+- [x] Independently verify native RBP unwind metadata and Windows runtime lookup/unwind at eleven offsets across the partial prologue, body and both epilogues.
+- [x] Regress the original direct PDB/SHA/MSF/resource suite and the original COFF CodeView suite against the updated SG model/writer/reader.
+
+Main evidence: `target/selfhost/m5-link-ranges-final/evidence.json`, SHA-256
+`b06ca597151e600b943235e4a7905dee435ab962d7121b3fd71782a477b8ef7f`.
+Thirty-eight commands passed, including 23 malformed/unsupported CodeView
+cases, 20 native resource scopes, independent RBP inspection/runtime unwind,
+real source stepping/local values and actual epilogue unavailability. All 181
+source inputs and 36 tool/runtime identities were unchanged. The recorded full
+revision interval is `c32037ff9941ae3f10094c5b17dd8909fd63a698` through
+`befcfd6d1898fefc971939bd4d7565f3da119601`; the concurrent commit did not change
+any member of this gate's real import/source/tool closure.
+
+COFF regression: `target/selfhost/m5-link-codeview-ranges-final/evidence.json`,
+SHA-256 `65c40aa5cf3f7a83a339402e1cf7215c462b4a7397f92ce18f774c3556034df1`;
+28 commands, 179 unchanged source inputs, 36 unchanged tool/runtime identities,
+start/end revision `befcfd6d1898fefc971939bd4d7565f3da119601`.
+Direct debug regression: `target/selfhost/m5-link-debug-ranges-regression/evidence.json`,
+SHA-256 `f83090371fac0e51f007010657029e36fe169d95782a6282aa1392549c3b232c`;
+32 commands, 177 unchanged source inputs, 37 unchanged tool/runtime identities,
+start/end revision `c32037ff9941ae3f10094c5b17dd8909fd63a698`.
+All runs used Windows 11 AMD64 and retained exact commands/results. Product
+emission remains SG-only with an empty toolchain PATH. These are fixed-frame
+primitive debug fixtures; automatic compiler mapping and the complete M5
+native/type/debug corpus remain open.

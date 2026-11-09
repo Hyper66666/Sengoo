@@ -9,11 +9,12 @@ struct ShLinkDebug {
     source_lines: i64,
     functions: Vec<i64>,
     locals: Vec<i64>,
+    ranges: Vec<i64>,
     lines: Vec<i64>,
 }
 
 def sh_link_debug_new() -> ShLinkDebug {
-    ShLinkDebug { names: sh_symbols_new(1048576), path: -1, source: vec_new_i64(), source_lines: 0, functions: vec_new_i64(), locals: vec_new_i64(), lines: vec_new_i64() };
+    ShLinkDebug { names: sh_symbols_new(1048576), path: -1, source: vec_new_i64(), source_lines: 0, functions: vec_new_i64(), locals: vec_new_i64(), ranges: vec_new_i64(), lines: vec_new_i64() };
 }
 
 def sh_link_debug_name(debug: &ShLinkDebug, text: &String) -> Result<i64, i64> {
@@ -41,7 +42,7 @@ def sh_link_debug_source(debug: &mut ShLinkDebug, path: &String, source: &ShBina
 
 def sh_link_debug_function(debug: &ShLinkDebug, name: &String, segment: i64, offset: i64, size: i64, frame: i64, prologue: i64, epilogue: i64) -> Result<i64, i64> {
     if debug.functions.len() / 8 >= 256 { return sh_i64_error(7302); };
-    if debug.path < 0 or segment < 1 or segment > 96 or offset < 0 or offset > 4294967295 or size < 1 or size > 65535 or frame < 0 or frame > 1048576 or frame % 8 != 0 or prologue < 0 or epilogue < prologue or epilogue > size { return sh_i64_error(7301); };
+    if debug.path < 0 or segment < 1 or segment > 96 or offset < 0 or offset > 4294967295 or size < 1 or size > 65535 or frame < 0 or frame > 1048576 or frame % 8 != 0 or prologue < 0 or (epilogue != 0 and epilogue < prologue) or epilogue > size { return sh_i64_error(7301); };
     let symbol = sh_link_debug_name(debug, name)?;
     let mut index = 0;
     while index < debug.functions.len() / 8 { if sh_link_word(&debug.functions, 8, index, 0) == symbol { return sh_i64_error(7305); }; if sh_link_word(&debug.functions, 8, index, 1) == segment { let first = sh_link_word(&debug.functions, 8, index, 2); let end = first + sh_link_word(&debug.functions, 8, index, 3); if offset < end and first < offset + size { return sh_i64_error(7301); }; }; index = index + 1; };
@@ -59,7 +60,7 @@ def sh_link_debug_function(debug: &ShLinkDebug, name: &String, segment: i64, off
 def sh_link_debug_local(debug: &ShLinkDebug, function: i64, name: &String, kind: i64, stack: i64, start: i64, size: i64) -> Result<i64, i64> {
     if debug.locals.len() / 6 >= 4096 { return sh_i64_error(7302); };
     if kind != 19 { return sh_i64_error(7303); };
-    if function < 0 or function >= debug.functions.len() / 8 or stack < 0 or stack > sh_link_word(&debug.functions, 8, function, 4) - 8 or start < sh_link_word(&debug.functions, 8, function, 5) or size < 1 or start + size > sh_link_word(&debug.functions, 8, function, 6) { return sh_i64_error(7301); };
+    if function < 0 or function >= debug.functions.len() / 8 or stack < 0 or stack > sh_link_word(&debug.functions, 8, function, 4) - 8 or start < sh_link_word(&debug.functions, 8, function, 5) or size < 1 or start + size > sh_link_debug_lifetime_end(debug, function) { return sh_i64_error(7301); };
     let symbol = sh_link_debug_name(debug, name)?;
     let mut index = 0;
     while index < debug.locals.len() / 6 { if sh_link_word(&debug.locals, 6, index, 0) == function and sh_link_word(&debug.locals, 6, index, 1) == symbol { return sh_i64_error(7305); }; index = index + 1; };
@@ -134,6 +135,7 @@ def sh_link_debug_identity(debug: &ShLinkDebug, image: &ShBinary, pdb_path: &Str
     sh_binary_unsigned(&identity, debug.source.len(), 8)?;
     sh_binary_unsigned(&identity, debug.functions.len(), 8)?;
     sh_binary_unsigned(&identity, debug.locals.len(), 8)?;
+    sh_binary_unsigned(&identity, debug.ranges.len(), 8)?;
     sh_binary_unsigned(&identity, debug.lines.len(), 8)?;
     sh_link_debug_text(&identity, pdb_path)?;
     sh_link_debug_append(&identity, image)?;
@@ -145,6 +147,8 @@ def sh_link_debug_identity(debug: &ShLinkDebug, image: &ShBinary, pdb_path: &Str
     while index < debug.functions.len() { sh_binary_unsigned(&identity, sengoo_vec_get_or_default_i64(debug.functions.handle, index, 0), 8)?; index = index + 1; };
     index = 0;
     while index < debug.locals.len() { sh_binary_unsigned(&identity, sengoo_vec_get_or_default_i64(debug.locals.handle, index, 0), 8)?; index = index + 1; };
+    index = 0;
+    while index < debug.ranges.len() { sh_binary_unsigned(&identity, sengoo_vec_get_or_default_i64(debug.ranges.handle, index, 0), 8)?; index = index + 1; };
     index = 0;
     while index < debug.lines.len() { sh_binary_unsigned(&identity, sengoo_vec_get_or_default_i64(debug.lines.handle, index, 0), 8)?; index = index + 1; };
     sh_link_sha256(&identity);
@@ -193,4 +197,24 @@ def sh_link_debug_image(debug: &ShLinkDebug, image: &ShBinary, pdb_path: &String
     index = 0;
     while index < pdb_path.len() { sh_binary_patch(&output, raw + 52 + index, path_bytes.get_u8(index)?, 1)?; index = index + 1; };
     Result { is_ok: true, value: output, error: 0 };
+}
+
+def sh_link_debug_lifetime_end(debug: &ShLinkDebug, function: i64) -> i64 {
+    let epilogue = sh_link_word(&debug.functions, 8, function, 6);
+    if epilogue == 0 { return sh_link_word(&debug.functions, 8, function, 3); };
+    epilogue;
+}
+
+def sh_link_debug_local_range(debug: &ShLinkDebug, local: i64, start: i64, size: i64) -> Result<i64, i64> {
+    if debug.ranges.len() / 3 >= 65536 { return sh_i64_error(7302); };
+    if local < 0 or local >= debug.locals.len() / 6 { return sh_i64_error(7301); };
+    let function = sh_link_word(&debug.locals, 6, local, 0);
+    let mut previous_end = sh_link_word(&debug.locals, 6, local, 4) + sh_link_word(&debug.locals, 6, local, 5);
+    let mut index = 0;
+    while index < debug.ranges.len() / 3 { if sh_link_word(&debug.ranges, 3, index, 0) == local { previous_end = sh_link_word(&debug.ranges, 3, index, 1) + sh_link_word(&debug.ranges, 3, index, 2); }; index = index + 1; };
+    if start < previous_end or size < 1 or start > sh_link_debug_lifetime_end(debug, function) or size > sh_link_debug_lifetime_end(debug, function) - start { return sh_i64_error(7301); };
+    sh_link_push(&debug.ranges, local)?;
+    sh_link_push(&debug.ranges, start)?;
+    sh_link_push(&debug.ranges, size)?;
+    sh_i64_ok(debug.ranges.len() / 3 - 1);
 }

@@ -62,7 +62,7 @@ def msf_streams(raw):
     return result
 
 
-def validate_pair(image, pdb, source, pdb_path):
+def validate_pair(image, pdb, source, pdb_path, expected_code_size=29, expected_lines=((0, 1), (4, 2), (13, 3), (19, 4), (24, 5))):
     streams = msf_streams(pdb)
     if len(streams) != 11 or u32(streams[1], 0) != 20000404 or u32(streams[1], 8) != 1:
         raise AssertionError("PDB stream identities differ")
@@ -94,7 +94,7 @@ def validate_pair(image, pdb, source, pdb_path):
         if kind == 0xF2:
             offset, segment, flags, size = struct.unpack_from("<IHHI", data)
             file_id, count, block_size = struct.unpack_from("<III", data, 12)
-            if segment != 1 or flags or offset or size != 29 or file_id or block_size != 12 + 8 * count:
+            if segment != 1 or flags or offset or size != expected_code_size or file_id or block_size != 12 + 8 * count:
                 raise AssertionError("CodeView line block differs")
             lines.extend((u32(data, 24 + index * 8), u32(data, 28 + index * 8)) for index in range(count))
         elif kind == 0xF4:
@@ -104,7 +104,7 @@ def validate_pair(image, pdb, source, pdb_path):
         else:
             raise AssertionError("unexpected CodeView subsection")
         at += 8 + length
-    if lines != [(offset, number | 0x80000000) for offset, number in ((0, 1), (4, 2), (13, 3), (19, 4), (24, 5))]:
+    if lines != [(offset, number | 0x80000000) for offset, number in expected_lines]:
         raise AssertionError("source address/line map differs")
     if checksum != hashlib.sha256(source).digest():
         raise AssertionError("SG source SHA-256 differs")

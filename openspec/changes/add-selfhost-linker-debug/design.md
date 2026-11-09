@@ -211,3 +211,33 @@ preserving existing PE/PDB bytes. Twenty native success/failure scopes recover
 all tracked resources exactly. Debug input contributions currently remain
 mapped in the PE; debug stripping and the public non-debug CLI policy remain
 integration work rather than implied full debug-input support.
+
+
+## Fixed RBP frames and multiple-return local ranges
+
+A function `epilogue` value of zero explicitly means that there is no single
+common epilogue start; its CodeView procedure `DbgEnd` is zero and supported
+local ranges are bounded by the complete function extent. Nonzero epilogue
+values retain the initial single-tail contract. `sh_link_debug_local` creates
+the first range and returns a local identity. `sh_link_debug_local_range(debug,
+local_id, start, length)` appends a further ordered, nonoverlapping range for
+the same SP-relative location. The model admits at most 65,536 extra ranges.
+Each range must start after the prologue and end within its declared function
+lifetime bound. Extra ranges participate in the source-bound debug identity.
+The PDB writer emits one S_LOCAL followed by multiple defrange records, and the
+COFF writer/reader relocates, validates and preserves those separate ranges.
+Changing a local's SP base between ranges is explicitly unsupported.
+
+Native callers split ranges around every SP-changing epilogue and begin them
+after definite initialization. An RBP function can still use the SP-relative
+location model while the stack pointer is stable: local SP offset equals the
+allocated frame size minus the RBP slot offset. The frame metadata includes
+saved nonvolatile stack slots; the PDB writer accounts separately for the
+return address. It must not use the first return as the entire function's end.
+
+The named RBP fixture saves RBP, establishes a fixed 48-byte frame, has two
+returns, and describes answer at SP+40 over [19,39) and [44,56). A real debugger
+observes 40 then 42 while stepping through its body and reports the local as
+unavailable after entering the first epilogue. A Windows probe checks
+RtlLookupFunctionEntry and RtlVirtualUnwind at eleven offsets spanning partial
+prologue, function body, and both epilogues, restoring caller RIP/RSP/RBP.
