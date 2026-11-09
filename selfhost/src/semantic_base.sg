@@ -18,6 +18,7 @@ struct ShChecked {
     node_types: Vec<i64>,
     call_types: Vec<i64>,
     deferred_types: Vec<i64>,
+    builtin_calls: Vec<i64>,
     resolution: Vec<i64>,
     node_scopes: Vec<i64>,
     bindings: Vec<i64>,
@@ -321,10 +322,25 @@ def sh_s_new(ast: &ShAst, maximum: i64) -> ShChecked {
     let never = sh_type_primitive(&types, 17, 0, 0).unwrap_or(-1);
     let error = sh_type_primitive(&types, 18, 0, 0).unwrap_or(-1);
     let diagnostics: Vec<ShDiagnostic> = vec_new();
-    let mut result = ShChecked { types: types, symbols: sh_symbols_new(1000000), node_types: vec_new_i64(), call_types: vec_new_i64(), deferred_types: vec_new_i64(), resolution: vec_new_i64(), node_scopes: vec_new_i64(), bindings: vec_new_i64(), scopes: vec_new_i64(), diagnostics: diagnostics, substitutions: vec_new_i64(), generic_parameters: vec_new_i64(), constraints: vec_new_i64(), trait_types: vec_new_i64(), class_parents: vec_new_i64(), propagation: vec_new_i64(), loop_values: vec_new_i64(), async_depth: 0, unsafe_depth: 0, error: 0, start: 0, end: 0, diagnostic_limit: maximum, current_scope: 0, current_owner: -1, current_return: -1, loop_depth: 0, depth: 0, unit_type: unit, bool_type: boolean, integer_type: integer, float_type: floating, char_type: character, str_type: string, never_type: never, error_type: error };
+    let mut result = ShChecked { types: types, symbols: sh_symbols_new(1000000), node_types: vec_new_i64(), call_types: vec_new_i64(), deferred_types: vec_new_i64(), builtin_calls: vec_new_i64(), resolution: vec_new_i64(), node_scopes: vec_new_i64(), bindings: vec_new_i64(), scopes: vec_new_i64(), diagnostics: diagnostics, substitutions: vec_new_i64(), generic_parameters: vec_new_i64(), constraints: vec_new_i64(), trait_types: vec_new_i64(), class_parents: vec_new_i64(), propagation: vec_new_i64(), loop_values: vec_new_i64(), async_depth: 0, unsafe_depth: 0, error: 0, start: 0, end: 0, diagnostic_limit: maximum, current_scope: 0, current_owner: -1, current_return: -1, loop_depth: 0, depth: 0, unit_type: unit, bool_type: boolean, integer_type: integer, float_type: floating, char_type: character, str_type: string, never_type: never, error_type: error };
     sh_s_scope(&result, -1, -1, 0);
     let mut index = 0;
     while index < sh_ast_count(ast) { if not result.node_types.push(-1) or not result.call_types.push(-1) or not result.resolution.push(-1) or not result.node_scopes.push(-1) { result.error = 5117; return result; }; index = index + 1; };
     if maximum < 1 or maximum > 1000000 { result.error = 5117; };
     result;
+}
+
+def sh_builtin_call_count(checked: &ShChecked) -> i64 {
+    checked.builtin_calls.len() / 6;
+}
+
+def sh_builtin_call_word(checked: &ShChecked, index: i64, field: i64) -> i64 {
+    if index < 0 or index >= sh_builtin_call_count(checked) or field < 0 or field >= 6 { return -1; };
+    checked.builtin_calls.get(index * 6 + field).unwrap_or(-1);
+}
+
+def sh_builtin_call_for_node(checked: &ShChecked, node: i64) -> i64 {
+    let mut index = 0;
+    while index < sh_builtin_call_count(checked) { if sh_builtin_call_word(checked, index, 0) == node { return index; }; index = index + 1; };
+    -1;
 }

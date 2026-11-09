@@ -293,6 +293,7 @@ def sh_s_type_ast_inner(checked: &mut ShChecked, text: &String, ast: &ShAst, nod
     let name = sh_s_path_name(checked, text, ast, path);
     if not name.is_ok() { sh_s_diagnose(checked, ast, node, 5102, 1, -1, -1); return checked.error_type; };
     if sh_s_text_equal(&name.value, "i128") or sh_s_text_equal(&name.value, "u128") { sh_s_diagnose(checked, ast, node, 5126, 1, 128, 64); return checked.error_type; };
+    if sh_s_text_equal(&name.value, "Future") and not sh_s_future_bound_role(ast, node) { if count != 2 { sh_s_diagnose(checked, ast, node, 5114, 1, 1, count - 1); return checked.error_type; }; let output = sh_s_type_ast(checked, text, ast, sh_ast_child(ast, node, 1)); return sh_s_unary_type(checked, 16, 0, 0, output); };
     let builtin = sh_s_builtin_type(checked, &name.value);
     if builtin >= 0 { if count != 1 { sh_s_diagnose(checked, ast, node, 5114, 1, 0, count - 1); }; return builtin; };
     let symbol = sh_intern(&checked.symbols, &name.value).unwrap_or(-1);
@@ -854,6 +855,7 @@ def sh_s_call(checked: &mut ShChecked, text: &String, ast: &ShAst, node: i64, ex
     let instance = sh_s_normalize(checked, fn_type);
     sh_s_set_type(checked, callee, instance);
     checked.call_types.set(node, instance);
+    if method { sh_s_intrinsic_method(checked, text, ast, node, instance); };
     let keys = vec_new_i64();
     let values = vec_new_i64();
     sh_s_pattern_keys(checked, sh_binding_word(checked, target, 3), instance, &keys, &values, 0);
@@ -1483,4 +1485,74 @@ def sh_s_deferred_calls(checked: &mut ShChecked, ast: &ShAst) {
     checked.current_scope = old_scope;
     checked.current_owner = old_owner;
     ();
+}
+
+def sh_s_intrinsic_i64(checked: &ShChecked, ty: i64) -> bool {
+    let value = sh_s_resolve(checked, ty);
+    sh_s_kind(checked, value) == 2 and sh_s_data(checked, value) == 64 and sh_s_flags(checked, value) == 1;
+}
+
+def sh_s_intrinsic_method(checked: &mut ShChecked, text: &String, ast: &ShAst, node: i64, signature: i64) {
+    if sh_s_arity(checked, signature) != 2 or sh_s_kind(checked, signature) != 11 { return; };
+    let receiver = sh_s_argument(checked, signature, 0);
+    let value = sh_s_argument(checked, receiver, 0);
+    let result = sh_s_argument(checked, signature, 1);
+    if sh_s_kind(checked, receiver) != 6 or sh_s_flags(checked, receiver) != 0 or sh_s_kind(checked, value) != 12 or sh_s_nominal(checked, value) != sh_s_named_symbol(checked, "String") or sh_s_kind(checked, result) != 6 or sh_s_flags(checked, result) != 0 or sh_s_kind(checked, sh_s_argument(checked, result, 0)) != 5 { return; };
+    let callee = sh_ast_child(ast, node, 0);
+    if sh_ast_word(ast, callee, 0) != 55 or sh_node_binding(checked, callee) >= 0 { return; };
+    let method_name = sh_s_name(text, ast, sh_ast_child(ast, callee, 1));
+    if not method_name.is_ok() or not sh_s_text_equal(&method_name.value, "as_str") { return; };
+    let runtime = sh_s_lookup(checked, sh_s_named_symbol(checked, "sengoo_string_as_str_ptr"), 0, false);
+    if runtime < 0 { return; };
+    let runtime_type = sh_binding_word(checked, runtime, 3);
+    let declaration = sh_binding_word(checked, runtime, 4);
+    let owner = sh_adt_binding(checked, value);
+    let field = sh_layout_field_binding(checked, value, 0);
+    let field_type = sh_resolved_field_type(checked, value, field);
+    let valid = owner >= 0 and sh_s_arity(checked, value) == 0 and field >= 0 and sh_binding_word(checked, field, 6) == owner and sh_s_intrinsic_i64(checked, field_type) and sh_binding_word(checked, runtime, 2) == 2 and (sh_binding_word(checked, runtime, 5) & 8) != 0 and declaration >= 0 and sh_s_child_kind(ast, declaration, 40) < 0 and sh_s_kind(checked, runtime_type) == 11 and sh_s_data(checked, runtime_type) == 1 and sh_s_flags(checked, runtime_type) == 0 and sh_s_arity(checked, runtime_type) == 2 and sh_s_intrinsic_i64(checked, sh_s_argument(checked, runtime_type, 0)) and sh_s_intrinsic_i64(checked, sh_s_argument(checked, runtime_type, 1));
+    if not valid { sh_s_diagnose(checked, ast, node, 5122, 1, -1, runtime_type); return; };
+    if sh_builtin_call_for_node(checked, node) >= 0 { return; };
+    if sh_builtin_call_count(checked) >= checked.node_types.len() { sh_s_diagnose(checked, ast, node, 5117, 1, -1, -1); return; };
+    let stored = checked.builtin_calls.push(node) and checked.builtin_calls.push(1) and checked.builtin_calls.push(value) and checked.builtin_calls.push(runtime) and checked.builtin_calls.push(signature) and checked.builtin_calls.push(runtime_type);
+    if not stored { sh_s_diagnose(checked, ast, node, 5117, 1, -1, -1); };
+    ();
+}
+
+def sh_s_future_bound_role(ast: &ShAst, node: i64) -> bool {
+    let mut parent = 0;
+    while parent < sh_ast_count(ast) { let kind = sh_ast_word(ast, parent, 0); let count = sh_ast_word(ast, parent, 6); let mut index = 0; while index < count { if sh_ast_child(ast, parent, index) == node { if kind == 27 { return true; }; if kind == 26 { let mut types = 0; let mut first = -1; let mut at = 0; while at < count { let child = sh_ast_child(ast, parent, at); let child_kind = sh_ast_word(ast, child, 0); if child_kind >= 70 and child_kind <= 76 { if first < 0 { first = child; }; types = types + 1; }; at = at + 1; }; return types == 2 and first == node; }; if kind == 35 and index > 0 { let payload = sh_ast_word(ast, parent, 4); if payload == 0 { return true; }; let bound_end = count - if (payload & 2) != 0 { 1; } else { 0; }; return (payload & 1) != 0 and index < bound_end; }; if kind == 75 { return true; }; return false; }; index = index + 1; }; parent = parent + 1; };
+    false;
+}
+
+def sh_builtin_call_valid(checked: &ShChecked, text: &String, ast: &ShAst, index: i64) -> bool {
+    if index < 0 or index >= sh_builtin_call_count(checked) or sh_builtin_call_word(checked, index, 1) != 1 { return false; };
+    let node = sh_builtin_call_word(checked, index, 0);
+    let receiver = sh_builtin_call_word(checked, index, 2);
+    let runtime = sh_builtin_call_word(checked, index, 3);
+    let language_fn = sh_builtin_call_word(checked, index, 4);
+    let runtime_fn = sh_builtin_call_word(checked, index, 5);
+    if sh_ast_word(ast, node, 0) != 53 or sh_ast_word(ast, node, 6) != 1 { return false; };
+    let callee = sh_ast_child(ast, node, 0);
+    if sh_ast_word(ast, callee, 0) != 55 or sh_ast_word(ast, callee, 6) != 2 or sh_node_binding(checked, callee) >= 0 or sh_node_binding(checked, node) >= 0 { return false; };
+    let name = sh_s_name(text, ast, sh_ast_child(ast, callee, 1));
+    if not name.is_ok() or not sh_s_text_equal(&name.value, "as_str") { return false; };
+    if sh_s_kind(checked, receiver) != 12 or sh_s_arity(checked, receiver) != 0 or sh_adt_binding(checked, receiver) < 0 { return false; };
+    let label = sh_s_symbol_text(checked, sh_s_nominal(checked, receiver));
+    if not label.is_ok() or not sh_s_text_equal(&label.value, "String") { return false; };
+    let original = sh_s_resolve(checked, sh_node_type(checked, sh_ast_child(ast, callee, 0)));
+    let actual = if sh_s_kind(checked, original) == 6 { sh_s_resolve(checked, sh_s_argument(checked, original, 0)); } else { original; };
+    if actual != receiver { return false; };
+    let owner = sh_adt_binding(checked, receiver);
+    let mut field = -1;
+    let mut binding = 0;
+    while binding < sh_binding_count(checked) { if sh_binding_word(checked, binding, 2) == 6 and sh_binding_word(checked, binding, 6) == owner and sh_binding_word(checked, binding, 7) == 0 { field = binding; break; }; binding = binding + 1; };
+    if field < 0 or not sh_s_intrinsic_i64(checked, sh_binding_word(checked, field, 3)) { return false; };
+    if sh_node_callable_type(checked, node) != language_fn or sh_s_kind(checked, language_fn) != 11 or sh_s_data(checked, language_fn) != 0 or sh_s_flags(checked, language_fn) != 0 or sh_s_arity(checked, language_fn) != 2 { return false; };
+    let reference = sh_s_argument(checked, language_fn, 0);
+    let result = sh_s_argument(checked, language_fn, 1);
+    if sh_s_kind(checked, reference) != 6 or sh_s_flags(checked, reference) != 0 or sh_s_argument(checked, reference, 0) != receiver or sh_s_kind(checked, result) != 6 or sh_s_flags(checked, result) != 0 or sh_s_kind(checked, sh_s_argument(checked, result, 0)) != 5 or sh_node_type(checked, node) != result { return false; };
+    let runtime_name = sh_s_symbol_text(checked, sh_binding_word(checked, runtime, 0));
+    let declaration = sh_binding_word(checked, runtime, 4);
+    if not runtime_name.is_ok() or not sh_s_text_equal(&runtime_name.value, "sengoo_string_as_str_ptr") or sh_binding_word(checked, runtime, 2) != 2 or (sh_binding_word(checked, runtime, 5) & 8) == 0 or declaration < 0 or sh_s_child_kind(ast, declaration, 40) >= 0 { return false; };
+    sh_binding_word(checked, runtime, 3) == runtime_fn and sh_s_kind(checked, runtime_fn) == 11 and sh_s_data(checked, runtime_fn) == 1 and sh_s_flags(checked, runtime_fn) == 0 and sh_s_arity(checked, runtime_fn) == 2 and sh_s_intrinsic_i64(checked, sh_s_argument(checked, runtime_fn, 0)) and sh_s_intrinsic_i64(checked, sh_s_argument(checked, runtime_fn, 1));
 }

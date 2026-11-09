@@ -350,7 +350,7 @@ def sh_b_initialize(result: &mut ShOwnership, checked: &ShChecked, ast: &ShAst, 
     result.state.set(path, 1);
     let mut child = 0;
     while child < result.state.len() { if child != path and sh_b_path_contains(result, path, child) { result.state.set(child, 1); (); }; child = child + 1; };
-    if sh_binding_word(checked, binding, 2) == 1 and result.contracts.get(binding).unwrap_or(0) == 1 { sh_b_action(result, ast, node, binding, 8, sh_binding_word(checked, binding, 1), 0); return; };
+    if sh_binding_word(checked, binding, 2) == 1 and result.contracts.get(binding).unwrap_or(0) != 0 { sh_b_action(result, ast, node, binding, if (result.contracts.get(binding).unwrap_or(0) & 1) != 0 { 8; } else { 9; }, sh_binding_word(checked, binding, 1), 0); return; };
     sh_b_definition(result, binding, path, sh_binding_word(checked, binding, 1), -1);
     sh_b_action(result, ast, node, binding, 1, sh_binding_word(checked, binding, 1), 0);
     let ty = sh_s_resolve(checked, sh_binding_word(checked, binding, 3));
@@ -460,6 +460,25 @@ def sh_b_native_contract(checked: &ShChecked, function: i64, position: i64) -> b
     false;
 }
 
+def sh_b_native_projects(checked: &ShChecked, function: i64, position: i64) -> bool {
+    let signature = sh_s_resolve(checked, sh_binding_word(checked, function, 3));
+    if position != 0 or sh_binding_word(checked, function, 2) != 2 or (sh_binding_word(checked, function, 5) & 8) == 0 or sh_s_kind(checked, signature) != 11 or sh_s_data(checked, signature) != 1 or sh_s_arity(checked, signature) != 2 { return false; };
+    let mut index = 0;
+    while index < 2 { let ty = sh_s_argument(checked, signature, index); if sh_s_kind(checked, ty) != 2 or sh_s_data(checked, ty) != 64 or sh_s_flags(checked, ty) != 1 { return false; }; index = index + 1; };
+    let name = sh_symbol_text(&checked.symbols, sh_binding_word(checked, function, 0));
+    name.is_ok() and sh_s_text_equal(&name.value, "sengoo_ffi_buffer_ptr");
+}
+
+def sh_ownership_parameter_projected(result: &ShOwnership, binding: i64) -> bool {
+    let mut index = 0;
+    while index < sh_ownership_action_count(result) { if sh_ownership_action(result, index, 1) == binding and sh_ownership_action(result, index, 2) == 9 { return true; }; index = index + 1; };
+    false;
+}
+
+def sh_ownership_parameter_borrowed(result: &ShOwnership, binding: i64) -> bool {
+    sh_ownership_parameter_observed(result, binding) or sh_ownership_parameter_projected(result, binding);
+}
+
 def sh_ownership_parameter_observed(result: &ShOwnership, binding: i64) -> bool {
     let mut index = 0;
     while index < sh_ownership_action_count(result) { if sh_ownership_action(result, index, 1) == binding and sh_ownership_action(result, index, 2) == 8 { return true; }; index = index + 1; };
@@ -468,10 +487,11 @@ def sh_ownership_parameter_observed(result: &ShOwnership, binding: i64) -> bool 
 
 def sh_ownership_observed_contracts_valid(result: &ShOwnership, checked: &ShChecked, ast: &ShAst) -> bool {
     let certificate = sh_ownership_from_facts(vec_new_i64(), vec_new_i64(), vec_new_i64(), 100);
+    sh_b_infer_contracts(&certificate, checked, ast);
     let mut binding = 0;
-    while binding < sh_binding_count(checked) { if not certificate.contracts.push(if sh_ownership_parameter_observed(result, binding) { 1; } else { 0; }) { return false; }; binding = binding + 1; };
+    while binding < sh_binding_count(checked) { let inferred = certificate.contracts.get(binding).unwrap_or(0); if sh_ownership_parameter_observed(result, binding) and (inferred & 1) == 0 or sh_ownership_parameter_projected(result, binding) and (inferred & 2) == 0 { return false; }; binding = binding + 1; };
     binding = 0;
-    while binding < sh_binding_count(checked) { if sh_ownership_parameter_observed(result, binding) { let function = sh_binding_word(checked, binding, 6); let signature = sh_s_resolve(checked, sh_binding_word(checked, function, 3)); let returned = sh_s_argument(checked, signature, sh_s_arity(checked, signature) - 1); let body = sh_s_child_kind(ast, sh_binding_word(checked, function, 4), 40); if sh_binding_word(checked, binding, 2) != 1 or not sh_b_legacy_parameter(checked, sh_binding_word(checked, binding, 3)) or sh_binding_word(checked, function, 2) != 2 or (sh_binding_word(checked, function, 5) & 8) != 0 or body < 0 or sh_b_carries_borrow(checked, returned, 0) or not sh_b_contract_expr(&certificate, checked, ast, body, binding, false, 0) { return false; }; }; binding = binding + 1; };
+    while binding < sh_binding_count(checked) { if sh_ownership_parameter_borrowed(result, binding) { let function = sh_binding_word(checked, binding, 6); let signature = sh_s_resolve(checked, sh_binding_word(checked, function, 3)); let returned = sh_s_argument(checked, signature, sh_s_arity(checked, signature) - 1); let body = sh_s_child_kind(ast, sh_binding_word(checked, function, 4), 40); let projected = sh_ownership_parameter_projected(result, binding); if sh_binding_word(checked, binding, 2) != 1 or not sh_b_profile_parameter(checked, ast, binding) or sh_binding_word(checked, function, 2) != 2 or (sh_binding_word(checked, function, 5) & 8) != 0 or body < 0 or sh_b_carries_borrow(checked, returned, 0) or projected and (sh_s_kind(checked, returned) != 2 or sh_s_data(checked, returned) != 64 or sh_s_flags(checked, returned) != 1) or not sh_b_contract_expr(&certificate, checked, ast, body, binding, projected, projected, 0) { return false; }; }; binding = binding + 1; };
     true;
 }
 
@@ -481,15 +501,20 @@ def sh_b_contract_parameter(checked: &ShChecked, function: i64, ordinal: i64) ->
     -1;
 }
 
-def sh_b_contract_observes(result: &ShOwnership, checked: &ShChecked, ast: &ShAst, call: i64, ordinal: i64) -> bool {
+def sh_b_contract_observes_mode(result: &ShOwnership, checked: &ShChecked, ast: &ShAst, call: i64, ordinal: i64, projected: bool) -> bool {
     let function = sh_node_binding(checked, call);
-    if sh_b_native_contract(checked, function, ordinal) { return true; };
+    if sh_b_native_contract(checked, function, ordinal) or projected and sh_b_native_projects(checked, function, ordinal) { return true; };
     let target = sh_ast_child(ast, call, 0);
     let ty = sh_s_resolve(checked, sh_node_type(checked, target));
     if sh_s_kind(checked, ty) != 11 { return false; };
     if sh_s_kind(checked, sh_s_resolve(checked, sh_s_argument(checked, ty, ordinal))) == 6 { return true; };
     let binding = sh_b_contract_parameter(checked, function, ordinal);
-    binding >= 0 and result.contracts.get(binding).unwrap_or(0) == 1;
+    let flags = result.contracts.get(binding).unwrap_or(0);
+    binding >= 0 and ((flags & 1) != 0 or projected and (flags & 2) != 0);
+}
+
+def sh_b_contract_observes(result: &ShOwnership, checked: &ShChecked, ast: &ShAst, call: i64, ordinal: i64) -> bool {
+    sh_b_contract_observes_mode(result, checked, ast, call, ordinal, result.projection_context != 0);
 }
 
 def sh_b_legacy_parameter(checked: &ShChecked, input: i64) -> bool {
@@ -498,35 +523,44 @@ def sh_b_legacy_parameter(checked: &ShChecked, input: i64) -> bool {
     sh_s_legacy_handle(checked, ty) and not sh_b_named(checked, ty, "JsonDoc");
 }
 
-def sh_b_contract_expr(result: &ShOwnership, checked: &ShChecked, ast: &ShAst, node: i64, parameter: i64, borrowed: bool, depth: i64) -> bool {
+def sh_b_contract_expr(result: &ShOwnership, checked: &ShChecked, ast: &ShAst, node: i64, parameter: i64, borrowed: bool, projection: bool, depth: i64) -> bool {
     if node < 0 { return true; };
     if depth > 256 { return false; };
     let kind = sh_ast_word(ast, node, 0);
     let count = sh_ast_word(ast, node, 6);
     if kind == 12 or kind == 10 { return sh_node_binding(checked, node) != parameter or borrowed; };
     if kind >= 70 { return true; };
-    if kind == 55 or kind == 50 or kind == 56 or kind == 57 { return sh_b_contract_expr(result, checked, ast, sh_ast_child(ast, node, 0), parameter, borrowed, depth + 1); };
-    if kind == 53 { let target = sh_ast_child(ast, node, 0); let member = sh_ast_word(ast, target, 0) == 55; if member and not sh_b_contract_expr(result, checked, ast, sh_ast_child(ast, target, 0), parameter, sh_b_contract_observes(result, checked, ast, node, 0), depth + 1) { return false; }; let mut index = 1; while index < count { let ordinal = index - 1 + if member { 1; } else { 0; }; if not sh_b_contract_expr(result, checked, ast, sh_ast_child(ast, node, index), parameter, sh_b_contract_observes(result, checked, ast, node, ordinal), depth + 1) { return false; }; index = index + 1; }; return true; };
-    if kind == 40 { let mut index = 0; while index < count { let child = sh_ast_child(ast, node, index); let tail = index + 1 == count and sh_ast_word(ast, child, 0) == 43; let observes = if sh_ast_word(ast, child, 0) == 43 and not tail { true; } else { borrowed and tail; }; if not sh_b_contract_expr(result, checked, ast, child, parameter, observes, depth + 1) { return false; }; index = index + 1; }; return true; };
-    if kind == 41 or kind == 44 { let mut index = 1; while index < count { let child = sh_ast_child(ast, node, index); if sh_ast_word(ast, child, 0) < 70 and not sh_b_contract_expr(result, checked, ast, child, parameter, false, depth + 1) { return false; }; index = index + 1; }; return true; };
-    if kind == 43 { return sh_b_contract_expr(result, checked, ast, sh_ast_child(ast, node, 0), parameter, borrowed, depth + 1); };
-    if kind == 61 or kind == 65 { if not sh_b_contract_expr(result, checked, ast, sh_ast_child(ast, node, 0), parameter, kind == 61, depth + 1) { return false; }; let mut index = 1; while index < count { if not sh_b_contract_expr(result, checked, ast, sh_ast_child(ast, node, index), parameter, borrowed, depth + 1) { return false; }; index = index + 1; }; return true; };
-    if kind == 66 { let mut index = 1; while index < count { if not sh_b_contract_expr(result, checked, ast, sh_ast_child(ast, node, index), parameter, if index + 1 == count { borrowed; } else { true; }, depth + 1) { return false; }; index = index + 1; }; return true; };
-    if kind == 62 or kind == 63 or kind == 64 { let mut index = 0; while index < count { let child = sh_ast_child(ast, node, index); if sh_ast_word(ast, child, 0) < 70 and not sh_b_contract_expr(result, checked, ast, child, parameter, kind != 63 or index + 1 == count, depth + 1) { return false; }; index = index + 1; }; return true; };
-    if kind == 52 { return sh_b_contract_expr(result, checked, ast, sh_ast_child(ast, node, 0), parameter, false, depth + 1) and sh_b_contract_expr(result, checked, ast, sh_ast_child(ast, node, 1), parameter, false, depth + 1); };
-    if kind == 54 { return sh_b_contract_expr(result, checked, ast, sh_ast_child(ast, node, 0), parameter, borrowed, depth + 1) and sh_b_contract_expr(result, checked, ast, sh_ast_child(ast, node, 1), parameter, true, depth + 1); };
-    if kind == 51 { let op = sh_ast_word(ast, node, 4); let logical = op == sh_kind("and") or op == sh_kind("or") or op == sh_kind("&&") or op == sh_kind("||"); let compare = op == sh_kind("==") or op == sh_kind("!=") or op == sh_kind("<") or op == sh_kind(">") or op == sh_kind("<=") or op == sh_kind(">="); let mut index = 0; while index < count { if not sh_b_contract_expr(result, checked, ast, sh_ast_child(ast, node, index), parameter, if logical { borrowed; } else { compare; }, depth + 1) { return false; }; index = index + 1; }; return true; };
+    if kind == 55 or kind == 50 or kind == 56 or kind == 57 { return sh_b_contract_expr(result, checked, ast, sh_ast_child(ast, node, 0), parameter, borrowed, projection, depth + 1); };
+    if kind == 53 { let target = sh_ast_child(ast, node, 0); let member = sh_ast_word(ast, target, 0) == 55; if member { let observes = sh_b_contract_observes_mode(result, checked, ast, node, 0, projection and borrowed); if not sh_b_contract_expr(result, checked, ast, sh_ast_child(ast, target, 0), parameter, observes, if observes { true; } else { projection; }, depth + 1) { return false; }; }; let mut index = 1; while index < count { let ordinal = index - 1 + if member { 1; } else { 0; }; let observes = sh_b_contract_observes_mode(result, checked, ast, node, ordinal, projection and borrowed); if not sh_b_contract_expr(result, checked, ast, sh_ast_child(ast, node, index), parameter, observes, if observes { true; } else { projection; }, depth + 1) { return false; }; index = index + 1; }; return true; };
+    if kind == 40 { let mut index = 0; while index < count { let child = sh_ast_child(ast, node, index); let tail = index + 1 == count and sh_ast_word(ast, child, 0) == 43; let observes = if sh_ast_word(ast, child, 0) == 43 and not tail { true; } else { borrowed and tail; }; if not sh_b_contract_expr(result, checked, ast, child, parameter, observes, projection, depth + 1) { return false; }; index = index + 1; }; return true; };
+    if kind == 41 or kind == 44 { let mut index = 1; while index < count { let child = sh_ast_child(ast, node, index); if sh_ast_word(ast, child, 0) < 70 and not sh_b_contract_expr(result, checked, ast, child, parameter, false, projection, depth + 1) { return false; }; index = index + 1; }; return true; };
+    if kind == 43 { return sh_b_contract_expr(result, checked, ast, sh_ast_child(ast, node, 0), parameter, borrowed, projection, depth + 1); };
+    if kind == 61 or kind == 65 { if not sh_b_contract_expr(result, checked, ast, sh_ast_child(ast, node, 0), parameter, kind == 61, projection, depth + 1) { return false; }; let mut index = 1; while index < count { if not sh_b_contract_expr(result, checked, ast, sh_ast_child(ast, node, index), parameter, borrowed, projection, depth + 1) { return false; }; index = index + 1; }; return true; };
+    if kind == 66 { let mut index = 1; while index < count { if not sh_b_contract_expr(result, checked, ast, sh_ast_child(ast, node, index), parameter, if index + 1 == count { borrowed; } else { true; }, projection, depth + 1) { return false; }; index = index + 1; }; return true; };
+    if kind == 62 or kind == 63 or kind == 64 { let mut index = 0; while index < count { let child = sh_ast_child(ast, node, index); if sh_ast_word(ast, child, 0) < 70 and not sh_b_contract_expr(result, checked, ast, child, parameter, kind != 63 or index + 1 == count, projection, depth + 1) { return false; }; index = index + 1; }; return true; };
+    if kind == 52 { return sh_b_contract_expr(result, checked, ast, sh_ast_child(ast, node, 0), parameter, false, projection, depth + 1) and sh_b_contract_expr(result, checked, ast, sh_ast_child(ast, node, 1), parameter, false, projection, depth + 1); };
+    if kind == 54 { return sh_b_contract_expr(result, checked, ast, sh_ast_child(ast, node, 0), parameter, borrowed, projection, depth + 1) and sh_b_contract_expr(result, checked, ast, sh_ast_child(ast, node, 1), parameter, true, projection, depth + 1); };
+    if kind == 51 { let op = sh_ast_word(ast, node, 4); let logical = op == sh_kind("and") or op == sh_kind("or") or op == sh_kind("&&") or op == sh_kind("||"); let compare = op == sh_kind("==") or op == sh_kind("!=") or op == sh_kind("<") or op == sh_kind(">") or op == sh_kind("<=") or op == sh_kind(">="); let mut index = 0; while index < count { if not sh_b_contract_expr(result, checked, ast, sh_ast_child(ast, node, index), parameter, if logical { borrowed; } else { compare; }, projection, depth + 1) { return false; }; index = index + 1; }; return true; };
     let mut index = if kind == 60 { 1; } else { 0; };
-    while index < count { let child = sh_ast_child(ast, node, index); if sh_ast_word(ast, child, 0) < 70 and not sh_b_contract_expr(result, checked, ast, child, parameter, if kind == 68 and sh_ast_word(ast, node, 4) != sh_kind("async") and sh_ast_word(ast, node, 4) != sh_kind("parallel") { borrowed; } else { false; }, depth + 1) { return false; }; index = index + 1; };
+    while index < count { let child = sh_ast_child(ast, node, index); if sh_ast_word(ast, child, 0) < 70 and not sh_b_contract_expr(result, checked, ast, child, parameter, if kind == 68 and sh_ast_word(ast, node, 4) != sh_kind("async") and sh_ast_word(ast, node, 4) != sh_kind("parallel") { borrowed; } else { false; }, projection, depth + 1) { return false; }; index = index + 1; };
     true;
+}
+
+def sh_b_profile_parameter(checked: &ShChecked, ast: &ShAst, binding: i64) -> bool {
+    let function = sh_binding_word(checked, binding, 6);
+    let owner = sh_binding_word(checked, function, 6);
+    let declaration = sh_binding_word(checked, binding, 4);
+    let receiver = sh_ast_word(ast, declaration, 0) == 21 and (sh_ast_word(ast, declaration, 4) & 4) != 0;
+    if receiver { let name = sh_symbol_text(&checked.symbols, sh_binding_word(checked, function, 0)); if name.is_ok() and (sh_s_text_equal(&name.value, "drop") or sh_s_text_equal(&name.value, "free") or sh_s_text_equal(&name.value, "close") or sh_s_text_equal(&name.value, "into_iter")) { return false; }; };
+    sh_b_legacy_parameter(checked, sh_binding_word(checked, binding, 3));
 }
 
 def sh_b_infer_contracts(result: &ShOwnership, checked: &ShChecked, ast: &ShAst) {
     let mut binding = 0;
     while binding < sh_binding_count(checked) { result.contracts.push(0); binding = binding + 1; };
     let mut changed = true;
-    let mut contract_pass = 0;
-    while changed and contract_pass <= sh_binding_count(checked) { changed = false; binding = 0; while binding < sh_binding_count(checked) { if sh_binding_word(checked, binding, 2) == 1 and result.contracts.get(binding).unwrap_or(0) == 0 and sh_b_legacy_parameter(checked, sh_binding_word(checked, binding, 3)) { let function = sh_binding_word(checked, binding, 6); let ty = sh_s_resolve(checked, sh_binding_word(checked, function, 3)); let return_type = sh_s_argument(checked, ty, sh_s_arity(checked, ty) - 1); let body = sh_s_child_kind(ast, sh_binding_word(checked, function, 4), 40); if sh_binding_word(checked, function, 2) == 2 and (sh_binding_word(checked, function, 5) & 8) == 0 and body >= 0 and not sh_b_carries_borrow(checked, return_type, 0) and sh_b_contract_expr(result, checked, ast, body, binding, false, 0) { result.contracts.set(binding, 1); changed = true; }; }; binding = binding + 1; }; contract_pass = contract_pass + 1; };
+    let mut profile_pass = 0;
+    while changed and profile_pass <= sh_binding_count(checked) { changed = false; binding = 0; while binding < sh_binding_count(checked) { if sh_binding_word(checked, binding, 2) == 1 and sh_b_profile_parameter(checked, ast, binding) { let function = sh_binding_word(checked, binding, 6); let ty = sh_s_resolve(checked, sh_binding_word(checked, function, 3)); let returned = sh_s_argument(checked, ty, sh_s_arity(checked, ty) - 1); let body = sh_s_child_kind(ast, sh_binding_word(checked, function, 4), 40); let flags = result.contracts.get(binding).unwrap_or(0); let mut next = flags; if sh_binding_word(checked, function, 2) == 2 and (sh_binding_word(checked, function, 5) & 8) == 0 and body >= 0 and not sh_b_carries_borrow(checked, returned, 0) { if (flags & 1) == 0 and sh_b_contract_expr(result, checked, ast, body, binding, false, false, 0) { next = next | 1; }; if (flags & 2) == 0 and sh_s_kind(checked, returned) == 2 and sh_s_data(checked, returned) == 64 and sh_s_flags(checked, returned) == 1 and sh_b_contract_expr(result, checked, ast, body, binding, true, true, 0) { next = next | 2; }; if next != flags { result.contracts.set(binding, next); changed = true; }; }; }; binding = binding + 1; }; profile_pass = profile_pass + 1; };
 }
 
 def sh_b_call(result: &mut ShOwnership, text: &String, checked: &ShChecked, ast: &ShAst, node: i64, holder: i64) {
@@ -539,7 +573,7 @@ def sh_b_call(result: &mut ShOwnership, text: &String, checked: &ShChecked, ast:
     let mut receiver = -1;
     if member { let base = sh_ast_child(ast, target, 0); if sh_b_alias_ambiguous(result, sh_node_binding(checked, base)) { sh_b_error(result, ast, base, 6111, sh_node_binding(checked, base), -1); }; let self_type = sh_s_resolve(checked, sh_s_argument(checked, fn_type, 0)); let previous_mode = result.access_mode; if sh_s_kind(checked, self_type) == 6 { result.access_mode = 1; }; sh_b_walk(result, text, checked, ast, base, not sh_b_contract_observes(result, checked, ast, node, 0), -1); result.access_mode = previous_mode; let base_is_ref = sh_s_kind(checked, sh_s_resolve(checked, sh_node_type(checked, base))) == 6; let receiver_alias = if base_is_ref { sh_node_binding(checked, base); } else { sh_b_access_alias(checked, ast, base, 0); }; let parent = sh_b_alias_loan(result, receiver_alias); receiver = if base_is_ref and parent >= 0 { result.loans.get(parent * 5).unwrap_or(-1); } else { sh_b_place(result, checked, ast, base); }; if sh_s_kind(checked, self_type) == 6 { sh_b_loan_from(result, checked, ast, node, receiver, -1, sh_s_flags(checked, self_type) == 1, parent); }; };
     let mut index = 1;
-    while index < sh_ast_word(ast, node, 6) { let argument = sh_ast_child(ast, node, index); let ordinal = index - 1 + if member { 1; } else { 0; }; let parameter = sh_s_resolve(checked, sh_s_argument(checked, fn_type, ordinal)); let observes = sh_s_kind(checked, parameter) == 6 or sh_b_contract_observes(result, checked, ast, node, ordinal); sh_b_walk(result, text, checked, ast, argument, not observes, -1); let projected = sh_b_place(result, checked, ast, argument); if observes and sh_s_kind(checked, parameter) == 6 { let alias = sh_node_binding(checked, argument); let parent_count = result.loans.len(); let mut parent_at = 0; while alias >= 0 and parent_at < parent_count { if result.loans.get(parent_at + 1).unwrap_or(-1) == alias and result.loans.get(parent_at + 4).unwrap_or(0) != 0 { let owner = result.loans.get(parent_at).unwrap_or(-1); sh_b_loan_from(result, checked, ast, argument, owner, -1, sh_s_flags(checked, parameter) == 1, parent_at / 5); }; parent_at = parent_at + 5; }; }; index = index + 1; };
+    while index < sh_ast_word(ast, node, 6) { let argument = sh_ast_child(ast, node, index); let ordinal = index - 1 + if member { 1; } else { 0; }; let parameter = sh_s_resolve(checked, sh_s_argument(checked, fn_type, ordinal)); let observes = sh_s_kind(checked, parameter) == 6 or sh_b_contract_observes(result, checked, ast, node, ordinal); let previous_projection = result.projection_context; result.projection_context = if observes { 1; } else { 0; }; sh_b_walk(result, text, checked, ast, argument, not observes, -1); result.projection_context = previous_projection; let projected = sh_b_place(result, checked, ast, argument); if observes and sh_s_kind(checked, parameter) == 6 { let alias = sh_node_binding(checked, argument); let parent_count = result.loans.len(); let mut parent_at = 0; while alias >= 0 and parent_at < parent_count { if result.loans.get(parent_at + 1).unwrap_or(-1) == alias and result.loans.get(parent_at + 4).unwrap_or(0) != 0 { let owner = result.loans.get(parent_at).unwrap_or(-1); sh_b_loan_from(result, checked, ast, argument, owner, -1, sh_s_flags(checked, parameter) == 1, parent_at / 5); }; parent_at = parent_at + 5; }; }; index = index + 1; };
     let return_type = sh_s_resolve(checked, sh_node_type(checked, node));
     let last_argument_loan = result.loans.len();
     if sh_b_carries_borrow(checked, return_type, 0) { let mut argument_loan = first_loan; while argument_loan < last_argument_loan { if result.loans.get(argument_loan + 1).unwrap_or(-1) == -1 and result.loans.get(argument_loan + 4).unwrap_or(0) != 0 { let owner = result.loans.get(argument_loan).unwrap_or(-1); sh_b_loan_from(result, checked, ast, node, owner, holder, result.loans.get(argument_loan + 2).unwrap_or(0) != 0 and sh_b_carries_mutable_borrow(checked, return_type, 0), argument_loan / 5); }; argument_loan = argument_loan + 5; }; };
@@ -552,7 +586,7 @@ def sh_b_operator(result: &mut ShOwnership, text: &String, checked: &ShChecked, 
     let signature = sh_s_resolve(checked, sh_node_callable_type(checked, node));
     let function = sh_node_binding(checked, node);
     let mut index = 0;
-    while index < sh_ast_word(ast, node, 6) { let argument = sh_ast_child(ast, node, index); let parameter = sh_s_resolve(checked, sh_s_argument(checked, signature, index)); let reference = sh_s_kind(checked, parameter) == 6; let parameter_binding = sh_b_contract_parameter(checked, function, index); let observes = reference or parameter_binding >= 0 and result.contracts.get(parameter_binding).unwrap_or(0) == 1; let previous = result.access_mode; if reference { result.access_mode = 1; }; sh_b_walk(result, text, checked, ast, argument, not observes, -1); result.access_mode = previous; if reference { let is_ref = sh_s_kind(checked, sh_s_resolve(checked, sh_node_type(checked, argument))) == 6; let alias = if is_ref { sh_node_binding(checked, argument); } else { sh_b_access_alias(checked, ast, argument, 0); }; let parent = sh_b_alias_loan(result, alias); if sh_b_alias_ambiguous(result, alias) { sh_b_error(result, ast, argument, 6111, alias, -1); }; let path = if is_ref and parent >= 0 { result.loans.get(parent * 5).unwrap_or(-1); } else { sh_b_place(result, checked, ast, argument); }; sh_b_loan_from(result, checked, ast, node, path, -1, sh_s_flags(checked, parameter) == 1, parent); }; index = index + 1; };
+    while index < sh_ast_word(ast, node, 6) { let argument = sh_ast_child(ast, node, index); let parameter = sh_s_resolve(checked, sh_s_argument(checked, signature, index)); let reference = sh_s_kind(checked, parameter) == 6; let parameter_binding = sh_b_contract_parameter(checked, function, index); let observes = reference or parameter_binding >= 0 and (result.contracts.get(parameter_binding).unwrap_or(0) & 1) != 0; let previous = result.access_mode; if reference { result.access_mode = 1; }; sh_b_walk(result, text, checked, ast, argument, not observes, -1); result.access_mode = previous; if reference { let is_ref = sh_s_kind(checked, sh_s_resolve(checked, sh_node_type(checked, argument))) == 6; let alias = if is_ref { sh_node_binding(checked, argument); } else { sh_b_access_alias(checked, ast, argument, 0); }; let parent = sh_b_alias_loan(result, alias); if sh_b_alias_ambiguous(result, alias) { sh_b_error(result, ast, argument, 6111, alias, -1); }; let path = if is_ref and parent >= 0 { result.loans.get(parent * 5).unwrap_or(-1); } else { sh_b_place(result, checked, ast, argument); }; sh_b_loan_from(result, checked, ast, node, path, -1, sh_s_flags(checked, parameter) == 1, parent); }; index = index + 1; };
     let end = result.loans.len();
     let returned = sh_node_type(checked, node);
     let mut loan = first;

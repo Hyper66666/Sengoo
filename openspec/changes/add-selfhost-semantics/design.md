@@ -300,3 +300,44 @@ replaces exactly those first three bytes with three spaces, preserving joined
 length and the original SourceId byte map. Original source snapshots retain the
 BOM bytes. Interior BOM characters remain lexical errors; this does not inherit
 the reference lexer's general behavior of skipping arbitrary error tokens.
+
+
+## Explicit intrinsic ABI facts and ordinary Future annotations
+
+`builtin_calls` stores six-word records: source call AST ID, intrinsic kind,
+receiver nominal type, runtime declaration binding, language function type and
+runtime function type. The first kind is the shared String.as_str view. Its
+language signature is shared &String to shared &str; the runtime ABI contract is
+a real external-C declaration of sengoo_string_as_str_ptr(i64) -> i64 and the
+standard non-generic String layout with its own signed-i64 first field. A missing declaration publishes
+no ABI authorization; an incompatible declaration or layout is a located 5122
+error. Type-only lifetime analysis may still retain the language signature, but
+native lowering cannot infer an available implementation from that signature.
+
+`sh_builtin_call_valid` performs byte-preserving read-only table, original AST lexeme, receiver,
+layout, callable/node-type and external-declaration relationship checks. HIR must
+preserve the records and reject invalid or duplicate identities. Concrete MIR
+jobs recheck the contract after substitution. A dedicated native bridge may
+produce the borrowed view only from that checked intrinsic and its source owner;
+an arbitrary integer cast never gains safe-reference authority. Language and C
+function types remain distinct, and native support requires its own execution
+and corruption tests.
+
+Ordinary Future<T> annotations use structural type kind 16 with exactly one
+argument. Actual trait-bound and impl-header roles continue to refer to the
+Future trait declaration; they are not interchangeable namespace uses. The
+reference inferencer currently lacks a Future/Future structural-unification arm,
+so an explicitly annotated local future can fail with identical printed expected
+and actual types. The new type arena does not replicate that inconsistency.
+Unused Future parameters and annotated local await have named type regressions;
+missing and extra arguments are rejected. Explicit unawaited Future escape rules
+remain in force. Runtime async wrappers retain their separate language-Future,
+C-start-handle and lifecycle-origin obligations; ordinary annotation support
+alone does not establish native async or std::file support.
+
+
+Intrinsic validation uses only checked IDs, direct declaration/field reads and
+resolved primitive IDs. It does not intern or substitute new types while checking
+an untrusted HIR record. The test poisons each of the six record words and
+confirms both rejection and an unchanged type-arena count after restoration.
+The ABI-one String bridge does not authorize generic or inherited-handle shapes.

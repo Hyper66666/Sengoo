@@ -73,6 +73,29 @@ def sh_mir_value_type(mir: &ShMir, value: i64) -> i64 {
     sh_mir_inst(mir, value, 3);
 }
 
+def sh_mir_runtime_pointer(mir: &ShMir, id: i64) -> i64 {
+    let returned = sh_mir_inst_arg(mir, id, 0);
+    let receiver = sh_mir_inst_arg(mir, id, 1);
+    let ty = sh_mir_inst(mir, id, 3);
+    let receiver_type = sh_mir_value_type(mir, receiver);
+    let nominal = sh_mir_type_arg(mir, receiver_type, 0);
+    let function = sh_mir_inst(mir, id, 7);
+    if sh_mir_inst(mir, id, 5) != 2 or sh_mir_inst(mir, id, 6) != 1 or sh_mir_inst(mir, id, 8) != 0 or sh_mir_type_word(mir, ty, 0) != 6 or sh_mir_type_word(mir, ty, 2) != 0 or sh_mir_type_word(mir, sh_mir_type_arg(mir, ty, 0), 0) != 5 or sh_mir_type_word(mir, receiver_type, 0) != 6 or sh_mir_type_word(mir, receiver_type, 2) != 0 or sh_mir_type_word(mir, nominal, 0) != 12 or sh_mir_type_word(mir, nominal, 1) != 0 { return 5007; };
+    let label = sh_symbol_text(&mir.symbols, sh_mir_type_word(mir, nominal, 3));
+    if not label.is_ok() or label.value.as_str() != "String" { return 5007; };
+    if function < 0 or function >= sh_mir_fn_count(mir) or sh_mir_fn(mir, function, 3) % 2 != 1 { return 5006; };
+    let name = sh_symbol_text(&mir.symbols, sh_mir_fn(mir, function, 0));
+    let signature = sh_mir_fn(mir, function, 1);
+    let argument = sh_mir_type_arg(mir, signature, 0);
+    if not name.is_ok() or name.value.as_str() != "sengoo_string_as_str_ptr" or sh_mir_type_word(mir, signature, 0) != 11 or sh_mir_type_word(mir, signature, 1) != 1 or sh_mir_type_word(mir, signature, 2) != 0 or sh_mir_type_word(mir, signature, 5) != 2 or argument != sh_mir_type_arg(mir, signature, 1) or sh_mir_type_word(mir, argument, 0) != 2 or sh_mir_type_word(mir, argument, 1) != 64 or sh_mir_type_word(mir, argument, 2) != 1 { return 5006; };
+    if sh_mir_inst(mir, returned, 2) != 20 or sh_mir_inst(mir, returned, 3) != argument or sh_mir_inst(mir, returned, 5) != 1 or sh_mir_inst(mir, returned, 6) != function or sh_mir_inst(mir, returned, 7) != 1 or sh_mir_inst(mir, returned, 8) != 0 { return 5007; };
+    let loaded = sh_mir_inst_arg(mir, returned, 0);
+    let field = sh_mir_inst_arg(mir, loaded, 0);
+    let pointer = sh_mir_value_type(mir, field);
+    if sh_mir_inst(mir, loaded, 2) != 14 or sh_mir_inst(mir, loaded, 3) != argument or sh_mir_inst(mir, loaded, 5) != 1 or sh_mir_inst(mir, field, 2) != 17 or sh_mir_inst(mir, field, 5) != 1 or sh_mir_inst(mir, field, 6) != 0 or sh_mir_inst(mir, field, 7) != -1 or sh_mir_inst(mir, field, 8) != 0 or sh_mir_inst_arg(mir, field, 0) != receiver or sh_mir_type_word(mir, pointer, 0) != 6 or sh_mir_type_word(mir, pointer, 2) != 0 or sh_mir_type_arg(mir, pointer, 0) != argument or sh_mir_field_type(mir, nominal, -1, 0) != argument { return 5007; };
+    0;
+}
+
 def sh_mir_inst_typecheck(mir: &ShMir, id: i64) -> i64 {
     let opcode = sh_mir_inst(mir, id, 2);
     let ty = sh_mir_inst(mir, id, 3);
@@ -98,7 +121,7 @@ def sh_mir_inst_typecheck(mir: &ShMir, id: i64) -> i64 {
     if opcode == 9 { return if count == 0 and kind == 11 and aux >= 0 and aux < sh_mir_fn_count(mir) and ty == sh_mir_fn(mir, aux, 1) { 0; } else { 5006; }; };
     if opcode == 10 { if count != 1 or a != ty { return 5003; }; if aux == sh_kind("-") { return if kind == 2 or kind == 3 { 0; } else { 5003; }; }; if aux == sh_kind("!") or aux == sh_kind("not") { return if kind == 1 { 0; } else { 5003; }; }; if aux == sh_kind("~") { return if kind == 2 { 0; } else { 5003; }; }; return 5003; };
     if opcode == 11 { if count != 2 or a != b { return 5003; }; let input_kind = sh_mir_type_word(mir, a, 0); if aux == sh_kind("==") or aux == sh_kind("!=") or aux == sh_kind("<") or aux == sh_kind("<=") or aux == sh_kind(">") or aux == sh_kind(">=") { return if kind == 1 and (input_kind >= 1 and input_kind <= 4 or input_kind == 6 or input_kind == 7 or input_kind == 11) { 0; } else { 5003; }; }; if aux == sh_kind("&&") or aux == sh_kind("||") or aux == sh_kind("and") or aux == sh_kind("or") { return if kind == 1 and input_kind == 1 { 0; } else { 5003; }; }; if a != ty { return 5003; }; if aux == sh_kind("+") or aux == sh_kind("-") or aux == sh_kind("*") or aux == sh_kind("/") or aux == sh_kind("%") { return if kind == 2 or kind == 3 { 0; } else { 5003; }; }; if aux == sh_kind("&") or aux == sh_kind("|") or aux == sh_kind("^") or aux == sh_kind("<<") or aux == sh_kind(">>") { return if kind == 2 { 0; } else { 5003; }; }; return 5003; };
-    if opcode == 12 { if count != 1 or flags < 0 or flags > 2 { return 5003; }; let input_kind = sh_mir_type_word(mir, a, 0); if flags == 2 { let source = sh_mir_type_arg(mir, a, 0); let target = sh_mir_type_arg(mir, ty, 0); return if kind == 6 and input_kind == 6 and sh_mir_type_word(mir, ty, 2) <= sh_mir_type_word(mir, a, 2) and sh_mir_type_word(mir, source, 0) == 12 and sh_mir_type_word(mir, target, 0) == 12 and sh_mir_type_word(mir, source, 1) == 2 and sh_mir_type_word(mir, target, 1) == 2 and sh_mir_class_ancestor(mir, source, target) { 0; } else { 5003; }; }; if kind >= 1 and kind <= 4 and input_kind >= 1 and input_kind <= 4 { return 0; }; if flags == 1 and (kind == 7 or kind == 2 and sh_mir_type_word(mir, ty, 1) == 64) and (input_kind == 7 or input_kind == 2 and sh_mir_type_word(mir, a, 1) == 64) { return 0; }; return 5003; };
+    if opcode == 12 { if count != 1 or flags < 0 or flags > 2 { return 5003; }; let input_kind = sh_mir_type_word(mir, a, 0); if flags == 2 { let source = sh_mir_type_arg(mir, a, 0); let target = sh_mir_type_arg(mir, ty, 0); return if kind == 6 and input_kind == 6 and sh_mir_type_word(mir, ty, 2) <= sh_mir_type_word(mir, a, 2) and (source == target or sh_mir_type_word(mir, source, 0) == 12 and sh_mir_type_word(mir, target, 0) == 12 and sh_mir_type_word(mir, source, 1) == 2 and sh_mir_type_word(mir, target, 1) == 2 and sh_mir_class_ancestor(mir, source, target)) { 0; } else { 5003; }; }; if kind >= 1 and kind <= 4 and input_kind >= 1 and input_kind <= 4 { return 0; }; if flags == 1 and (kind == 7 or kind == 2 and sh_mir_type_word(mir, ty, 1) == 64) and (input_kind == 7 or input_kind == 2 and sh_mir_type_word(mir, a, 1) == 64) { return 0; }; return 5003; };
     if opcode == 13 { if count != 0 or not sh_mir_pointer(mir, ty) or aux < 0 or aux >= sh_mir_local_count(mir) or sh_mir_local(mir, aux, 0) != function or sh_mir_type_arg(mir, ty, 0) != sh_mir_local(mir, aux, 1) { return 5007; }; if sh_mir_type_word(mir, ty, 2) % 2 == 1 and sh_mir_local(mir, aux, 4) % 2 == 0 { return 5007; }; return 0; };
     if opcode == 14 { return if count == 1 and sh_mir_pointer(mir, a) and sh_mir_type_arg(mir, a, 0) == ty { 0; } else { 5007; }; };
     if opcode == 15 { return if count == 2 and kind == 0 and sh_mir_pointer(mir, a) and sh_mir_type_word(mir, a, 2) % 2 == 1 and sh_mir_type_arg(mir, a, 0) == b { 0; } else { 5007; }; };
@@ -110,6 +133,7 @@ def sh_mir_inst_typecheck(mir: &ShMir, id: i64) -> i64 {
     if opcode == 21 { if count != 1 or kind != 0 or not sh_mir_pointer(mir, a) or sh_mir_type_word(mir, a, 2) != 1 or extra != sh_mir_type_arg(mir, a, 0) or flags < 0 or flags > 1 { return 5007; }; if aux >= 0 and (aux >= sh_mir_local_count(mir) or sh_mir_local(mir, aux, 0) != function or sh_mir_local(mir, aux, 1) != extra or sh_mir_local(mir, aux, 4) < 2 or sh_mir_inst(mir, first, 2) != 13 or sh_mir_inst(mir, first, 6) != aux) { return 5007; }; if aux < -1 { return 5007; }; return 0; };
     if opcode == 22 { let length = sh_mir_value_type(mir, sh_mir_inst_arg(mir, id, 2)); return if count == 3 and kind == 0 and sh_mir_type_word(mir, a, 0) == 7 and sh_mir_type_word(mir, b, 0) == 7 and sh_mir_type_word(mir, a, 2) == 1 and sh_mir_type_arg(mir, a, 0) == sh_mir_type_arg(mir, b, 0) and sh_mir_type_word(mir, length, 0) == 2 and sh_mir_type_word(mir, length, 1) == 64 and sh_mir_type_word(mir, length, 2) % 2 == 0 and flags == 1 and aux == 0 and extra == 0 { 0; } else { 5007; }; };
     if opcode == 23 { return if count == 1 and kind == 2 and sh_mir_type_word(mir, a, 0) == 12 and sh_mir_type_word(mir, a, 1) == 1 { 0; } else { 5003; }; };
+    if opcode == 26 { return sh_mir_runtime_pointer(mir, id); };
     if opcode == 25 { return if count == 0 and kind == 0 and aux >= 0 and aux < sh_mir_local_count(mir) and sh_mir_local(mir, aux, 0) == function and (extra == 0 or extra == 1) { 0; } else { 5007; }; };
     5003;
 }

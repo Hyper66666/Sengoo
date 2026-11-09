@@ -509,3 +509,78 @@ match qualified reference acceptance/rejection. Independent report
 The earlier ten-case report remains preserved separately. Large module-aware
 corpus discovery is still classified by phase and missing dependency context;
 its development results do not close M3 or establish complete stdlib/async support.
+
+
+## Intrinsic authorization and ordinary Future annotation checkpoint
+
+- [x] Add explicit six-word intrinsic call facts separating the source call, kind, receiver nominal type, real runtime declaration, language signature and C ABI signature.
+- [x] Verify ABI-one String.as_str declaration/layout requirements, missing-declaration non-authorization, wrong parameter/return/layout/non-C rejection, safe-reference cast rejection and six-field corruption checks with an unchanged arena during validation.
+- [x] Preserve ordinary Future<T> structural identity separately from Future trait-bound/impl roles; verify unused parameters, annotated local await and arity rejection without claiming runtime-wrapper implementation.
+- [ ] Verify the native String-view ABI bridge against the real runtime and independently checked MIR authorization; keep this consumer gate separate from native execution of the checker tests.
+
+Source-bound report `target/selfhost/m3-semantic/evidence.json` has SHA-256
+`76b068ba127a0fae7aa7194aeae2f14350c0f8d672b0262c49e6168e5b92778b`.
+It records 193 literal semantic fixtures plus intrinsic field-corruption and
+arena-stability checks, 100 exact semantic/type resource scopes, ten module
+cycles, native CLI build and a fresh 49-case comparison retaining the same five
+reviewed differences. Actual start/end revisions are
+`190ef7ca9fb26656f0a2be4e9adf1c60b6b787c2` and
+`35b163db0bb259fe74e4f786d74f084f9cdc51e1`. The report explicitly records
+that revision interval; all mapped frontend, compiler/stdlib source, design/spec
+and tool hashes were unchanged. Independent commits outside that complete input
+closure do not invalidate an otherwise identical build snapshot. The earlier
+changing-ownership-source run remains failed development evidence.
+
+The ordinary annotated-local Future regression corrects the reference's missing
+Future/Future structural-unification arm, rather than asserting zero differential
+mismatches on that spelling. Actual runtime start handles, language Future
+signatures, polling/result/cancellation/drop lifecycle origins and ABI bridges
+remain distinct open obligations. Current selfhost semantic-module discovery
+passes typing and still reaches the ownership diagnostic cap; this checkpoint
+is not complete M3, native async support or self-compilation.
+
+## Projected parameter and readonly runtime pointer checkpoint
+
+- [x] Separate observed and projected-only parameter summaries, retain conservative default transfers and authorize a projected result only inside a proved noescape complete-expression context.
+- [x] Serialize projected-parameter certificate kind nine, suppress the callee's owning parameter Drop on both sides of the call contract and independently infer certificates from an empty state to reject forged recursive authorization.
+- [x] Preserve intrinsic six-word facts in HIR schema four with exact language/C signatures, pure receiver/layout/declaration validation, unique records and corruption/old-version rejection.
+- [x] Lower authorized String.as_str through the unchanged declared C i64-to-i64 function and a dedicated MIR opcode-26 borrowed pointer bridge; reject wrong kinds, flags, C targets, call provenance, receivers and ordinary integer-to-safe-reference casts.
+- [x] Permit only same-pointee mutable-to-shared reference qualification through the existing validated reference-coercion operation, preserving rejection of mutability upgrades.
+- [x] Verify source-wrapper projection, native pointer projection and readonly UTF-8 pointer bridging through independent SG-object and frozen Rust/LLVM paths, each with 100 owner scopes, two observations per scope, exactly one release and a zero live count.
+
+The frontend report is
+`target/selfhost/m3-projection-contract/frontend-checkpoint/evidence.json`,
+SHA-256 `82a201538c208e8050f4f486a27ae34e5fe2de111e42b60079c6e9af0966aefb`.
+It records 175 unchanged input hashes, empty tool changes, 50 ownership rounds,
+10 HIR-four/lowering/cleanup rounds and 30 raw MIR rounds with exact String,
+Buffer and opaque handle counts. Actual revisions are
+`190ef7ca9fb26656f0a2be4e9adf1c60b6b787c2` through
+`35b163db0bb259fe74e4f786d74f084f9cdc51e1`; independent native commits outside
+this frontend closure are recorded without altering the input identities.
+
+The independent executable report is
+`target/selfhost/m3-projection-contract/final-checkpoint/evidence.json`,
+SHA-256 `eff28a24103587239f2365b6ca4ef64378d0afd0b775d3f83ef036411c2fe3a3`.
+It records identical start/end revision
+`35b163db0bb259fe74e4f786d74f084f9cdc51e1`, Windows 11 AMD64,
+Python 3.12.14, 193 input hashes and empty source/tool changes. All 22 commands
+passed: one SG compiler build and seven steps for each of three exact source
+programs. Both object emissions are byte-identical for each source. All six
+candidate/reference executables returned 42; C independently checks live,
+created, released and observation counts before each release, and validates
+UTF-8 view bytes. The C probe implements the declared reserved ABI contracts;
+integration with actual registered runtime String allocations remains a
+separate runtime gate and does not follow from these probe results.
+
+The earlier unstrengthened C-probe report remains preserved. The development
+resource test also exposed a genuine narrow-SSA load bug: a one-byte false
+block parameter was read as an uninitialized qword. Its independent backend
+fix and dirty-stack negative control are recorded by the native backend gates;
+the resource OR assertion was retained unchanged for this final pass.
+
+This checkpoint closes the named projected-wrapper reproduction 807 and the
+three declared probe programs, with `m3_complete: false`. Full standard-library
+ownership parity, pointer aliases outside noescape contexts, generic ownership,
+real runtime allocation/drop integration, executable contracts, closure
+environments, owned patterns, conditional field cleanup and async/cancellation
+remain open. It does not qualify performance or native self-compilation.
