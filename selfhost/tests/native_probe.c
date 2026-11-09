@@ -72,6 +72,7 @@ struct StringHandle { int64_t handle; };
 extern const char *sg_native_runtime_view(const struct StringHandle *);
 int64_t sengoo_string_as_str_ptr(int64_t handle) {
     static const char view[]="runtime view";
+    if (handle==0 || handle==-3 || handle==-14 || handle==INT64_MIN) return handle;
     if (handle!=42) exit(82);
     return (int64_t)(uintptr_t)view;
 }
@@ -287,6 +288,12 @@ static int virtual_unwind(void *function) {
     return 0;
 }
 int main(int argc,char **argv) {
+    if (argc>2 && strcmp(argv[1],"runtime-status")==0) {
+        const struct StringHandle owner={_strtoi64(argv[2],NULL,10)};
+        (void)sg_native_runtime_view(&owner);
+        fputs("borrowed-pointer-consumer-entered\n",stderr);
+        return 55;
+    }
     if (argc>1 && strcmp(argv[1],"overflow")==0) { (void)sg_native_add(INT64_MAX,1); return 65; }
     if (argc>1 && strcmp(argv[1],"overflow8")==0) { int8_t byte=127; (void)sg_native_memory(&byte); return 65; }
     if (argc>1 && strcmp(argv[1],"umul-overflow")==0) { (void)sg_native_umul(UINT64_MAX,2); return 65; }

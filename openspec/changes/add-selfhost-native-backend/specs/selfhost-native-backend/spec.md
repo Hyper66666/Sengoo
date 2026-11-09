@@ -33,6 +33,11 @@ registers, stack probing and unwind records SHALL describe the emitted code.
 - **THEN** its native output and side effects match the supported reference behavior
 - **AND** C interoperability and stack unwinding succeed on the recorded Windows host
 
+#### Scenario: A runtime borrowed-view provider returns an error status
+- **WHEN** the validated runtime pointer bridge receives zero or a negative signed pointer-bits result
+- **THEN** native execution traps before publishing the borrowed view to its consumer
+- **AND** successful registered-provider results preserve their exact pointer bits and existing ownership cleanup
+
 ### Requirement: Object emission SHALL provide independently consumable native artifacts
 
 The backend SHALL emit checked COFF data, code, symbols, relocations, unwind

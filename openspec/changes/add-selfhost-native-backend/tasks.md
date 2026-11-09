@@ -25,6 +25,8 @@
 
 ## Supported target behavior
 
+- [x] Reject nonpositive runtime pointer status before constructing a borrowed view, and preserve valid pointer/resource behavior (`target/selfhost/m4-runtime-pointer-status-production/evidence.json`). Actual registered-provider tests are separately recorded; arbitrary positive-address validity is not claimed.
+
 - [ ] Implement target type layout and Windows x64 direct/indirect/C ABI calls, aggregates and SSE values.
 - [ ] Lower every supported MIR instruction, control-flow terminator and block parameter correctly.
 - [ ] Preserve overflow/division/shift/floating/contract-check semantics and ownership cleanup.
@@ -312,3 +314,13 @@ the exact result bits through opcode 26 to a shared string reference. The C
 caller verifies the handle and view bytes. Existing regressions, resources and
 the old-qword negative control pass. This independent C ABI probe does not
 claim production String allocation or a complete native runtime SDK.
+
+Production status guard: `target/selfhost/m4-runtime-pointer-status-production/evidence.json`,
+SHA-256 `7dcf9bfa1002d6e189820348b0961f0530aa892e8ac58acb67c991935f0870d7`,
+revision `49e47f80af573f3186e853c6abb41909412bbfac`, Windows 11 AMD64.
+All 35 commands passed with unchanged source/tool hashes. Zero, -3, -14 and
+INT64_MIN provider results trap with Windows illegal-instruction status before
+the consumer marker; the registered positive ABI fixture and all prior native
+regressions pass. The candidate uses signed comparison followed by UD2 rather
+than converting an error status into a safe view. A separate whole-pipeline
+runtime gate retains old compiler consumer-reachability controls.

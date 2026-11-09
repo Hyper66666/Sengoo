@@ -153,6 +153,10 @@ def main():
             run("reject-" + case, [probe, case], b"integer overflow", 63)
         run("reject-division-zero", [probe, "division-zero"], b"division by zero", 62)
         run("reject-division-overflow", [probe, "division-overflow"], b"integer overflow", 63)
+        for status in (0, -3, -14, -9223372036854775808):
+            rejected = run("reject-runtime-status-" + str(status), [probe, "runtime-status", str(status)], code=0xC000001D)
+            if b"borrowed-pointer-consumer-entered" in rejected:
+                raise AssertionError("nonpositive runtime status reached a borrowed pointer consumer")
         run("execute-wrap", [wrap_probe, "wrap"], b"native wrapping arithmetic: ok")
         report["artifacts"] = {p.name: sha(p) for p in (abi_binary, binary, checked, repeated, wrapping, probe, wrap_probe)}
         report["result"] = "passed"

@@ -244,6 +244,12 @@ zero-extend unsigned values and sign-extend signed values; floating and
 aggregate storage retain their declared ABI access paths. This avoids a
 whole-stack initialization dependency and preserves parallel edge copying.
 
+The runtime pointer bridge checks the signed provider result before admitting
+the borrowed view. A nonpositive value is an error status and traps with UD2;
+it cannot become a safe reference or reach its consumer. Positive bits retain
+their value, subject to the validated provider/receiver lifetime contract.
+This check does not prove arbitrary positive memory addresses valid.
+
 Primary references:
 
 - Intel instruction reference: https://www.intel.com/content/www/us/en/content-details/671110/intel-64-and-ia-32-architectures-software-developer-s-manual-combined-volumes-2a-2b-2c-and-2d-instruction-set-reference-a-z.html
