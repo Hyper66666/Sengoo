@@ -1,0 +1,63 @@
+import selfhost_native;
+
+import selfhost_frontend;
+
+import selfhost_mir_lower;
+
+import std::args;
+
+import std::io;
+
+import std::file;
+
+def sh_nc_argument(index: i64) -> Result<String, i64> {
+    let length = arg_len(index)?;
+    let buffer = ffi_buffer_new(length)?;
+    let count = arg_copy(index, buffer)?;
+    string_from_utf8(buffer, count);
+}
+
+def sh_nc_error(code: i64, start: i64, end: i64, phase: &str) -> Result<i64, i64> {
+    let output = string_from_str("{\"schema_version\":1,\"ok\":false,\"phase\":\"")?;
+    output.push_str(phase)?;
+    output.push_str("\",\"code\":")?;
+    output.push_i64(code)?;
+    output.push_str(",\"start\":")?;
+    output.push_i64(start)?;
+    output.push_str(",\"end\":")?;
+    output.push_i64(end)?;
+    output.push_str("}\n")?;
+    io_stdout_write(output.as_str())?;
+    sh_i64_ok(65);
+}
+
+def sh_nc_file(input: &str, output: &str, checked_arithmetic: bool) -> Result<i64, i64> {
+    let sources = sh_sources_new(1, 16777216);
+    let source = sh_source_load(&sources, input)?;
+    let length = sh_source_len(&sources, source)?;
+    let text = sh_span_text(&sources, ShSpan { source: source, start: 0, end: length })?;
+    let features = sh_symbols_new(0);
+    let front = sh_frontend(&text, source, &features, 16777216, 1000000);
+    if front.error != 0 { return sh_nc_error(front.error, front.start, front.end, "frontend"); };
+    let checked = sh_check(&front.expanded.text, &front.parsed.ast, 1000);
+    if checked.error != 0 { let span = sh_exp_map(&front.expanded.mapping, checked.start, checked.end); return sh_nc_error(checked.error, span.start, span.end, "semantics"); };
+    let lowered = sh_lower(&front.expanded.text, &front.parsed.ast, &checked, 100000);
+    if lowered.error != 0 { let span = sh_exp_map(&front.expanded.mapping, lowered.start, lowered.end); return sh_nc_error(lowered.error, span.start, span.end, "lowering"); };
+    let object = sh_native_object(&lowered.mir, 67108864, checked_arithmetic);
+    if not object.is_ok() { return sh_nc_error(object.error, 0, 0, "native"); };
+    let bytes = sh_binary_buffer(&object.value)?;
+    file_write_str_raw(sengoo_stdlib_str_ptr(output), bytes.ptr(), bytes.used_len())?;
+    io_stdout_write("{\"schema_version\":1,\"ok\":true,\"phase\":\"object\"}\n")?;
+    sh_i64_ok(0);
+}
+
+def main() -> i64 {
+    if args_len() < 2 or args_len() > 3 { io_stderr_write("usage: SG native development preview INPUT OUTPUT.obj [--wrap]\n"); return 64; };
+    let input = sh_nc_argument(0);
+    let output = sh_nc_argument(1);
+    if not input.is_ok() or not output.is_ok() { return 64; };
+    if args_len() == 3 { let mode = sh_nc_argument(2); if not mode.is_ok() or not sh_s_text_equal(&mode.value, "--wrap") { return 64; }; };
+    let result = sh_nc_file(input.value.as_str(), output.value.as_str(), args_len() == 2);
+    if not result.is_ok() { sh_nc_error(result.error, 0, 0, "input-output"); return 66; };
+    result.value;
+}

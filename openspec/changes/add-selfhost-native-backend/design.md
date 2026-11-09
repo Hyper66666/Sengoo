@@ -85,6 +85,16 @@ unwinding across its frames. Independent C callers execute actual generated
 machine code and test checked failure exits and wrapping results; raw MIR
 validation and output limits are checked before publishing an object.
 
+`tools/native.sg` joins the SG frontend, semantic checker, owned HIR/MIR and
+scalar consumer into a single-source development CLI. Its positional interface
+is `INPUT OUTPUT.obj [--wrap]`; JSON schema-version-1 diagnostics identify the
+failed phase, and output is opened only after every compiler phase succeeds.
+It does not yet implement the public sgc command/module/configuration surface.
+The source integration gate verifies exact input bytes against the qualified
+Rust reference pinned in `reference-baseline.lock`, emitting LLVM independently
+and linking both artifacts with the same C verification shim. Native SG object
+emission itself does not invoke a compiler, assembler or linker.
+
 Primary references:
 
 - Intel instruction reference: https://www.intel.com/content/www/us/en/content-details/671110/intel-64-and-ia-32-architectures-software-developer-s-manual-combined-volumes-2a-2b-2c-and-2d-instruction-set-reference-a-z.html

@@ -6,6 +6,7 @@
 - [x] Resolve bounded concrete Windows x64 type sizes, alignments, array strides and nominal/tuple/enum field offsets; verify recursive/overflow/claim failures and exact resources, and compare ten layout results with independently compiled C (`target/selfhost/m4-layout-final/evidence.json`). Full calling conventions remain open.
 - [x] Emit deterministic multiple initialized COFF sections, short/long section and symbol names, external/static symbols and checked AMD64 relocations; independently inspect and link/execute external calls, cross-section loads and absolute data pointers (`target/selfhost/m4-object-checked/evidence.json`). Auxiliary/COMDAT/BSS/debug/unwind records remain open.
 - [x] Implement and independently execute the initial validated scalar MIR consumer, including parallel CFG edge copies, integer widths, local memory, direct/indirect calls, six-argument Windows C calls, checked arithmetic failures and wrapping mode (`target/selfhost/m4-scalar-initialization/evidence.json`). Complete MIR/native ABI and cleanup support remain open.
+- [x] Verify the initial SG source-to-native-object CLI through frontend/semantics/owned HIR/MIR/x64/COFF against the frozen qualified Rust/LLVM reference for nine exact source programs and three output-preserving rejections (`target/selfhost/m4-source-supported/evidence.json`). Public sgc/module/tool parity remains open.
 
 ## Supported target behavior
 
@@ -51,3 +52,15 @@ overflow executions exited 63 through the verification hook; wrapping arithmetic
 returned the expected bits without invoking it. The earlier unsigned multiply
 encoding failure remains in `target/selfhost/m4-scalar-final/`; it was fixed
 before this successful run. This evidence does not complete M4.
+
+Initial source pipeline evidence: report SHA-256
+`ed54ccce7056c7fb2eb65e003cb05d37b5a7bf2929a912124b5b10ac952e5257`,
+revision `8182d7931ab882963c4fe583201f16d07ac50531`, Windows 11 x64.
+All 68 commands passed with unchanged source/tool identities. Nine exact UTF-8
+source files passed both paths, including for/while, scalar match, narrow suffix
+arithmetic, functions and a six-argument C call. SG objects were deterministic;
+both linked executables exited 42 with equal stdout/stderr. Three deliberate
+failures preserved previous output bytes. The initial trial in
+`target/selfhost/m4-source-final/` used an unsuffixed narrow-literal form rejected
+by the frozen reference and remains a failed report; the successful gate uses
+its explicitly supported `40i8`/`2i8` counterpart. These gates do not close M4.

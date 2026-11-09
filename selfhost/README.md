@@ -6,11 +6,18 @@ and compatibility gates live in `openspec/changes/self-hosting-program/`.
 
 ## Current boundary
 
-This is the **M1 stage0 foundation**, not a self-hosted compiler. `bootstrap.sg`
-is an SG process driver which invokes the frozen Rust reference compiler.
-`src/core.sg` contains compiler foundation algorithms in SG. Its containers,
-strings, files and processes still use the existing runtime. There is no
-minimal native SDK yet. Rust and clang remain required at this stage.
+M0, M1 and M2 have passed their recorded local Windows gates. SG now implements
+the frontend, partial semantic/ownership checking, an owned typed HIR bridge,
+typed MIR, target layout, x64 instruction encoding and COFF object writing.
+The initial scalar native path executes real generated code. This is still a
+development toolchain: M3-M8 remain open, and there is no compiler self-build
+fixed point yet. Containers, strings, files and processes still use the existing
+runtime; the minimal native SDK and SG runtime port remain required.
+
+`bootstrap.sg` remains the original stage0 process driver which invokes the
+frozen Rust reference compiler. The newer `tools/native.sg` path implements SG
+source-to-object compilation in SG. Rust/clang are still used to build that
+development executable, and clang independently links verification artifacts.
 
 The prior Agent SDK/ownership implementation was committed and pushed to
 `main` as `cc70247ec5bd9531bea751a08288980da40ecc68` before this work started.
@@ -124,11 +131,42 @@ M0's local source-release reference and eight daily workload baselines are
 frozen in `BASELINE.md` and `reference-baseline.lock`. Raw reports remain under
 `target/selfhost/m0-frozen/` and `target/selfhost/reference-qualification/`.
 Public seed distribution, installed SDKs and clean-machine qualification remain
-separate work. M2 adds the SG lexer/parser to these
-foundations; M3 adds semantic analysis and MIR; M4/M5 add native code generation
+separate work. M2's lexer/parser, macro/attribute/derive, protocol and formatter
+gates passed, including 310 source cases and 1,748 transformation comparisons.
+M3 completes semantic analysis and HIR/MIR; M4/M5 complete native code generation
 and linking/debug symbols; M6 proves compiler self-rebuild; M7 finishes all
 supported Windows tool/runtime behavior; M8 requires reproducible S2/S3 outputs,
 two candidates and the installation/compatibility/performance gates. Default
 cutover allows at most 10% time and 15% peak-memory regression on frozen daily
 workloads, while preserving the existing performance gates. Other release
 hosts continue to require their own evidence.
+
+## Native development preview
+
+`source_codegen_gate.py` builds `tools/native.sg`, then compares nine exact
+source programs through the SG and frozen qualified Rust/LLVM paths. Both paths
+execute with exit status 42 and identical stdout/stderr. Fixtures cover calls,
+branches, while/for, scalar match, explicit narrow integer suffixes, a six-arg
+C call and Unicode source/path handling. Repeated SG objects must have identical
+bytes; syntax, semantic and unsupported-codegen failures preserve existing
+output files. The gate accepts `--seed`, `--formatter`, `--clang`, `--reference`
+and `--output`; the reference identity comes from `reference-baseline.lock`.
+
+After the gate, the development CLI can be invoked as:
+
+```text
+native.exe INPUT.sg OUTPUT.obj [--wrap]
+```
+
+The default checks integer add/subtract/multiply overflow. `--wrap` selects
+wrapping arithmetic. Output diagnostics use JSON schema version 1. This preview
+currently handles single-source scalar MIR and writes AMD64 COFF directly.
+It is not yet the public `sgc` command interface. Floating/aggregate values,
+ownership cleanup, division/remainder, async, full module/tool compatibility,
+stack probing/unwind/CodeView and SG linking remain open. Unsupported code
+reports a failure; there is no automatic LLVM fallback.
+
+Other focused gates are `syntax_gate.py`, `transform_gate.py`, `format_gate.py`,
+`native_gate.py`, `layout_gate.py`, `object_gate.py` and `codegen_gate.py`.
+Their exact local evidence paths and source/tool hashes are recorded in the
+owning OpenSpec changes. Historical failed trials remain beside successful runs.
