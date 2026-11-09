@@ -516,7 +516,7 @@ its development results do not close M3 or establish complete stdlib/async suppo
 - [x] Add explicit six-word intrinsic call facts separating the source call, kind, receiver nominal type, real runtime declaration, language signature and C ABI signature.
 - [x] Verify ABI-one String.as_str declaration/layout requirements, missing-declaration non-authorization, wrong parameter/return/layout/non-C rejection, safe-reference cast rejection and six-field corruption checks with an unchanged arena during validation.
 - [x] Preserve ordinary Future<T> structural identity separately from Future trait-bound/impl roles; verify unused parameters, annotated local await and arity rejection without claiming runtime-wrapper implementation.
-- [ ] Verify the native String-view ABI bridge against the real runtime and independently checked MIR authorization; keep this consumer gate separate from native execution of the checker tests.
+- [x] Verify the native String-view ABI bridge against the real runtime and independently checked MIR authorization; keep this consumer gate separate from native execution of the checker tests.
 
 Source-bound report `target/selfhost/m3-semantic/evidence.json` has SHA-256
 `76b068ba127a0fae7aa7194aeae2f14350c0f8d672b0262c49e6168e5b92778b`.
@@ -584,3 +584,24 @@ ownership parity, pointer aliases outside noescape contexts, generic ownership,
 real runtime allocation/drop integration, executable contracts, closure
 environments, owned patterns, conditional field cleanup and async/cancellation
 remain open. It does not qualify performance or native self-compilation.
+
+## Registered runtime String bridge integration
+
+- [x] Link the exact successful pointer-bridge producer object and frozen-reference LLVM IR against freshly compiled runtime.c and runtime_string.c, preserving their artifact/source/tool identities.
+- [x] Allocate registered Strings through the real from_bytes_copy entry, observe the real as_str_ptr UTF-8 storage twice and release through real free_status exactly once per scope; check actual String, Buffer and opaque live counts return to zero over 100 scopes in both executions.
+
+Report: `target/selfhost/m3-string-runtime/checkpoint/evidence.json`, SHA-256
+`8fd3e9def047fe1fcb122ac399bb39b9138162cf9e52098d2a5b5b26070a3d7e`.
+It records identical start/end revision
+`3ad0189ecf083f0a08bea58d08b4ed0fd5193b83`, 119 unchanged input hashes,
+empty tool changes and six successful compile/link/execute commands. Both
+candidate and reference programs returned 42. The dependency is the exact
+`eff28a...` producer report, with matching source, COFF object, LLVM IR and
+qualified tool hashes; this gate does not claim to rebuild that frontend.
+
+This narrow real-runtime result supersedes the pending registered-String
+integration item in the earlier probe checkpoint. It does not close the full
+runtime SDK, standard-library body/lowering or generic ownership obligations.
+Actual profile-nine discovery still reports nine String-entry ownership
+diagnostics and 245 core-entry diagnostics, preserved separately by phase.
+Full M3, native self-compilation and performance/cutover gates remain open.
