@@ -1,0 +1,70 @@
+import selfhost_native_sdk;
+
+struct ShSdkBinding {
+    entry: i64,
+    declaration: i64,
+    function_type: i64,
+    source: i64,
+    source_identity: String,
+    manifest_identity: String,
+    manifest_sha256: String,
+    error: i64,
+}
+
+def sh_sdk_type_code_valid(types: &ShTypes, ty: i64, code: i64) -> bool {
+    let kind = sh_type_word(types, ty, 0);
+    let data = sh_type_word(types, ty, 1);
+    let flags = sh_type_word(types, ty, 2);
+    let nominal = sh_type_word(types, ty, 3);
+    let count = sh_type_word(types, ty, 5);
+    if not kind.is_ok() or not data.is_ok() or not flags.is_ok() or not nominal.is_ok() or not count.is_ok() { return false; };
+    if code == 0 or code == 1 or code == 2 { return kind.value == if code == 0 { 0; } else if code == 1 { 2; } else { 1; } and data.value == if code == 1 { 64; } else { 0; } and flags.value == if code == 1 { 1; } else { 0; } and nominal.value == -1 and count.value == 0; };
+    if code != 3 or kind.value != 7 or data.value != 0 or flags.value != 1 or nominal.value != -1 or count.value != 1 { return false; };
+    let inner = sh_type_argument(types, ty, 0);
+    if not inner.is_ok() { return false; };
+    sh_type_word(types, inner.value, 0).unwrap_or(-1) == 12 and sh_type_word(types, inner.value, 1).unwrap_or(-1) == 0 and sh_type_word(types, inner.value, 2).unwrap_or(-1) == 0 and sh_type_word(types, inner.value, 3).unwrap_or(-1) == 0 and sh_type_word(types, inner.value, 5).unwrap_or(-1) == 0;
+}
+
+def sh_native_sdk_binding_valid(sdk: &ShNativeSdk, entry: i64) -> bool {
+    if entry < 0 or entry >= 16 or sh_native_sdk_entry_count(sdk) != 16 or not sh_native_sdk_unchanged(sdk) or not sh_sdk_prelude_valid(&sdk.units.get(1).text, &sdk.ast) { return false; };
+    let declaration = sh_native_sdk_entry_word(sdk, entry, 0);
+    let function = sh_native_sdk_entry_word(sdk, entry, 1);
+    let block = sh_ast_child(&sdk.ast, sdk.ast.root, 1);
+    let expected = sh_ast_child(&sdk.ast, block, entry + 1);
+    let source_node = sh_sdk_j_at(&sdk.document, sh_sdk_j_get(&sdk.document, sdk.document.root, "exports"), entry);
+    let source = sh_sdk_j_integer(&sdk.document, sh_sdk_j_get(&sdk.document, source_node, "source"));
+    if not source.is_ok() or source.value < 0 or source.value >= sdk.units.len() - 2 { return false; };
+    let count = sh_sdk_expected_count(entry);
+    if declaration != expected or sh_native_sdk_entry_word(sdk, entry, 2) != if entry < 6 { 0; } else { 1; } or sh_native_sdk_entry_word(sdk, entry, 3) != if entry == 0 { 0; } else if entry < 6 { 1; } else if entry < 11 { 2; } else { 3; } or sh_native_sdk_entry_word(sdk, entry, 4) != count or sh_native_sdk_entry_word(sdk, entry, 5) != sh_sdk_expected_result(entry) or sh_native_sdk_entry_word(sdk, entry, 6) != if sh_sdk_expected_unsafe(entry) { 1; } else { 0; } or sh_native_sdk_entry_word(sdk, entry, 7) != if sh_sdk_expected_consume(entry) { 1; } else { 0; } or sh_native_sdk_entry_word(sdk, entry, 8) != source.value + 2 { return false; };
+    if sh_type_word(&sdk.types, function, 0).unwrap_or(-1) != 11 or sh_type_word(&sdk.types, function, 1).unwrap_or(-1) != 1 or sh_type_word(&sdk.types, function, 2).unwrap_or(-1) != 0 or sh_type_word(&sdk.types, function, 3).unwrap_or(-2) != -1 or sh_type_word(&sdk.types, function, 5).unwrap_or(-1) != count + 1 { return false; };
+    let mut index = 0;
+    while index <= count { let argument = sh_type_argument(&sdk.types, function, index); let code = if index == count { sh_sdk_expected_result(entry); } else { sh_sdk_expected_parameter(entry, index); }; if not argument.is_ok() or not sh_sdk_type_code_valid(&sdk.types, argument.value, code) { return false; }; index = index + 1; };
+    true;
+}
+
+def sh_sdk_binding_empty(error: i64) -> ShSdkBinding {
+    ShSdkBinding { entry: -1, declaration: -1, function_type: -1, source: -1, source_identity: string_new(), manifest_identity: string_new(), manifest_sha256: string_new(), error: error };
+}
+
+def sh_native_sdk_binding(sdk: &ShNativeSdk, entry: i64) -> ShSdkBinding {
+    if not sh_native_sdk_binding_valid(sdk, entry) { return sh_sdk_binding_empty(5411); };
+    let identity = sdk.units.get(1).identity.clone();
+    let manifest_identity = sdk.units.get(0).identity.clone();
+    let digest = sdk.units.get(0).sha256.clone();
+    if not identity.is_ok() or not manifest_identity.is_ok() or not digest.is_ok() { return sh_sdk_binding_empty(5404); };
+    ShSdkBinding { entry: entry, declaration: sh_native_sdk_entry_word(sdk, entry, 0), function_type: sh_native_sdk_entry_word(sdk, entry, 1), source: 1, source_identity: identity.value, manifest_identity: manifest_identity.value, manifest_sha256: digest.value, error: 0 };
+}
+
+def sh_native_sdk_certificate_valid(sdk: &ShNativeSdk, binding: &ShSdkBinding) -> bool {
+    if binding.error != 0 or not sh_native_sdk_binding_valid(sdk, binding.entry) { return false; };
+    binding.source == 1 and binding.declaration == sh_native_sdk_entry_word(sdk, binding.entry, 0) and binding.function_type == sh_native_sdk_entry_word(sdk, binding.entry, 1) and binding.source_identity.as_str() == sdk.units.get(1).identity.as_str() and binding.manifest_identity.as_str() == sdk.units.get(0).identity.as_str() and binding.manifest_sha256.as_str() == sdk.units.get(0).sha256.as_str();
+}
+
+def sh_native_sdk_lifecycle_declaration(sdk: &ShNativeSdk, family: i64, operation: i64) -> i64 {
+    if family < 2 or family > 3 or operation < 0 or operation >= 5 or sdk.error != 0 { return -1; };
+    let contract = sh_sdk_j_at(&sdk.document, sh_sdk_j_get(&sdk.document, sdk.document.root, "language_contracts"), family - 1);
+    let operations = sh_sdk_j_get(&sdk.document, contract, "operations");
+    let entry = sh_sdk_j_integer(&sdk.document, sh_sdk_j_at(&sdk.document, operations, operation));
+    if not entry.is_ok() or entry.value != if family == 2 { 6 + operation; } else { 11 + operation; } or not sh_native_sdk_binding_valid(sdk, entry.value) { return -1; };
+    entry.value;
+}

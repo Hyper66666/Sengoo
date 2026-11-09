@@ -1,0 +1,140 @@
+import selfhost_native_sdk;
+
+import std::hash;
+
+struct ShSdkArtifact {
+    snapshot: FileSnapshot,
+    identity: String,
+    manifest_identity: String,
+    manifest_sha256: String,
+    sha256: String,
+    bytes: Buffer,
+    component: i64,
+    ordinal: i64,
+    mode: i64,
+    error: i64,
+}
+
+def sh_sdk_artifact_empty(code: i64) -> ShSdkArtifact {
+    ShSdkArtifact { snapshot: FileSnapshot { handle: 0 }, identity: string_new(), manifest_identity: string_new(), manifest_sha256: string_new(), sha256: string_new(), bytes: Buffer { handle: 0 }, component: -1, ordinal: -1, mode: -1, error: code };
+}
+
+def sh_sdk_artifact_u32(bytes: &Buffer, index: i64) -> i64 {
+    if index < 0 or index > bytes.used_len() or bytes.used_len() - index < 4 { return -1; };
+    bytes.get_u8(index).unwrap_or(0) + bytes.get_u8(index + 1).unwrap_or(0) * 256 + bytes.get_u8(index + 2).unwrap_or(0) * 65536 + bytes.get_u8(index + 3).unwrap_or(0) * 16777216;
+}
+
+def sh_sdk_artifact_coff(bytes: &Buffer) -> bool {
+    let length = bytes.used_len();
+    if length < 20 or bytes.get_u8(0).unwrap_or(-1) != 100 or bytes.get_u8(1).unwrap_or(-1) != 134 { return false; };
+    let sections = bytes.get_u8(2).unwrap_or(0) + bytes.get_u8(3).unwrap_or(0) * 256;
+    let optional = bytes.get_u8(16).unwrap_or(0) + bytes.get_u8(17).unwrap_or(0) * 256;
+    if sections < 1 or optional != 0 or sections > (length - 20) / 40 { return false; };
+    let table = sh_sdk_artifact_u32(bytes, 8);
+    let count = sh_sdk_artifact_u32(bytes, 12);
+    if table < 0 or table > length or count < 0 or count > (length - table) / 18 { return false; };
+    let strings = table + count * 18;
+    let size = sh_sdk_artifact_u32(bytes, strings);
+    if size < 4 or size > length - strings { return false; };
+    let mut section = 0;
+    while section < sections { let header = 20 + section * 40; let size = sh_sdk_artifact_u32(bytes, header + 16); let pointer = sh_sdk_artifact_u32(bytes, header + 20); if pointer < 0 or pointer > length or size < 0 or size > length - pointer { return false; }; section = section + 1; };
+    true;
+}
+
+def sh_sdk_artifact_symbol(bytes: &Buffer, expected: &str) -> bool {
+    if not sh_sdk_artifact_coff(bytes) { return false; };
+    let name = ffi_buffer_from_bytes(expected);
+    if not name.is_ok() { return false; };
+    let table = sh_sdk_artifact_u32(bytes, 8);
+    let count = sh_sdk_artifact_u32(bytes, 12);
+    let strings = table + count * 18;
+    let size = sh_sdk_artifact_u32(bytes, strings);
+    let sections = bytes.get_u8(2).unwrap_or(0) + bytes.get_u8(3).unwrap_or(0) * 256;
+    let mut symbol = 0;
+    let mut found = false;
+    while symbol < count { let record = table + symbol * 18; let mut begin = record; let mut limit = record + 8; if sh_sdk_artifact_u32(bytes, record) == 0 { let offset = sh_sdk_artifact_u32(bytes, record + 4); if offset < 4 or offset >= size { return false; }; begin = strings + offset; limit = strings + size; }; let mut length = 0; while begin + length < limit and bytes.get_u8(begin + length).unwrap_or(-1) != 0 { length = length + 1; }; if begin + length == limit and limit != record + 8 { return false; }; let section = bytes.get_u8(record + 12).unwrap_or(0) + bytes.get_u8(record + 13).unwrap_or(0) * 256; let storage = bytes.get_u8(record + 16).unwrap_or(0); let function = (bytes.get_u8(record + 14).unwrap_or(0) & 48) == 32; if storage == 2 and function and section > 0 and section < 32768 { if section > sections { return false; }; let value = sh_sdk_artifact_u32(bytes, record + 8); let extent = sh_sdk_artifact_u32(bytes, 20 + (section - 1) * 40 + 16); if value < 0 or value >= extent { return false; }; }; let mut matches = length == name.value.used_len() and section > 0 and section <= sections and storage == 2 and function; let mut index = 0; while matches and index < length { matches = bytes.get_u8(begin + index).unwrap_or(-1) == name.value.get_u8(index).unwrap_or(-2); index = index + 1; }; found = found or matches; let auxiliary = bytes.get_u8(record + 17).unwrap_or(0); if auxiliary >= count - symbol { return false; }; symbol = symbol + 1 + auxiliary; };
+    found;
+}
+
+def sh_sdk_artifact_path_matches(sdk: &ShNativeSdk, record: i64, snapshot: &FileSnapshot) -> bool {
+    let relative = sh_sdk_j_text(&sdk.document, sh_sdk_j_get(&sdk.document, record, "path"));
+    let prelude = sdk.units.get(1).snapshot.path();
+    let actual = snapshot.path();
+    let suffix = "selfhost/sdk/native_x64_abi1/prelude.sg";
+    if not relative.is_ok() or not sh_sdk_relative(&relative.value) or not prelude.is_ok() or not actual.is_ok() or prelude.value.len() < suffix.len() { return false; };
+    let prefix = prelude.value.get(0, prelude.value.len() - suffix.len());
+    if not prefix.is_ok() or not prefix.value.push_str(relative.value.as_str()).is_ok() { return false; };
+    let expected = ffi_buffer_from_bytes(prefix.value.as_str());
+    let actual_bytes = ffi_buffer_from_bytes(actual.value.as_str());
+    if not expected.is_ok() or not actual_bytes.is_ok() or expected.value.used_len() != actual_bytes.value.used_len() { return false; };
+    let mut index = 0;
+    while index < expected.value.used_len() { let left = expected.value.get_u8(index).unwrap_or(-1); let right = actual_bytes.value.get_u8(index).unwrap_or(-2); let a = if left == 92 { 47; } else if left >= 65 and left <= 90 { left + 32; } else { left; }; let b = if right == 92 { 47; } else if right >= 65 and right <= 90 { right + 32; } else { right; }; if a != b { return false; }; index = index + 1; };
+    true;
+}
+
+def sh_native_sdk_artifact(root: &str, sdk: &ShNativeSdk, component: i64, ordinal: i64, pin: &str, development: bool) -> ShSdkArtifact {
+    if sdk.error != 0 or not sh_native_sdk_unchanged(sdk) { return sh_sdk_artifact_empty(5406); };
+    if component < 0 or component >= 2 or ordinal < 0 or not sh_sdk_pin_valid(pin) { return sh_sdk_artifact_empty(5408); };
+    if not development { return sh_sdk_artifact_empty(5410); };
+    let components = sh_sdk_j_get(&sdk.document, sdk.document.root, "components");
+    let owner = sh_sdk_j_at(&sdk.document, components, component);
+    let artifacts = sh_sdk_j_get(&sdk.document, owner, "artifacts");
+    let item = sh_sdk_j_at(&sdk.document, artifacts, ordinal);
+    if sh_sdk_j_size(&sdk.document, item) != 5 or not sh_sdk_string(&sdk.document, owner, "class", "reference-runtime") or not sh_sdk_string(&sdk.document, item, "format", "coff-object") or not sh_sdk_string(&sdk.document, item, "target", "x86_64-pc-windows-msvc") or not sh_sdk_integer(&sdk.document, item, "abi_version", 1) or not sh_sdk_string(&sdk.document, item, "sha256", pin) { return sh_sdk_artifact_empty(5408); };
+    let path = sh_sdk_j_text(&sdk.document, sh_sdk_j_get(&sdk.document, item, "path"));
+    if not path.is_ok() or not sh_sdk_relative(&path.value) { return sh_sdk_artifact_empty(5408); };
+    let joined = path_join_string(root, path.value.as_str());
+    if not joined.is_ok() { return sh_sdk_artifact_empty(5401); };
+    let opened = file_snapshot_open(joined.value.as_str(), 16777216);
+    if not opened.is_ok() { return sh_sdk_artifact_empty(5401); };
+    let snapshot = opened.value;
+    if not sh_sdk_artifact_path_matches(sdk, item, &snapshot) { return sh_sdk_artifact_empty(5408); };
+    let digest = snapshot.sha256();
+    let identity = snapshot.identity();
+    let length = snapshot.len();
+    if not digest.is_ok() or not identity.is_ok() or not length.is_ok() { return sh_sdk_artifact_empty(5401); };
+    if digest.value.as_str() != pin { return sh_sdk_artifact_empty(5402); };
+    let allocated = ffi_buffer_new(length.value);
+    if not allocated.is_ok() { return sh_sdk_artifact_empty(5404); };
+    let mut bytes = allocated.value;
+    let copied = snapshot.copy_bytes(&mut bytes);
+    if not copied.is_ok() or copied.value != length.value { return sh_sdk_artifact_empty(5401); };
+    if not sh_sdk_artifact_coff(&bytes) { return sh_sdk_artifact_empty(5409); };
+    let mut entry = 0;
+    let mut known = false;
+    while entry < 16 { if sh_native_sdk_entry_word(sdk, entry, 2) == component and sh_sdk_artifact_symbol(&bytes, sh_sdk_expected_symbol(entry)) { known = true; }; entry = entry + 1; };
+    if not known { return sh_sdk_artifact_empty(5409); };
+    let manifest_identity = sdk.units.get(0).identity.clone();
+    let manifest_digest = sdk.units.get(0).sha256.clone();
+    if not manifest_identity.is_ok() or not manifest_digest.is_ok() { return sh_sdk_artifact_empty(5404); };
+    let stable = snapshot.still_matches();
+    if not stable.is_ok() or not stable.value or not sh_native_sdk_unchanged(sdk) { return sh_sdk_artifact_empty(5406); };
+    ShSdkArtifact { snapshot: snapshot, identity: identity.value, manifest_identity: manifest_identity.value, manifest_sha256: manifest_digest.value, sha256: digest.value, bytes: bytes, component: component, ordinal: ordinal, mode: 0, error: 0 };
+}
+
+def sh_native_sdk_artifact_unchanged(sdk: &ShNativeSdk, artifact: &ShSdkArtifact) -> bool {
+    if sdk.error != 0 or artifact.error != 0 or artifact.mode != 0 or artifact.component < 0 or artifact.component >= 2 or artifact.ordinal < 0 or sdk.units.get(0).identity.as_str() != artifact.manifest_identity.as_str() or sdk.units.get(0).sha256.as_str() != artifact.manifest_sha256.as_str() { return false; };
+    let components = sh_sdk_j_get(&sdk.document, sdk.document.root, "components");
+    let owner = sh_sdk_j_at(&sdk.document, components, artifact.component);
+    let record = sh_sdk_j_at(&sdk.document, sh_sdk_j_get(&sdk.document, owner, "artifacts"), artifact.ordinal);
+    if sh_sdk_j_size(&sdk.document, record) != 5 or not sh_sdk_string(&sdk.document, owner, "class", "reference-runtime") or not sh_sdk_string(&sdk.document, record, "sha256", artifact.sha256.as_str()) or not sh_sdk_string(&sdk.document, record, "format", "coff-object") or not sh_sdk_string(&sdk.document, record, "target", "x86_64-pc-windows-msvc") or not sh_sdk_integer(&sdk.document, record, "abi_version", 1) { return false; };
+    if not sh_sdk_artifact_path_matches(sdk, record, &artifact.snapshot) { return false; };
+    let actual_identity = artifact.snapshot.identity();
+    let actual_sha = artifact.snapshot.sha256();
+    let length = artifact.snapshot.len();
+    if not actual_identity.is_ok() or not actual_sha.is_ok() or not length.is_ok() or length.value != artifact.bytes.used_len() or actual_identity.value.as_str() != artifact.identity.as_str() or actual_sha.value.as_str() != artifact.sha256.as_str() { return false; };
+    let allocated = ffi_buffer_new(64);
+    if not allocated.is_ok() { return false; };
+    let digest = allocated.value;
+    let copied = sengoo_hash_sha256_bounded(sengoo_ffi_buffer_ptr(artifact.bytes.handle), length.value, 16777216, digest.handle, 64);
+    if copied != 64 { return false; };
+    let text = string_from_utf8(digest, copied);
+    if not text.is_ok() or text.value.as_str() != artifact.sha256.as_str() { return false; };
+    let stable = artifact.snapshot.still_matches();
+    stable.is_ok() and stable.value and sh_native_sdk_unchanged(sdk);
+}
+
+def sh_native_sdk_artifact_has(sdk: &ShNativeSdk, artifact: &ShSdkArtifact, entry: i64) -> bool {
+    if entry < 0 or entry >= sh_native_sdk_entry_count(sdk) or sh_native_sdk_entry_word(sdk, entry, 2) != artifact.component or not sh_native_sdk_artifact_unchanged(sdk, artifact) { return false; };
+    sh_sdk_artifact_symbol(&artifact.bytes, sh_sdk_expected_symbol(entry));
+}

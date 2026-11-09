@@ -1,0 +1,440 @@
+{
+  "schema": "sengoo.native-sdk.catalog.v1",
+  "family": "native-x64-handle-abi",
+  "target": "x86_64-pc-windows-msvc",
+  "pointer_bits": 64,
+  "endianness": "little",
+  "abi_version": 1,
+  "runtime_algorithms_ported": false,
+  "prelude": {
+    "path": "selfhost/sdk/native_x64_abi1/prelude.sg",
+    "sha256": "6761258635f1623d1e819a350560bdaab5ea0c29849cf60bfad780c2272c51a0"
+  },
+  "sources": [
+    {
+      "path": "tools/stdlib/runtime.c",
+      "sha256": "7f905b1935ad9d56bd36bd46a354211649ed8444f90afa10070b350648c61e7e",
+      "bytes": 198153
+    },
+    {
+      "path": "tools/stdlib/runtime_string.c",
+      "sha256": "0efbf24466151a5005897a85a32b4b37cbd7253dfb35a32012cb01d839acedae",
+      "bytes": 33624
+    },
+    {
+      "path": "tools/stdlib/runtime_shared.h",
+      "sha256": "a49cda38fee3029bf296ff0a38337695a602380c82d58b37a65cadfa6cfebf0c",
+      "bytes": 6963
+    },
+    {
+      "path": "tools/stdlib/string.sg",
+      "sha256": "8d5b9339163809b766a65d5f92ad0750163dedfefdc6c3293966bbf019217305",
+      "bytes": 19683
+    },
+    {
+      "path": "tools/stdlib/file.sg",
+      "sha256": "4f06beb2c04856a97dc4d06abeea7deb783c7f6cd50375c7d6a8d2b533c1876f",
+      "bytes": 6804
+    },
+    {
+      "path": "runtime/src/async_runtime/futures.rs",
+      "sha256": "6432928b47303479726c01563afaf59b62bdee3643ee3614a8951938a7eb2368",
+      "bytes": 10114
+    },
+    {
+      "path": "runtime/src/async_runtime/async_file.rs",
+      "sha256": "941909262fa10ab5a1776de932694dcdfcbcfad4c51d36d55a284502af17b219",
+      "bytes": 14918
+    },
+    {
+      "path": "runtime/src/async_runtime.rs",
+      "sha256": "2030bbe511a6447c3e679c28cc17a39d296707aea9aa799a04f03d1be2590aee",
+      "bytes": 90838
+    },
+    {
+      "path": "runtime/Cargo.toml",
+      "sha256": "e51b0543fcc98652e8835dfcc0beecac1bd3b7d3e5e24a7d68302e67a0fbba5a",
+      "bytes": 1001
+    },
+    {
+      "path": "compiler/src/mir/lowering/method_builtin_helpers.rs",
+      "sha256": "5fced1ead82b8648ea709ced95a91b3314cacd906a1efa6865b6ae70059a8d39",
+      "bytes": 6121
+    },
+    {
+      "path": "compiler/src/mir/lowering/call_emission_helpers.rs",
+      "sha256": "c5c26b774600a07b606e13f5b4ae0bddb1af7a712318600fa65770b3f96d104d",
+      "bytes": 9506
+    },
+    {
+      "path": "compiler/src/codegen/declaration_helpers.rs",
+      "sha256": "87e6ed9d742018acd2a75d8007fc63ba31bb9d641f1801feda16edb9f0be1864",
+      "bytes": 62226
+    },
+    {
+      "path": "tools/sgc/src/installed_runtime.rs",
+      "sha256": "d6d556785216c45fb1ad0a700a78ffca7679f035c2ca4b11634d6a2338aa795f",
+      "bytes": 19948
+    },
+    {
+      "path": "tools/sgc/src/native_toolchain.rs",
+      "sha256": "8a373546dae089044d47bd88e1310ea19a3d3a61f102ac0d32e368bfe4636d2d",
+      "bytes": 78924
+    }
+  ],
+  "exports": [
+    {
+      "id": 0,
+      "symbol": "sengoo_runtime_abi_version",
+      "component": 0,
+      "family": 0,
+      "convention": "C",
+      "parameters": [],
+      "result": 1,
+      "unsafe": false,
+      "consumes_handle": false,
+      "source": 0,
+      "prototype_begin": 547,
+      "prototype_end": 589,
+      "prototype": "long long sengoo_runtime_abi_version(void)"
+    },
+    {
+      "id": 1,
+      "symbol": "sengoo_string_from_bytes_copy",
+      "component": 0,
+      "family": 1,
+      "convention": "C",
+      "parameters": [
+        1,
+        1
+      ],
+      "result": 1,
+      "unsafe": false,
+      "consumes_handle": false,
+      "source": 1,
+      "prototype_begin": 13726,
+      "prototype_end": 13801,
+      "prototype": "long long sengoo_string_from_bytes_copy(long long bytes_ptr, long long len)"
+    },
+    {
+      "id": 2,
+      "symbol": "sengoo_string_as_str_ptr",
+      "component": 0,
+      "family": 1,
+      "convention": "C",
+      "parameters": [
+        1
+      ],
+      "result": 1,
+      "unsafe": false,
+      "consumes_handle": false,
+      "source": 1,
+      "prototype_begin": 12278,
+      "prototype_end": 12330,
+      "prototype": "long long sengoo_string_as_str_ptr(long long handle)"
+    },
+    {
+      "id": 3,
+      "symbol": "sengoo_string_len",
+      "component": 0,
+      "family": 1,
+      "convention": "C",
+      "parameters": [
+        1
+      ],
+      "result": 1,
+      "unsafe": false,
+      "consumes_handle": false,
+      "source": 1,
+      "prototype_begin": 11325,
+      "prototype_end": 11370,
+      "prototype": "long long sengoo_string_len(long long handle)"
+    },
+    {
+      "id": 4,
+      "symbol": "sengoo_string_free_status",
+      "component": 0,
+      "family": 1,
+      "convention": "C",
+      "parameters": [
+        1
+      ],
+      "result": 1,
+      "unsafe": false,
+      "consumes_handle": true,
+      "source": 1,
+      "prototype_begin": 10339,
+      "prototype_end": 10392,
+      "prototype": "long long sengoo_string_free_status(long long handle)"
+    },
+    {
+      "id": 5,
+      "symbol": "sengoo_string_live_handle_count",
+      "component": 0,
+      "family": 1,
+      "convention": "C",
+      "parameters": [],
+      "result": 1,
+      "unsafe": false,
+      "consumes_handle": false,
+      "source": 1,
+      "prototype_begin": 11033,
+      "prototype_end": 11080,
+      "prototype": "long long sengoo_string_live_handle_count(void)"
+    },
+    {
+      "id": 6,
+      "symbol": "sengoo_async_sleep__start",
+      "component": 1,
+      "family": 2,
+      "convention": "C",
+      "parameters": [
+        1
+      ],
+      "result": 1,
+      "unsafe": false,
+      "consumes_handle": false,
+      "source": 5,
+      "prototype_begin": 2232,
+      "prototype_end": 2300,
+      "prototype": "pub extern \"C\" fn sengoo_async_sleep__start(duration_ms: i64) -> i64"
+    },
+    {
+      "id": 7,
+      "symbol": "sengoo_async_sleep__poll",
+      "component": 1,
+      "family": 2,
+      "convention": "C",
+      "parameters": [
+        1
+      ],
+      "result": 1,
+      "unsafe": true,
+      "consumes_handle": false,
+      "source": 5,
+      "prototype_begin": 2632,
+      "prototype_end": 2701,
+      "prototype": "pub unsafe extern \"C\" fn sengoo_async_sleep__poll(handle: i64) -> i64"
+    },
+    {
+      "id": 8,
+      "symbol": "sengoo_async_sleep__result",
+      "component": 1,
+      "family": 2,
+      "convention": "C",
+      "parameters": [
+        1
+      ],
+      "result": 0,
+      "unsafe": true,
+      "consumes_handle": true,
+      "source": 5,
+      "prototype_begin": 3226,
+      "prototype_end": 3290,
+      "prototype": "pub unsafe extern \"C\" fn sengoo_async_sleep__result(handle: i64)"
+    },
+    {
+      "id": 9,
+      "symbol": "sengoo_async_sleep__cancel",
+      "component": 1,
+      "family": 2,
+      "convention": "C",
+      "parameters": [
+        1
+      ],
+      "result": 2,
+      "unsafe": true,
+      "consumes_handle": true,
+      "source": 5,
+      "prototype_begin": 3548,
+      "prototype_end": 3620,
+      "prototype": "pub unsafe extern \"C\" fn sengoo_async_sleep__cancel(handle: i64) -> bool"
+    },
+    {
+      "id": 10,
+      "symbol": "sengoo_async_sleep__drop",
+      "component": 1,
+      "family": 2,
+      "convention": "C",
+      "parameters": [
+        1
+      ],
+      "result": 0,
+      "unsafe": true,
+      "consumes_handle": true,
+      "source": 5,
+      "prototype_begin": 3894,
+      "prototype_end": 3956,
+      "prototype": "pub unsafe extern \"C\" fn sengoo_async_sleep__drop(handle: i64)"
+    },
+    {
+      "id": 11,
+      "symbol": "sengoo_async_file_wait_readable__start",
+      "component": 1,
+      "family": 3,
+      "convention": "C",
+      "parameters": [
+        1,
+        1
+      ],
+      "result": 1,
+      "unsafe": false,
+      "consumes_handle": false,
+      "source": 6,
+      "prototype_begin": 4801,
+      "prototype_end": 4899,
+      "prototype": "pub extern \"C\" fn sengoo_async_file_wait_readable__start(file_handle: i64, timeout_ms: i64) -> i64"
+    },
+    {
+      "id": 12,
+      "symbol": "sengoo_async_file_wait_readable__poll",
+      "component": 1,
+      "family": 3,
+      "convention": "C",
+      "parameters": [
+        1
+      ],
+      "result": 1,
+      "unsafe": true,
+      "consumes_handle": false,
+      "source": 6,
+      "prototype_begin": 6428,
+      "prototype_end": 6510,
+      "prototype": "pub unsafe extern \"C\" fn sengoo_async_file_wait_readable__poll(handle: i64) -> i64"
+    },
+    {
+      "id": 13,
+      "symbol": "sengoo_async_file_wait_readable__result",
+      "component": 1,
+      "family": 3,
+      "convention": "C",
+      "parameters": [
+        3,
+        1
+      ],
+      "result": 0,
+      "unsafe": true,
+      "consumes_handle": true,
+      "source": 6,
+      "prototype_begin": 8338,
+      "prototype_end": 8469,
+      "prototype": "pub unsafe extern \"C\" fn sengoo_async_file_wait_readable__result( output: *mut AsyncFileReadinessOutcome, handle: i64, )"
+    },
+    {
+      "id": 14,
+      "symbol": "sengoo_async_file_wait_readable__cancel",
+      "component": 1,
+      "family": 3,
+      "convention": "C",
+      "parameters": [
+        1
+      ],
+      "result": 2,
+      "unsafe": true,
+      "consumes_handle": true,
+      "source": 6,
+      "prototype_begin": 9102,
+      "prototype_end": 9187,
+      "prototype": "pub unsafe extern \"C\" fn sengoo_async_file_wait_readable__cancel(handle: i64) -> bool"
+    },
+    {
+      "id": 15,
+      "symbol": "sengoo_async_file_wait_readable__drop",
+      "component": 1,
+      "family": 3,
+      "convention": "C",
+      "parameters": [
+        1
+      ],
+      "result": 0,
+      "unsafe": true,
+      "consumes_handle": true,
+      "source": 6,
+      "prototype_begin": 9514,
+      "prototype_end": 9589,
+      "prototype": "pub unsafe extern \"C\" fn sengoo_async_file_wait_readable__drop(handle: i64)"
+    }
+  ],
+  "layouts": [
+    {
+      "id": 0,
+      "name": "ShNativeFileReadinessOutcome",
+      "size": 16,
+      "alignment": 8,
+      "fields": [
+        {
+          "name": "is_ok",
+          "type": 2,
+          "offset": 0
+        },
+        {
+          "name": "value",
+          "type": 2,
+          "offset": 1
+        },
+        {
+          "name": "error",
+          "type": 1,
+          "offset": 8
+        }
+      ]
+    }
+  ],
+  "language_contracts": [
+    {
+      "kind": 1,
+      "language_function": "fn(&String)->&str",
+      "origin": "receiver-storage",
+      "producer": 2,
+      "output": "borrowed-str",
+      "operations": [
+        2
+      ],
+      "runtime_result": "positive-address-or-negative-status"
+    },
+    {
+      "kind": 2,
+      "language_function": "fn(i64)->Future<()>",
+      "origin": "sengoo_async_sleep",
+      "producer": 6,
+      "output": "unit",
+      "operations": [
+        6,
+        7,
+        8,
+        9,
+        10
+      ],
+      "runtime_result": "owned-handle"
+    },
+    {
+      "kind": 3,
+      "language_function": "fn(&AsyncFile,i64)->Future<FileReadinessOutcome>",
+      "origin": "sengoo_async_file_wait_readable",
+      "producer": 11,
+      "output": "FileReadinessOutcome",
+      "operations": [
+        11,
+        12,
+        13,
+        14,
+        15
+      ],
+      "runtime_result": "owned-handle"
+    }
+  ],
+  "components": [
+    {
+      "id": 0,
+      "name": "c-source-reference-runtime",
+      "class": "reference-runtime",
+      "artifacts": []
+    },
+    {
+      "id": 1,
+      "name": "rust-native-bridge-reference-runtime",
+      "class": "reference-runtime",
+      "artifacts": []
+    }
+  ]
+}

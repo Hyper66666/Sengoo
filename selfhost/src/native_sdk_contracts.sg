@@ -1,0 +1,128 @@
+import selfhost_parser;
+
+import selfhost_types;
+
+def sh_sdk_expected_symbol(entry: i64) -> &str {
+    if entry == 0 { return "sengoo_runtime_abi_version"; };
+    if entry == 1 { return "sengoo_string_from_bytes_copy"; };
+    if entry == 2 { return "sengoo_string_as_str_ptr"; };
+    if entry == 3 { return "sengoo_string_len"; };
+    if entry == 4 { return "sengoo_string_free_status"; };
+    if entry == 5 { return "sengoo_string_live_handle_count"; };
+    if entry == 6 { return "sengoo_async_sleep__start"; };
+    if entry == 7 { return "sengoo_async_sleep__poll"; };
+    if entry == 8 { return "sengoo_async_sleep__result"; };
+    if entry == 9 { return "sengoo_async_sleep__cancel"; };
+    if entry == 10 { return "sengoo_async_sleep__drop"; };
+    if entry == 11 { return "sengoo_async_file_wait_readable__start"; };
+    if entry == 12 { return "sengoo_async_file_wait_readable__poll"; };
+    if entry == 13 { return "sengoo_async_file_wait_readable__result"; };
+    if entry == 14 { return "sengoo_async_file_wait_readable__cancel"; };
+    if entry == 15 { return "sengoo_async_file_wait_readable__drop"; };
+    "";
+}
+
+def sh_sdk_expected_prototype(entry: i64) -> &str {
+    if entry == 0 { return "long long sengoo_runtime_abi_version(void)"; };
+    if entry == 1 { return "long long sengoo_string_from_bytes_copy(long long bytes_ptr, long long len)"; };
+    if entry == 2 { return "long long sengoo_string_as_str_ptr(long long handle)"; };
+    if entry == 3 { return "long long sengoo_string_len(long long handle)"; };
+    if entry == 4 { return "long long sengoo_string_free_status(long long handle)"; };
+    if entry == 5 { return "long long sengoo_string_live_handle_count(void)"; };
+    if entry == 6 { return "pub extern \"C\" fn sengoo_async_sleep__start(duration_ms: i64) -> i64"; };
+    if entry == 7 { return "pub unsafe extern \"C\" fn sengoo_async_sleep__poll(handle: i64) -> i64"; };
+    if entry == 8 { return "pub unsafe extern \"C\" fn sengoo_async_sleep__result(handle: i64)"; };
+    if entry == 9 { return "pub unsafe extern \"C\" fn sengoo_async_sleep__cancel(handle: i64) -> bool"; };
+    if entry == 10 { return "pub unsafe extern \"C\" fn sengoo_async_sleep__drop(handle: i64)"; };
+    if entry == 11 { return "pub extern \"C\" fn sengoo_async_file_wait_readable__start(file_handle: i64, timeout_ms: i64) -> i64"; };
+    if entry == 12 { return "pub unsafe extern \"C\" fn sengoo_async_file_wait_readable__poll(handle: i64) -> i64"; };
+    if entry == 13 { return "pub unsafe extern \"C\" fn sengoo_async_file_wait_readable__result( output: *mut AsyncFileReadinessOutcome, handle: i64, )"; };
+    if entry == 14 { return "pub unsafe extern \"C\" fn sengoo_async_file_wait_readable__cancel(handle: i64) -> bool"; };
+    if entry == 15 { return "pub unsafe extern \"C\" fn sengoo_async_file_wait_readable__drop(handle: i64)"; };
+    "";
+}
+
+def sh_sdk_expected_source(entry: i64) -> &str {
+    if entry == 0 { return "tools/stdlib/runtime.c"; };
+    if entry < 6 { return "tools/stdlib/runtime_string.c"; };
+    if entry < 11 { return "runtime/src/async_runtime/futures.rs"; };
+    "runtime/src/async_runtime/async_file.rs";
+}
+
+def sh_sdk_expected_count(entry: i64) -> i64 {
+    if entry == 0 or entry == 5 { return 0; };
+    if entry == 1 or entry == 11 or entry == 13 { return 2; };
+    1;
+}
+
+def sh_sdk_expected_parameter(entry: i64, index: i64) -> i64 {
+    if index < 0 or index >= sh_sdk_expected_count(entry) { return -1; };
+    if entry == 13 and index == 0 { return 3; };
+    1;
+}
+
+def sh_sdk_expected_result(entry: i64) -> i64 {
+    if entry == 8 or entry == 10 or entry == 13 or entry == 15 { return 0; };
+    if entry == 9 or entry == 14 { return 2; };
+    1;
+}
+
+def sh_sdk_expected_unsafe(entry: i64) -> bool {
+    entry >= 7 and entry <= 10 or entry >= 12 and entry <= 15;
+}
+
+def sh_sdk_expected_consume(entry: i64) -> bool {
+    entry == 4 or entry >= 8 and entry <= 10 or entry >= 13 and entry <= 15;
+}
+
+def sh_sdk_ast_text(text: &String, ast: &ShAst, node: i64, expected: &str) -> bool {
+    let name = text.get(sh_ast_word(ast, node, 2), sh_ast_word(ast, node, 3));
+    name.is_ok() and name.value.as_str() == expected;
+}
+
+def sh_sdk_ast_named(text: &String, ast: &ShAst, node: i64, expected: &str) -> bool {
+    if sh_ast_word(ast, node, 0) != 70 or sh_ast_word(ast, node, 6) != 1 { return false; };
+    let path = sh_ast_child(ast, node, 0);
+    sh_ast_word(ast, path, 0) == 12 and sh_ast_word(ast, path, 6) == 1 and sh_sdk_ast_text(text, ast, sh_ast_child(ast, path, 0), expected);
+}
+
+def sh_sdk_ast_type(text: &String, ast: &ShAst, node: i64, code: i64) -> bool {
+    if code == 1 { return sh_sdk_ast_named(text, ast, node, "i64"); };
+    if code == 2 { return sh_sdk_ast_named(text, ast, node, "bool"); };
+    if code == 3 { return sh_ast_word(ast, node, 0) == 71 and sh_ast_word(ast, node, 4) == 1000 + sh_kind("*") and sh_ast_word(ast, node, 6) == 1 and sh_sdk_ast_named(text, ast, sh_ast_child(ast, node, 0), "ShNativeFileReadinessOutcome"); };
+    false;
+}
+
+def sh_sdk_prelude_valid(text: &String, ast: &ShAst) -> bool {
+    if sh_ast_word(ast, ast.root, 6) != 2 { return false; };
+    let layout = sh_ast_child(ast, ast.root, 0);
+    let block = sh_ast_child(ast, ast.root, 1);
+    if sh_ast_word(ast, layout, 0) != 22 or sh_ast_word(ast, layout, 6) != 4 or not sh_sdk_ast_text(text, ast, sh_ast_child(ast, layout, 0), "ShNativeFileReadinessOutcome") or sh_ast_word(ast, block, 0) != 31 or sh_ast_word(ast, block, 6) != 17 or not sh_sdk_ast_text(text, ast, sh_ast_child(ast, block, 0), "\"C\"") { return false; };
+    let mut field = 0;
+    while field < 3 { let node = sh_ast_child(ast, layout, field + 1); let expected = if field == 0 { "is_ok"; } else if field == 1 { "value"; } else { "error"; }; if sh_ast_word(ast, node, 0) != 23 or sh_ast_word(ast, node, 6) != 2 or not sh_sdk_ast_text(text, ast, sh_ast_child(ast, node, 0), expected) or not sh_sdk_ast_type(text, ast, sh_ast_child(ast, node, 1), if field == 2 { 1; } else { 2; }) { return false; }; field = field + 1; };
+    let mut entry = 0;
+    while entry < 16 { let node = sh_ast_child(ast, block, entry + 1); let count = sh_sdk_expected_count(entry); let result = sh_sdk_expected_result(entry); let unsafe_flag = if sh_sdk_expected_unsafe(entry) { 2; } else { 0; }; if sh_ast_word(ast, node, 0) != 20 or sh_ast_word(ast, node, 4) != unsafe_flag or sh_ast_word(ast, node, 6) != 1 + count + if result == 0 { 0; } else { 1; } or not sh_sdk_ast_text(text, ast, sh_ast_child(ast, node, 0), sh_sdk_expected_symbol(entry)) { return false; }; let mut index = 0; while index < count { let parameter = sh_ast_child(ast, node, index + 1); if sh_ast_word(ast, parameter, 0) != 21 or sh_ast_word(ast, parameter, 4) != 0 or sh_ast_word(ast, parameter, 6) != 2 or not sh_sdk_ast_type(text, ast, sh_ast_child(ast, parameter, 1), sh_sdk_expected_parameter(entry, index)) { return false; }; index = index + 1; }; if result != 0 and not sh_sdk_ast_type(text, ast, sh_ast_child(ast, node, count + 1), result) { return false; }; entry = entry + 1; };
+    true;
+}
+
+def sh_sdk_physical_type(types: &ShTypes, code: i64) -> Result<i64, i64> {
+    if code == 0 { return sh_type_primitive(types, 0, 0, 0); };
+    if code == 1 { return sh_type_primitive(types, 2, 64, 1); };
+    if code == 2 { return sh_type_primitive(types, 1, 0, 0); };
+    if code != 3 { return sh_i64_error(5405); };
+    let empty = vec_new_i64();
+    let layout = sh_type_intern(types, 12, 0, 0, 0, &empty)?;
+    let args = vec_new_i64();
+    if not args.push(layout) { return sh_i64_error(5404); };
+    sh_type_intern(types, 7, 0, 1, -1, &args);
+}
+
+def sh_sdk_function_type(types: &ShTypes, entry: i64) -> Result<i64, i64> {
+    if entry < 0 or entry >= 16 { return sh_i64_error(5405); };
+    let args = vec_new_i64();
+    let mut index = 0;
+    while index < sh_sdk_expected_count(entry) { let argument = sh_sdk_physical_type(types, sh_sdk_expected_parameter(entry, index))?; if not args.push(argument) { return sh_i64_error(5404); }; index = index + 1; };
+    let result = sh_sdk_physical_type(types, sh_sdk_expected_result(entry))?;
+    if not args.push(result) { return sh_i64_error(5404); };
+    sh_type_intern(types, 11, 1, 0, -1, &args);
+}

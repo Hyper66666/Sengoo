@@ -1,0 +1,24 @@
+struct ShNativeFileReadinessOutcome {
+    is_ok: bool,
+    value: bool,
+    error: i64,
+}
+
+extern "C" {
+    fn sengoo_runtime_abi_version() -> i64;
+    fn sengoo_string_from_bytes_copy(bytes_ptr: i64, len: i64) -> i64;
+    fn sengoo_string_as_str_ptr(handle: i64) -> i64;
+    fn sengoo_string_len(handle: i64) -> i64;
+    fn sengoo_string_free_status(handle: i64) -> i64;
+    fn sengoo_string_live_handle_count() -> i64;
+    fn sengoo_async_sleep__start(duration_ms: i64) -> i64;
+    unsafe fn sengoo_async_sleep__poll(handle: i64) -> i64;
+    unsafe fn sengoo_async_sleep__result(handle: i64);
+    unsafe fn sengoo_async_sleep__cancel(handle: i64) -> bool;
+    unsafe fn sengoo_async_sleep__drop(handle: i64);
+    fn sengoo_async_file_wait_readable__start(file_handle: i64, timeout_ms: i64) -> i64;
+    unsafe fn sengoo_async_file_wait_readable__poll(handle: i64) -> i64;
+    unsafe fn sengoo_async_file_wait_readable__result(output: *mut ShNativeFileReadinessOutcome, handle: i64);
+    unsafe fn sengoo_async_file_wait_readable__cancel(handle: i64) -> bool;
+    unsafe fn sengoo_async_file_wait_readable__drop(handle: i64);
+}

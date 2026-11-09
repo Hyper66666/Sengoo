@@ -1,0 +1,213 @@
+import selfhost_native_sdk_json;
+
+import selfhost_native_sdk_contracts;
+
+import std::path;
+
+struct ShSdkSource {
+    snapshot: FileSnapshot,
+    text: String,
+    path: String,
+    identity: String,
+    sha256: String,
+}
+
+struct ShNativeSdk {
+    units: Vec<ShSdkSource>,
+    document: ShSdkJson,
+    ast: ShAst,
+    types: ShTypes,
+    entries: Vec<i64>,
+    error: i64,
+    source: i64,
+    start: i64,
+    end: i64,
+}
+
+def sh_sdk_fail(sdk: &mut ShNativeSdk, error: i64, source: i64, start: i64, end: i64) {
+    if sdk.error == 0 { sdk.error = error; sdk.source = source; sdk.start = start; sdk.end = end; };
+    ();
+}
+
+def sh_sdk_pin_valid(pin: &str) -> bool {
+    if pin.len() != 64 { return false; };
+    let bytes = ffi_buffer_from_bytes(pin);
+    if not bytes.is_ok() { return false; };
+    let mut index = 0;
+    while index < 64 { let byte = bytes.value.get_u8(index).unwrap_or(-1); if not (byte >= 48 and byte <= 57 or byte >= 97 and byte <= 102) { return false; }; index = index + 1; };
+    true;
+}
+
+def sh_sdk_relative(path: &String) -> bool {
+    let bytes = ffi_buffer_from_bytes(path.as_str());
+    if not bytes.is_ok() or path.len() == 0 { return false; };
+    let mut begin = 0;
+    let mut index = 0;
+    while index <= path.len() { let byte = if index == path.len() { 47; } else { bytes.value.get_u8(index).unwrap_or(-1); }; if byte == 47 { if index == begin { return false; }; let component = path.get(begin, index); if not component.is_ok() or component.value.as_str() == "." or component.value.as_str() == ".." { return false; }; begin = index + 1; } else if not (byte >= 65 and byte <= 90 or byte >= 97 and byte <= 122 or byte >= 48 and byte <= 57 or byte == 95 or byte == 45 or byte == 46) { return false; }; index = index + 1; };
+    true;
+}
+
+def sh_sdk_open(sdk: &mut ShNativeSdk, path: &str, pin: &str, maximum: i64) -> i64 {
+    if sdk.units.len() >= 24 or maximum < 0 or maximum > 67108864 { sh_sdk_fail(sdk, 5404, -1, 0, 0); return -1; };
+    let opened = file_snapshot_open(path, maximum);
+    if not opened.is_ok() { sh_sdk_fail(sdk, 5401, -1, 0, 0); return -1; };
+    let snapshot = opened.value;
+    let digest = snapshot.sha256();
+    let identity = snapshot.identity();
+    let canonical = snapshot.path();
+    let length = snapshot.len();
+    if not digest.is_ok() or not identity.is_ok() or not canonical.is_ok() or not length.is_ok() { sh_sdk_fail(sdk, 5401, -1, 0, 0); return -1; };
+    if not sh_sdk_pin_valid(pin) or digest.value.as_str() != pin { sh_sdk_fail(sdk, 5402, -1, 0, 0); return -1; };
+    let mut previous = 0;
+    while previous < sdk.units.len() { if sdk.units.get(previous).identity.as_str() == identity.value.as_str() { sh_sdk_fail(sdk, 5403, previous, 0, 0); return -1; }; previous = previous + 1; };
+    let allocated = ffi_buffer_new(length.value);
+    if not allocated.is_ok() { sh_sdk_fail(sdk, 5404, -1, 0, 0); return -1; };
+    let mut bytes = allocated.value;
+    let copied = snapshot.copy_bytes(&mut bytes);
+    if not copied.is_ok() or copied.value != length.value { sh_sdk_fail(sdk, 5401, -1, 0, 0); return -1; };
+    let text = string_from_utf8(bytes, copied.value);
+    if not text.is_ok() { sh_sdk_fail(sdk, 5403, -1, 0, 0); return -1; };
+    let source = sdk.units.len();
+    let unit = ShSdkSource { snapshot: snapshot, text: text.value, path: canonical.value, identity: identity.value, sha256: digest.value };
+    if not sdk.units.push(unit) { sh_sdk_fail(sdk, 5404, -1, 0, 0); return -1; };
+    source;
+}
+
+def sh_native_sdk_unchanged(sdk: &ShNativeSdk) -> bool {
+    if sdk.error != 0 { return false; };
+    let mut index = 0;
+    while index < sdk.units.len() { let stable = sdk.units.get(index).snapshot.still_matches(); if not stable.is_ok() or not stable.value { return false; }; index = index + 1; };
+    true;
+}
+
+def sh_sdk_integer(doc: &ShSdkJson, object: i64, name: &str, expected: i64) -> bool {
+    let actual = sh_sdk_j_integer(doc, sh_sdk_j_get(doc, object, name));
+    actual.is_ok() and actual.value == expected;
+}
+
+def sh_sdk_boolean(doc: &ShSdkJson, object: i64, name: &str, expected: bool) -> bool {
+    let node = sh_sdk_j_get(doc, object, name);
+    sh_sdk_j_field(doc, node, 0) == 1 and sh_sdk_j_field(doc, node, 1) == if expected { 1; } else { 0; };
+}
+
+def sh_sdk_string(doc: &ShSdkJson, object: i64, name: &str, expected: &str) -> bool {
+    sh_sdk_j_equal(doc, sh_sdk_j_get(doc, object, name), expected);
+}
+
+def sh_sdk_header(doc: &ShSdkJson, target: &str, abi: i64) -> bool {
+    let root = doc.root;
+    doc.error == 0 and sh_sdk_j_size(doc, root) == 13 and sh_sdk_string(doc, root, "schema", "sengoo.native-sdk.catalog.v1") and sh_sdk_string(doc, root, "family", "native-x64-handle-abi") and sh_sdk_string(doc, root, "target", target) and target == "x86_64-pc-windows-msvc" and abi == 1 and sh_sdk_integer(doc, root, "abi_version", abi) and sh_sdk_integer(doc, root, "pointer_bits", 64) and sh_sdk_string(doc, root, "endianness", "little") and sh_sdk_boolean(doc, root, "runtime_algorithms_ported", false);
+}
+
+def sh_sdk_layout(doc: &ShSdkJson) -> bool {
+    let layouts = sh_sdk_j_get(doc, doc.root, "layouts");
+    if sh_sdk_j_size(doc, layouts) != 1 { return false; };
+    let layout = sh_sdk_j_at(doc, layouts, 0);
+    if sh_sdk_j_size(doc, layout) != 5 or not sh_sdk_integer(doc, layout, "id", 0) or not sh_sdk_string(doc, layout, "name", "ShNativeFileReadinessOutcome") or not sh_sdk_integer(doc, layout, "size", 16) or not sh_sdk_integer(doc, layout, "alignment", 8) { return false; };
+    let fields = sh_sdk_j_get(doc, layout, "fields");
+    if sh_sdk_j_size(doc, fields) != 3 { return false; };
+    let mut index = 0;
+    while index < 3 { let field = sh_sdk_j_at(doc, fields, index); let name = if index == 0 { "is_ok"; } else if index == 1 { "value"; } else { "error"; }; if sh_sdk_j_size(doc, field) != 3 or not sh_sdk_string(doc, field, "name", name) or not sh_sdk_integer(doc, field, "type", if index == 2 { 1; } else { 2; }) or not sh_sdk_integer(doc, field, "offset", if index == 2 { 8; } else { index; }) { return false; }; index = index + 1; };
+    true;
+}
+
+def sh_sdk_languages(doc: &ShSdkJson) -> bool {
+    let contracts = sh_sdk_j_get(doc, doc.root, "language_contracts");
+    if sh_sdk_j_size(doc, contracts) != 3 { return false; };
+    let mut index = 0;
+    while index < 3 { let contract = sh_sdk_j_at(doc, contracts, index); let function = if index == 0 { "fn(&String)->&str"; } else if index == 1 { "fn(i64)->Future<()>"; } else { "fn(&AsyncFile,i64)->Future<FileReadinessOutcome>"; }; let origin = if index == 0 { "receiver-storage"; } else if index == 1 { "sengoo_async_sleep"; } else { "sengoo_async_file_wait_readable"; }; let output = if index == 0 { "borrowed-str"; } else if index == 1 { "unit"; } else { "FileReadinessOutcome"; }; let first = if index == 0 { 2; } else if index == 1 { 6; } else { 11; }; if sh_sdk_j_size(doc, contract) != 7 or not sh_sdk_integer(doc, contract, "kind", index + 1) or not sh_sdk_string(doc, contract, "language_function", function) or not sh_sdk_string(doc, contract, "origin", origin) or not sh_sdk_string(doc, contract, "output", output) or not sh_sdk_integer(doc, contract, "producer", first) or not sh_sdk_string(doc, contract, "runtime_result", if index == 0 { "positive-address-or-negative-status"; } else { "owned-handle"; }) { return false; }; let operations = sh_sdk_j_get(doc, contract, "operations"); let count = if index == 0 { 1; } else { 5; }; if sh_sdk_j_size(doc, operations) != count { return false; }; let mut operation = 0; while operation < count { let actual = sh_sdk_j_integer(doc, sh_sdk_j_at(doc, operations, operation)); if not actual.is_ok() or actual.value != first + operation { return false; }; operation = operation + 1; }; index = index + 1; };
+    true;
+}
+
+def sh_sdk_normalize(input: &String) -> Result<String, i64> {
+    let bytes = ffi_buffer_from_bytes(input.as_str())?;
+    let output = ffi_buffer_new(input.len())?;
+    let mut space = false;
+    let mut index = 0;
+    while index < input.len() { let byte = bytes.get_u8(index)?; if byte == 32 or byte == 9 or byte == 10 or byte == 13 { space = output.used_len() > 0; } else { if space { output.push_u8(32)?; space = false; }; output.push_u8(byte)?; (); }; index = index + 1; };
+    let length = output.used_len();
+    string_from_utf8(output, length);
+}
+
+def sh_sdk_export(sdk: &mut ShNativeSdk, entry: i64) -> bool {
+    let doc = &sdk.document;
+    let item = sh_sdk_j_at(doc, sh_sdk_j_get(doc, doc.root, "exports"), entry);
+    let source_result = sh_sdk_j_integer(doc, sh_sdk_j_get(doc, item, "source"));
+    if not source_result.is_ok() or source_result.value < 0 or source_result.value >= sdk.units.len() - 2 { return false; };
+    let source = source_result.value;
+    let component = if entry < 6 { 0; } else { 1; };
+    let family = if entry == 0 { 0; } else if entry < 6 { 1; } else if entry < 11 { 2; } else { 3; };
+    if sh_sdk_j_size(doc, item) != 13 or not sh_sdk_integer(doc, item, "id", entry) or not sh_sdk_string(doc, item, "symbol", sh_sdk_expected_symbol(entry)) or not sh_sdk_integer(doc, item, "component", component) or not sh_sdk_integer(doc, item, "family", family) or not sh_sdk_string(doc, item, "convention", "C") or not sh_sdk_integer(doc, item, "result", sh_sdk_expected_result(entry)) or not sh_sdk_boolean(doc, item, "unsafe", sh_sdk_expected_unsafe(entry)) or not sh_sdk_boolean(doc, item, "consumes_handle", sh_sdk_expected_consume(entry)) or not sh_sdk_string(doc, item, "prototype", sh_sdk_expected_prototype(entry)) { return false; };
+    let record = sh_sdk_j_at(doc, sh_sdk_j_get(doc, doc.root, "sources"), source);
+    if not sh_sdk_string(doc, record, "path", sh_sdk_expected_source(entry)) { return false; };
+    let parameters = sh_sdk_j_get(doc, item, "parameters");
+    if sh_sdk_j_size(doc, parameters) != sh_sdk_expected_count(entry) { return false; };
+    let mut index = 0;
+    while index < sh_sdk_expected_count(entry) { let actual = sh_sdk_j_integer(doc, sh_sdk_j_at(doc, parameters, index)); if not actual.is_ok() or actual.value != sh_sdk_expected_parameter(entry, index) { return false; }; index = index + 1; };
+    let begin = sh_sdk_j_integer(doc, sh_sdk_j_get(doc, item, "prototype_begin"));
+    let end = sh_sdk_j_integer(doc, sh_sdk_j_get(doc, item, "prototype_end"));
+    if not begin.is_ok() or not end.is_ok() or begin.value < 0 or end.value < begin.value or end.value > sdk.units.get(source + 2).text.len() { return false; };
+    let raw = sdk.units.get(source + 2).text.get(begin.value, end.value);
+    if not raw.is_ok() { return false; };
+    let normalized = sh_sdk_normalize(&raw.value);
+    if not normalized.is_ok() or normalized.value.as_str() != sh_sdk_expected_prototype(entry) { return false; };
+    let function = sh_sdk_function_type(&sdk.types, entry);
+    if not function.is_ok() { return false; };
+    let block = sh_ast_child(&sdk.ast, sdk.ast.root, 1);
+    sdk.entries.push(sh_ast_child(&sdk.ast, block, entry + 1)) and sdk.entries.push(function.value) and sdk.entries.push(component) and sdk.entries.push(family) and sdk.entries.push(sh_sdk_expected_count(entry)) and sdk.entries.push(sh_sdk_expected_result(entry)) and sdk.entries.push(if sh_sdk_expected_unsafe(entry) { 1; } else { 0; }) and sdk.entries.push(if sh_sdk_expected_consume(entry) { 1; } else { 0; }) and sdk.entries.push(source + 2);
+}
+
+def sh_native_sdk_inventory(root: &str, manifest: &str, pin: &str, target: &str, abi: i64) -> ShNativeSdk {
+    let units: Vec<ShSdkSource> = vec_new();
+    let empty = string_new();
+    let mut sdk = ShNativeSdk { units: units, document: sh_sdk_json_parse(&empty, 1), ast: ShAst { words: vec_new_i64(), edges: vec_new_i64(), root: -1 }, types: sh_types_new(100), entries: vec_new_i64(), error: 0, source: -1, start: 0, end: 0 };
+    if not sh_sdk_pin_valid(pin) { sh_sdk_fail(&mut sdk, 5402, -1, 0, 0); return sdk; };
+    let manifest_open = sh_sdk_open(&mut sdk, manifest, pin, 1048576);
+    if manifest_open < 0 { return sdk; };
+    sdk.document = sh_sdk_json_parse(&sdk.units.get(0).text, 10000);
+    if sdk.document.error != 0 { let begin = sdk.document.start; let end = sdk.document.end; sh_sdk_fail(&mut sdk, 5403, 0, begin, end); return sdk; };
+    let header_valid = sh_sdk_header(&sdk.document, target, abi);
+    if not header_valid { sh_sdk_fail(&mut sdk, 5409, 0, 0, 0); return sdk; };
+    let layouts_valid = sh_sdk_layout(&sdk.document) and sh_sdk_languages(&sdk.document);
+    if not layouts_valid { sh_sdk_fail(&mut sdk, 5407, 0, 0, 0); return sdk; };
+    let prelude = sh_sdk_j_get(&sdk.document, sdk.document.root, "prelude");
+    let prelude_pin = sh_sdk_j_text(&sdk.document, sh_sdk_j_get(&sdk.document, prelude, "sha256"));
+    let prelude_valid = sh_sdk_j_size(&sdk.document, prelude) == 2 and sh_sdk_string(&sdk.document, prelude, "path", "selfhost/sdk/native_x64_abi1/prelude.sg") and prelude_pin.is_ok();
+    if not prelude_valid { sh_sdk_fail(&mut sdk, 5403, 0, 0, 0); return sdk; };
+    let prelude_path = path_join_string(root, "selfhost/sdk/native_x64_abi1/prelude.sg");
+    if not prelude_path.is_ok() { sh_sdk_fail(&mut sdk, 5401, -1, 0, 0); return sdk; };
+    let prelude_open = sh_sdk_open(&mut sdk, prelude_path.value.as_str(), prelude_pin.value.as_str(), 1048576);
+    if prelude_open < 0 { return sdk; };
+    let parsed = sh_parse(&sdk.units.get(1).text, 1, 10000);
+    let parsed_valid = parsed.error == 0 and sh_sdk_prelude_valid(&sdk.units.get(1).text, &parsed.ast);
+    if not parsed_valid { sh_sdk_fail(&mut sdk, 5405, 1, parsed.start, parsed.end); return sdk; };
+    sdk.ast = parsed.ast;
+    let sources = sh_sdk_j_get(&sdk.document, sdk.document.root, "sources");
+    let count = sh_sdk_j_size(&sdk.document, sources);
+    if count < 4 or count > 20 { sh_sdk_fail(&mut sdk, 5403, 0, 0, 0); return sdk; };
+    let mut source = 0;
+    while source < count { let record = sh_sdk_j_at(&sdk.document, sources, source); let path = sh_sdk_j_text(&sdk.document, sh_sdk_j_get(&sdk.document, record, "path")); let digest = sh_sdk_j_text(&sdk.document, sh_sdk_j_get(&sdk.document, record, "sha256")); let bytes = sh_sdk_j_integer(&sdk.document, sh_sdk_j_get(&sdk.document, record, "bytes")); let valid = sh_sdk_j_size(&sdk.document, record) == 3 and path.is_ok() and digest.is_ok() and bytes.is_ok() and sh_sdk_relative(&path.value) and bytes.value >= 0 and bytes.value <= 1048576; if not valid { sh_sdk_fail(&mut sdk, 5403, 0, 0, 0); return sdk; }; let joined = path_join_string(root, path.value.as_str()); if not joined.is_ok() { sh_sdk_fail(&mut sdk, 5401, -1, 0, 0); return sdk; }; let opened = sh_sdk_open(&mut sdk, joined.value.as_str(), digest.value.as_str(), 1048576); if opened < 0 { return sdk; }; let length = sdk.units.get(source + 2).text.len(); if length != bytes.value { sh_sdk_fail(&mut sdk, 5402, source + 2, 0, 0); return sdk; }; source = source + 1; };
+    let exports = sh_sdk_j_get(&sdk.document, sdk.document.root, "exports");
+    let export_count = sh_sdk_j_size(&sdk.document, exports);
+    if export_count != 16 { sh_sdk_fail(&mut sdk, 5405, 0, 0, 0); return sdk; };
+    let mut entry = 0;
+    while entry < 16 { let valid = sh_sdk_export(&mut sdk, entry); if not valid { sh_sdk_fail(&mut sdk, 5405, 0, 0, 0); return sdk; }; entry = entry + 1; };
+    let components = sh_sdk_j_get(&sdk.document, sdk.document.root, "components");
+    let component_count = sh_sdk_j_size(&sdk.document, components);
+    if component_count != 2 { sh_sdk_fail(&mut sdk, 5403, 0, 0, 0); return sdk; };
+    let mut component = 0;
+    while component < 2 { let item = sh_sdk_j_at(&sdk.document, components, component); let valid = sh_sdk_j_size(&sdk.document, item) == 4 and sh_sdk_integer(&sdk.document, item, "id", component) and sh_sdk_string(&sdk.document, item, "name", if component == 0 { "c-source-reference-runtime"; } else { "rust-native-bridge-reference-runtime"; }) and sh_sdk_string(&sdk.document, item, "class", "reference-runtime") and sh_sdk_j_field(&sdk.document, sh_sdk_j_get(&sdk.document, item, "artifacts"), 0) == 4; if not valid { sh_sdk_fail(&mut sdk, 5408, 0, 0, 0); return sdk; }; component = component + 1; };
+    let unchanged = sh_native_sdk_unchanged(&sdk);
+    if not unchanged { sh_sdk_fail(&mut sdk, 5406, 0, 0, 0); };
+    sdk;
+}
+
+def sh_native_sdk_entry_count(sdk: &ShNativeSdk) -> i64 {
+    if sdk.error != 0 { return 0; };
+    sdk.entries.len() / 9;
+}
+
+def sh_native_sdk_entry_word(sdk: &ShNativeSdk, entry: i64, field: i64) -> i64 {
+    if entry < 0 or entry >= sh_native_sdk_entry_count(sdk) or field < 0 or field >= 9 { return -1; };
+    sh_sdk_j_word(&sdk.entries, entry * 9 + field);
+}

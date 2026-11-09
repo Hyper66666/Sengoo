@@ -1,0 +1,152 @@
+import selfhost_native_sdk_json;
+
+import selfhost_native_sdk;
+
+import selfhost_native_sdk_artifact;
+
+import selfhost_native_sdk_bind;
+
+import std::args;
+
+import std::assert;
+
+extern "C" {
+    fn sengoo_string_live_handle_count() -> i64;
+    fn sengoo_buffer_live_handle_count() -> i64;
+    fn sengoo_opaque_live_handle_count() -> i64;
+}
+
+def sh_sdk_test_json() -> Result<bool, i64> {
+    let text = string_from_str("{\"array\":[true,false,null,-9223372036854775808,9223372036854775807,1.25e-3],\"utf8\":\"\\uD83D\\uDE00 café\\n\"}")?;
+    let doc = sh_sdk_json_parse(&text, 100);
+    assert_true(doc.error == 0, "native_sdk.sg", 17);
+    let array = sh_sdk_j_get(&doc, doc.root, "array");
+    assert_true(sh_sdk_j_size(&doc, array) == 6, "native_sdk.sg", 19);
+    assert_true(sh_sdk_j_field(&doc, sh_sdk_j_at(&doc, array, 0), 1) == 1, "native_sdk.sg", 20);
+    let minimum = sh_sdk_j_integer(&doc, sh_sdk_j_at(&doc, array, 3))?;
+    let maximum = sh_sdk_j_integer(&doc, sh_sdk_j_at(&doc, array, 4))?;
+    assert_true(minimum == -9223372036854775807 - 1 and maximum == 9223372036854775807, "native_sdk.sg", 23);
+    assert_true(sh_sdk_j_field(&doc, sh_sdk_j_at(&doc, array, 5), 0) == 6, "native_sdk.sg", 24);
+    let decoded = sh_sdk_j_text(&doc, sh_sdk_j_get(&doc, doc.root, "utf8"))?;
+    assert_true(decoded.as_str() == "😀 café\n", "native_sdk.sg", 26);
+    assert_true(sh_sdk_j_get(&doc, -1, "no") == -1 and sh_sdk_j_at(&doc, array, -1) == -1 and sh_sdk_j_field(&doc, 9223372036854775807, 0) == -1, "native_sdk.sg", 27);
+    Result { is_ok: true, value: true, error: 0 };
+}
+
+def sh_sdk_test_bad(text: &str, code: i64) -> Result<bool, i64> {
+    let input = string_from_str(text)?;
+    let doc = sh_sdk_json_parse(&input, 100);
+    assert_true(doc.error == code, "native_sdk.sg", 34);
+    assert_true(doc.start >= 0 and doc.end >= doc.start and doc.end <= input.len(), "native_sdk.sg", 35);
+    Result { is_ok: true, value: true, error: 0 };
+}
+
+def sh_sdk_tests() -> Result<bool, i64> {
+    sh_sdk_test_json()?;
+    sh_sdk_test_bad("{\"a\":1,\"a\":2}", 5301)?;
+    sh_sdk_test_bad("{\"a\":1,\"\\u0061\":2}", 5301)?;
+    sh_sdk_test_bad("{\"a\":1,}", 5301)?;
+    sh_sdk_test_bad("[1,]", 5301)?;
+    sh_sdk_test_bad("01", 5301)?;
+    sh_sdk_test_bad("true false", 5301)?;
+    sh_sdk_test_bad("\"\\uDC00\"", 5303)?;
+    sh_sdk_test_bad("\"\\uD800x\"", 5303)?;
+    sh_sdk_test_bad("\"\\x20\"", 5301)?;
+    sh_sdk_test_bad("[1e]", 5301)?;
+    let text = string_from_str("[1,2,3]")?;
+    let limited = sh_sdk_json_parse(&text, 2);
+    assert_true(limited.error == 5302, "native_sdk.sg", 54);
+    let sdk = sh_native_sdk_inventory(".", "selfhost/sdk/native_x64_abi1/manifest.json", "f044410918f66b38c6059b5e4b29f94aa35ea08c748fcdd3d795a7ac4c055bbb", "x86_64-pc-windows-msvc", 1);
+    if sdk.error != 0 { println("SDK inventory failure"); println(sdk.error); println(sdk.source); println(sdk.start); println(sdk.end); return Result { is_ok: false, value: false, error: sdk.error }; };
+    assert_true(sh_native_sdk_entry_count(&sdk) == 16 and sdk.units.len() == 16, "native_sdk.sg", 60);
+    assert_true(sh_native_sdk_unchanged(&sdk), "native_sdk.sg", 61);
+    let function = sh_native_sdk_entry_word(&sdk, 13, 1);
+    assert_true(sh_type_word(&sdk.types, function, 0)? == 11 and sh_type_word(&sdk.types, function, 1)? == 1 and sh_type_word(&sdk.types, function, 5)? == 3, "native_sdk.sg", 63);
+    let pointer = sh_type_argument(&sdk.types, function, 0)?;
+    assert_true(sh_type_word(&sdk.types, pointer, 0)? == 7 and sh_type_word(&sdk.types, pointer, 2)? == 1, "native_sdk.sg", 65);
+    let returned = sh_type_argument(&sdk.types, function, 2)?;
+    assert_true(sh_type_word(&sdk.types, returned, 0)? == 0, "native_sdk.sg", 67);
+    let binding = sh_native_sdk_binding(&sdk, 13);
+    assert_true(binding.error == 0 and sh_native_sdk_certificate_valid(&sdk, &binding), "native_sdk.sg", 70);
+    assert_true(not sh_native_sdk_binding_valid(&sdk, -1) and not sh_native_sdk_binding_valid(&sdk, 9223372036854775807), "native_sdk.sg", 71);
+    assert_true(sh_native_sdk_lifecycle_declaration(&sdk, 2, 0) == 6 and sh_native_sdk_lifecycle_declaration(&sdk, 2, 4) == 10 and sh_native_sdk_lifecycle_declaration(&sdk, 3, 2) == 13 and sh_native_sdk_lifecycle_declaration(&sdk, 3, 5) == -1, "native_sdk.sg", 72);
+    let arena_count = sh_type_count(&sdk.types);
+    let mut field = 0;
+    while field < 9 { let original = sh_native_sdk_entry_word(&sdk, 13, field); sdk.entries.set(13 * 9 + field, -1); assert_true(not sh_native_sdk_binding_valid(&sdk, 13), "native_sdk.sg", 73); sdk.entries.set(13 * 9 + field, original); assert_true(sh_native_sdk_binding_valid(&sdk, 13), "native_sdk.sg", 74); field = field + 1; };
+    let convention = sh_type_word(&sdk.types, function, 1)?;
+    sdk.types.words.set(function * 6 + 1, 0);
+    assert_true(not sh_native_sdk_binding_valid(&sdk, 13), "native_sdk.sg", 77);
+    sdk.types.words.set(function * 6 + 1, convention);
+    assert_true(sh_type_count(&sdk.types) == arena_count and sh_native_sdk_certificate_valid(&sdk, &binding), "native_sdk.sg", 79);
+    let mut poisoned = sh_native_sdk_binding(&sdk, 2);
+    let declaration = poisoned.declaration;
+    poisoned.declaration = -1;
+    assert_true(not sh_native_sdk_certificate_valid(&sdk, &poisoned), "native_sdk.sg", 83);
+    poisoned.declaration = declaration;
+    poisoned.source_identity.push_str("-wrong-source")?;
+    assert_true(not sh_native_sdk_certificate_valid(&sdk, &poisoned), "native_sdk.sg", 86);
+    Result { is_ok: true, value: true, error: 0 };
+}
+
+def sh_sdk_test_case(doc: &ShSdkJson, node: i64) -> Result<bool, i64> {
+    let path = sh_sdk_j_text(doc, sh_sdk_j_get(doc, node, "path"))?;
+    let pin = sh_sdk_j_text(doc, sh_sdk_j_get(doc, node, "pin"))?;
+    let target = sh_sdk_j_text(doc, sh_sdk_j_get(doc, node, "target"))?;
+    let abi = sh_sdk_j_integer(doc, sh_sdk_j_get(doc, node, "abi"))?;
+    let expected = sh_sdk_j_integer(doc, sh_sdk_j_get(doc, node, "expected"))?;
+    let root = sh_sdk_j_text(doc, sh_sdk_j_get(doc, node, "root"))?;
+    let sdk = sh_native_sdk_inventory(root.as_str(), path.as_str(), pin.as_str(), target.as_str(), abi);
+    if sdk.error != expected { println("SDK fixture unexpected error"); println(path.as_str()); println(sdk.error); println(expected); return Result { is_ok: false, value: false, error: 99 }; };
+    assert_true(sh_native_sdk_entry_count(&sdk) == if expected == 0 { 16; } else { 0; }, "native_sdk.sg", 94);
+    assert_true(sh_native_sdk_entry_word(&sdk, -1, 0) == -1 and sh_native_sdk_entry_word(&sdk, 9223372036854775807, 0) == -1 and sh_native_sdk_entry_word(&sdk, 0, 9223372036854775807) == -1, "native_sdk.sg", 95);
+    let descriptor = sh_sdk_j_get(doc, node, "artifact");
+    if descriptor >= 0 and sdk.error == 0 { let component = sh_sdk_j_integer(doc, sh_sdk_j_get(doc, descriptor, "component"))?; let ordinal = sh_sdk_j_integer(doc, sh_sdk_j_get(doc, descriptor, "ordinal"))?; let artifact_pin = sh_sdk_j_text(doc, sh_sdk_j_get(doc, descriptor, "pin"))?; let artifact_error = sh_sdk_j_integer(doc, sh_sdk_j_get(doc, descriptor, "expected"))?; let mode = sh_sdk_j_integer(doc, sh_sdk_j_get(doc, descriptor, "development"))?; let mut artifact = sh_native_sdk_artifact(root.as_str(), &sdk, component, ordinal, artifact_pin.as_str(), mode == 1); if artifact.error != artifact_error { println("SDK artifact unexpected error"); println(path.as_str()); println(artifact.error); println(artifact_error); return Result { is_ok: false, value: false, error: 99 }; }; if artifact.error == 0 { assert_true(sh_native_sdk_artifact_unchanged(&sdk, &artifact), "native_sdk.sg", 99); let exports = sh_sdk_j_get(doc, descriptor, "exports"); let mut index = 0; while index < sh_sdk_j_size(doc, exports) { let entry = sh_sdk_j_integer(doc, sh_sdk_j_at(doc, exports, index))?; assert_true(sh_native_sdk_artifact_has(&sdk, &artifact, entry), "native_sdk.sg", 99); index = index + 1; }; let missing = sh_sdk_j_integer(doc, sh_sdk_j_get(doc, descriptor, "missing"))?; assert_true(not sh_native_sdk_artifact_has(&sdk, &artifact, missing), "native_sdk.sg", 100); let saved_ordinal = artifact.ordinal; artifact.ordinal = 9223372036854775807; assert_true(not sh_native_sdk_artifact_unchanged(&sdk, &artifact), "native_sdk.sg", 101); artifact.ordinal = saved_ordinal; let length = artifact.bytes.used_len(); let backup = ffi_buffer_new(length)?; backup.append_copy(&artifact.bytes, 0, length)?; artifact.bytes.clear(); artifact.bytes.push_u8(0)?; artifact.bytes.append_copy(&backup, 1, length - 1)?; assert_true(not sh_native_sdk_artifact_unchanged(&sdk, &artifact), "native_sdk.sg", 104); artifact.bytes.clear(); artifact.bytes.append_copy(&backup, 0, length)?; assert_true(sh_native_sdk_artifact_unchanged(&sdk, &artifact), "native_sdk.sg", 106); artifact.sha256.push_str("-poison")?; assert_true(not sh_native_sdk_artifact_unchanged(&sdk, &artifact), "native_sdk.sg", 107); (); }; };
+    let name = sh_sdk_j_text(doc, sh_sdk_j_get(doc, node, "name"))?;
+    println("SDK_CASE");
+    println(name.as_str());
+    println(expected);
+    if descriptor >= 0 { let expected_artifact = sh_sdk_j_integer(doc, sh_sdk_j_get(doc, descriptor, "expected"))?; println(expected_artifact); (); } else { println(-1); (); };
+    Result { is_ok: true, value: true, error: 0 };
+}
+
+def sh_sdk_test_cases(path: &str) -> Result<bool, i64> {
+    let sources = sh_sources_new(1, 1048576);
+    let source = sh_source_load(&sources, path)?;
+    let doc = sh_sdk_json_parse(&sources.texts.get(source).text, 10000);
+    if doc.error != 0 { return Result { is_ok: false, value: false, error: doc.error }; };
+    let count = sh_sdk_j_size(&doc, doc.root);
+    if count < 1 { return Result { is_ok: false, value: false, error: 99 }; };
+    let mut index = 0;
+    while index < count { sh_sdk_test_case(&doc, sh_sdk_j_at(&doc, doc.root, index))?; index = index + 1; };
+    println("SDK external fixtures passed");
+    println(count);
+    Result { is_ok: true, value: true, error: 0 };
+}
+
+def sh_sdk_test_argument(index: i64) -> Result<String, i64> {
+    let length = arg_len(index)?;
+    let buffer = ffi_buffer_new(length)?;
+    let copied = arg_copy(index, buffer)?;
+    string_from_utf8(buffer, copied);
+}
+
+def sh_sdk_test_external() -> Result<bool, i64> {
+    let path = sh_sdk_test_argument(0)?;
+    sh_sdk_test_cases(path.as_str());
+}
+
+def main() -> i64 {
+    if args_len() != 1 { println("usage: native-sdk CASES_JSON"); return 64; };
+    let strings = sengoo_string_live_handle_count();
+    let buffers = sengoo_buffer_live_handle_count();
+    let opaque = sengoo_opaque_live_handle_count();
+    let snapshots = sengoo_file_snapshot_live_handle_count();
+    let snapshot_bytes = sengoo_file_snapshot_live_bytes();
+    let mut round = 0;
+    while round < 20 { let result = sh_sdk_tests(); if not result.is_ok() { return result.error; }; assert_true(sengoo_string_live_handle_count() == strings and sengoo_buffer_live_handle_count() == buffers and sengoo_opaque_live_handle_count() == opaque and sengoo_file_snapshot_live_handle_count() == snapshots and sengoo_file_snapshot_live_bytes() == snapshot_bytes, "native_sdk.sg", 66); round = round + 1; };
+    let result = sh_sdk_test_external();
+    if not result.is_ok() { return result.error; };
+    assert_true(sengoo_string_live_handle_count() == strings and sengoo_buffer_live_handle_count() == buffers and sengoo_opaque_live_handle_count() == opaque and sengoo_file_snapshot_live_handle_count() == snapshots and sengoo_file_snapshot_live_bytes() == snapshot_bytes, "native_sdk.sg", 136);
+    println("selfhost native sdk: ok");
+    0;
+}

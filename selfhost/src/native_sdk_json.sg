@@ -1,0 +1,198 @@
+import selfhost_core;
+
+struct ShSdkJson {
+    strings: ShSymbols,
+    words: Vec<i64>,
+    links: Vec<i64>,
+    bytes: Buffer,
+    cursor: i64,
+    maximum: i64,
+    root: i64,
+    error: i64,
+    start: i64,
+    end: i64,
+}
+
+def sh_sdk_j_word(values: &Vec<i64>, index: i64) -> i64 {
+    sengoo_vec_get_or_default_i64(values.handle, index, -1);
+}
+
+def sh_sdk_j_count(doc: &ShSdkJson) -> i64 {
+    doc.words.len() / 4;
+}
+
+def sh_sdk_j_field(doc: &ShSdkJson, node: i64, field: i64) -> i64 {
+    if node < 0 or node >= sh_sdk_j_count(doc) or field < 0 or field > 3 { return -1; };
+    sh_sdk_j_word(&doc.words, node * 4 + field);
+}
+
+def sh_sdk_j_byte(doc: &ShSdkJson, index: i64) -> i64 {
+    if index < 0 or index >= doc.bytes.used_len() { return -1; };
+    doc.bytes.get_u8(index).unwrap_or(-1);
+}
+
+def sh_sdk_j_fail(doc: &mut ShSdkJson, error: i64) {
+    if doc.error == 0 { doc.error = error; let length = if doc.bytes.handle == 0 { 0; } else { doc.bytes.used_len(); }; doc.start = if doc.cursor < 0 { 0; } else if doc.cursor > length { length; } else { doc.cursor; }; doc.end = doc.start; if doc.end < length { doc.end = doc.end + 1; }; };
+    ();
+}
+
+def sh_sdk_j_space(doc: &mut ShSdkJson) {
+    while doc.cursor < doc.bytes.used_len() { let byte = sh_sdk_j_byte(doc, doc.cursor); if byte != 32 and byte != 9 and byte != 10 and byte != 13 { break; }; doc.cursor = doc.cursor + 1; };
+    ();
+}
+
+def sh_sdk_j_push(doc: &mut ShSdkJson, kind: i64, payload: i64, begin: i64) -> i64 {
+    if sh_sdk_j_count(doc) >= doc.maximum { sh_sdk_j_fail(doc, 5302); return -1; };
+    let node = sh_sdk_j_count(doc);
+    if not doc.words.push(kind) or not doc.words.push(payload) or not doc.words.push(begin) or not doc.words.push(doc.cursor) { sh_sdk_j_fail(doc, 5302); return -1; };
+    node;
+}
+
+def sh_sdk_j_hex(byte: i64) -> i64 {
+    if byte >= 48 and byte <= 57 { return byte - 48; };
+    if byte >= 65 and byte <= 70 { return byte - 55; };
+    if byte >= 97 and byte <= 102 { return byte - 87; };
+    -1;
+}
+
+def sh_sdk_j_hex4(doc: &mut ShSdkJson) -> i64 {
+    let mut code = 0;
+    let mut index = 0;
+    while index < 4 { let digit = sh_sdk_j_hex(sh_sdk_j_byte(doc, doc.cursor)); if digit < 0 { sh_sdk_j_fail(doc, 5303); return -1; }; code = code * 16 + digit; doc.cursor = doc.cursor + 1; index = index + 1; };
+    code;
+}
+
+def sh_sdk_j_utf8(output: &Buffer, value: i64) -> bool {
+    if value < 0 or value > 1114111 or value >= 55296 and value <= 57343 { return false; };
+    if value < 128 { return output.push_u8(value).is_ok(); };
+    if value < 2048 { return output.push_u8(192 + value / 64).is_ok() and output.push_u8(128 + value % 64).is_ok(); };
+    if value < 65536 { return output.push_u8(224 + value / 4096).is_ok() and output.push_u8(128 + value / 64 % 64).is_ok() and output.push_u8(128 + value % 64).is_ok(); };
+    output.push_u8(240 + value / 262144).is_ok() and output.push_u8(128 + value / 4096 % 64).is_ok() and output.push_u8(128 + value / 64 % 64).is_ok() and output.push_u8(128 + value % 64).is_ok();
+}
+
+def sh_sdk_j_string(doc: &mut ShSdkJson) -> i64 {
+    if sh_sdk_j_byte(doc, doc.cursor) != 34 { sh_sdk_j_fail(doc, 5301); return -1; };
+    doc.cursor = doc.cursor + 1;
+    let mut closing = doc.cursor;
+    let mut escaped = false;
+    while closing < doc.bytes.used_len() { let byte = sh_sdk_j_byte(doc, closing); if byte == 34 and not escaped { break; }; if byte == 92 and not escaped { escaped = true; } else { escaped = false; }; closing = closing + 1; };
+    if closing == doc.bytes.used_len() { sh_sdk_j_fail(doc, 5301); return -1; };
+    let allocated = ffi_buffer_new(closing - doc.cursor);
+    if not allocated.is_ok() { sh_sdk_j_fail(doc, 5302); return -1; };
+    let output = allocated.value;
+    while doc.cursor < doc.bytes.used_len() and doc.error == 0 { let byte = sh_sdk_j_byte(doc, doc.cursor); doc.cursor = doc.cursor + 1; if byte == 34 { let decoded = string_from_utf8(output, output.used_len()); if not decoded.is_ok() { sh_sdk_j_fail(doc, 5303); return -1; }; let symbol = sh_intern(&doc.strings, &decoded.value); if not symbol.is_ok() { sh_sdk_j_fail(doc, 5302); return -1; }; return symbol.value; }; if byte < 32 { sh_sdk_j_fail(doc, 5301); return -1; }; if byte != 92 { if not output.push_u8(byte).is_ok() { sh_sdk_j_fail(doc, 5302); return -1; }; } else { let escaped = sh_sdk_j_byte(doc, doc.cursor); doc.cursor = doc.cursor + 1; let mut scalar = -1; if escaped == 34 or escaped == 92 or escaped == 47 { scalar = escaped; } else if escaped == 98 { scalar = 8; } else if escaped == 102 { scalar = 12; } else if escaped == 110 { scalar = 10; } else if escaped == 114 { scalar = 13; } else if escaped == 116 { scalar = 9; } else if escaped == 117 { scalar = sh_sdk_j_hex4(doc); if scalar >= 55296 and scalar <= 56319 { if sh_sdk_j_byte(doc, doc.cursor) != 92 or sh_sdk_j_byte(doc, doc.cursor + 1) != 117 { sh_sdk_j_fail(doc, 5303); return -1; }; doc.cursor = doc.cursor + 2; let low = sh_sdk_j_hex4(doc); if low < 56320 or low > 57343 { sh_sdk_j_fail(doc, 5303); return -1; }; scalar = 65536 + (scalar - 55296) * 1024 + low - 56320; }; } else { sh_sdk_j_fail(doc, 5301); return -1; }; if not sh_sdk_j_utf8(&output, scalar) { sh_sdk_j_fail(doc, 5303); return -1; }; }; };
+    sh_sdk_j_fail(doc, 5301);
+    -1;
+}
+
+def sh_sdk_j_digit(value: i64) -> bool {
+    value >= 48 and value <= 57;
+}
+
+def sh_sdk_j_number(doc: &mut ShSdkJson) -> i64 {
+    let begin = doc.cursor;
+    let negative = sh_sdk_j_byte(doc, doc.cursor) == 45;
+    if negative { doc.cursor = doc.cursor + 1; };
+    if not sh_sdk_j_digit(sh_sdk_j_byte(doc, doc.cursor)) { sh_sdk_j_fail(doc, 5301); return -1; };
+    let mut value = 0;
+    let mut exact = true;
+    let first = sh_sdk_j_byte(doc, doc.cursor);
+    while sh_sdk_j_digit(sh_sdk_j_byte(doc, doc.cursor)) { let digit = sh_sdk_j_byte(doc, doc.cursor) - 48; if value < (-9223372036854775807 - 1 + digit) / 10 { exact = false; } else if exact { value = value * 10 - digit; }; doc.cursor = doc.cursor + 1; if first == 48 { break; }; };
+    if sh_sdk_j_byte(doc, doc.cursor) == 46 { exact = false; doc.cursor = doc.cursor + 1; if not sh_sdk_j_digit(sh_sdk_j_byte(doc, doc.cursor)) { sh_sdk_j_fail(doc, 5301); return -1; }; while sh_sdk_j_digit(sh_sdk_j_byte(doc, doc.cursor)) { doc.cursor = doc.cursor + 1; }; };
+    if sh_sdk_j_byte(doc, doc.cursor) == 69 or sh_sdk_j_byte(doc, doc.cursor) == 101 { exact = false; doc.cursor = doc.cursor + 1; if sh_sdk_j_byte(doc, doc.cursor) == 43 or sh_sdk_j_byte(doc, doc.cursor) == 45 { doc.cursor = doc.cursor + 1; }; if not sh_sdk_j_digit(sh_sdk_j_byte(doc, doc.cursor)) { sh_sdk_j_fail(doc, 5301); return -1; }; while sh_sdk_j_digit(sh_sdk_j_byte(doc, doc.cursor)) { doc.cursor = doc.cursor + 1; }; };
+    if not negative { if value == -9223372036854775807 - 1 { exact = false; } else { value = -value; }; };
+    sh_sdk_j_push(doc, if exact { 2; } else { 6; }, value, begin);
+}
+
+def sh_sdk_j_literal(doc: &mut ShSdkJson, spelling: &str, kind: i64, payload: i64) -> i64 {
+    let begin = doc.cursor;
+    let text = string_from_str(spelling);
+    if not text.is_ok() { sh_sdk_j_fail(doc, 5302); return -1; };
+    let bytes = ffi_buffer_from_bytes(text.value.as_str());
+    if not bytes.is_ok() { sh_sdk_j_fail(doc, 5302); return -1; };
+    let mut index = 0;
+    while index < bytes.value.used_len() { if sh_sdk_j_byte(doc, doc.cursor) != bytes.value.get_u8(index).unwrap_or(-1) { sh_sdk_j_fail(doc, 5301); return -1; }; doc.cursor = doc.cursor + 1; index = index + 1; };
+    sh_sdk_j_push(doc, kind, payload, begin);
+}
+
+def sh_sdk_j_link(doc: &mut ShSdkJson, parent: i64, key: i64, child: i64) -> bool {
+    if doc.links.len() / 3 >= doc.maximum { sh_sdk_j_fail(doc, 5302); return false; };
+    if key >= 0 { let mut index = 0; while index < doc.links.len() { if sh_sdk_j_word(&doc.links, index) == parent and sh_sdk_j_word(&doc.links, index + 1) == key { sh_sdk_j_fail(doc, 5301); return false; }; index = index + 3; }; };
+    let ok = doc.links.push(parent) and doc.links.push(key) and doc.links.push(child);
+    if not ok { sh_sdk_j_fail(doc, 5302); };
+    ok;
+}
+
+def sh_sdk_j_value(doc: &mut ShSdkJson, depth: i64) -> i64 {
+    if depth > 48 { sh_sdk_j_fail(doc, 5302); return -1; };
+    sh_sdk_j_space(doc);
+    let begin = doc.cursor;
+    let byte = sh_sdk_j_byte(doc, doc.cursor);
+    if byte == 34 { let symbol = sh_sdk_j_string(doc); if doc.error != 0 { return -1; }; return sh_sdk_j_push(doc, 3, symbol, begin); };
+    if byte == 45 or sh_sdk_j_digit(byte) { return sh_sdk_j_number(doc); };
+    if byte == 116 { return sh_sdk_j_literal(doc, "true", 1, 1); };
+    if byte == 102 { return sh_sdk_j_literal(doc, "false", 1, 0); };
+    if byte == 110 { return sh_sdk_j_literal(doc, "null", 0, 0); };
+    if byte != 91 and byte != 123 { sh_sdk_j_fail(doc, 5301); return -1; };
+    doc.cursor = doc.cursor + 1;
+    let object = byte == 123;
+    let close = if object { 125; } else { 93; };
+    let node = sh_sdk_j_push(doc, if object { 5; } else { 4; }, 0, begin);
+    if node < 0 { return -1; };
+    sh_sdk_j_space(doc);
+    if sh_sdk_j_byte(doc, doc.cursor) == close { doc.cursor = doc.cursor + 1; doc.words.set(node * 4 + 3, doc.cursor); return node; };
+    while doc.error == 0 { let mut key = -1; if object { key = sh_sdk_j_string(doc); if doc.error != 0 { return -1; }; sh_sdk_j_space(doc); if sh_sdk_j_byte(doc, doc.cursor) != 58 { sh_sdk_j_fail(doc, 5301); return -1; }; doc.cursor = doc.cursor + 1; }; let child = sh_sdk_j_value(doc, depth + 1); if doc.error != 0 or not sh_sdk_j_link(doc, node, key, child) { return -1; }; sh_sdk_j_space(doc); let delimiter = sh_sdk_j_byte(doc, doc.cursor); doc.cursor = doc.cursor + 1; if delimiter == close { doc.words.set(node * 4 + 3, doc.cursor); return node; }; if delimiter != 44 { sh_sdk_j_fail(doc, 5301); return -1; }; sh_sdk_j_space(doc); };
+    -1;
+}
+
+def sh_sdk_json_parse(text: &String, maximum: i64) -> ShSdkJson {
+    let mut doc = ShSdkJson { strings: sh_symbols_new(maximum), words: vec_new_i64(), links: vec_new_i64(), bytes: Buffer { handle: 0 }, cursor: 0, maximum: maximum, root: -1, error: 0, start: 0, end: 0 };
+    if maximum < 1 or maximum > 100000 or text.len() > 1048576 { sh_sdk_j_fail(&mut doc, 5302); return doc; };
+    if not text.char_count().is_ok() { sh_sdk_j_fail(&mut doc, 5303); return doc; };
+    let allocated = ffi_buffer_from_bytes(text.as_str());
+    if not allocated.is_ok() { sh_sdk_j_fail(&mut doc, 5302); return doc; };
+    doc.bytes = allocated.value;
+    let root = sh_sdk_j_value(&mut doc, 0);
+    sh_sdk_j_space(&mut doc);
+    if doc.cursor != doc.bytes.used_len() { sh_sdk_j_fail(&mut doc, 5301); };
+    if doc.error == 0 { doc.root = root; };
+    doc;
+}
+
+def sh_sdk_j_text(doc: &ShSdkJson, node: i64) -> Result<String, i64> {
+    if sh_sdk_j_field(doc, node, 0) != 3 { return string_result_err(5301); };
+    sh_symbol_text(&doc.strings, sh_sdk_j_field(doc, node, 1));
+}
+
+def sh_sdk_j_equal(doc: &ShSdkJson, node: i64, expected: &str) -> bool {
+    let value = sh_sdk_j_text(doc, node);
+    value.is_ok() and value.value.as_str() == expected;
+}
+
+def sh_sdk_j_get(doc: &ShSdkJson, node: i64, key: &str) -> i64 {
+    if sh_sdk_j_field(doc, node, 0) != 5 { return -1; };
+    let mut index = 0;
+    while index < doc.links.len() { if sh_sdk_j_word(&doc.links, index) == node { let symbol = sh_sdk_j_word(&doc.links, index + 1); let name = sh_symbol_text(&doc.strings, symbol); if name.is_ok() and name.value.as_str() == key { return sh_sdk_j_word(&doc.links, index + 2); }; }; index = index + 3; };
+    -1;
+}
+
+def sh_sdk_j_size(doc: &ShSdkJson, node: i64) -> i64 {
+    if sh_sdk_j_field(doc, node, 0) != 4 and sh_sdk_j_field(doc, node, 0) != 5 { return -1; };
+    let mut count = 0;
+    let mut index = 0;
+    while index < doc.links.len() { if sh_sdk_j_word(&doc.links, index) == node { count = count + 1; }; index = index + 3; };
+    count;
+}
+
+def sh_sdk_j_at(doc: &ShSdkJson, node: i64, requested: i64) -> i64 {
+    if requested < 0 or sh_sdk_j_field(doc, node, 0) != 4 { return -1; };
+    let mut count = 0;
+    let mut index = 0;
+    while index < doc.links.len() { if sh_sdk_j_word(&doc.links, index) == node { if count == requested { return sh_sdk_j_word(&doc.links, index + 2); }; count = count + 1; }; index = index + 3; };
+    -1;
+}
+
+def sh_sdk_j_integer(doc: &ShSdkJson, node: i64) -> Result<i64, i64> {
+    if sh_sdk_j_field(doc, node, 0) != 2 { return sh_i64_error(5301); };
+    sh_i64_ok(sh_sdk_j_field(doc, node, 1));
+}
