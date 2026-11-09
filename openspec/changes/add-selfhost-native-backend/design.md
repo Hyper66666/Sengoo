@@ -63,6 +63,28 @@ records are implemented. Native verification independently inspects names and
 relocation kinds, then links a generated function that calls a C external,
 loads another section through REL32 and exposes an ADDR64 data pointer.
 
+`native.sg` is the first validated scalar MIR consumer. It emits x64 directly,
+uses eight-byte stack slots and volatile scratch registers, spills all incoming
+ABI parameters before user code, reserves Windows shadow/outgoing stack space,
+preserves RBP and maintains stack alignment. CFG edge arguments use a separate
+snapshot area before destination assignments so loop parameter swaps work.
+Direct calls and function addresses use COFF REL32 records; indirect calls use
+a register. The initial scalar path supports unit, bool, integer, char and
+thin-pointer/function/handle values, integer arithmetic/bit operations, casts,
+branches/switches, local addresses, narrow loads/stores and scalar calls.
+Integer results are normalized at their declared width. Debug arithmetic
+preserves the reference overflow hook for signed/unsigned add/subtract/multiply;
+wrapping mode omits that hook. Scalar initialization facts may be elided only
+because this initial consumer rejects every local requiring ownership cleanup.
+
+Frames larger than 4,000 bytes reject until stack probing/unwind records land.
+Floating values, aggregate values, string literal data, division/remainder,
+ownership/drop and async operations remain explicit unsupported errors. This
+initial path has no unwind/CodeView records and does not qualify debugging or
+unwinding across its frames. Independent C callers execute actual generated
+machine code and test checked failure exits and wrapping results; raw MIR
+validation and output limits are checked before publishing an object.
+
 Primary references:
 
 - Intel instruction reference: https://www.intel.com/content/www/us/en/content-details/671110/intel-64-and-ia-32-architectures-software-developer-s-manual-combined-volumes-2a-2b-2c-and-2d-instruction-set-reference-a-z.html

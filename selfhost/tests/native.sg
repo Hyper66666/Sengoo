@@ -1,0 +1,300 @@
+import selfhost_native;
+
+import std::assert;
+
+import std::args;
+
+import std::file;
+
+extern "C" {
+    fn sengoo_string_live_handle_count() -> i64;
+    fn sengoo_buffer_live_handle_count() -> i64;
+    fn sengoo_opaque_live_handle_count() -> i64;
+}
+
+def sh_nt_fn(mir: &ShMir, name: &str, args: &Vec<i64>, result: i64, abi: i64, foreign: bool) -> Result<i64, i64> {
+    let arguments = vec_new_i64();
+    let mut index = 0;
+    while index < args.len() { arguments.push(sh_native_at(args, index)); index = index + 1; };
+    arguments.push(result);
+    let signature = sh_type_intern(&mir.types, 11, abi, 0, -1, &arguments)?;
+    let text = string_from_str(name)?;
+    sh_mir_add_function(mir, &text, signature, if foreign { 1; } else { 0; }, -1, 0, 0);
+}
+
+def sh_nt_block(mir: &ShMir, function: i64, scope: i64) -> Result<i64, i64> {
+    sh_mir_add_block(mir, function, scope, 0, -1, 0, 0);
+}
+
+def sh_nt_inst(mir: &ShMir, block: i64, opcode: i64, ty: i64, args: &Vec<i64>, aux: i64, extra: i64) -> Result<i64, i64> {
+    sh_mir_add_instruction(mir, block, opcode, ty, args, aux, extra, 0, -1, 0, 0);
+}
+
+def sh_nt_binary(mir: &ShMir, block: i64, ty: i64, lhs: i64, rhs: i64, operator: &str) -> Result<i64, i64> {
+    let args = vec_new_i64();
+    args.push(lhs);
+    args.push(rhs);
+    sh_nt_inst(mir, block, 11, ty, &args, sh_kind(operator), 0);
+}
+
+def sh_nt_return(mir: &ShMir, block: i64, value: i64) -> Result<i64, i64> {
+    sh_mir_add_terminator(mir, block, 3, value, -1, 0, 0);
+}
+
+def sh_nt_binary_function(mir: &ShMir, name: &str, ty: i64, result_type: i64, operator: &str) -> Result<i64, i64> {
+    let args = vec_new_i64();
+    args.push(ty);
+    args.push(ty);
+    let function = sh_nt_fn(mir, name, &args, result_type, 0, false)?;
+    let scope = sh_mir_add_scope(mir, function, -1, 0)?;
+    let block = sh_nt_block(mir, function, scope)?;
+    args.clear();
+    let lhs = sh_nt_inst(mir, block, 1, ty, &args, 0, 0)?;
+    let rhs = sh_nt_inst(mir, block, 1, ty, &args, 1, 0)?;
+    let result = sh_nt_binary(mir, block, result_type, lhs, rhs, operator)?;
+    sh_nt_return(mir, block, result);
+}
+
+def sh_nt_swap(mir: &ShMir, integer: i64, boolean: i64) -> Result<bool, i64> {
+    let empty = vec_new_i64();
+    let args = vec_new_i64();
+    args.push(integer);
+    let function = sh_nt_fn(mir, "sg_native_swap", &args, integer, 0, false)?;
+    let scope = sh_mir_add_scope(mir, function, -1, 0)?;
+    let entry = sh_nt_block(mir, function, scope)?;
+    let header = sh_nt_block(mir, function, scope)?;
+    let body = sh_nt_block(mir, function, scope)?;
+    let exit = sh_nt_block(mir, function, scope)?;
+    let x = sh_nt_inst(mir, header, 2, integer, &empty, 0, 0)?;
+    let y = sh_nt_inst(mir, header, 2, integer, &empty, 1, 0)?;
+    let i = sh_nt_inst(mir, header, 2, integer, &empty, 2, 0)?;
+    let n = sh_nt_inst(mir, entry, 1, integer, &empty, 0, 0)?;
+    let zero = sh_nt_inst(mir, entry, 4, integer, &empty, 0, 0)?;
+    let one = sh_nt_inst(mir, entry, 4, integer, &empty, 1, 0)?;
+    let two = sh_nt_inst(mir, entry, 4, integer, &empty, 2, 0)?;
+    let ten = sh_nt_inst(mir, entry, 4, integer, &empty, 10, 0)?;
+    let begin = sh_mir_add_terminator(mir, entry, 1, -1, -1, 0, 0)?;
+    args.clear();
+    args.push(one);
+    args.push(two);
+    args.push(zero);
+    sh_mir_add_edge(mir, begin, header, &args, 0, 0)?;
+    let condition = sh_nt_binary(mir, header, boolean, i, n, "<")?;
+    let branch = sh_mir_add_terminator(mir, header, 2, condition, -1, 0, 0)?;
+    sh_mir_add_edge(mir, branch, body, &empty, 0, 0)?;
+    sh_mir_add_edge(mir, branch, exit, &empty, 0, 0)?;
+    let next = sh_nt_binary(mir, body, integer, i, one, "+")?;
+    let back = sh_mir_add_terminator(mir, body, 1, -1, -1, 0, 0)?;
+    args.clear();
+    args.push(y);
+    args.push(x);
+    args.push(next);
+    sh_mir_add_edge(mir, back, header, &args, 0, 0)?;
+    let tens = sh_nt_binary(mir, exit, integer, x, ten, "*")?;
+    let result = sh_nt_binary(mir, exit, integer, tens, y, "+")?;
+    sh_nt_return(mir, exit, result)?;
+    Result { is_ok: true, value: true, error: 0 };
+}
+
+def sh_nt_fixture(mir: &ShMir) -> Result<bool, i64> {
+    let integer = sh_type_primitive(&mir.types, 2, 64, 1)?;
+    let boolean = sh_type_primitive(&mir.types, 1, 0, 0)?;
+    let unit = sh_type_primitive(&mir.types, 0, 0, 0)?;
+    let empty = vec_new_i64();
+    let args = vec_new_i64();
+    args.push(integer);
+    args.push(integer);
+    let add = sh_nt_fn(mir, "sg_native_add", &args, integer, 0, false)?;
+    let scope = sh_mir_add_scope(mir, add, -1, 0)?;
+    let block = sh_nt_block(mir, add, scope)?;
+    let lhs = sh_nt_inst(mir, block, 1, integer, &empty, 0, 0)?;
+    let rhs = sh_nt_inst(mir, block, 1, integer, &empty, 1, 0)?;
+    let sum = sh_nt_binary(mir, block, integer, lhs, rhs, "+")?;
+    sh_nt_return(mir, block, sum)?;
+    args.clear();
+    let mut index = 0;
+    while index < 6 { args.push(integer); index = index + 1; };
+    let external = sh_nt_fn(mir, "sg_native_external6", &args, integer, 1, true)?;
+    args.clear();
+    args.push(integer);
+    let caller = sh_nt_fn(mir, "sg_native_call6", &args, integer, 0, false)?;
+    let call_scope = sh_mir_add_scope(mir, caller, -1, 0)?;
+    let call_block = sh_nt_block(mir, caller, call_scope)?;
+    let last = sh_nt_inst(mir, call_block, 1, integer, &empty, 0, 0)?;
+    args.clear();
+    index = 1;
+    while index < 6 { let value = sh_nt_inst(mir, call_block, 4, integer, &empty, index, 0)?; args.push(value); index = index + 1; };
+    args.push(last);
+    let called = sh_nt_inst(mir, call_block, 20, integer, &args, external, 1)?;
+    sh_nt_return(mir, call_block, called)?;
+    args.clear();
+    args.push(integer);
+    let looping = sh_nt_fn(mir, "sg_native_loop", &args, integer, 0, false)?;
+    let loop_scope = sh_mir_add_scope(mir, looping, -1, 0)?;
+    let entry = sh_nt_block(mir, looping, loop_scope)?;
+    let header = sh_nt_block(mir, looping, loop_scope)?;
+    let body = sh_nt_block(mir, looping, loop_scope)?;
+    let exit = sh_nt_block(mir, looping, loop_scope)?;
+    let induction = sh_nt_inst(mir, header, 2, integer, &empty, 0, 0)?;
+    let total = sh_nt_inst(mir, header, 2, integer, &empty, 1, 0)?;
+    let n = sh_nt_inst(mir, entry, 1, integer, &empty, 0, 0)?;
+    let zero = sh_nt_inst(mir, entry, 4, integer, &empty, 0, 0)?;
+    let one = sh_nt_inst(mir, entry, 4, integer, &empty, 1, 0)?;
+    let begin = sh_mir_add_terminator(mir, entry, 1, -1, -1, 0, 0)?;
+    args.clear();
+    args.push(zero);
+    args.push(zero);
+    sh_mir_add_edge(mir, begin, header, &args, 0, 0)?;
+    let condition = sh_nt_binary(mir, header, boolean, induction, n, "<")?;
+    let branch = sh_mir_add_terminator(mir, header, 2, condition, -1, 0, 0)?;
+    sh_mir_add_edge(mir, branch, body, &empty, 0, 0)?;
+    sh_mir_add_edge(mir, branch, exit, &empty, 0, 0)?;
+    let advanced = sh_nt_binary(mir, body, integer, induction, one, "+")?;
+    let accumulated = sh_nt_binary(mir, body, integer, total, induction, "+")?;
+    let back = sh_mir_add_terminator(mir, body, 1, -1, -1, 0, 0)?;
+    args.clear();
+    args.push(advanced);
+    args.push(accumulated);
+    sh_mir_add_edge(mir, back, header, &args, 0, 0)?;
+    sh_nt_return(mir, exit, total)?;
+    args.clear();
+    args.push(integer);
+    args.push(integer);
+    args.push(integer);
+    let c_signature = sh_type_intern(&mir.types, 11, 1, 0, -1, &args)?;
+    args.clear();
+    args.push(c_signature);
+    args.push(integer);
+    args.push(integer);
+    let indirect = sh_nt_fn(mir, "sg_native_indirect", &args, integer, 0, false)?;
+    let indirect_scope = sh_mir_add_scope(mir, indirect, -1, 0)?;
+    let indirect_block = sh_nt_block(mir, indirect, indirect_scope)?;
+    let callee = sh_nt_inst(mir, indirect_block, 1, c_signature, &empty, 0, 0)?;
+    let a = sh_nt_inst(mir, indirect_block, 1, integer, &empty, 1, 0)?;
+    let b = sh_nt_inst(mir, indirect_block, 1, integer, &empty, 2, 0)?;
+    args.clear();
+    args.push(callee);
+    args.push(a);
+    args.push(b);
+    let indirect_value = sh_nt_inst(mir, indirect_block, 20, integer, &args, -1, 1)?;
+    sh_nt_return(mir, indirect_block, indirect_value)?;
+    args.clear();
+    let address = sh_nt_fn(mir, "sg_native_address", &args, sh_mir_fn(mir, add, 1), 0, false)?;
+    let address_scope = sh_mir_add_scope(mir, address, -1, 0)?;
+    let address_block = sh_nt_block(mir, address, address_scope)?;
+    let function_pointer = sh_nt_inst(mir, address_block, 9, sh_mir_fn(mir, add, 1), &empty, add, 0)?;
+    sh_nt_return(mir, address_block, function_pointer)?;
+    let byte = sh_type_primitive(&mir.types, 2, 8, 1)?;
+    args.clear();
+    args.push(byte);
+    let pointer = sh_type_intern(&mir.types, 7, 0, 1, -1, &args)?;
+    args.clear();
+    args.push(pointer);
+    let memory = sh_nt_fn(mir, "sg_native_memory", &args, integer, 0, false)?;
+    let memory_scope = sh_mir_add_scope(mir, memory, -1, 0)?;
+    let memory_block = sh_nt_block(mir, memory, memory_scope)?;
+    let p = sh_nt_inst(mir, memory_block, 1, pointer, &empty, 0, 0)?;
+    args.clear();
+    args.push(p);
+    let loaded = sh_nt_inst(mir, memory_block, 14, byte, &args, 0, 0)?;
+    let increment = sh_nt_inst(mir, memory_block, 4, byte, &empty, 1, 0)?;
+    let updated = sh_nt_binary(mir, memory_block, byte, loaded, increment, "+")?;
+    args.clear();
+    args.push(p);
+    args.push(updated);
+    sh_nt_inst(mir, memory_block, 15, unit, &args, 0, 0)?;
+    args.clear();
+    args.push(updated);
+    let widened = sh_nt_inst(mir, memory_block, 12, integer, &args, 0, 0)?;
+    sh_nt_return(mir, memory_block, widened)?;
+    let short = sh_type_primitive(&mir.types, 2, 16, 1)?;
+    args.clear();
+    args.push(short);
+    let short_ref = sh_type_intern(&mir.types, 6, 0, 1, -1, &args)?;
+    args.clear();
+    let local_fn = sh_nt_fn(mir, "sg_native_local", &args, integer, 0, false)?;
+    let local_scope = sh_mir_add_scope(mir, local_fn, -1, 0)?;
+    let local_block = sh_nt_block(mir, local_fn, local_scope)?;
+    let local = sh_mir_add_local(mir, local_fn, short, -1, 0, 1, local_scope, -1, -1, 0, 0)?;
+    let local_pointer = sh_nt_inst(mir, local_block, 13, short_ref, &empty, local, 0)?;
+    let local_value = sh_nt_inst(mir, local_block, 4, short, &empty, -123, 0)?;
+    args.clear();
+    args.push(local_pointer);
+    args.push(local_value);
+    sh_nt_inst(mir, local_block, 15, unit, &args, 0, 0)?;
+    sh_nt_inst(mir, local_block, 25, unit, &empty, local, 1)?;
+    args.clear();
+    args.push(local_pointer);
+    let local_read = sh_nt_inst(mir, local_block, 14, short, &args, 0, 0)?;
+    args.clear();
+    args.push(local_read);
+    let local_result = sh_nt_inst(mir, local_block, 12, integer, &args, 0, 0)?;
+    sh_nt_return(mir, local_block, local_result)?;
+    sh_nt_swap(mir, integer, boolean)?;
+    sh_nt_binary_function(mir, "sg_native_mul", integer, integer, "*")?;
+    sh_nt_binary_function(mir, "sg_native_sub", integer, integer, "-")?;
+    sh_nt_binary_function(mir, "sg_native_shift", integer, integer, ">>")?;
+    sh_nt_binary_function(mir, "sg_native_less", integer, boolean, "<")?;
+    let unsigned = sh_type_primitive(&mir.types, 2, 64, 0)?;
+    sh_nt_binary_function(mir, "sg_native_uadd", unsigned, unsigned, "+")?;
+    sh_nt_binary_function(mir, "sg_native_umul", unsigned, unsigned, "*")?;
+    Result { is_ok: true, value: true, error: 0 };
+}
+
+def sh_test_native() -> Result<bool, i64> {
+    let mir = sh_mir_new(1000);
+    sh_nt_fixture(&mir)?;
+    assert_eq_i64(sh_mir_validate(&mir).error, 0, "native.sg", 168);
+    let checked = sh_native_object(&mir, 65536, true)?;
+    let repeated = sh_native_object(&mir, 65536, true)?;
+    assert_eq_i64(sh_binary_len(&checked), sh_binary_len(&repeated), "native.sg", 171);
+    let mut index = 0;
+    while index < sh_binary_len(&checked) { assert_eq_i64(sh_binary_get(&checked, index)?, sh_binary_get(&repeated, index)?, "native.sg", 173); index = index + 1; };
+    let small = sh_native_object(&mir, 8, true);
+    assert_eq_i64(small.error, 6001, "native.sg", 175);
+    mir.instructions.set(26, 999);
+    let malformed = sh_native_object(&mir, 65536, true);
+    assert_eq_i64(malformed.error, 5003, "native.sg", 178);
+    mir.instructions.set(26, 11);
+    let mut local = 0;
+    while local < 500 { sh_mir_add_local(&mir, 0, sh_mir_type_arg(&mir, sh_mir_fn(&mir, 0, 1), 0), -1, 2, 1, 0, -1, -1, 0, 0)?; local = local + 1; };
+    let large = sh_native_object(&mir, 65536, true);
+    assert_eq_i64(large.error, 6503, "native.sg", 184);
+    let unsupported_mir = sh_mir_new(20);
+    let floating = sh_type_primitive(&unsupported_mir.types, 3, 64, 0)?;
+    let empty = vec_new_i64();
+    let function = sh_nt_fn(&unsupported_mir, "unsupported_float", &empty, floating, 0, false)?;
+    let scope = sh_mir_add_scope(&unsupported_mir, function, -1, 0)?;
+    let block = sh_nt_block(&unsupported_mir, function, scope)?;
+    let value = sh_nt_inst(&unsupported_mir, block, 5, floating, &empty, 0, 0)?;
+    sh_nt_return(&unsupported_mir, block, value)?;
+    let unsupported = sh_native_object(&unsupported_mir, 65536, true);
+    assert_eq_i64(unsupported.error, 6502, "native.sg", 185);
+    Result { is_ok: true, value: true, error: 0 };
+}
+
+def sh_nt_emit() -> Result<bool, i64> {
+    let path_bytes = ffi_buffer_new(arg_len(0).unwrap_or(0))?;
+    let copied = arg_copy(0, path_bytes)?;
+    let path = string_from_utf8(path_bytes, copied)?;
+    let mir = sh_mir_new(1000);
+    sh_nt_fixture(&mir)?;
+    let object = sh_native_object(&mir, 65536, args_len() == 1)?;
+    let buffer = sh_binary_buffer(&object)?;
+    file_write_str_raw(sengoo_stdlib_str_ptr(path.as_str()), buffer.ptr(), buffer.used_len())?;
+    Result { is_ok: true, value: true, error: 0 };
+}
+
+def main() -> i64 {
+    if args_len() > 0 { let emitted = sh_nt_emit(); if not emitted.is_ok() { println(emitted.error); return 1; }; return 0; };
+    let strings = sengoo_string_live_handle_count();
+    let buffers = sengoo_buffer_live_handle_count();
+    let opaque = sengoo_opaque_live_handle_count();
+    let mut round = 0;
+    while round < 10 { let result = sh_test_native(); if not result.is_ok() { println(result.error); return 1; }; round = round + 1; };
+    assert_eq_i64(sengoo_string_live_handle_count(), strings, "native.sg", 210);
+    assert_eq_i64(sengoo_buffer_live_handle_count(), buffers, "native.sg", 211);
+    assert_eq_i64(sengoo_opaque_live_handle_count(), opaque, "native.sg", 212);
+    println("selfhost scalar MIR native objects: ok");
+    0;
+}

@@ -5,6 +5,7 @@
 - [x] Emit and inspect a deterministic single-text COFF object with short/long symbols; full sections/data/relocations remain open (`target/selfhost/native-foundations/evidence.json`).
 - [x] Resolve bounded concrete Windows x64 type sizes, alignments, array strides and nominal/tuple/enum field offsets; verify recursive/overflow/claim failures and exact resources, and compare ten layout results with independently compiled C (`target/selfhost/m4-layout-final/evidence.json`). Full calling conventions remain open.
 - [x] Emit deterministic multiple initialized COFF sections, short/long section and symbol names, external/static symbols and checked AMD64 relocations; independently inspect and link/execute external calls, cross-section loads and absolute data pointers (`target/selfhost/m4-object-checked/evidence.json`). Auxiliary/COMDAT/BSS/debug/unwind records remain open.
+- [x] Implement and independently execute the initial validated scalar MIR consumer, including parallel CFG edge copies, integer widths, local memory, direct/indirect calls, six-argument Windows C calls, checked arithmetic failures and wrapping mode (`target/selfhost/m4-scalar-initialization/evidence.json`). Complete MIR/native ABI and cleanup support remain open.
 
 ## Supported target behavior
 
@@ -38,3 +39,15 @@ native success/failure scopes restored resources exactly; repeated COFF bytes
 matched, LLVM independently inspected all three sections and their symbols and
 relocations, and the linked C probe verified the external call plus data/pointer
 relocations. These are object-writer gates, not completed M4/M5 milestones.
+
+Initial scalar MIR consumer evidence: report SHA-256
+`deccc25e5284604e395a59509779792bb3aa6e8a2e7ddc50e19d83001cf4638f`,
+revision `4a190f17c6279b52daf32001202938dfa9cf4859`, Windows 11 x64.
+Nineteen commands passed with unchanged source/tool identities. Ten native
+builder/validator scopes recovered resources exactly, repeated objects matched,
+independent inspection/disassembly and C linking succeeded, and C execution
+verified loop/parallel-swap/call/memory behavior. Five signed/unsigned/narrow
+overflow executions exited 63 through the verification hook; wrapping arithmetic
+returned the expected bits without invoking it. The earlier unsigned multiply
+encoding failure remains in `target/selfhost/m4-scalar-final/`; it was fixed
+before this successful run. This evidence does not complete M4.

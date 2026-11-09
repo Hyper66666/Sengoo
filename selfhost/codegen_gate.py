@@ -1,0 +1,118 @@
+"""Execute SG scalar MIR machine code through independent Windows C callers."""
+from __future__ import annotations
+
+import argparse
+import hashlib
+import json
+import os
+from pathlib import Path
+import platform
+import subprocess
+import time
+
+ROOT = Path(__file__).resolve().parents[1]
+
+
+def sha(path):
+    return hashlib.sha256(path.read_bytes()).hexdigest()
+
+
+def main():
+    parser = argparse.ArgumentParser(description=__doc__)
+    for name in ("seed", "clang", "formatter"):
+        parser.add_argument("--" + name, type=Path, required=True)
+    parser.add_argument("--output", type=Path, default=ROOT / "target/selfhost/m4-scalar-final")
+    args = parser.parse_args()
+    out = args.output.resolve()
+    if not out.is_relative_to(ROOT / "target"):
+        raise ValueError("outputs must stay inside target/")
+    out.mkdir(parents=True, exist_ok=True)
+    paths = {name: getattr(args, name).resolve() for name in ("seed", "clang", "formatter")}
+    lock = json.loads((ROOT / "selfhost/bootstrap.lock").read_text())
+    names = ("core", "types", "lexer", "mir", "mir_validate", "binary", "coff", "object", "x64", "x64_scalar", "native")
+    inputs = [Path(__file__), ROOT / "selfhost/bootstrap.lock", ROOT / "selfhost/tests/native.sg", ROOT / "selfhost/tests/native_probe.c"]
+    inputs += [ROOT / "selfhost/src" / (name + ".sg") for name in names]
+    inputs += sorted((ROOT / "tools/stdlib").rglob("*.sg"))
+    inputs += [ROOT / "tools/stdlib/runtime.c", ROOT / "tools/stdlib/runtime_abi.h"]
+    report = {"schema": 1, "result": "running", "stage": "scalar-mir-native-consumer",
+              "revision": subprocess.check_output(["git", "rev-parse", "HEAD"], cwd=ROOT, text=True).strip(),
+              "host": platform.platform(), "sources": {str(p.relative_to(ROOT)): sha(p) for p in inputs if p.is_file()},
+              "tools": {}, "steps": [], "m4_complete": False,
+              "limits": ["validated scalar MIR only; floating/aggregates/ownership/async/string data remain explicit unsupported errors",
+                         "stack-slot allocation; frame limited to 4000 bytes until stack probing and unwind metadata land",
+                         "no unwind or CodeView records yet; normal C calls only, no unwinding across generated frames",
+                         "division/remainder and full ABI coverage remain open; shift fixtures use defined in-width counts",
+                         "SG emits bytes directly; external tools only independently inspect/link the verification caller",
+                         "not an SG linker, complete backend or self-compilation fixed point"]}
+    env = dict(os.environ)
+    for name in list(env):
+        if name.upper().startswith(("SENGOO_", "SGPLATFORM_", "SDL2_")):
+            env.pop(name)
+    env.update(SENGOO_STDLIB=str(ROOT / "tools/stdlib"), SENGOO_RUNTIME=str(ROOT / "tools/stdlib/runtime.c"),
+               SENGOO_CLANG=str(paths["clang"]), SENGOO_MODULE_MAP=";".join(
+                   "selfhost_" + name + "=" + str(ROOT / "selfhost/src" / (name + ".sg")) for name in names))
+    env["PATH"] = str(paths["clang"].parent) + os.pathsep + env.get("PATH", "")
+
+    def run(name, command, marker=None, code=0):
+        started = time.monotonic()
+        done = subprocess.run(list(map(str, command)), cwd=ROOT, env=env, capture_output=True, timeout=600)
+        (out / (name + ".stdout.log")).write_bytes(done.stdout)
+        (out / (name + ".stderr.log")).write_bytes(done.stderr)
+        report["steps"].append({"name": name, "command": list(map(str, command)), "exit_code": done.returncode,
+                                "expected_exit_code": code, "seconds": time.monotonic() - started})
+        if done.returncode != code or marker and marker not in done.stdout + done.stderr:
+            raise AssertionError(f"{name} failed: {done.returncode}")
+        print(f"{name}: {done.returncode}", flush=True)
+        return done.stdout
+
+    try:
+        for name, path in paths.items():
+            digest = sha(path)
+            if digest != lock[name]["sha256"]:
+                raise ValueError(f"{name} identity mismatch")
+            report["tools"][name] = {"path": str(path), "sha256": digest}
+        for name in ("src/native.sg", "src/x64_scalar.sg", "tests/native.sg"):
+            run("format-" + name.replace("/", "-"), [paths["formatter"], "--check", ROOT / "selfhost" / name])
+        binary = out / "native-tests.exe"
+        binary.unlink(missing_ok=True)
+        run("build-sg", [paths["seed"], "--runtime-mode", "source-development", "build",
+                         ROOT / "selfhost/tests/native.sg", "--force-rebuild", "-O", "0", "-o", binary])
+        run("native-sg", [binary], b"selfhost scalar MIR native objects: ok")
+        checked, repeated, wrapping = (out / name for name in ("checked.obj", "repeated.obj", "wrapping.obj"))
+        for name, path, extra in (("checked", checked, []), ("repeat", repeated, []), ("wrapping", wrapping, ["wrap"])):
+            path.unlink(missing_ok=True)
+            run("emit-" + name, [binary, path, *extra])
+        if checked.read_bytes() != repeated.read_bytes() or checked.read_bytes()[4:8] != bytes(4):
+            raise AssertionError("object bytes are not deterministic")
+        inspector = paths["clang"].parent / "llvm-readobj.exe"
+        disassembler = paths["clang"].parent / "llvm-objdump.exe"
+        for name, path in (("inspector", inspector), ("disassembler", disassembler)):
+            report["tools"][name] = {"path": str(path), "sha256": sha(path)}
+        run("inspect", [inspector, "--file-headers", "--sections", "--symbols", "--relocations", checked], b"sg_native_indirect")
+        run("disassemble", [disassembler, "-d", checked], b"sg_native_loop")
+        probe, wrap_probe = out / "native-probe.exe", out / "wrap-probe.exe"
+        for name, obj, exe in (("checked", checked, probe), ("wrap", wrapping, wrap_probe)):
+            run("link-" + name, [paths["clang"], ROOT / "selfhost/tests/native_probe.c", obj, "-Werror", "-o", exe])
+        run("execute-checked", [probe], b"native MIR calls, loop, pointers, narrow memory and checked arithmetic: ok")
+        for case in ("overflow", "overflow8", "umul-overflow", "uadd-overflow", "mul-overflow"):
+            run("reject-" + case, [probe, case], b"integer overflow", 63)
+        run("execute-wrap", [wrap_probe, "wrap"], b"native wrapping arithmetic: ok")
+        report["artifacts"] = {p.name: sha(p) for p in (binary, checked, repeated, wrapping, probe, wrap_probe)}
+        report["result"] = "passed"
+    except BaseException as error:
+        report.update(result="failed", error=repr(error))
+        raise
+    finally:
+        changed = [name for name, digest in report["sources"].items() if not (ROOT / name).is_file() or sha(ROOT / name) != digest]
+        changed_tools = [name for name, identity in report["tools"].items()
+                         if not Path(identity["path"]).is_file() or sha(Path(identity["path"])) != identity["sha256"]]
+        report.update(changed_sources=changed, changed_tools=changed_tools)
+        if changed or changed_tools:
+            report.update(result="failed", error="native inputs changed during verification")
+        (out / "evidence.json").write_text(json.dumps(report, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
+        if changed or changed_tools:
+            raise AssertionError("native inputs changed")
+
+
+if __name__ == "__main__":
+    main()

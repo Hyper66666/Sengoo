@@ -1,0 +1,196 @@
+import selfhost_mir_validate;
+
+import selfhost_x64_scalar;
+
+import selfhost_object;
+
+struct ShNative {
+    code: ShBinary,
+    values: Vec<i64>,
+    locals: Vec<i64>,
+    functions: Vec<i64>,
+    blocks: Vec<i64>,
+    branches: Vec<i64>,
+    calls: Vec<i64>,
+    frame: i64,
+    edge_base: i64,
+    checked: bool,
+}
+
+def sh_native_at(values: &Vec<i64>, id: i64) -> i64 {
+    sengoo_vec_get_or_default_i64(values.handle, id, -1);
+}
+
+def sh_native_width(mir: &ShMir, ty: i64) -> i64 {
+    let kind = sh_mir_type_word(mir, ty, 0);
+    if kind == 0 { return 0; };
+    if kind == 1 { return 1; };
+    if kind == 2 { return sh_mir_type_word(mir, ty, 1) / 8; };
+    if kind == 4 { return 4; };
+    if kind == 6 and sh_mir_type_word(mir, sh_mir_type_arg(mir, ty, 0), 0) == 14 { return -1; };
+    if kind == 5 or kind == 6 or kind == 7 or kind == 11 or kind == 16 { return 8; };
+    -1;
+}
+
+def sh_native_signed(mir: &ShMir, ty: i64) -> bool {
+    sh_mir_type_word(mir, ty, 0) == 2 and (sh_mir_type_word(mir, ty, 2) & 1) == 1;
+}
+
+def sh_native_normalize(native: &ShNative, mir: &ShMir, ty: i64, register: i64) -> Result<i64, i64> {
+    let width = sh_native_width(mir, ty);
+    if width < 0 { return sh_i64_error(6502); };
+    if width == 0 { return sh_x64_mov_imm(&native.code, register, 0); };
+    if width < 8 { let bits = if sh_mir_type_word(mir, ty, 0) == 1 { 1; } else { width * 8; }; sh_x64_shift(&native.code, 0, register, 64 - bits)?; return sh_x64_shift(&native.code, if sh_native_signed(mir, ty) { 2; } else { 1; }, register, 64 - bits); };
+    sh_i64_ok(0);
+}
+
+def sh_native_load(native: &ShNative, id: i64, register: i64) -> Result<i64, i64> {
+    let offset = sh_native_at(&native.values, id);
+    if offset < 8 { return sh_i64_error(6501); };
+    sh_x64_memory(&native.code, 0, register, 5, -offset);
+}
+
+def sh_native_save(native: &ShNative, id: i64, register: i64) -> Result<i64, i64> {
+    let offset = sh_native_at(&native.values, id);
+    if offset < 8 { return sh_i64_error(6501); };
+    sh_x64_memory(&native.code, 1, register, 5, -offset);
+}
+
+def sh_native_call_fixup(native: &ShNative, function: i64) -> Result<i64, i64> {
+    let offset = sh_x64_branch(&native.code, 1, 0)?;
+    if not native.calls.push(offset) or not native.calls.push(function) { return sh_i64_error(6503); };
+    sh_i64_ok(offset);
+}
+
+def sh_native_edge(native: &ShNative, mir: &ShMir, edge: i64) -> Result<i64, i64> {
+    let target = sh_mir_edge(mir, edge, 1);
+    let count = sh_mir_edge(mir, edge, 3);
+    let mut index = 0;
+    while index < count { sh_native_load(native, sh_mir_edge_arg(mir, edge, index), 0)?; sh_x64_memory(&native.code, 1, 0, 5, -native.edge_base - index * 8)?; index = index + 1; };
+    index = 0;
+    while index < count { sh_x64_memory(&native.code, 0, 0, 5, -native.edge_base - index * 8)?; sh_native_save(native, sh_mir_parameter(mir, target, index), 0)?; index = index + 1; };
+    let patch = sh_x64_branch(&native.code, 0, 0)?;
+    if not native.branches.push(patch) or not native.branches.push(target) { return sh_i64_error(6503); };
+    sh_i64_ok(patch);
+}
+
+def sh_native_binary(native: &ShNative, mir: &ShMir, id: i64) -> Result<i64, i64> {
+    let lhs = sh_mir_inst_arg(mir, id, 0);
+    let rhs = sh_mir_inst_arg(mir, id, 1);
+    let ty = sh_mir_value_type(mir, lhs);
+    let operator = sh_mir_inst(mir, id, 6);
+    if sh_native_width(mir, ty) < 0 { return sh_i64_error(6502); };
+    sh_native_load(native, lhs, 0)?;
+    sh_native_load(native, rhs, 10)?;
+    let comparison = operator == sh_kind("==") or operator == sh_kind("!=") or operator == sh_kind("<") or operator == sh_kind("<=") or operator == sh_kind(">") or operator == sh_kind(">=");
+    if comparison { sh_x64_binary(&native.code, 5, 0, 10)?; let signed = sh_native_signed(mir, ty); let condition = if operator == sh_kind("==") { 4; } else { if operator == sh_kind("!=") { 5; } else { if operator == sh_kind("<") { if signed { 12; } else { 2; }; } else { if operator == sh_kind("<=") { if signed { 14; } else { 6; }; } else { if operator == sh_kind(">") { if signed { 15; } else { 7; }; } else { if signed { 13; } else { 3; }; }; }; }; }; }; sh_x64_set_condition(&native.code, condition, 0)?; return sh_native_save(native, id, 0); };
+    let arithmetic = operator == sh_kind("+") or operator == sh_kind("-") or operator == sh_kind("*");
+    if arithmetic { let operation = if operator == sh_kind("+") { 0; } else { if operator == sh_kind("-") { 1; } else { 6; }; }; if operator == sh_kind("*") and not sh_native_signed(mir, ty) and sh_native_width(mir, ty) == 8 { sh_x64_unary(&native.code, 2, 10)?; } else { sh_x64_binary(&native.code, operation, 0, 10)?; }; if native.checked { if sh_native_width(mir, ty) == 8 { sh_x64_set_condition(&native.code, if sh_native_signed(mir, ty) { 0; } else { 2; }, 1)?; } else { sh_x64_mov(&native.code, 11, 0)?; sh_native_normalize(native, mir, ty, 0)?; sh_x64_binary(&native.code, 5, 0, 11)?; sh_x64_set_condition(&native.code, 5, 1)?; }; sh_native_save(native, id, 0)?; sh_native_call_fixup(native, sh_mir_fn_count(mir))?; sh_native_load(native, id, 0)?; (); }; return sh_native_finish(native, mir, id); };
+    let operation = if operator == sh_kind("&") or operator == sh_kind("&&") or operator == sh_kind("and") { 2; } else { if operator == sh_kind("|") or operator == sh_kind("||") or operator == sh_kind("or") { 3; } else { if operator == sh_kind("^") { 4; } else { -1; }; }; };
+    if operation >= 0 { sh_x64_binary(&native.code, operation, 0, 10)?; return sh_native_finish(native, mir, id); };
+    if operator == sh_kind("<<") or operator == sh_kind(">>") { sh_x64_mov(&native.code, 1, 10)?; sh_x64_mov_imm(&native.code, 11, if sh_native_width(mir, ty) == 8 { 63; } else { 31; })?; sh_x64_binary(&native.code, 2, 1, 11)?; sh_x64_shift(&native.code, if operator == sh_kind("<<") { 0; } else { if sh_native_signed(mir, ty) { 2; } else { 1; }; }, 0, -1)?; return sh_native_finish(native, mir, id); };
+    sh_i64_error(6502);
+}
+
+def sh_native_finish(native: &ShNative, mir: &ShMir, id: i64) -> Result<i64, i64> {
+    sh_native_normalize(native, mir, sh_mir_value_type(mir, id), 0)?;
+    sh_native_save(native, id, 0);
+}
+
+def sh_native_instruction(native: &ShNative, mir: &ShMir, id: i64) -> Result<i64, i64> {
+    let opcode = sh_mir_inst(mir, id, 2);
+    let ty = sh_mir_value_type(mir, id);
+    let aux = sh_mir_inst(mir, id, 6);
+    let first = sh_mir_inst_arg(mir, id, 0);
+    if sh_native_width(mir, ty) < 0 { return sh_i64_error(6502); };
+    if opcode == 1 or opcode == 2 { return sh_i64_ok(0); };
+    if opcode == 25 { sh_x64_mov_imm(&native.code, 0, 0)?; return sh_native_finish(native, mir, id); };
+    if opcode == 11 { return sh_native_binary(native, mir, id); };
+    if opcode == 3 or opcode == 4 or opcode == 6 or opcode == 7 { sh_x64_mov_imm(&native.code, 0, if opcode == 3 { 0; } else { aux; })?; return sh_native_finish(native, mir, id); };
+    if opcode == 9 { let patch = sh_x64_rip_address(&native.code, 0)?; if not native.calls.push(patch) or not native.calls.push(aux) { return sh_i64_error(6503); }; return sh_native_finish(native, mir, id); };
+    if opcode == 10 { sh_native_load(native, first, 0)?; if aux == sh_kind("-") or aux == sh_kind("~") { sh_x64_unary(&native.code, if aux == sh_kind("-") { 1; } else { 0; }, 0)?; } else { sh_x64_mov_imm(&native.code, 10, 1)?; sh_x64_binary(&native.code, 4, 0, 10)?; }; return sh_native_finish(native, mir, id); };
+    if opcode == 12 { sh_native_load(native, first, 0)?; return sh_native_finish(native, mir, id); };
+    if opcode == 13 { let offset = sh_native_at(&native.locals, aux); if offset < 8 { return sh_i64_error(6501); }; sh_x64_memory(&native.code, 2, 0, 5, -offset)?; return sh_native_finish(native, mir, id); };
+    if opcode == 14 { sh_native_load(native, first, 10)?; let width = sh_native_width(mir, ty); if width == 0 { sh_x64_mov_imm(&native.code, 0, 0)?; } else { sh_x64_scalar_memory(&native.code, false, 0, 10, 0, width, sh_native_signed(mir, ty))?; }; return sh_native_finish(native, mir, id); };
+    if opcode == 15 { let rhs = sh_mir_inst_arg(mir, id, 1); let value_type = sh_mir_value_type(mir, rhs); let width = sh_native_width(mir, value_type); if width < 0 { return sh_i64_error(6502); }; sh_native_load(native, first, 10)?; sh_native_load(native, rhs, 0)?; if width > 0 { sh_x64_scalar_memory(&native.code, true, 0, 10, 0, width, false)?; (); }; sh_x64_mov_imm(&native.code, 0, 0)?; return sh_native_finish(native, mir, id); };
+    if opcode == 20 { let prefix = if aux < 0 { 1; } else { 0; }; let count = sh_mir_inst(mir, id, 5) - prefix; let mut index = 0; while index < count { let argument = sh_mir_inst_arg(mir, id, index + prefix); if sh_native_width(mir, sh_mir_value_type(mir, argument)) <= 0 { return sh_i64_error(6502); }; let register = if index == 0 { 1; } else { if index == 1 { 2; } else { if index == 2 { 8; } else { if index == 3 { 9; } else { 0; }; }; }; }; sh_native_load(native, argument, register)?; if index >= 4 { sh_x64_memory(&native.code, 1, 0, 4, 32 + (index - 4) * 8)?; (); }; index = index + 1; }; if aux >= 0 { sh_native_call_fixup(native, aux)?; } else { sh_native_load(native, first, 11)?; sh_x64_call_register(&native.code, 11)?; }; return sh_native_finish(native, mir, id); };
+    sh_i64_error(6502);
+}
+
+def sh_native_terminator(native: &ShNative, mir: &ShMir, term: i64) -> Result<i64, i64> {
+    let kind = sh_mir_term(mir, term, 2);
+    let first_edge = sh_mir_term(mir, term, 4);
+    if kind == 1 { return sh_native_edge(native, mir, first_edge); };
+    if kind == 2 { sh_native_load(native, sh_mir_term(mir, term, 3), 0)?; sh_x64_mov_imm(&native.code, 10, 0)?; sh_x64_binary(&native.code, 5, 0, 10)?; let false_patch = sh_x64_branch(&native.code, 2, 4)?; sh_native_edge(native, mir, first_edge)?; sh_x64_fix_branch(&native.code, false_patch, sh_binary_len(&native.code))?; return sh_native_edge(native, mir, first_edge + 1); };
+    if kind == 3 { let value = sh_mir_term(mir, term, 3); if value >= 0 { sh_native_load(native, value, 0)?; } else { sh_x64_mov_imm(&native.code, 0, 0)?; }; sh_x64_stack_adjust(&native.code, native.frame, true)?; sh_x64_stack_register(&native.code, 5, true)?; return sh_x64_ret(&native.code); };
+    if kind == 4 { sh_binary_byte(&native.code, 15)?; return sh_binary_byte(&native.code, 11); };
+    if kind == 5 { let value = sh_mir_term(mir, term, 3); let count = sh_mir_term(mir, term, 5); let mut index = 0; let mut default_edge = -1; while index < count { let edge = first_edge + index; if sh_mir_edge(mir, edge, 5) == 1 { default_edge = edge; } else { sh_native_load(native, value, 0)?; sh_x64_mov_imm(&native.code, 10, sh_mir_edge(mir, edge, 4))?; sh_x64_binary(&native.code, 5, 0, 10)?; let next = sh_x64_branch(&native.code, 2, 5)?; sh_native_edge(native, mir, edge)?; sh_x64_fix_branch(&native.code, next, sh_binary_len(&native.code))?; (); }; index = index + 1; }; return sh_native_edge(native, mir, default_edge); };
+    sh_i64_error(6502);
+}
+
+def sh_native_function(native: &mut ShNative, mir: &ShMir, function: i64) -> Result<i64, i64> {
+    let signature = sh_mir_fn(mir, function, 1);
+    let parameters = sh_mir_type_word(mir, signature, 5) - 1;
+    if sh_mir_type_word(mir, signature, 2) != 0 or sh_native_width(mir, sh_mir_type_arg(mir, signature, parameters)) < 0 { return sh_i64_error(6502); };
+    let mut index = 0;
+    while index < parameters { if sh_native_width(mir, sh_mir_type_arg(mir, signature, index)) <= 0 { return sh_i64_error(6502); }; index = index + 1; };
+    let mut slots = 0;
+    index = 0;
+    while index < sh_mir_local_count(mir) { if sh_mir_local(mir, index, 0) == function { if sh_native_width(mir, sh_mir_local(mir, index, 1)) < 0 or sh_mir_local(mir, index, 4) >= 2 { return sh_i64_error(6502); }; slots = slots + 8; if not native.locals.set(index, slots) { return sh_i64_error(6503); }; }; index = index + 1; };
+    let mut stack_arguments = 0;
+    index = 0;
+    while index < sh_mir_inst_count(mir) { if sh_mir_inst(mir, index, 0) == function { if sh_native_width(mir, sh_mir_value_type(mir, index)) < 0 { return sh_i64_error(6502); }; slots = slots + 8; if not native.values.set(index, slots) { return sh_i64_error(6503); }; if sh_mir_inst(mir, index, 2) == 20 { let count = sh_mir_inst(mir, index, 5) - if sh_mir_inst(mir, index, 6) < 0 { 1; } else { 0; }; if count - 4 > stack_arguments { stack_arguments = count - 4; }; }; }; index = index + 1; };
+    let mut edge_parameters = 0;
+    index = 0;
+    while index < sh_mir_block_count(mir) { if sh_mir_block(mir, index, 0) == function and sh_mir_block(mir, index, 3) > edge_parameters { edge_parameters = sh_mir_block(mir, index, 3); }; index = index + 1; };
+    native.edge_base = slots + 8;
+    native.frame = ((slots + edge_parameters * 8 + 32 + stack_arguments * 8 + 15) / 16) * 16;
+    if native.frame > 4000 { return sh_i64_error(6503); };
+    sh_binary_align(&native.code, 16, 144)?;
+    let start = sh_binary_len(&native.code);
+    if not native.functions.set(function, start) { return sh_i64_error(6503); };
+    sh_x64_stack_register(&native.code, 5, false)?;
+    sh_x64_mov(&native.code, 5, 4)?;
+    sh_x64_stack_adjust(&native.code, native.frame, false)?;
+    index = 0;
+    while index < sh_mir_inst_count(mir) { if sh_mir_inst(mir, index, 0) == function and sh_mir_inst(mir, index, 2) == 1 { let ordinal = sh_mir_inst(mir, index, 6); if ordinal < 4 { let register = if ordinal == 0 { 1; } else { if ordinal == 1 { 2; } else { if ordinal == 2 { 8; } else { 9; }; }; }; sh_x64_mov(&native.code, 0, register)?; } else { sh_x64_memory(&native.code, 0, 0, 5, 48 + (ordinal - 4) * 8)?; }; sh_native_normalize(native, mir, sh_mir_value_type(mir, index), 0)?; sh_native_save(native, index, 0)?; (); }; index = index + 1; };
+    let entry = sh_x64_branch(&native.code, 0, 0)?;
+    if not native.branches.push(entry) or not native.branches.push(sh_mir_fn(mir, function, 2)) { return sh_i64_error(6503); };
+    let mut block = 0;
+    while block < sh_mir_block_count(mir) { if sh_mir_block(mir, block, 0) == function { if not native.blocks.set(block, sh_binary_len(&native.code)) { return sh_i64_error(6503); }; index = 0; while index < sh_mir_inst_count(mir) { if sh_mir_inst(mir, index, 1) == block { sh_native_instruction(native, mir, index)?; (); }; index = index + 1; }; sh_native_terminator(native, mir, sh_mir_block(mir, block, 4))?; (); }; block = block + 1; };
+    sh_i64_ok(start);
+}
+
+def sh_native_emit(native: &mut ShNative, mir: &ShMir) -> Result<ShBinary, i64> {
+    let checked = sh_mir_validate(mir);
+    if checked.error != 0 { return sh_coff_error(checked.error); };
+    let mut index = 0;
+    while index < sh_mir_inst_count(mir) { if not native.values.push(-1) { return sh_coff_error(6503); }; index = index + 1; };
+    index = 0;
+    while index < sh_mir_local_count(mir) { if not native.locals.push(-1) { return sh_coff_error(6503); }; index = index + 1; };
+    index = 0;
+    while index < sh_mir_block_count(mir) { if not native.blocks.push(-1) { return sh_coff_error(6503); }; index = index + 1; };
+    index = 0;
+    while index < sh_mir_fn_count(mir) { if not native.functions.push(-1) { return sh_coff_error(6503); }; index = index + 1; };
+    index = 0;
+    while index < sh_mir_fn_count(mir) { if sh_mir_fn(mir, index, 3) == 0 { let emitted = sh_native_function(native, mir, index); if not emitted.is_ok() { return sh_coff_error(emitted.error); }; }; index = index + 1; };
+    if sh_binary_len(&native.code) == 0 { return sh_coff_error(6502); };
+    index = 0;
+    while index < native.branches.len() { let patch = sh_native_at(&native.branches, index); let target = sh_native_at(&native.blocks, sh_native_at(&native.branches, index + 1)); let fixed = sh_x64_fix_branch(&native.code, patch, target); if not fixed.is_ok() { return sh_coff_error(fixed.error); }; index = index + 2; };
+    let object = sh_object_new(native.code.limit);
+    let name = string_from_str(".text");
+    if not name.is_ok() { return sh_coff_error(6503); };
+    let section = sh_object_add_section(&object, &name.value, &native.code, 1610612768, 16);
+    if not section.is_ok() { return sh_coff_error(section.error); };
+    let symbol_ids = vec_new_i64();
+    index = 0;
+    while index <= sh_mir_fn_count(mir) { let mut used = index < sh_mir_fn_count(mir) and (sh_mir_fn(mir, index, 3) & 2) == 0; if index == sh_mir_fn_count(mir) { let mut call = 0; while call < native.calls.len() { if sh_native_at(&native.calls, call + 1) == index { used = true; }; call = call + 2; }; }; let mut symbol = -1; if used { let text = if index == sh_mir_fn_count(mir) { string_from_str("sengoo_panic_integer_overflow"); } else { sh_symbol_text(&mir.symbols, sh_mir_fn(mir, index, 0)); }; if not text.is_ok() { return sh_coff_error(6501); }; let offset = sh_native_at(&native.functions, index); let added = sh_object_add_symbol(&object, &text.value, if offset >= 0 { offset; } else { 0; }, if offset >= 0 { 1; } else { 0; }, true, 2); if not added.is_ok() { return sh_coff_error(added.error); }; symbol = added.value; }; if not symbol_ids.push(symbol) { return sh_coff_error(6503); }; index = index + 1; };
+    index = 0;
+    while index < native.calls.len() { let symbol = sh_native_at(&symbol_ids, sh_native_at(&native.calls, index + 1)); if symbol < 0 { return sh_coff_error(6502); }; let added = sh_object_add_relocation(&object, 0, sh_native_at(&native.calls, index), symbol, 4); if not added.is_ok() { return sh_coff_error(added.error); }; index = index + 2; };
+    sh_object_emit(&object);
+}
+
+def sh_native_object(mir: &ShMir, maximum: i64, checked: bool) -> Result<ShBinary, i64> {
+    let mut native = ShNative { code: sh_binary_new(maximum), values: vec_new_i64(), locals: vec_new_i64(), functions: vec_new_i64(), blocks: vec_new_i64(), branches: vec_new_i64(), calls: vec_new_i64(), frame: 0, edge_base: 0, checked: checked };
+    sh_native_emit(&mut native, mir);
+}
