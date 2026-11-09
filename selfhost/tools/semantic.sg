@@ -1,0 +1,62 @@
+import selfhost_semantic;
+
+import selfhost_frontend;
+
+import std::args;
+
+import std::io;
+
+def sh_semantic_argument(index: i64) -> Result<String, i64> {
+    let length = arg_len(index)?;
+    let buffer = ffi_buffer_new(length)?;
+    let count = arg_copy(index, buffer)?;
+    string_from_utf8(buffer, count);
+}
+
+def sh_semantic_json_error(code: i64, start: i64, end: i64, phase: &str) -> Result<bool, i64> {
+    let output = string_from_str("{\"schema_version\":1,\"ok\":false,\"phase\":\"")?;
+    output.push_str(phase)?;
+    output.push_str("\",\"diagnostics\":[{\"code\":")?;
+    output.push_i64(code)?;
+    output.push_str(",\"severity\":1,\"start\":")?;
+    output.push_i64(start)?;
+    output.push_str(",\"end\":")?;
+    output.push_i64(end)?;
+    output.push_str("}]}\n")?;
+    io_stdout_write(output.as_str())?;
+    Result { is_ok: true, value: true, error: 0 };
+}
+
+def sh_semantic_file(path: &str) -> Result<i64, i64> {
+    let sources = sh_sources_new(1, 16777216);
+    let source = sh_source_load(&sources, path)?;
+    let length = sh_source_len(&sources, source)?;
+    let text = sh_span_text(&sources, ShSpan { source: source, start: 0, end: length })?;
+    let features = sh_symbols_new(0);
+    let front = sh_frontend(&text, source, &features, 16777216, 1000000);
+    if front.error != 0 { sh_semantic_json_error(front.error, front.start, front.end, "frontend")?; return sh_i64_ok(65); };
+    let checked = sh_check(&front.expanded.text, &front.parsed.ast, 1000);
+    let output = string_from_str("{\"schema_version\":1,\"ok\":")?;
+    output.push_str(if checked.error == 0 { "true"; } else { "false"; })?;
+    output.push_str(",\"phase\":\"typecheck\",\"ast_nodes\":")?;
+    output.push_i64(sh_ast_count(&front.parsed.ast))?;
+    output.push_str(",\"types\":")?;
+    output.push_i64(sh_type_count(&checked.types))?;
+    output.push_str(",\"bindings\":")?;
+    output.push_i64(sh_binding_count(&checked))?;
+    output.push_str(",\"diagnostics\":[")?;
+    let mut index = 0;
+    while index < checked.diagnostics.len() { let diagnostic = checked.diagnostics.get(index); let original = sh_exp_map(&front.expanded.mapping, diagnostic.start, diagnostic.end); if index > 0 { output.push_str(",")?; (); }; output.push_str("{\"code\":")?; output.push_i64(diagnostic.code)?; output.push_str(",\"severity\":")?; output.push_i64(diagnostic.severity)?; output.push_str(",\"node\":")?; output.push_i64(diagnostic.node)?; output.push_str(",\"start\":")?; output.push_i64(original.start)?; output.push_str(",\"end\":")?; output.push_i64(original.end)?; output.push_str(",\"expected\":")?; output.push_i64(diagnostic.expected)?; output.push_str(",\"actual\":")?; output.push_i64(diagnostic.actual)?; output.push_str("}")?; index = index + 1; };
+    output.push_str("]}\n")?;
+    io_stdout_write(output.as_str())?;
+    sh_i64_ok(if checked.error == 0 { 0; } else { 65; });
+}
+
+def main() -> i64 {
+    if args_len() != 1 { io_stderr_write("usage: semantic FILE (JSON diagnostics on stdout)\n"); return 64; };
+    let path = sh_semantic_argument(0);
+    if not path.is_ok() { sh_semantic_json_error(path.error, 0, 0, "arguments"); return 64; };
+    let result = sh_semantic_file(path.value.as_str());
+    if not result.is_ok() { sh_semantic_json_error(result.error, 0, 0, "input"); return 66; };
+    result.value;
+}

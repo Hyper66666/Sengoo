@@ -1,0 +1,350 @@
+import selfhost_mir_lower;
+
+import std::assert;
+
+extern "C" {
+    fn sengoo_string_live_handle_count() -> i64;
+    fn sengoo_buffer_live_handle_count() -> i64;
+    fn sengoo_opaque_live_handle_count() -> i64;
+}
+
+def sh_mt_fn(mir: &ShMir, name: &str, result: i64, parameter: i64, abi: i64, foreign_flag: bool) -> Result<i64, i64> {
+    sh_mir_source(mir, 0, 1024)?;
+    let arguments = vec_new_i64();
+    if parameter >= 0 { arguments.push(parameter); (); };
+    arguments.push(result);
+    let signature = sh_type_intern(&mir.types, 11, abi, 0, -1, &arguments)?;
+    let text = string_from_str(name)?;
+    sh_mir_add_function(mir, &text, signature, if foreign_flag { 1; } else { 0; }, 0, 0, 10);
+}
+
+def sh_mt_constant(mir: &ShMir, block: i64, ty: i64, value: i64) -> Result<i64, i64> {
+    let operands = vec_new_i64();
+    let opcode = if sh_mir_type_word(mir, ty, 0) == 1 { 6; } else { 4; };
+    sh_mir_add_instruction(mir, block, opcode, ty, &operands, value, 0, 0, 0, 0, 1);
+}
+
+def sh_mt_binary(mir: &ShMir, block: i64, ty: i64, lhs: i64, rhs: i64, operator: i64) -> Result<i64, i64> {
+    let operands = vec_new_i64();
+    operands.push(lhs);
+    operands.push(rhs);
+    sh_mir_add_instruction(mir, block, 11, ty, &operands, operator, 0, 0, 0, 1, 2);
+}
+
+def sh_mt_edge(mir: &ShMir, term: i64, target: i64, value: i64) -> Result<i64, i64> {
+    let arguments = vec_new_i64();
+    if value >= 0 { arguments.push(value); (); };
+    sh_mir_add_edge(mir, term, target, &arguments, 0, 0);
+}
+
+def sh_mt_diamond() -> Result<bool, i64> {
+    let mir = sh_mir_new(1000);
+    let integer = sh_type_primitive(&mir.types, 2, 64, 1)?;
+    let boolean = sh_type_primitive(&mir.types, 1, 0, 0)?;
+    let function = sh_mt_fn(&mir, "diamond", integer, boolean, 0, false)?;
+    let scope = sh_mir_add_scope(&mir, function, -1, 0)?;
+    let entry = sh_mir_add_block(&mir, function, scope, 0, 0, 0, 10)?;
+    let left = sh_mir_add_block(&mir, function, scope, 0, 0, 10, 20)?;
+    let right = sh_mir_add_block(&mir, function, scope, 0, 0, 20, 30)?;
+    let join = sh_mir_add_block(&mir, function, scope, 0, 0, 30, 40)?;
+    let empty_args = vec_new_i64();
+    let merged = sh_mir_add_instruction(&mir, join, 2, integer, &empty_args, 0, 0, 0, 0, 30, 31)?;
+    let condition = sh_mir_add_instruction(&mir, entry, 1, boolean, &empty_args, 0, 0, 0, 0, 0, 1)?;
+    let duplicated = sh_mir_add_instruction(&mir, entry, 1, boolean, &empty_args, 0, 0, 0, 0, 0, 1)?;
+    let branch = sh_mir_add_terminator(&mir, entry, 2, condition, 0, 0, 10)?;
+    sh_mt_edge(&mir, branch, left, -1)?;
+    sh_mt_edge(&mir, branch, right, -1)?;
+    let left_value = sh_mt_constant(&mir, left, integer, 41)?;
+    let left_term = sh_mir_add_terminator(&mir, left, 1, -1, 0, 10, 20)?;
+    sh_mt_edge(&mir, left_term, join, left_value)?;
+    let right_value = sh_mt_constant(&mir, right, integer, 42)?;
+    let right_term = sh_mir_add_terminator(&mir, right, 1, -1, 0, 20, 30)?;
+    sh_mt_edge(&mir, right_term, join, right_value)?;
+    let return_term = sh_mir_add_terminator(&mir, join, 3, merged, 0, 30, 40)?;
+    assert_eq_i64(sh_mir_validate(&mir).error, 5006, "mir.sg", 43);
+    mir.instructions.set(duplicated * 12 + 2, 6);
+    mir.instructions.set(duplicated * 12 + 6, 1);
+    assert_eq_i64(sh_mir_validate(&mir).error, 0, "mir.sg", 44);
+    assert_eq_i64(sh_mir_reachable(&mir, entry, join, left), 1, "mir.sg", 44);
+    assert_eq_i64(sh_mir_reachable(&mir, entry, join, entry), 0, "mir.sg", 45);
+    mir.terminators.set(return_term * 10 + 3, left_value);
+    assert_eq_i64(sh_mir_validate(&mir).error, 5005, "mir.sg", 48);
+    mir.terminators.set(return_term * 10 + 3, merged);
+    mir.terminators.set(branch * 10 + 3, left_value);
+    assert_eq_i64(sh_mir_validate(&mir).error, 5003, "mir.sg", 51);
+    mir.terminators.set(branch * 10 + 3, condition);
+    mir.edges.set(sh_mir_term(&mir, left_term, 4) * 6 + 3, 0);
+    assert_eq_i64(sh_mir_validate(&mir).error, 5004, "mir.sg", 54);
+    Result { is_ok: true, value: true, error: 0 };
+}
+
+def sh_mt_loop() -> Result<bool, i64> {
+    let mir = sh_mir_new(1000);
+    let integer = sh_type_primitive(&mir.types, 2, 64, 1)?;
+    let boolean = sh_type_primitive(&mir.types, 1, 0, 0)?;
+    let function = sh_mt_fn(&mir, "loop", integer, -1, 0, false)?;
+    let scope = sh_mir_add_scope(&mir, function, -1, 0)?;
+    let entry = sh_mir_add_block(&mir, function, scope, 0, 0, 0, 10)?;
+    let header = sh_mir_add_block(&mir, function, scope, 0, 0, 10, 20)?;
+    let body = sh_mir_add_block(&mir, function, scope, 0, 0, 20, 30)?;
+    let done = sh_mir_add_block(&mir, function, scope, 0, 0, 30, 40)?;
+    let empty_args = vec_new_i64();
+    let iteration = sh_mir_add_instruction(&mir, header, 2, integer, &empty_args, 0, 0, 0, 0, 10, 11)?;
+    let initial = sh_mt_constant(&mir, entry, integer, 0)?;
+    let enter = sh_mir_add_terminator(&mir, entry, 1, -1, 0, 0, 10)?;
+    sh_mt_edge(&mir, enter, header, initial)?;
+    let limit = sh_mt_constant(&mir, header, integer, 3)?;
+    let condition = sh_mt_binary(&mir, header, boolean, iteration, limit, sh_kind("<"))?;
+    let select = sh_mir_add_terminator(&mir, header, 2, condition, 0, 10, 20)?;
+    sh_mt_edge(&mir, select, body, -1)?;
+    sh_mt_edge(&mir, select, done, -1)?;
+    let one = sh_mt_constant(&mir, body, integer, 1)?;
+    let next = sh_mt_binary(&mir, body, integer, iteration, one, sh_kind("+"))?;
+    let backedge = sh_mir_add_terminator(&mir, body, 1, -1, 0, 20, 30)?;
+    sh_mt_edge(&mir, backedge, header, next)?;
+    sh_mir_add_terminator(&mir, done, 3, iteration, 0, 30, 40)?;
+    assert_eq_i64(sh_mir_validate(&mir).error, 0, "mir.sg", 74);
+    assert_eq_i64(sh_mir_reachable(&mir, entry, done, body), 1, "mir.sg", 75);
+    assert_eq_i64(sh_mir_reachable(&mir, entry, done, header), 0, "mir.sg", 76);
+    mir.operands.set(sh_mir_inst(&mir, next, 4), next);
+    assert_eq_i64(sh_mir_validate(&mir).error, 5005, "mir.sg", 79);
+    Result { is_ok: true, value: true, error: 0 };
+}
+
+def sh_mt_memory_calls() -> Result<bool, i64> {
+    let mir = sh_mir_new(1000);
+    let unit_type = sh_type_primitive(&mir.types, 0, 0, 0)?;
+    let integer = sh_type_primitive(&mir.types, 2, 64, 1)?;
+    let args = vec_new_i64();
+    args.push(integer);
+    args.push(integer);
+    let pair = sh_type_intern(&mir.types, 10, 0, 0, -1, &args)?;
+    let pointee = vec_new_i64();
+    pointee.push(pair);
+    let reference = sh_type_intern(&mir.types, 6, 0, 1, -1, &pointee)?;
+    let foreign_function = sh_mt_fn(&mir, "foreign_function", integer, integer, 1, true)?;
+    let function = sh_mt_fn(&mir, "memory", integer, -1, 0, false)?;
+    let scope = sh_mir_add_scope(&mir, function, -1, 0)?;
+    let entry = sh_mir_add_block(&mir, function, scope, 0, 0, 0, 10)?;
+    let cleanup = sh_mir_add_block(&mir, function, scope, 1, 0, 10, 20)?;
+    let local = sh_mir_add_local(&mir, function, pair, -1, 0, 3, scope, -1, 0, 0, 10)?;
+    let other_local = sh_mir_add_local(&mir, function, pair, -1, 0, 3, scope, -1, 0, 0, 10)?;
+    let empty_args = vec_new_i64();
+    let address = sh_mir_add_instruction(&mir, entry, 13, reference, &empty_args, local, 0, 0, 0, 0, 1)?;
+    let first = sh_mt_constant(&mir, entry, integer, 41)?;
+    let second = sh_mt_constant(&mir, entry, integer, 1)?;
+    let operands = vec_new_i64();
+    operands.push(first);
+    operands.push(second);
+    let aggregate = sh_mir_add_instruction(&mir, entry, 16, pair, &operands, -1, 0, 0, 0, 1, 2)?;
+    operands.clear();
+    operands.push(address);
+    operands.push(aggregate);
+    sh_mir_add_instruction(&mir, entry, 15, unit_type, &operands, 0, 0, 0, 0, 2, 3)?;
+    operands.clear();
+    operands.push(address);
+    let loaded = sh_mir_add_instruction(&mir, entry, 14, pair, &operands, 0, 0, 0, 0, 3, 4)?;
+    operands.clear();
+    operands.push(loaded);
+    let selected = sh_mir_add_instruction(&mir, entry, 18, integer, &operands, 0, -1, 0, 0, 4, 5)?;
+    operands.clear();
+    operands.push(selected);
+    let call = sh_mir_add_instruction(&mir, entry, 20, integer, &operands, foreign_function, 1, 0, 0, 5, 6)?;
+    let leave = sh_mir_add_terminator(&mir, entry, 1, -1, 0, 0, 10)?;
+    sh_mt_edge(&mir, leave, cleanup, -1)?;
+    operands.clear();
+    operands.push(address);
+    let dropped = sh_mir_add_instruction(&mir, cleanup, 21, unit_type, &operands, local, pair, 1, 0, 10, 11)?;
+    sh_mir_add_instruction(&mir, cleanup, 25, unit_type, &empty_args, local, 0, 0, 0, 11, 12)?;
+    sh_mir_add_terminator(&mir, cleanup, 3, call, 0, 10, 20)?;
+    assert_eq_i64(sh_mir_validate(&mir).error, 0, "mir.sg", 103);
+    mir.instructions.set(dropped * 12 + 6, other_local);
+    assert_eq_i64(sh_mir_validate(&mir).error, 5007, "mir.sg", 104);
+    mir.instructions.set(dropped * 12 + 6, local);
+    mir.instructions.set(call * 12 + 7, 0);
+    assert_eq_i64(sh_mir_validate(&mir).error, 5006, "mir.sg", 105);
+    mir.instructions.set(call * 12 + 7, 1);
+    mir.instructions.set(dropped * 12 + 7, integer);
+    assert_eq_i64(sh_mir_validate(&mir).error, 5007, "mir.sg", 108);
+    mir.instructions.set(dropped * 12 + 7, pair);
+    mir.locals.set(local * 10 + 4, 2);
+    assert_eq_i64(sh_mir_validate(&mir).error, 5007, "mir.sg", 111);
+    Result { is_ok: true, value: true, error: 0 };
+}
+
+def sh_mt_bounds() -> Result<bool, i64> {
+    let mir = sh_mir_new(2);
+    let integer = sh_type_primitive(&mir.types, 2, 64, 1)?;
+    let function = sh_mt_fn(&mir, "small", integer, -1, 0, false)?;
+    let scope = sh_mir_add_scope(&mir, function, -1, 0)?;
+    let entry = sh_mir_add_block(&mir, function, scope, 0, 0, 0, 10)?;
+    assert_eq_i64(sh_mir_validate(&mir).error, 5004, "mir.sg", 119);
+    let first = sh_mt_constant(&mir, entry, integer, 1)?;
+    let second = sh_mt_constant(&mir, entry, integer, 2)?;
+    assert_eq_i64(sh_mt_constant(&mir, entry, integer, 3).error, 5001, "mir.sg", 121);
+    assert_eq_i64(sh_mir_inst_count(&mir), 2, "mir.sg", 122);
+    sh_mir_add_terminator(&mir, entry, 3, second, 0, 0, 10)?;
+    assert_eq_i64(sh_mir_validate(&mir).error, 0, "mir.sg", 124);
+    assert_eq_i64(sh_mt_constant(&mir, entry, integer, 4).error, 5004, "mir.sg", 125);
+    assert_eq_i64(sh_mir_source(&mir, 0, 999).error, 5002, "mir.sg", 126);
+    assert_true(not sh_mir_span_valid(&mir, 0, -1, 3), "mir.sg", 127);
+    assert_true(not sh_mir_span_valid(&mir, 0, 0, 1025), "mir.sg", 128);
+    mir.operands.push(999);
+    mir.instructions.set(first * 12 + 4, 0);
+    mir.instructions.set(first * 12 + 5, 1);
+    assert_eq_i64(sh_mir_validate(&mir).error, 5005, "mir.sg", 131);
+    Result { is_ok: true, value: true, error: 0 };
+}
+
+def sh_mt_nominal_indirect() -> Result<bool, i64> {
+    let mir = sh_mir_new(1000);
+    let integer = sh_type_primitive(&mir.types, 2, 64, 1)?;
+    let name = string_from_str("Record")?;
+    let symbol = sh_intern(&mir.symbols, &name)?;
+    let args = vec_new_i64();
+    let nominal = sh_type_intern(&mir.types, 12, 0, 0, symbol, &args)?;
+    let members = vec_new_i64();
+    members.push(integer);
+    let offsets = vec_new_i64();
+    offsets.push(0);
+    let layout = sh_mir_add_layout(&mir, nominal, -1, &members, &offsets, -1, 8, 8)?;
+    let callee = sh_mt_fn(&mir, "foreign_indirect", integer, integer, 1, true)?;
+    let function = sh_mt_fn(&mir, "nominal", integer, -1, 0, false)?;
+    let scope = sh_mir_add_scope(&mir, function, -1, 0)?;
+    let block = sh_mir_add_block(&mir, function, scope, 0, 0, 0, 10)?;
+    let empty_args = vec_new_i64();
+    let value = sh_mt_constant(&mir, block, integer, 42)?;
+    let values = vec_new_i64();
+    values.push(value);
+    let aggregate = sh_mir_add_instruction(&mir, block, 16, nominal, &values, -1, 0, 0, 0, 1, 2)?;
+    values.clear();
+    values.push(aggregate);
+    let extracted = sh_mir_add_instruction(&mir, block, 18, integer, &values, 0, -1, 0, 0, 2, 3)?;
+    let function_value = sh_mir_add_instruction(&mir, block, 9, sh_mir_fn(&mir, callee, 1), &empty_args, callee, 0, 0, 0, 3, 4)?;
+    values.clear();
+    values.push(function_value);
+    values.push(extracted);
+    let called = sh_mir_add_instruction(&mir, block, 20, integer, &values, -1, 1, 0, 0, 4, 5)?;
+    sh_mir_add_terminator(&mir, block, 3, called, 0, 0, 10)?;
+    assert_eq_i64(sh_mir_validate(&mir).error, 0, "mir.sg", 151);
+    mir.fields.set(sh_mir_word(&mir.layouts, 7, layout, 2) * 2, 999);
+    assert_eq_i64(sh_mir_validate(&mir).error, 5003, "mir.sg", 153);
+    mir.fields.set(sh_mir_word(&mir.layouts, 7, layout, 2) * 2, integer);
+    mir.layouts.set(layout * 7 + 6, 3);
+    assert_eq_i64(sh_mir_validate(&mir).error, 5003, "mir.sg", 156);
+    mir.layouts.set(layout * 7 + 6, 8);
+    mir.types.words.set(nominal * 6 + 3, 999);
+    assert_eq_i64(sh_mir_validate(&mir).error, 5003, "mir.sg", 159);
+    mir.types.words.set(nominal * 6 + 3, symbol);
+    mir.fields.push(999);
+    mir.fields.push(0);
+    assert_eq_i64(sh_mir_validate(&mir).error, 5003, "mir.sg", 160);
+    mir.fields.set(mir.fields.len() - 2, integer);
+    assert_eq_i64(sh_mir_validate(&mir).error, 5003, "mir.sg", 161);
+    sh_mir_trim(&mir.fields, mir.fields.len() - 2);
+    let other = sh_mt_fn(&mir, "different_function", integer, -1, 0, false)?;
+    let other_scope = sh_mir_add_scope(&mir, other, -1, 0)?;
+    let other_block = sh_mir_add_block(&mir, other, other_scope, 0, 0, 0, 10)?;
+    let other_value = sh_mt_constant(&mir, other_block, integer, 7)?;
+    sh_mir_add_terminator(&mir, other_block, 3, other_value, 0, 0, 10)?;
+    mir.operands.set(sh_mir_inst(&mir, called, 4) + 1, other_value);
+    assert_eq_i64(sh_mir_validate(&mir).error, 5005, "mir.sg", 165);
+    Result { is_ok: true, value: true, error: 0 };
+}
+
+def sh_mt_lower_case(source: &str, expected: i64) -> Result<bool, i64> {
+    let text = string_from_str(source)?;
+    let parsed = sh_parse(&text, 0, 10000);
+    if parsed.error != 0 { println("MIR fixture parse"); println(parsed.error); return Result { is_ok: false, value: false, error: parsed.error }; };
+    let checked = sh_check(&text, &parsed.ast, 100);
+    let lowered = sh_lower(&text, &parsed.ast, &checked, 10000);
+    if lowered.error != expected { println(source); println("MIR error"); println(lowered.error); println(lowered.start); println(lowered.end); return Result { is_ok: false, value: false, error: 99 }; };
+    if expected == 0 { let validated = sh_mir_validate(&lowered.mir); assert_eq_i64(validated.error, 0, "mir.sg", 180); assert_true(sh_mir_fn_count(&lowered.mir) > 0, "mir.sg", 181); (); };
+    Result { is_ok: true, value: true, error: 0 };
+}
+
+def sh_mt_cleanup_case(source: &str, expected_drops: i64, expected_projections: i64) -> Result<bool, i64> {
+    let text = string_from_str(source)?;
+    let parsed = sh_parse(&text, 0, 10000);
+    if parsed.error != 0 { return Result { is_ok: false, value: false, error: parsed.error }; };
+    let checked = sh_check(&text, &parsed.ast, 100);
+    let lowered = sh_lower(&text, &parsed.ast, &checked, 10000);
+    if lowered.error != 0 { println(source); println(lowered.error); return Result { is_ok: false, value: false, error: lowered.error }; };
+    let mut drops = 0;
+    let mut projections = 0;
+    let mut instruction = 0;
+    while instruction < sh_mir_inst_count(&lowered.mir) {
+        if sh_mir_inst(&lowered.mir, instruction, 2) == 21 {
+            drops = drops + 1;
+            if sh_mir_inst(&lowered.mir, instruction, 6) == -1 { projections = projections + 1; };
+            assert_eq_i64(sh_mir_block(&lowered.mir, sh_mir_inst(&lowered.mir, instruction, 1), 5), 1, "mir.sg", 263);
+            ();
+        };
+        instruction = instruction + 1;
+    };
+    assert_eq_i64(drops, expected_drops, "mir.sg", 267);
+    assert_eq_i64(projections, expected_projections, "mir.sg", 268);
+    let mut local = 0;
+    while local < sh_mir_local_count(&lowered.mir) {
+        if sh_mir_local(&lowered.mir, local, 3) == 1 and sh_mir_local(&lowered.mir, local, 4) >= 2 {
+            let mut initialized = 0;
+            let mut init = 0;
+            while init < sh_mir_inst_count(&lowered.mir) {
+                if sh_mir_inst(&lowered.mir, init, 2) == 25 and sh_mir_inst(&lowered.mir, init, 6) == local and sh_mir_inst(&lowered.mir, init, 7) == 1 { initialized = initialized + 1; };
+                init = init + 1;
+            };
+            assert_eq_i64(initialized, 1, "mir.sg", 278);
+            ();
+        };
+        local = local + 1;
+    };
+    let mut destructor_layouts = 0;
+    let mut layout = 0;
+    while layout < sh_mir_count(&lowered.mir.layouts, 7) { if sh_mir_word(&lowered.mir.layouts, 7, layout, 4) >= 0 { destructor_layouts = destructor_layouts + 1; }; layout = layout + 1; };
+    assert_eq_i64(destructor_layouts, 1, "mir.sg", 272);
+    Result { is_ok: true, value: true, error: 0 };
+}
+
+def sh_mt_lower() -> Result<bool, i64> {
+    sh_mt_lower_case("def main() -> i64 { 42; }", 0)?;
+    sh_mt_lower_case("def add(x: i64, y: i64) -> i64 { x + y } def main() -> i64 { add(40, 2); }", 0)?;
+    sh_mt_lower_case("def choose(x: bool) -> i64 { if x { 41; } else { 42; }; }", 0)?;
+    sh_mt_lower_case("def main() -> i64 { let mut value = 0; while value < 4 { value = value + 1; }; value; }", 0)?;
+    sh_mt_lower_case("def main() -> i64 { let value = (20, 22); value.0 + value.1; }", 0)?;
+    sh_mt_lower_case("struct Point { x: i64, y: i64, } def main() -> i64 { let point = Point { x: 20, y: 22 }; point.x + point.y; }", 0)?;
+    sh_mt_lower_case("extern \"C\" { fn external_score(value: i64) -> i64; } def main() -> i64 { external_score(42); }", 0)?;
+    sh_mt_lower_case("def main() -> i64 { let mut value = 41; let reference = &mut value; *reference = 42; value; }", 0)?;
+    sh_mt_lower_case("def main() -> i64 { loop { break 42; }; }", 0)?;
+    sh_mt_lower_case("def main() -> i64 { if true and false or true { return 42; } else { return 0; }; }", 0)?;
+    sh_mt_lower_case("struct Owner { value: i64, } impl Drop for Owner { def drop(&mut self) {} } def main() -> i64 { let value = Owner { value: 42 }; 42; }", 0)?;
+    sh_mt_lower_case("struct Owner { value: i64, } impl Drop for Owner { def drop(&mut self) {} } struct Pair { left: Owner, right: Owner, } def main() -> i64 { let pair = Pair { left: Owner { value: 1 }, right: Owner { value: 2 } }; let moved = pair.left; 42; }", 0)?;
+    sh_mt_cleanup_case("struct Owner { value: i64, } impl Drop for Owner { def drop(&mut self) {} } def main() -> i64 { let value = Owner { value: 42 }; 42; }", 1, 0)?;
+    sh_mt_cleanup_case("struct Owner { value: i64, } impl Drop for Owner { def drop(&mut self) {} } struct Pair { left: Owner, right: Owner, } def main() -> i64 { let pair = Pair { left: Owner { value: 1 }, right: Owner { value: 2 } }; let moved = pair.left; 42; }", 2, 1)?;
+    sh_mt_cleanup_case("struct Owner { value: i64, } impl Drop for Owner { def drop(&mut self) {} } def consume(value: Owner, flag: bool) -> i64 { if flag { let moved = value; 0; } else { 0; }; 42; } def main() -> i64 { consume(Owner { value: 42 }, true); }", 2, 0)?;
+    sh_mt_lower_case("def main() -> i64 { missing; }", 5101)?;
+    Result { is_ok: true, value: true, error: 0 };
+}
+
+def main() -> i64 {
+    let strings = sengoo_string_live_handle_count();
+    let buffers = sengoo_buffer_live_handle_count();
+    let opaque = sengoo_opaque_live_handle_count();
+    let mut round = 0;
+    while round < 10 {
+        let lowering = sh_mt_lower();
+        if not lowering.is_ok() { println(lowering.error); return 6; };
+        let nominal = sh_mt_nominal_indirect();
+        if not nominal.is_ok() { println(nominal.error); return 5; };
+        assert_eq_i64(sengoo_string_live_handle_count(), strings, "mir.sg", 260);
+        assert_eq_i64(sengoo_buffer_live_handle_count(), buffers, "mir.sg", 261);
+        assert_eq_i64(sengoo_opaque_live_handle_count(), opaque, "mir.sg", 262);
+        round = round + 1;
+    };
+    round = 0;
+    while round < 30 { let diamond = sh_mt_diamond(); if not diamond.is_ok() { println(diamond.error); return 1; }; let loops = sh_mt_loop(); if not loops.is_ok() { println(loops.error); return 2; }; let memory = sh_mt_memory_calls(); if not memory.is_ok() { println(memory.error); return 3; }; let limits = sh_mt_bounds(); if not limits.is_ok() { println(limits.error); return 4; }; round = round + 1; };
+    assert_eq_i64(sengoo_string_live_handle_count(), strings, "mir.sg", 146);
+    assert_eq_i64(sengoo_buffer_live_handle_count(), buffers, "mir.sg", 147);
+    assert_eq_i64(sengoo_opaque_live_handle_count(), opaque, "mir.sg", 148);
+    println("selfhost MIR foundation: 10 typed lowering and 30 CFG/SSA/memory/ABI/bounds exact resource rounds passed");
+    0;
+}

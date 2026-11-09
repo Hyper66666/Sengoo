@@ -1,0 +1,113 @@
+import selfhost_semantic;
+
+import std::assert;
+
+extern "C" {
+    fn sengoo_string_live_handle_count() -> i64;
+    fn sengoo_buffer_live_handle_count() -> i64;
+    fn sengoo_opaque_live_handle_count() -> i64;
+}
+
+def sh_semantic_case(source: &str, expected: i64) -> Result<bool, i64> {
+    let text = string_from_str(source)?;
+    let parsed = sh_parse(&text, 0, 100000);
+    if parsed.error != 0 { println("semantic fixture parse error"); println(source); println(parsed.error); return Result { is_ok: false, value: false, error: parsed.error }; };
+    let checked = sh_check(&text, &parsed.ast, 1000);
+    if checked.error != expected { println("semantic fixture unexpected result"); println(source); println(checked.error); println(expected); let mut index = 0; while index < checked.diagnostics.len() { let diagnostic = checked.diagnostics.get(index); println(diagnostic.code); println(diagnostic.start); println(diagnostic.end); index = index + 1; }; return Result { is_ok: false, value: false, error: 99 }; };
+    assert_true(checked.node_types.len() == sh_ast_count(&parsed.ast), "semantic.sg", 24);
+    assert_true(checked.resolution.len() == sh_ast_count(&parsed.ast), "semantic.sg", 25);
+    assert_true(checked.node_scopes.len() == sh_ast_count(&parsed.ast), "semantic.sg", 26);
+    if expected != 0 { assert_true(checked.start >= 0 and checked.end >= checked.start and checked.end <= text.len(), "semantic.sg", 27); (); };
+    Result { is_ok: true, value: true, error: 0 };
+}
+
+def sh_semantic_positive() -> Result<bool, i64> {
+    sh_semantic_case("def main()->i64{42}", 0)?;
+    sh_semantic_case("def add(a:i64,b:i64)->i64{a+b} def main()->i64{add(20,22)}", 0)?;
+    sh_semantic_case("def main()->i64{later(41)} def later(x:i64)->i64{x+1}", 0)?;
+    sh_semantic_case("def id<T>(x:T)->T{x} def main()->i64{let n=id(42);let b=id(true);if b {n}else{0}}", 0)?;
+    sh_semantic_case("struct Pair {x:i64,y:i64} def main()->i64{let p=Pair{x:20,y:22};p.x+p.y}", 0)?;
+    sh_semantic_case("struct Cell<T>{value:T} def main()->i64{let a=Cell{value:42};let b=Cell{value:true};if b.value {a.value}else{0}}", 0)?;
+    sh_semantic_case("struct Point{x:i64} impl Point {def value(&self)->i64{self.x}} def main()->i64{let p=Point{x:42};p.value()}", 0)?;
+    sh_semantic_case("struct Point{x:i64} impl Point {def set(&mut self,n:i64){self.x=n;}} def main()->i64{let mut p=Point{x:0};p.set(42);p.x}", 0)?;
+    sh_semantic_case("def main()->i64{let mut x=0;while x<42 {x=x+1;}x}", 0)?;
+    sh_semantic_case("def main()->i64{let mut x=0;for n in 0..7 {x=x+n;}x*2}", 0)?;
+    sh_semantic_case("def main()->i64{loop {break 42;}}", 0)?;
+    sh_semantic_case("def main()->i64{let a:[i64;3]=[20,21,22];a[0]+a[2]}", 0)?;
+    sh_semantic_case("def main()->i64{let pair:(bool,i64)=(true,42);if pair.0 {pair.1}else{0}}", 0)?;
+    sh_semantic_case("def main()->i64{let x=42;let r=&x;*r}", 0)?;
+    sh_semantic_case("type Value=i64; def main()->Value{42}", 0)?;
+    sh_semantic_case("def main()->i64{let x:i8=42i8;(x as i64)}", 0)?;
+    sh_semantic_case("def main()->i64{match true {true=>42,false=>0}}", 0)?;
+    sh_semantic_case("enum Answer{No,Yes} def main()->i64{match Answer::Yes {Answer::No=>0,Answer::Yes=>42}}", 0)?;
+    sh_semantic_case("enum Item{Number(i64),Empty} def main()->i64{match Item::Number(42){Item::Number(n)=>n,Item::Empty=>0}}", 0)?;
+    sh_semantic_case("extern \"C\"{fn foreign(x:i64)->i64;} def main()->i64{foreign(42)}", 0)?;
+    sh_semantic_case("async def answer()->i64{42} async def next()->i64{await answer()}", 0)?;
+    sh_semantic_case("def id<T>(x:T)->T{x} def main()->i64{id::<i64>(42)}", 5101)?;
+    sh_semantic_case("struct Cell<T=i64>{value:T} def main()->i64{let c:Cell=Cell{value:42};c.value}", 0)?;
+    sh_semantic_case("type Identity<T> = T; def main()->Identity<i64>{42}", 0)?;
+    sh_semantic_case("struct Point{x:i64} impl Point {def make(n:i64)->Point{Point{x:n}}} def main()->i64{Point::make(42).x}", 0)?;
+    sh_semantic_case("trait Value {def value(&self)->i64{}} struct Point{x:i64} impl Value for Point {def value(&self)->i64{self.x}} def main()->i64{let p=Point{x:42};p.value()}", 0)?;
+    sh_semantic_case("trait Value {def value(&self)->i64{}} def read<T:Value>(x:&T)->i64{x.value()}", 0)?;
+    sh_semantic_case("def main(){println(42);print(true);eprintln(\"hello\");}", 0)?;
+    sh_semantic_case("trait Source {type Item;def value(&self)->Self::Item{}} struct Point{x:i64} impl Source for Point {type Item=i64;def value(&self)->Self::Item{self.x}} def main()->i64{let p=Point{x:42};p.value()}", 0)?;
+    sh_semantic_case("trait Source {type Item;def value(&self)->Self::Item{}} def take<T:Source>(x:&T)->T::Item{x.value()}", 0)?;
+    sh_semantic_case("def main()->i64{let message=f\"answer={42}\";42}", 0)?;
+    sh_semantic_case("def answer()->i64{42} def main()->i64{if answer()==42 {answer()}else{0}}", 0)?;
+    sh_semantic_case("async def child()->i64{42} async def main()->i64{await sleep(1);let task=spawn_task(child());if cancel_task(task){task_status(task)}else{select(child(),child())}}", 0)?;
+    sh_semantic_case("async def child()->bool{true} async def main()->bool{let scope=task_scope();scope_spawn(&scope,child());join(child(),child());if await timeout(child(),1){select_cancel(child(),child(),child())}else{false}}", 0)?;
+    sh_semantic_case("def main()->i64{let add=|x|x+1;let text=\"hello\"+\" world\";add(text.len())}", 0)?;
+    sh_semantic_case("struct Point{x:i64} def main(){print(Point{x:42});}", 0)?;
+    sh_semantic_case("trait Convert<T>{def convert(self)->T{}} impl Convert<i64> for i32 {def convert(self)->i64{self as i64}}", 0)?;
+    sh_semantic_case("extern \"C\"{fn small()->i32;} def main()->i64{let y:i64=100;small()+y}", 0)?;
+    sh_semantic_case("struct Result<T,E>{is_ok:bool,value:T,error:E} def answer()->Result<i64,i64>{Result{is_ok:true,value:42,error:0}} def main()->i64{let r=try {let n=answer()?;n};r.value}", 0)?;
+    sh_semantic_case("struct Option<T>{is_some:bool,value:T} def answer()->Option<i64>{Option{is_some:true,value:42}} def main()->i64{let r=try {let n=answer()?;n};r.value}", 0)?;
+    Result { is_ok: true, value: true, error: 0 };
+}
+
+def sh_semantic_negative() -> Result<bool, i64> {
+    sh_semantic_case("def main()->i64{missing}", 5101)?;
+    sh_semantic_case("def main(x:Missing)->i64{42}", 5102)?;
+    sh_semantic_case("def same()->i64{1} def same()->i64{2}", 0)?;
+    sh_semantic_case("def main()->bool{42}", 5104)?;
+    sh_semantic_case("def add(a:i64,b:i64)->i64{a+b} def main()->i64{add(1)}", 5105)?;
+    sh_semantic_case("struct Pair{x:i64} def main()->i64{let p=Pair{x:42};p.absent}", 5106)?;
+    sh_semantic_case("struct Pair{x:i64,y:i64} def main()->Pair{Pair{x:1}}", 5106)?;
+    sh_semantic_case("def main()->i64{let x=0;x=42;x}", 5107)?;
+    sh_semantic_case("def main()->i64{break;42}", 5109)?;
+    sh_semantic_case("def main()->i64{match true {true=>42}}", 5111)?;
+    sh_semantic_case("def main()->i64{true as f64}", 5113)?;
+    sh_semantic_case("struct Cell<T>{value:T} def main(x:Cell)->i64{42}", 5114)?;
+    sh_semantic_case("def main()->i64{let a=[1,2];a[2]}", 5119)?;
+    sh_semantic_case("async def answer()->i64{42} def main()->i64{await answer()}", 5120)?;
+    sh_semantic_case("def main()->i64{let x:isize=1isize;x+1i64}", 5104)?;
+    sh_semantic_case("def id<T>(x:T)->T{x} def main()->i64{id::<bool>(42)}", 5101)?;
+    sh_semantic_case("trait Value {def value(&self)->i64{}} struct Point{x:i64} impl Value for Point {}", 5115)?;
+    sh_semantic_case("trait Value {def value(&self)->i64{}} struct Point{x:i64} impl Value for Point {def value(&self)->bool{true}}", 5104)?;
+    sh_semantic_case("def main(){println(1,2);}", 5105)?;
+    sh_semantic_case("def main(){sleep(1);}", 5120)?;
+    sh_semantic_case("async def main(){sleep(true);}", 5104)?;
+    sh_semantic_case("async def main(){select(1,2);}", 5104)?;
+    sh_semantic_case("async def main(){select(sleep(1));}", 5105)?;
+    sh_semantic_case("async def child()->bool{true} async def main(){select(child(),sleep(1));}", 5104)?;
+    sh_semantic_case("async def child(x:&i64)->i64{*x} async def main(){let x=42;spawn(child(&x));}", 5115)?;
+    sh_semantic_case("async def child()->i64{42} async def main(){let f=child();spawn(f);}", 5115)?;
+    Result { is_ok: true, value: true, error: 0 };
+}
+
+def main() -> i64 {
+    let strings = sengoo_string_live_handle_count();
+    let buffers = sengoo_buffer_live_handle_count();
+    let opaque = sengoo_opaque_live_handle_count();
+    let positive = sh_semantic_positive();
+    if not positive.is_ok() { return 1; };
+    let negative = sh_semantic_negative();
+    if not negative.is_ok() { return 2; };
+    let mut round = 0;
+    while round < 100 { let result = sh_semantic_case("def identity<T>(x:T)->T{x} def main()->i64{identity(42)}", 0); if not result.is_ok() { return 3; }; let rejected = sh_semantic_case("def main()->i64{let x=true;x+42}", 5104); if not rejected.is_ok() { return 4; }; round = round + 1; };
+    assert_eq_i64(sengoo_string_live_handle_count(), strings, "semantic.sg", 100);
+    assert_eq_i64(sengoo_buffer_live_handle_count(), buffers, "semantic.sg", 101);
+    assert_eq_i64(sengoo_opaque_live_handle_count(), opaque, "semantic.sg", 102);
+    println("selfhost semantic: ok");
+    0;
+}

@@ -1,0 +1,76 @@
+import selfhost_borrow;
+
+import std::assert;
+
+extern "C" {
+    fn sengoo_string_live_handle_count() -> i64;
+    fn sengoo_buffer_live_handle_count() -> i64;
+    fn sengoo_opaque_live_handle_count() -> i64;
+}
+
+def sh_borrow_case(raw: &str, expected: i64) -> Result<bool, i64> {
+    let text = string_from_str(raw)?;
+    let parsed = sh_parse(&text, 0, 10000);
+    assert_eq_i64(parsed.error, 0, "borrow.sg", 14);
+    let checked = sh_check(&text, &parsed.ast, 100);
+    if checked.error != 0 { println(checked.error); println(checked.start); println(raw); return result_err_bool(checked.error); };
+    let ownership = sh_check_ownership(&text, &parsed.ast, &checked, 100);
+    if ownership.error != expected { println(ownership.error); println(ownership.start); println(raw); };
+    assert_eq_i64(ownership.error, expected, "borrow.sg", 19);
+    if expected != 0 { assert_true(ownership.diagnostics.len() > 0, "borrow.sg", 21); assert_true(ownership.start >= 0 and ownership.end > ownership.start, "borrow.sg", 22); (); };
+    Result { is_ok: true, value: true, error: 0 };
+}
+
+def sh_test_borrow_round() -> Result<bool, i64> {
+    sh_borrow_case("struct Owner { value: i64, } impl Drop for Owner { def drop(&mut self) {} } def consume(value: Owner) {} def f() { let owner = Owner { value: 1 }; consume(owner); consume(owner); }", 6101)?;
+    sh_borrow_case("struct Owner { value: i64, } impl Drop for Owner { def drop(&mut self) {} } def consume(value: Owner) {} def f() { let owner = Owner { value: 1 }; consume(owner); let owner = Owner { value: 2 }; consume(owner); }", 0)?;
+    sh_borrow_case("def use_ref(value: &i64) {} def f() { let mut value = 1; let a = &value; let b = &mut value; use_ref(a); }", 6103)?;
+    sh_borrow_case("def use_mut(value: &mut i64) {} def f() { let mut value = 1; let a = &mut value; let b = &mut value; use_mut(a); }", 6102)?;
+    sh_borrow_case("def use_ref(value: &i64) {} def f() { let mut value = 1; let a = &value; use_ref(a); let b = &mut value; }", 0)?;
+    sh_borrow_case("def f() -> &i64 { let value = 1; return &value; }", 6105)?;
+    sh_borrow_case("def f() -> &i64 { let value = 1; &value }", 6105)?;
+    sh_borrow_case("def f(value: i64) -> &i64 { &value }", 6105)?;
+    sh_borrow_case("def f(value: &i64) -> &i64 { value }", 0)?;
+    sh_borrow_case("def use_ref(value: &i64) {} def f() { let mut value = 1; let alias = &value; value = 2; use_ref(alias); }", 6106)?;
+    sh_borrow_case("struct Owner { value: i64, } impl Drop for Owner { def drop(&mut self) {} } def consume(value: Owner) {} def f(flag: bool) { let owner = Owner { value: 1 }; if flag { consume(owner); } consume(owner); }", 6101)?;
+    sh_borrow_case("struct Owner { value: i64, } impl Drop for Owner { def drop(&mut self) {} } def consume(value: Owner) {} def f(flag: bool) { let owner = Owner { value: 1 }; if flag { consume(owner); return; } consume(owner); }", 0)?;
+    sh_borrow_case("struct Owner { value: i64, } impl Drop for Owner { def drop(&mut self) {} } def consume(value: Owner) {} def f(flag: bool) { let owner = Owner { value: 1 }; while flag { consume(owner); } }", 6101)?;
+    sh_borrow_case("struct Owner { value: i64, } impl Drop for Owner { def drop(&mut self) {} } def consume(value: Owner) {} def f(flag: bool) { let owner = Owner { value: 1 }; while flag { consume(owner); break; } }", 0)?;
+    sh_borrow_case("def use_ref(value: &i64) {} def f(flag: bool) { let mut value = 1; let alias = &value; while flag { use_ref(alias); value = 2; } }", 6106)?;
+    sh_borrow_case("struct Owner { value: i64, } impl Drop for Owner { def drop(&mut self) {} } struct Pair { left: Owner, right: Owner, } def consume(value: Owner) {} def f() { let pair = Pair { left: Owner { value: 1 }, right: Owner { value: 2 } }; consume(pair.left); consume(pair.right); }", 0)?;
+    sh_borrow_case("struct Owner { value: i64, } impl Drop for Owner { def drop(&mut self) {} } struct Pair { left: Owner, right: Owner, } impl Drop for Pair { def drop(&mut self) {} } def consume(value: Owner) {} def f() { let pair = Pair { left: Owner { value: 1 }, right: Owner { value: 2 } }; consume(pair.left); }", 6107)?;
+    Result { is_ok: true, value: true, error: 0 };
+}
+
+def sh_test_borrow_actions() -> Result<bool, i64> {
+    let text = string_from_str("struct Owner { value: i64, } impl Drop for Owner { def drop(&mut self) {} } def f() { let first = Owner { value: 1 }; let second = Owner { value: 2 }; }")?;
+    let parsed = sh_parse(&text, 0, 10000);
+    let checked = sh_check(&text, &parsed.ast, 100);
+    assert_eq_i64(checked.error, 0, "borrow.sg", 46);
+    let ownership = sh_check_ownership(&text, &parsed.ast, &checked, 100);
+    assert_eq_i64(ownership.error, 0, "borrow.sg", 48);
+    let mut initializations = 0;
+    let mut drops = 0;
+    let mut last = 9223372036854775807;
+    let mut index = 0;
+    while index < sh_ownership_action_count(&ownership) { let kind = sh_ownership_action(&ownership, index, 2); let binding = sh_ownership_action(&ownership, index, 1); if kind == 1 and sh_binding_word(&checked, binding, 2) == 0 { initializations = initializations + 1; }; if kind == 3 { assert_true(binding < last, "borrow.sg", 58); assert_eq_i64(sh_ownership_action(&ownership, index, 4), 0, "borrow.sg", 59); last = binding; drops = drops + 1; }; index = index + 1; };
+    assert_eq_i64(initializations, 2, "borrow.sg", 65);
+    assert_eq_i64(drops, 2, "borrow.sg", 66);
+    assert_eq_i64(sh_ownership_action(&ownership, -1, 0), -1, "borrow.sg", 67);
+    Result { is_ok: true, value: true, error: 0 };
+}
+
+def main() -> i64 {
+    let strings = sengoo_string_live_handle_count();
+    let buffers = sengoo_buffer_live_handle_count();
+    let opaque = sengoo_opaque_live_handle_count();
+    let mut round = 0;
+    while round < 50 { let result = sh_test_borrow_round(); if not result.is_ok() { return 1; }; round = round + 1; };
+    let actions = sh_test_borrow_actions();
+    if not actions.is_ok() { return 2; };
+    assert_eq_i64(sengoo_string_live_handle_count(), strings, "borrow.sg", 83);
+    assert_eq_i64(sengoo_buffer_live_handle_count(), buffers, "borrow.sg", 84);
+    assert_eq_i64(sengoo_opaque_live_handle_count(), opaque, "borrow.sg", 85);
+    println("selfhost ownership: ok");
+    0;
+}

@@ -1,0 +1,266 @@
+import selfhost_parser;
+
+import selfhost_types;
+
+struct ShDiagnostic {
+    code: i64,
+    severity: i64,
+    node: i64,
+    start: i64,
+    end: i64,
+    expected: i64,
+    actual: i64,
+}
+
+struct ShChecked {
+    types: ShTypes,
+    symbols: ShSymbols,
+    node_types: Vec<i64>,
+    resolution: Vec<i64>,
+    node_scopes: Vec<i64>,
+    bindings: Vec<i64>,
+    scopes: Vec<i64>,
+    diagnostics: Vec<ShDiagnostic>,
+    substitutions: Vec<i64>,
+    generic_parameters: Vec<i64>,
+    constraints: Vec<i64>,
+    trait_types: Vec<i64>,
+    class_parents: Vec<i64>,
+    propagation: Vec<i64>,
+    loop_values: Vec<i64>,
+    async_depth: i64,
+    unsafe_depth: i64,
+    error: i64,
+    start: i64,
+    end: i64,
+    diagnostic_limit: i64,
+    current_scope: i64,
+    current_owner: i64,
+    current_return: i64,
+    loop_depth: i64,
+    depth: i64,
+    unit_type: i64,
+    bool_type: i64,
+    integer_type: i64,
+    float_type: i64,
+    char_type: i64,
+    str_type: i64,
+    never_type: i64,
+    error_type: i64,
+}
+
+def sh_s_vector(values: &Vec<i64>, index: i64) -> i64 {
+    sengoo_vec_get_or_default_i64(values.handle, index, -1);
+}
+
+def sh_binding_count(checked: &ShChecked) -> i64 {
+    checked.bindings.len() / 8;
+}
+
+def sh_binding_word(checked: &ShChecked, binding: i64, field: i64) -> i64 {
+    if binding < 0 or binding >= sh_binding_count(checked) or field < 0 or field >= 8 { return -1; };
+    checked.bindings.get(binding * 8 + field).unwrap_or(-1);
+}
+
+def sh_scope_count(checked: &ShChecked) -> i64 {
+    checked.scopes.len() / 3;
+}
+
+def sh_scope_word(checked: &ShChecked, scope: i64, field: i64) -> i64 {
+    if scope < 0 or scope >= sh_scope_count(checked) or field < 0 or field >= 3 { return -1; };
+    checked.scopes.get(scope * 3 + field).unwrap_or(-1);
+}
+
+def sh_node_type(checked: &ShChecked, node: i64) -> i64 {
+    checked.node_types.get(node).unwrap_or(-1);
+}
+
+def sh_node_binding(checked: &ShChecked, node: i64) -> i64 {
+    checked.resolution.get(node).unwrap_or(-1);
+}
+
+def sh_node_scope(checked: &ShChecked, node: i64) -> i64 {
+    checked.node_scopes.get(node).unwrap_or(-1);
+}
+
+def sh_diagnostic_count(checked: &ShChecked) -> i64 {
+    checked.diagnostics.len();
+}
+
+def sh_s_kind(checked: &ShChecked, ty: i64) -> i64 {
+    sh_type_word(&checked.types, ty, 0).unwrap_or(-1);
+}
+
+def sh_s_data(checked: &ShChecked, ty: i64) -> i64 {
+    sh_type_word(&checked.types, ty, 1).unwrap_or(-1);
+}
+
+def sh_s_flags(checked: &ShChecked, ty: i64) -> i64 {
+    sh_type_word(&checked.types, ty, 2).unwrap_or(-1);
+}
+
+def sh_s_nominal(checked: &ShChecked, ty: i64) -> i64 {
+    sh_type_word(&checked.types, ty, 3).unwrap_or(-1);
+}
+
+def sh_s_arity(checked: &ShChecked, ty: i64) -> i64 {
+    sh_type_word(&checked.types, ty, 5).unwrap_or(-1);
+}
+
+def sh_s_argument(checked: &ShChecked, ty: i64, index: i64) -> i64 {
+    sh_type_argument(&checked.types, ty, index).unwrap_or(-1);
+}
+
+def sh_s_diagnose(checked: &mut ShChecked, ast: &ShAst, node: i64, code: i64, severity: i64, expected: i64, actual: i64) {
+    let low = sh_ast_word(ast, node, 2);
+    let high = sh_ast_word(ast, node, 3);
+    let start = if low >= 0 { low; } else { 0; };
+    let end = if high >= start { high; } else { start; };
+    if severity > 0 and checked.error == 0 { checked.error = code; checked.start = start; checked.end = end; };
+    if checked.diagnostics.len() >= checked.diagnostic_limit { if checked.error == 0 { checked.error = 5117; checked.start = start; checked.end = end; }; return; };
+    let item = ShDiagnostic { code: code, severity: severity, node: node, start: start, end: end, expected: expected, actual: actual };
+    if not checked.diagnostics.push(item) { checked.error = 5117; checked.start = start; checked.end = end; };
+}
+
+def sh_s_set_type(checked: &ShChecked, node: i64, ty: i64) -> i64 {
+    if node >= 0 and node < checked.node_types.len() { checked.node_types.set(node, ty); if checked.node_scopes.get(node).unwrap_or(-1) < 0 { checked.node_scopes.set(node, checked.current_scope); (); }; (); };
+    ty;
+}
+
+def sh_s_bind_node(checked: &ShChecked, node: i64, binding: i64) {
+    if node >= 0 and node < checked.resolution.len() { checked.resolution.set(node, binding); checked.node_scopes.set(node, checked.current_scope); (); };
+}
+
+def sh_s_scope(checked: &ShChecked, parent: i64, owner: i64, flags: i64) -> i64 {
+    let id = sh_scope_count(checked);
+    if not checked.scopes.push(parent) or not checked.scopes.push(owner) or not checked.scopes.push(flags) { return -1; };
+    id;
+}
+
+def sh_s_binding(checked: &ShChecked, name: i64, scope: i64, kind: i64, ty: i64, node: i64, flags: i64, owner: i64, aux: i64) -> i64 {
+    let id = sh_binding_count(checked);
+    let stored = checked.bindings.push(name) and checked.bindings.push(scope) and checked.bindings.push(kind) and checked.bindings.push(ty) and checked.bindings.push(node) and checked.bindings.push(flags) and checked.bindings.push(owner) and checked.bindings.push(aux);
+    if not stored { return -1; };
+    sh_s_bind_node(checked, node, id);
+    id;
+}
+
+def sh_s_binding_set(checked: &ShChecked, binding: i64, field: i64, value: i64) -> bool {
+    if binding < 0 or binding >= sh_binding_count(checked) or field < 0 or field >= 8 { return false; };
+    checked.bindings.set(binding * 8 + field, value);
+}
+
+def sh_s_type_binding_kind(kind: i64) -> bool {
+    kind == 3 or kind == 4 or kind == 7 or kind == 8 or kind == 9;
+}
+
+def sh_s_lookup_scope(checked: &ShChecked, name: i64, scope: i64, type_namespace: bool) -> i64 {
+    let mut id = sh_binding_count(checked) - 1;
+    while id >= 0 { let kind = sh_binding_word(checked, id, 2); if sh_binding_word(checked, id, 0) == name and sh_binding_word(checked, id, 1) == scope and sh_s_type_binding_kind(kind) == type_namespace { return id; }; id = id - 1; };
+    -1;
+}
+
+def sh_s_lookup(checked: &ShChecked, name: i64, scope: i64, type_namespace: bool) -> i64 {
+    let mut current = scope;
+    let mut depth = 0;
+    while current >= 0 and depth <= sh_scope_count(checked) { let found = sh_s_lookup_scope(checked, name, current, type_namespace); if found >= 0 { return found; }; current = sh_scope_word(checked, current, 0); depth = depth + 1; };
+    -1;
+}
+
+def sh_s_name(text: &String, ast: &ShAst, node: i64) -> Result<String, i64> {
+    let start = sh_ast_word(ast, node, 2);
+    let end = sh_ast_word(ast, node, 3);
+    text.get(start, end);
+}
+
+def sh_s_symbol(checked: &ShChecked, text: &String, ast: &ShAst, node: i64) -> i64 {
+    let name = sh_s_name(text, ast, node);
+    if not name.is_ok() { return -1; };
+    sh_intern(&checked.symbols, &name.value).unwrap_or(-1);
+}
+
+def sh_s_symbol_text(checked: &ShChecked, symbol: i64) -> Result<String, i64> {
+    sh_symbol_text(&checked.symbols, symbol);
+}
+
+def sh_s_type(checked: &ShChecked, kind: i64, data: i64, flags: i64, nominal: i64, arguments: &Vec<i64>) -> i64 {
+    sh_type_intern(&checked.types, kind, data, flags, nominal, arguments).unwrap_or(checked.error_type);
+}
+
+def sh_s_primitive(checked: &ShChecked, kind: i64, data: i64, flags: i64) -> i64 {
+    sh_type_primitive(&checked.types, kind, data, flags).unwrap_or(checked.error_type);
+}
+
+def sh_s_unary_type(checked: &ShChecked, kind: i64, data: i64, flags: i64, inner: i64) -> i64 {
+    let args = vec_new_i64();
+    args.push(inner);
+    sh_s_type(checked, kind, data, flags, -1, &args);
+}
+
+def sh_s_resolve(checked: &ShChecked, ty: i64) -> i64 {
+    let mut current = ty;
+    let mut count = 0;
+    while current >= 0 and count <= sh_type_count(&checked.types) { let next = checked.substitutions.get(current).unwrap_or(-1); if next < 0 or next == current { return current; }; current = next; count = count + 1; };
+    checked.error_type;
+}
+
+def sh_s_fresh(checked: &ShChecked) -> i64 {
+    let variable = sh_type_count(&checked.types);
+    sh_s_primitive(checked, 19, variable, 0);
+}
+
+def sh_s_occurs(checked: &ShChecked, variable: i64, value: i64, depth: i64) -> bool {
+    if depth > 128 { return true; };
+    let ty = sh_s_resolve(checked, value);
+    if variable == ty { return true; };
+    let mut index = 0;
+    while index < sh_s_arity(checked, ty) { if sh_s_occurs(checked, variable, sh_s_argument(checked, ty, index), depth + 1) { return true; }; index = index + 1; };
+    false;
+}
+
+def sh_s_substitute(checked: &ShChecked, variable: i64, value: i64) -> bool {
+    while checked.substitutions.len() <= variable { if not checked.substitutions.push(-1) { return false; }; };
+    checked.substitutions.set(variable, value);
+}
+
+def sh_s_unify(checked: &ShChecked, expected: i64, actual: i64, depth: i64) -> bool {
+    if depth > 128 or expected < 0 or actual < 0 { return false; };
+    let left = sh_s_resolve(checked, expected);
+    let right = sh_s_resolve(checked, actual);
+    if left == right { return true; };
+    let a = sh_s_kind(checked, left);
+    let b = sh_s_kind(checked, right);
+    if a == 18 or b == 18 or a == 17 or b == 17 { return true; };
+    if a == 19 { if sh_s_occurs(checked, left, right, 0) { return false; }; return sh_s_substitute(checked, left, right); };
+    if b == 19 { if sh_s_occurs(checked, right, left, 0) { return false; }; return sh_s_substitute(checked, right, left); };
+    if a != b or sh_s_data(checked, left) != sh_s_data(checked, right) or sh_s_nominal(checked, left) != sh_s_nominal(checked, right) or sh_s_arity(checked, left) != sh_s_arity(checked, right) { return false; };
+    if sh_s_flags(checked, left) != sh_s_flags(checked, right) and not (a == 6 and sh_s_flags(checked, left) == 0 and sh_s_flags(checked, right) == 1) { return false; };
+    let mut index = 0;
+    while index < sh_s_arity(checked, left) { if not sh_s_unify(checked, sh_s_argument(checked, left, index), sh_s_argument(checked, right, index), depth + 1) { return false; }; index = index + 1; };
+    true;
+}
+
+def sh_s_expect(checked: &mut ShChecked, ast: &ShAst, node: i64, expected: i64, actual: i64) -> bool {
+    if sh_s_unify(checked, expected, actual, 0) { return true; };
+    sh_s_diagnose(checked, ast, node, 5104, 1, expected, actual);
+    false;
+}
+
+def sh_s_new(ast: &ShAst, maximum: i64) -> ShChecked {
+    let types = sh_types_new(1000000);
+    let unit = sh_type_primitive(&types, 0, 0, 0).unwrap_or(-1);
+    let boolean = sh_type_primitive(&types, 1, 0, 0).unwrap_or(-1);
+    let integer = sh_type_primitive(&types, 2, 64, 1).unwrap_or(-1);
+    let floating = sh_type_primitive(&types, 3, 64, 0).unwrap_or(-1);
+    let character = sh_type_primitive(&types, 4, 0, 0).unwrap_or(-1);
+    let string = sh_type_primitive(&types, 5, 0, 0).unwrap_or(-1);
+    let never = sh_type_primitive(&types, 17, 0, 0).unwrap_or(-1);
+    let error = sh_type_primitive(&types, 18, 0, 0).unwrap_or(-1);
+    let diagnostics: Vec<ShDiagnostic> = vec_new();
+    let mut result = ShChecked { types: types, symbols: sh_symbols_new(1000000), node_types: vec_new_i64(), resolution: vec_new_i64(), node_scopes: vec_new_i64(), bindings: vec_new_i64(), scopes: vec_new_i64(), diagnostics: diagnostics, substitutions: vec_new_i64(), generic_parameters: vec_new_i64(), constraints: vec_new_i64(), trait_types: vec_new_i64(), class_parents: vec_new_i64(), propagation: vec_new_i64(), loop_values: vec_new_i64(), async_depth: 0, unsafe_depth: 0, error: 0, start: 0, end: 0, diagnostic_limit: maximum, current_scope: 0, current_owner: -1, current_return: -1, loop_depth: 0, depth: 0, unit_type: unit, bool_type: boolean, integer_type: integer, float_type: floating, char_type: character, str_type: string, never_type: never, error_type: error };
+    sh_s_scope(&result, -1, -1, 0);
+    let mut index = 0;
+    while index < sh_ast_count(ast) { if not result.node_types.push(-1) or not result.resolution.push(-1) or not result.node_scopes.push(-1) { result.error = 5117; return result; }; index = index + 1; };
+    if maximum < 1 or maximum > 1000000 { result.error = 5117; };
+    result;
+}

@@ -1,0 +1,171 @@
+import selfhost_mir;
+
+import selfhost_lexer;
+
+def sh_mir_problem(mir: &ShMir, error: i64, function: i64, block: i64, instruction: i64) -> ShMirValidation {
+    let mut source = -1;
+    let mut start = 0;
+    let mut end = 0;
+    if instruction >= 0 and instruction < sh_mir_inst_count(mir) { source = sh_mir_inst(mir, instruction, 9); start = sh_mir_inst(mir, instruction, 10); end = sh_mir_inst(mir, instruction, 11); } else { if block >= 0 and block < sh_mir_block_count(mir) { let span = sh_mir_block(mir, block, 6); source = sh_mir_word(&mir.spans, 3, span, 0); start = sh_mir_word(&mir.spans, 3, span, 1); end = sh_mir_word(&mir.spans, 3, span, 2); }; };
+    ShMirValidation { error: error, function: function, block: block, instruction: instruction, source: source, start: start, end: end };
+}
+
+def sh_mir_reachable(mir: &ShMir, entry: i64, target: i64, avoid: i64) -> i64 {
+    let count = sh_mir_block_count(mir);
+    if entry < 0 or entry >= count or target < 0 or target >= count or avoid < -1 or avoid >= count { return -1; };
+    if entry == avoid { return 0; };
+    if entry == target { return 1; };
+    let seen = vec_new_i64();
+    let queue = vec_new_i64();
+    let mut index = 0;
+    while index < count { if not seen.push(0) { return -1; }; index = index + 1; };
+    if not seen.set(entry, 1) or not queue.push(entry) { return -1; };
+    let function = sh_mir_block(mir, entry, 0);
+    index = 0;
+    while index < queue.len() { let block = sengoo_vec_get_or_default_i64(queue.handle, index, -1); let term = sh_mir_block(mir, block, 4); if term < 0 or term >= sh_mir_term_count(mir) { return -1; }; let first = sh_mir_term(mir, term, 4); let edges = sh_mir_term(mir, term, 5); if first < 0 or edges < 0 or first > sh_mir_edge_count(mir) or edges > sh_mir_edge_count(mir) - first { return -1; }; let mut edge = 0; while edge < edges { let next = sh_mir_edge(mir, first + edge, 1); if next < 0 or next >= count or sh_mir_block(mir, next, 0) != function { return -1; }; if next != avoid { if next == target { return 1; }; if sengoo_vec_get_or_default_i64(seen.handle, next, -1) == 0 { if not seen.set(next, 1) or not queue.push(next) { return -1; }; }; }; edge = edge + 1; }; index = index + 1; };
+    0;
+}
+
+def sh_mir_use_valid(mir: &ShMir, value: i64, function: i64, block: i64, before: i64) -> i64 {
+    if value < 0 or value >= sh_mir_inst_count(mir) or sh_mir_inst(mir, value, 0) != function { return 5005; };
+    let defined = sh_mir_inst(mir, value, 1);
+    if defined == block { if value >= before { return 5005; }; return 0; };
+    // Unreachable blocks cannot import arbitrary unrelated SSA definitions.
+    let accessible = sh_mir_reachable(mir, sh_mir_fn(mir, function, 2), block, -1);
+    if accessible < 0 { return 5004; }; if accessible == 0 { return 5005; };
+    let reaches = sh_mir_reachable(mir, sh_mir_fn(mir, function, 2), block, defined);
+    if reaches < 0 { return 5004; };
+    if reaches == 1 { return 5005; };
+    0;
+}
+
+def sh_mir_pointer(mir: &ShMir, ty: i64) -> bool {
+    let kind = sh_mir_type_word(mir, ty, 0);
+    kind == 6 or kind == 7;
+}
+
+def sh_mir_validate_types(mir: &ShMir) -> i64 {
+    if sh_mir_count(&mir.types.words, 6) < 0 or mir.types.arguments.len() > mir.limit { return 5001; };
+    let mut ty = 0;
+    while ty < sh_type_count(&mir.types) { let kind = sh_mir_type_word(mir, ty, 0); let data = sh_mir_type_word(mir, ty, 1); let flags = sh_mir_type_word(mir, ty, 2); let nominal = sh_mir_type_word(mir, ty, 3); let first = sh_mir_type_word(mir, ty, 4); let count = sh_mir_type_word(mir, ty, 5); if first < 0 or count < 0 or first > mir.types.arguments.len() or count > mir.types.arguments.len() - first or not sh_type_shape(kind, data, flags, nominal, count) { return 5003; }; if kind >= 12 and kind <= 15 and nominal >= sh_symbol_count(&mir.symbols) { return 5003; }; let mut argument = 0; while argument < count { let value = sh_mir_type_arg(mir, ty, argument); if value < 0 or value >= ty { return 5003; }; argument = argument + 1; }; ty = ty + 1; };
+    let mut layout = 0;
+    while layout < sh_mir_count(&mir.layouts, 7) { let layout_type = sh_mir_word(&mir.layouts, 7, layout, 0); let variant = sh_mir_word(&mir.layouts, 7, layout, 1); let first = sh_mir_word(&mir.layouts, 7, layout, 2); let count = sh_mir_word(&mir.layouts, 7, layout, 3); let destructor = sh_mir_word(&mir.layouts, 7, layout, 4); let size = sh_mir_word(&mir.layouts, 7, layout, 5); let alignment = sh_mir_word(&mir.layouts, 7, layout, 6); if sh_mir_type_word(mir, layout_type, 0) != 12 or variant < -1 or (sh_mir_type_word(mir, layout_type, 1) == 1) != (variant >= 0) or first < 0 or count < 0 or first > sh_mir_count(&mir.fields, 2) or count > sh_mir_count(&mir.fields, 2) - first or destructor < -1 or destructor >= sh_mir_fn_count(mir) or size < -1 or alignment < -1 or (size >= 0 and alignment <= 0) or alignment > 4096 { return 5003; }; let mut power = 1; while power < alignment { power = power * 2; }; if alignment > 0 and power != alignment { return 5003; }; let mut previous = 0; while previous < layout { if sh_mir_word(&mir.layouts, 7, previous, 0) == layout_type and sh_mir_word(&mir.layouts, 7, previous, 1) == variant { return 5003; }; previous = previous + 1; }; let mut field = 0; while field < count { let field_type = sh_mir_word(&mir.fields, 2, first + field, 0); let offset = sh_mir_word(&mir.fields, 2, first + field, 1); if not sh_mir_valid_type(mir, field_type) or offset < -1 or size >= 0 and (offset < 0 or offset > size) { return 5003; }; field = field + 1; }; if destructor >= 0 { let signature = sh_mir_fn(mir, destructor, 1); let parameter = sh_mir_type_arg(mir, signature, 0); let result = sh_mir_type_arg(mir, signature, 1); if sh_mir_type_word(mir, signature, 0) != 11 or sh_mir_type_word(mir, signature, 1) != 0 or sh_mir_type_word(mir, signature, 5) != 2 or sh_mir_type_word(mir, parameter, 0) != 6 or sh_mir_type_word(mir, parameter, 2) != 1 or sh_mir_type_arg(mir, parameter, 0) != layout_type or sh_mir_type_word(mir, result, 0) != 0 { return 5007; }; }; layout = layout + 1; };
+    let mut field = 0;
+    while field < sh_mir_count(&mir.fields, 2) {
+        if not sh_mir_valid_type(mir, sh_mir_word(&mir.fields, 2, field, 0)) or sh_mir_word(&mir.fields, 2, field, 1) < -1 { return 5003; };
+        let mut owners = 0;
+        layout = 0;
+        while layout < sh_mir_count(&mir.layouts, 7) { let first = sh_mir_word(&mir.layouts, 7, layout, 2); if field >= first and field - first < sh_mir_word(&mir.layouts, 7, layout, 3) { owners = owners + 1; }; layout = layout + 1; };
+        if owners != 1 { return 5003; };
+        field = field + 1;
+    };
+    0;
+}
+
+def sh_mir_value_type(mir: &ShMir, value: i64) -> i64 {
+    sh_mir_inst(mir, value, 3);
+}
+
+def sh_mir_inst_typecheck(mir: &ShMir, id: i64) -> i64 {
+    let opcode = sh_mir_inst(mir, id, 2);
+    let ty = sh_mir_inst(mir, id, 3);
+    let count = sh_mir_inst(mir, id, 5);
+    let aux = sh_mir_inst(mir, id, 6);
+    let extra = sh_mir_inst(mir, id, 7);
+    let flags = sh_mir_inst(mir, id, 8);
+    let kind = sh_mir_type_word(mir, ty, 0);
+    let function = sh_mir_inst(mir, id, 0);
+    let block = sh_mir_inst(mir, id, 1);
+    let first = sh_mir_inst_arg(mir, id, 0);
+    let second = sh_mir_inst_arg(mir, id, 1);
+    let a = sh_mir_value_type(mir, first);
+    let b = sh_mir_value_type(mir, second);
+    if opcode == 1 { let signature = sh_mir_fn(mir, function, 1); let parameters = sh_mir_type_word(mir, signature, 5) - 1; if count != 0 or aux < 0 or aux >= parameters or block != sh_mir_fn(mir, function, 2) or ty != sh_mir_type_arg(mir, signature, aux) { return 5006; }; return 0; };
+    if opcode == 2 { if count != 0 or aux < 0 or sh_mir_parameter(mir, block, aux) != id { return 5003; }; return 0; };
+    if opcode == 3 { return if count == 0 and kind == 0 { 0; } else { 5003; }; };
+    if opcode == 4 { return if count == 0 and kind == 2 { 0; } else { 5003; }; };
+    if opcode == 5 { return if count == 0 and kind == 3 and (flags == 0 or flags == 1 and aux >= 0 and aux < sh_symbol_count(&mir.symbols)) { 0; } else { 5003; }; };
+    if opcode == 6 { return if count == 0 and kind == 1 and (aux == 0 or aux == 1) { 0; } else { 5003; }; };
+    if opcode == 7 { return if count == 0 and kind == 4 and aux >= 0 and aux <= 1114111 and not (aux >= 55296 and aux <= 57343) { 0; } else { 5003; }; };
+    if opcode == 8 { return if count == 0 and (kind == 5 or kind == 6 and sh_mir_type_word(mir, sh_mir_type_arg(mir, ty, 0), 0) == 5 or kind == 9 and sh_mir_type_word(mir, sh_mir_type_arg(mir, ty, 0), 0) == 2) and aux >= 0 and aux < sh_symbol_count(&mir.symbols) { 0; } else { 5003; }; };
+    if opcode == 9 { return if count == 0 and kind == 11 and aux >= 0 and aux < sh_mir_fn_count(mir) and ty == sh_mir_fn(mir, aux, 1) { 0; } else { 5006; }; };
+    if opcode == 10 { if count != 1 or a != ty { return 5003; }; if aux == sh_kind("-") { return if kind == 2 or kind == 3 { 0; } else { 5003; }; }; if aux == sh_kind("!") or aux == sh_kind("not") { return if kind == 1 { 0; } else { 5003; }; }; if aux == sh_kind("~") { return if kind == 2 { 0; } else { 5003; }; }; return 5003; };
+    if opcode == 11 { if count != 2 or a != b { return 5003; }; let input_kind = sh_mir_type_word(mir, a, 0); if aux == sh_kind("==") or aux == sh_kind("!=") or aux == sh_kind("<") or aux == sh_kind("<=") or aux == sh_kind(">") or aux == sh_kind(">=") { return if kind == 1 and (input_kind >= 1 and input_kind <= 4 or input_kind == 6 or input_kind == 7 or input_kind == 11) { 0; } else { 5003; }; }; if aux == sh_kind("&&") or aux == sh_kind("||") or aux == sh_kind("and") or aux == sh_kind("or") { return if kind == 1 and input_kind == 1 { 0; } else { 5003; }; }; if a != ty { return 5003; }; if aux == sh_kind("+") or aux == sh_kind("-") or aux == sh_kind("*") or aux == sh_kind("/") or aux == sh_kind("%") { return if kind == 2 or kind == 3 { 0; } else { 5003; }; }; if aux == sh_kind("&") or aux == sh_kind("|") or aux == sh_kind("^") or aux == sh_kind("<<") or aux == sh_kind(">>") { return if kind == 2 { 0; } else { 5003; }; }; return 5003; };
+    if opcode == 12 { if count != 1 or flags < 0 or flags > 1 { return 5003; }; let input_kind = sh_mir_type_word(mir, a, 0); if kind >= 1 and kind <= 4 and input_kind >= 1 and input_kind <= 4 { return 0; }; if flags == 1 and (kind == 7 or kind == 2 and sh_mir_type_word(mir, ty, 1) == 64) and (input_kind == 7 or input_kind == 2 and sh_mir_type_word(mir, a, 1) == 64) { return 0; }; return 5003; };
+    if opcode == 13 { if count != 0 or not sh_mir_pointer(mir, ty) or aux < 0 or aux >= sh_mir_local_count(mir) or sh_mir_local(mir, aux, 0) != function or sh_mir_type_arg(mir, ty, 0) != sh_mir_local(mir, aux, 1) { return 5007; }; if sh_mir_type_word(mir, ty, 2) % 2 == 1 and sh_mir_local(mir, aux, 4) % 2 == 0 { return 5007; }; return 0; };
+    if opcode == 14 { return if count == 1 and sh_mir_pointer(mir, a) and sh_mir_type_arg(mir, a, 0) == ty { 0; } else { 5007; }; };
+    if opcode == 15 { return if count == 2 and kind == 0 and sh_mir_pointer(mir, a) and sh_mir_type_word(mir, a, 2) % 2 == 1 and sh_mir_type_arg(mir, a, 0) == b { 0; } else { 5007; }; };
+    if opcode == 16 or opcode == 24 { let variant = if opcode == 24 { aux; } else { -1; }; let fields = sh_mir_field_count(mir, ty, variant); if fields < 0 or count != fields or opcode == 24 and (kind != 12 or sh_mir_type_word(mir, ty, 1) != 1) { return 5003; }; let mut i = 0; while i < count { if sh_mir_value_type(mir, sh_mir_inst_arg(mir, id, i)) != sh_mir_field_type(mir, ty, variant, i) { return 5003; }; i = i + 1; }; return 0; };
+    if opcode == 17 { if count != 1 or not sh_mir_pointer(mir, a) or not sh_mir_pointer(mir, ty) or sh_mir_type_word(mir, a, 0) != kind { return 5007; }; if sh_mir_type_word(mir, ty, 2) > sh_mir_type_word(mir, a, 2) { return 5007; }; return if sh_mir_type_arg(mir, ty, 0) == sh_mir_field_type(mir, sh_mir_type_arg(mir, a, 0), extra, aux) { 0; } else { 5007; }; };
+    if opcode == 18 { return if count == 1 and ty == sh_mir_field_type(mir, a, extra, aux) { 0; } else { 5003; }; };
+    if opcode == 19 { if count != 2 or not sh_mir_pointer(mir, a) or not sh_mir_pointer(mir, ty) or sh_mir_type_word(mir, b, 0) != 2 or sh_mir_type_word(mir, a, 0) != kind { return 5007; }; let base = sh_mir_type_arg(mir, a, 0); let base_kind = sh_mir_type_word(mir, base, 0); let element = if base_kind == 8 or base_kind == 9 { sh_mir_type_arg(mir, base, 0); } else { base; }; if base_kind != 8 and base_kind != 9 and sh_mir_type_word(mir, a, 0) != 7 { return 5007; }; return if element == sh_mir_type_arg(mir, ty, 0) and sh_mir_type_word(mir, ty, 2) <= sh_mir_type_word(mir, a, 2) { 0; } else { 5007; }; };
+    if opcode == 20 { let signature = if aux >= 0 and aux < sh_mir_fn_count(mir) { sh_mir_fn(mir, aux, 1); } else { a; }; let prefix = if aux == -1 { 1; } else { 0; }; if aux < -1 or aux >= sh_mir_fn_count(mir) or sh_mir_type_word(mir, signature, 0) != 11 or extra != sh_mir_type_word(mir, signature, 1) { return 5006; }; let parameters = sh_mir_type_word(mir, signature, 5) - 1; let variadic = sh_mir_type_word(mir, signature, 2) % 2 == 1; if count - prefix < parameters or not variadic and count - prefix != parameters or variadic and extra != 1 or ty != sh_mir_type_arg(mir, signature, parameters) { return 5006; }; let mut i = 0; while i < parameters { if sh_mir_value_type(mir, sh_mir_inst_arg(mir, id, i + prefix)) != sh_mir_type_arg(mir, signature, i) { return 5006; }; i = i + 1; }; while i < count - prefix { let promoted = sh_mir_value_type(mir, sh_mir_inst_arg(mir, id, i + prefix)); let promoted_kind = sh_mir_type_word(mir, promoted, 0); if not (promoted_kind == 2 and sh_mir_type_word(mir, promoted, 1) >= 32 or promoted_kind == 3 and sh_mir_type_word(mir, promoted, 1) == 64 or promoted_kind == 7 or promoted_kind == 11) { return 5006; }; i = i + 1; }; return 0; };
+    if opcode == 21 { if count != 1 or kind != 0 or not sh_mir_pointer(mir, a) or sh_mir_type_word(mir, a, 2) != 1 or extra != sh_mir_type_arg(mir, a, 0) or flags < 0 or flags > 1 { return 5007; }; if aux >= 0 and (aux >= sh_mir_local_count(mir) or sh_mir_local(mir, aux, 0) != function or sh_mir_local(mir, aux, 1) != extra or sh_mir_local(mir, aux, 4) < 2 or sh_mir_inst(mir, first, 2) != 13 or sh_mir_inst(mir, first, 6) != aux) { return 5007; }; if aux < -1 { return 5007; }; return 0; };
+    if opcode == 22 { return if count == 3 and kind == 0 and sh_mir_pointer(mir, a) and sh_mir_pointer(mir, b) and sh_mir_type_word(mir, a, 2) == 1 and sh_mir_type_arg(mir, a, 0) == sh_mir_type_arg(mir, b, 0) and sh_mir_type_word(mir, sh_mir_value_type(mir, sh_mir_inst_arg(mir, id, 2)), 0) == 2 { 0; } else { 5007; }; };
+    if opcode == 23 { return if count == 1 and kind == 2 and sh_mir_type_word(mir, a, 0) == 12 and sh_mir_type_word(mir, a, 1) == 1 { 0; } else { 5003; }; };
+    if opcode == 25 { return if count == 0 and kind == 0 and aux >= 0 and aux < sh_mir_local_count(mir) and sh_mir_local(mir, aux, 0) == function and (extra == 0 or extra == 1) { 0; } else { 5007; }; };
+    5003;
+}
+
+def sh_mir_validate_ownership(mir: &ShMir) -> ShMirValidation {
+    // Every flat edge and block parameter must belong to exactly one declared range.
+    let mut edge = 0;
+    while edge < sh_mir_edge_count(mir) {
+        let term = sh_mir_edge(mir, edge, 0);
+        if term < 0 or term >= sh_mir_term_count(mir) { return sh_mir_problem(mir, 5004, -1, -1, -1); };
+        let first = sh_mir_term(mir, term, 4);
+        if edge < first or edge - first >= sh_mir_term(mir, term, 5) { return sh_mir_problem(mir, 5004, sh_mir_term(mir, term, 0), sh_mir_term(mir, term, 1), -1); };
+        edge = edge + 1;
+    };
+    let mut slot = 0;
+    while slot < mir.parameters.len() {
+        let instruction = mir.parameters.get(slot).unwrap_or(-1);
+        let block = sh_mir_inst(mir, instruction, 1);
+        let first = sh_mir_block(mir, block, 2);
+        if instruction < 0 or instruction >= sh_mir_inst_count(mir) or block < 0 or block >= sh_mir_block_count(mir) or slot < first or slot - first >= sh_mir_block(mir, block, 3) or sh_mir_inst(mir, instruction, 2) != 2 or sh_mir_inst(mir, instruction, 6) != slot - first { return sh_mir_problem(mir, 5004, -1, block, instruction); };
+        slot = slot + 1;
+    };
+    let mut function = 0;
+    while function < sh_mir_fn_count(mir) {
+        let root = sh_mir_fn(mir, function, 7);
+        let external = sh_mir_fn(mir, function, 3) % 2 == 1;
+        if external and root != -1 or not external and (root < 0 or root >= sh_mir_scope_count(mir) or sh_mir_scope(mir, root, 0) != function or sh_mir_scope(mir, root, 1) != -1) { return sh_mir_problem(mir, 5002, function, -1, -1); };
+        let mut parameter = 0;
+        while not external and parameter < sh_mir_type_word(mir, sh_mir_fn(mir, function, 1), 5) - 1 {
+            let mut matches = 0;
+            let mut instruction = 0;
+            while instruction < sh_mir_inst_count(mir) { if sh_mir_inst(mir, instruction, 0) == function and sh_mir_inst(mir, instruction, 2) == 1 and sh_mir_inst(mir, instruction, 6) == parameter { matches = matches + 1; }; instruction = instruction + 1; };
+            if matches != 1 { return sh_mir_problem(mir, 5006, function, sh_mir_fn(mir, function, 2), -1); };
+            parameter = parameter + 1;
+        };
+        function = function + 1;
+    };
+    sh_mir_problem(mir, 0, -1, -1, -1);
+}
+
+def sh_mir_validate(mir: &ShMir) -> ShMirValidation {
+    if mir.schema != 1 or mir.target != 1 or mir.runtime_abi != 1 or mir.pointer_width != 64 or not sh_mir_limit(mir) { return sh_mir_problem(mir, 5001, -1, -1, -1); };
+    let counts = [sh_mir_fn_count(mir), sh_mir_local_count(mir), sh_mir_scope_count(mir), sh_mir_block_count(mir), sh_mir_inst_count(mir), sh_mir_term_count(mir), sh_mir_edge_count(mir), sh_mir_count(&mir.layouts, 7), sh_mir_count(&mir.fields, 2), sh_mir_count(&mir.sources, 2), sh_mir_count(&mir.spans, 3)];
+    let mut i = 0;
+    while i < 11 { if counts[i] < 0 or counts[i] > mir.limit { return sh_mir_problem(mir, 5001, -1, -1, -1); }; i = i + 1; };
+    if mir.operands.len() > mir.limit or mir.parameters.len() > mir.limit or sh_type_count(&mir.types) > mir.limit or sh_symbol_count(&mir.symbols) > mir.limit { return sh_mir_problem(mir, 5001, -1, -1, -1); };
+    let type_problem = sh_mir_validate_types(mir);
+    if type_problem != 0 { return sh_mir_problem(mir, type_problem, -1, -1, -1); };
+    let ownership_problem = sh_mir_validate_ownership(mir);
+    if ownership_problem.error != 0 { return ownership_problem; };
+    i = 0;
+    while i < sh_mir_fn_count(mir) { let signature = sh_mir_fn(mir, i, 1); let entry = sh_mir_fn(mir, i, 2); let flags = sh_mir_fn(mir, i, 3); if sh_mir_fn(mir, i, 0) < 0 or sh_mir_fn(mir, i, 0) >= sh_symbol_count(&mir.symbols) or sh_mir_type_word(mir, signature, 0) != 11 or flags < 0 or flags > 3 or not sh_mir_span_valid(mir, sh_mir_fn(mir, i, 4), sh_mir_fn(mir, i, 5), sh_mir_fn(mir, i, 6)) { return sh_mir_problem(mir, 5003, i, -1, -1); }; if flags % 2 == 1 { if entry != -1 { return sh_mir_problem(mir, 5004, i, entry, -1); }; } else { if entry < 0 or entry >= sh_mir_block_count(mir) or sh_mir_block(mir, entry, 0) != i or sh_mir_block(mir, entry, 3) != 0 { return sh_mir_problem(mir, 5004, i, entry, -1); }; }; i = i + 1; };
+    i = 0;
+    while i < sh_mir_scope_count(mir) { let function = sh_mir_scope(mir, i, 0); let parent = sh_mir_scope(mir, i, 1); if function < 0 or function >= sh_mir_fn_count(mir) or parent < -1 or parent >= i or parent >= 0 and sh_mir_scope(mir, parent, 0) != function { return sh_mir_problem(mir, 5002, function, -1, -1); }; i = i + 1; };
+    i = 0;
+    while i < sh_mir_local_count(mir) { let function = sh_mir_local(mir, i, 0); let scope = sh_mir_local(mir, i, 5); let local_kind = sh_mir_local(mir, i, 3); if function < 0 or function >= sh_mir_fn_count(mir) or not sh_mir_valid_type(mir, sh_mir_local(mir, i, 1)) or local_kind < 0 or local_kind > 3 or sh_mir_local(mir, i, 4) < 0 or sh_mir_local(mir, i, 4) > 3 or scope < 0 or scope >= sh_mir_scope_count(mir) or sh_mir_scope(mir, scope, 0) != function or not sh_mir_span_valid(mir, sh_mir_local(mir, i, 7), sh_mir_local(mir, i, 8), sh_mir_local(mir, i, 9)) { return sh_mir_problem(mir, 5007, function, -1, -1); }; if local_kind == 1 { let ordinal = sh_mir_local(mir, i, 6); let signature = sh_mir_fn(mir, function, 1); if ordinal < 0 or ordinal >= sh_mir_type_word(mir, signature, 5) - 1 or sh_mir_local(mir, i, 1) != sh_mir_type_arg(mir, signature, ordinal) { return sh_mir_problem(mir, 5006, function, -1, -1); }; }; i = i + 1; };
+    i = 0;
+    while i < sh_mir_block_count(mir) { let function = sh_mir_block(mir, i, 0); let scope = sh_mir_block(mir, i, 1); let term = sh_mir_block(mir, i, 4); let span = sh_mir_block(mir, i, 6); if function < 0 or function >= sh_mir_fn_count(mir) or sh_mir_fn(mir, function, 3) % 2 == 1 or scope < 0 or scope >= sh_mir_scope_count(mir) or sh_mir_scope(mir, scope, 0) != function or term < 0 or term >= sh_mir_term_count(mir) or sh_mir_term(mir, term, 0) != function or sh_mir_term(mir, term, 1) != i { return sh_mir_problem(mir, 5004, function, i, -1); }; if span < 0 or span >= sh_mir_count(&mir.spans, 3) or not sh_mir_span_valid(mir, sh_mir_word(&mir.spans, 3, span, 0), sh_mir_word(&mir.spans, 3, span, 1), sh_mir_word(&mir.spans, 3, span, 2)) { return sh_mir_problem(mir, 5002, function, i, -1); }; let first = sh_mir_block(mir, i, 2); let count = sh_mir_block(mir, i, 3); if count < 0 or count > mir.parameters.len() or count == 0 and first != -1 or count > 0 and (first < 0 or first > mir.parameters.len() - count) { return sh_mir_problem(mir, 5004, function, i, -1); }; let mut param = 0; while param < count { let instruction = sh_mir_parameter(mir, i, param); if instruction < 0 or instruction >= sh_mir_inst_count(mir) or sh_mir_inst(mir, instruction, 1) != i or sh_mir_inst(mir, instruction, 2) != 2 or sh_mir_inst(mir, instruction, 6) != param { return sh_mir_problem(mir, 5004, function, i, instruction); }; param = param + 1; }; i = i + 1; };
+    i = 0;
+    while i < sh_mir_term_count(mir) { let function = sh_mir_term(mir, i, 0); let block = sh_mir_term(mir, i, 1); let kind = sh_mir_term(mir, i, 2); let value = sh_mir_term(mir, i, 3); let first = sh_mir_term(mir, i, 4); let count = sh_mir_term(mir, i, 5); if function < 0 or function >= sh_mir_fn_count(mir) or block < 0 or block >= sh_mir_block_count(mir) or sh_mir_block(mir, block, 0) != function or sh_mir_block(mir, block, 4) != i or kind < 1 or kind > 5 or first < 0 or count < 0 or first > sh_mir_edge_count(mir) or count > sh_mir_edge_count(mir) - first or sh_mir_term(mir, i, 6) < 0 or sh_mir_term(mir, i, 6) > sh_mir_inst_count(mir) { return sh_mir_problem(mir, 5004, function, block, -1); }; if not sh_mir_span_valid(mir, sh_mir_term(mir, i, 7), sh_mir_term(mir, i, 8), sh_mir_term(mir, i, 9)) { return sh_mir_problem(mir, 5002, function, block, -1); }; if kind == 1 and (count != 1 or value != -1) or kind == 2 and (count != 2 or value < 0) or (kind == 3 or kind == 4) and count != 0 or kind == 4 and value != -1 or kind == 5 and (count < 1 or value < 0) { return sh_mir_problem(mir, 5004, function, block, -1); }; if value >= 0 { if value >= sh_mir_inst_count(mir) or sh_mir_inst(mir, value, 0) != function { return sh_mir_problem(mir, 5005, function, block, value); }; } else { if value != -1 { return sh_mir_problem(mir, 5005, function, block, value); }; }; let mut edge = 0; let mut defaults = 0; while edge < count { let id = first + edge; let target = sh_mir_edge(mir, id, 1); let arguments = sh_mir_edge(mir, id, 3); let offset = sh_mir_edge(mir, id, 2); let flags = sh_mir_edge(mir, id, 5); if sh_mir_edge(mir, id, 0) != i or target < 0 or target >= sh_mir_block_count(mir) or sh_mir_block(mir, target, 0) != function or arguments != sh_mir_block(mir, target, 3) or offset < 0 or arguments < 0 or offset > mir.operands.len() or arguments > mir.operands.len() - offset or flags < 0 or flags > 3 { return sh_mir_problem(mir, 5004, function, block, -1); }; if kind == 5 and flags % 2 == 1 { defaults = defaults + 1; }; let mut arg = 0; while arg < arguments { let operand = sh_mir_edge_arg(mir, id, arg); let parameter = sh_mir_parameter(mir, target, arg); if operand < 0 or operand >= sh_mir_inst_count(mir) or sh_mir_inst(mir, operand, 0) != function { return sh_mir_problem(mir, 5005, function, block, operand); }; if sh_mir_value_type(mir, operand) != sh_mir_value_type(mir, parameter) { return sh_mir_problem(mir, 5003, function, block, operand); }; arg = arg + 1; }; edge = edge + 1; }; if kind == 5 and defaults != 1 { return sh_mir_problem(mir, 5004, function, block, -1); }; if kind == 2 and sh_mir_type_word(mir, sh_mir_value_type(mir, value), 0) != 1 { return sh_mir_problem(mir, 5003, function, block, value); }; if kind == 5 and sh_mir_type_word(mir, sh_mir_value_type(mir, value), 0) != 2 { return sh_mir_problem(mir, 5003, function, block, value); }; if kind == 3 { let signature = sh_mir_fn(mir, function, 1); let expected = sh_mir_type_arg(mir, signature, sh_mir_type_word(mir, signature, 5) - 1); if value == -1 and sh_mir_type_word(mir, expected, 0) != 0 or value >= 0 and sh_mir_value_type(mir, value) != expected { return sh_mir_problem(mir, 5003, function, block, value); }; }; i = i + 1; };
+    i = 0;
+    while i < sh_mir_inst_count(mir) { let function = sh_mir_inst(mir, i, 0); let block = sh_mir_inst(mir, i, 1); let first = sh_mir_inst(mir, i, 4); let count = sh_mir_inst(mir, i, 5); if function < 0 or function >= sh_mir_fn_count(mir) or block < 0 or block >= sh_mir_block_count(mir) or sh_mir_block(mir, block, 0) != function or not sh_mir_valid_type(mir, sh_mir_inst(mir, i, 3)) or first < 0 or count < 0 or first > mir.operands.len() or count > mir.operands.len() - first or i >= sh_mir_term(mir, sh_mir_block(mir, block, 4), 6) { return sh_mir_problem(mir, 5002, function, block, i); }; if not sh_mir_span_valid(mir, sh_mir_inst(mir, i, 9), sh_mir_inst(mir, i, 10), sh_mir_inst(mir, i, 11)) { return sh_mir_problem(mir, 5002, function, block, i); }; let mut arg = 0; while arg < count { let problem = sh_mir_use_valid(mir, sh_mir_inst_arg(mir, i, arg), function, block, i); if problem != 0 { return sh_mir_problem(mir, problem, function, block, i); }; arg = arg + 1; }; let problem = sh_mir_inst_typecheck(mir, i); if problem != 0 { return sh_mir_problem(mir, problem, function, block, i); }; i = i + 1; };
+    i = 0;
+    while i < sh_mir_term_count(mir) { let function = sh_mir_term(mir, i, 0); let block = sh_mir_term(mir, i, 1); let value = sh_mir_term(mir, i, 3); let watermark = sh_mir_term(mir, i, 6); if value >= 0 { let problem = sh_mir_use_valid(mir, value, function, block, watermark); if problem != 0 { return sh_mir_problem(mir, problem, function, block, value); }; }; let mut edge = 0; while edge < sh_mir_term(mir, i, 5) { let id = sh_mir_term(mir, i, 4) + edge; let mut arg = 0; while arg < sh_mir_edge(mir, id, 3) { let operand = sh_mir_edge_arg(mir, id, arg); let problem = sh_mir_use_valid(mir, operand, function, block, watermark); if problem != 0 { return sh_mir_problem(mir, problem, function, block, operand); }; arg = arg + 1; }; edge = edge + 1; }; i = i + 1; };
+    sh_mir_problem(mir, 0, -1, -1, -1);
+}

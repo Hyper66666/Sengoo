@@ -51,6 +51,41 @@ parameters and local `let` names follow the reference identifier grammar;
 unsupported destructuring bindings and non-self reference parameter syntax
 remain rejected. Return/break/yield are expression nodes, including match arms.
 
+## Reference grammar branch audit
+
+The syntax owner reviewed every implemented reference declaration/type/pattern
+and expression branch, including the separate `for` simple-prefix parser, rather
+than inferring completeness from repository fixture counts. Native complete
+program cases and direct oracle expectations cover the following boundaries:
+
+- Open-ended/inclusive ranges, string-key struct fields, tuple/struct/slice
+  patterns and rest markers; array-repeat syntax stays rejected.
+- Ordinary/extern/trait/class/impl frames, function bodies and parameter forms,
+  generic defaults and where-bound identity, plain inherited paths, negative
+  impl trait targets, FFI attribute shape and owner restrictions.
+- Calls and method calls, reference unary precedence, assignment associativity,
+  optional separators where the reference accepts them, function-type parameter
+  lists, and associated bindings only in trait/dyn bounds.
+- A `for` iterator uses the reference simple-prefix subset; unsupported general
+  postfix calls, typed lambdas, named arguments, compound bit assignments,
+  `Self` expressions and `elif` remain rejected.
+- Recursive else-if chains count toward the same parser depth bound; a separate
+  deep-chain native regression prevents bypassing the limit through control
+  parsing rather than Pratt recursion.
+
+Some frozen reference branches have token-name quirks. These are preserved as
+observed compatibility behavior, not recommended new syntax: the range and
+pattern inclusive separator is the equality token `==`; `0..=3` instead parses
+as assignment to an open-ended range. Top-level const/static and explicit enum
+discriminants likewise consume the equality token rather than assignment, while
+local declarations still use `=`. A `call::<i64>(1)` spelling is represented by
+the reference as comparisons, not explicit generic call arguments. Nested type
+arguments may close with `>>`, but a generic-parameter bound/default whose final
+type consumes both its closer and the declaration closer needs separate `> >`
+tokens in the reference. Structural native assertions retain these distinctions;
+changing the language behavior requires a separate correction and migration
+decision rather than silently fixing it during self-hosting.
+
 Parser recursion and node/token allocations have explicit bounds. Invalid
 maximum values are checked before multiplication. Every loop either consumes
 tokens or reports an error; failure must not spin at EOF. This first parser

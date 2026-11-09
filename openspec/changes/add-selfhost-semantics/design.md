@@ -1,0 +1,80 @@
+# Semantic core design
+
+Use integer identities into owning arenas rather than recursive Rust ownership
+objects. Structural type identity includes kind, qualifiers, nominal symbol
+identity and ordered type arguments. Nominal declarations refer to separately
+resolved member tables so recursive names do not require recursive value
+allocation. Layout later rejects infinitely sized by-value cycles while
+allowing supported indirection.
+
+Resolve names using explicit module/scope/symbol identities, not source-text
+matching. Keep source/expansion mappings attached to diagnostics and checked
+nodes. Generic substitutions and specialization keys use canonical type IDs
+and stable symbol order. Scope inference variables and constraints to their
+owning analysis request; no state or mutable borrow escapes a request snapshot.
+
+Ownership analysis must reproduce documented last-use/temporary/resource
+boundaries. Supported implicit native borrows keep their inferred/declared
+contracts, fresh temporary owners survive their consumers, and all exit paths
+emit correct cleanup. The known seed temporary owning-result field-projection
+leak is a regression to repair, not behavior to emulate. CFG merge, early
+return, try propagation, moves and cancellation receive independent tests.
+
+Typed HIR preserves resolved callable/type identities. MIR represents locals,
+places, instructions, basic blocks and terminators explicitly, validates every
+type/reference before backend entry, and records target pointer width and the
+runtime/FFI contract. The future bootstrap exchange adapter is versioned and
+test-only; it must not introduce a Rust dependency into SG self-builds.
+
+Stage implementation from type identity through name/type resolution, generic
+constraints, ownership and typed lowering. Run real positive/negative semantic
+fixtures and observable generated-program behavior as each behavior lands.
+Keep the entire M3 checklist open until all supported semantic and lowering
+gates pass; no scalar-only path qualifies the complete milestone.
+
+## Reference difference ledger
+
+Semantic comparison uses the current Rust `Parser` plus a fresh `TypeChecker`
+for every request. The frozen stage0 binary is a separate comparison input;
+its embedded revision and binary digest must not stand in for the current
+source oracle. A reported mismatch is never counted as parity merely because
+the SG implementation's own assertions pass.
+
+- Transparent aliases: `type Value = i64; def main() -> Value { 42 }` and the
+  corresponding generic alias currently fail in the Rust checker because the
+  alias remains nominal at the use site. Resolve aliases to their declared
+  targets, substitute their generic arguments/defaults and reject alias
+  cycles. This is a named correction to the declared alias capability, with
+  executable fixtures in `selfhost/tests/semantic.sg`.
+- Soundness and documented rejection boundaries: a non-exhaustive boolean
+  match, `break` outside a loop, and a trait method implementation with the
+  wrong return type are accepted by the current standalone Rust semantic
+  oracle. The SG checker rejects these with located codes 5111, 5109 and 5104.
+  Retain these named negative fixtures and classify the differences explicitly
+  rather than weakening the checker or claiming zero differential failures.
+- Duplicate function names currently overwrite the value lookup in the Rust
+  environment. Preserve that lookup behavior during this port; do not add a
+  blanket duplicate-function rejection. A future overload/code-generation
+  policy needs its own evidence and compatibility decision.
+- The current parser consumes `::` before `<` in `id::<i64>(42)` and constructs
+  comparison expressions rather than an explicit generic call. Keep the
+  malformed expression rejected in this change; do not bypass that AST in the
+  semantic checker or claim that the spelling already works. An explicit
+  generic-call syntax correction requires a separate parser change and AST
+  regression evidence.
+- The stage0 implementation's temporary owning aggregate field-projection
+  cleanup and borrowed concrete `Vec<i64>::get` specialization mismatch are
+  known implementation defects. SG implementation code uses explicit owners
+  and the existing typed collection ABI while bootstrapping; the new semantic
+  model must keep the source-level owner and method return type correct.
+
+The first named-fixture comparisons are development evidence, not the complete
+M3 compatibility gate. Record the oracle/candidate hashes, every mismatch and
+its disposition; generic bounds, associated projections, ownership, HIR/MIR
+and whole selfhost source validation remain required before milestone closure.
+
+Fresh reference comparisons are authoritative only when the oracle completes;
+stack overflow or process crashes are recorded as oracle faults and never
+converted into SG passes. Existing reference quirks and soundness corrections
+remain in this explicit compatibility ledger. The SG checker may reject an
+unsound accepted form only with a stable diagnostic and a named corpus case.

@@ -1,0 +1,394 @@
+import selfhost_types;
+
+// MIR schema 1: Runtime ABI 1, x86_64 Windows, 64-bit pointers.
+// IDs index their own flat table; -1 means absent, never a valid instruction.
+// function[8]: symbol, signature, entry, flags(external=1/template=2), file,start,end,rootScope
+// local[10]: function,type,symbol,kind(user=0,param=1,temp=2,return=3),flags(mut=1/drop=2),scope,ordinal,file,start,end
+// scope[3]: function,parent,flags; block[8]: function,scope,paramFirst,paramCount,terminator,flags(cleanup=1),span,reserved
+// instruction[12]: function,block,opcode,type,operandFirst,operandCount,aux,extra,flags,file,start,end
+// terminator[10]: function,block,kind,value,edgeFirst,edgeCount,instructionWatermark,file,start,end
+// edge[6]: terminator,target,operandFirst,operandCount,caseBits,flags(default=1)
+// layout[7]: type,variant(-1=struct),fieldFirst,fieldCount,dropFunction,size,align
+// field[2]: type,offset; -1 size/align/offset explicitly means physical layout is pending.
+// source[2]: file,length; span[3]: file,start,end. Spans use byte offsets.
+// Opcodes: 1 ABI parameter,2 block parameter,3 unit,4 integer bits,5 float(bits or flags=1 literal symbol),
+// 6 bool,7 char,8 string symbol,9 function address,10 unary,11 binary,12 cast(flags=1 unsafe),
+// 13 local address,14 load,15 store,16 aggregate,17 field address,18 extract field,19 element address,
+// 20 call(aux=function or -1 indirect; extra=SG0/C1),21 drop(aux=local or -1 projection; extra=pointee type),
+// 22 typed memory move,23 enum discriminant,24 enum variant,25 local initialization flag(aux=local,extra=0/1).
+// A conditional root drop tests the local flag; every executed root drop clears it.
+// Terminators: 1 goto,2 bool branch,3 return,4 unreachable,5 integer switch.
+
+struct ShMir {
+    schema: i64,
+    target: i64,
+    runtime_abi: i64,
+    pointer_width: i64,
+    limit: i64,
+    types: ShTypes,
+    symbols: ShSymbols,
+    functions: Vec<i64>,
+    locals: Vec<i64>,
+    scopes: Vec<i64>,
+    blocks: Vec<i64>,
+    instructions: Vec<i64>,
+    operands: Vec<i64>,
+    parameters: Vec<i64>,
+    terminators: Vec<i64>,
+    edges: Vec<i64>,
+    layouts: Vec<i64>,
+    fields: Vec<i64>,
+    sources: Vec<i64>,
+    spans: Vec<i64>,
+}
+
+struct ShMirValidation {
+    error: i64,
+    function: i64,
+    block: i64,
+    instruction: i64,
+    source: i64,
+    start: i64,
+    end: i64,
+}
+
+struct ShLowered {
+    mir: ShMir,
+    error: i64,
+    start: i64,
+    end: i64,
+}
+
+def sh_mir_new(limit: i64) -> ShMir {
+    ShMir { schema: 1, target: 1, runtime_abi: 1, pointer_width: 64, limit: limit, types: sh_types_new(limit), symbols: sh_symbols_new(limit), functions: vec_new_i64(), locals: vec_new_i64(), scopes: vec_new_i64(), blocks: vec_new_i64(), instructions: vec_new_i64(), operands: vec_new_i64(), parameters: vec_new_i64(), terminators: vec_new_i64(), edges: vec_new_i64(), layouts: vec_new_i64(), fields: vec_new_i64(), sources: vec_new_i64(), spans: vec_new_i64() };
+}
+
+def sh_mir_limit(mir: &ShMir) -> bool {
+    mir.limit >= 0 and mir.limit <= 100000;
+}
+
+def sh_mir_count(words: &Vec<i64>, width: i64) -> i64 {
+    if width <= 0 or words.len() % width != 0 { return -1; };
+    words.len() / width;
+}
+
+def sh_mir_word(words: &Vec<i64>, width: i64, id: i64, field: i64) -> i64 {
+    if id < 0 or width <= 0 or field < 0 or field >= width or id >= sh_mir_count(words, width) { return -1; };
+    sengoo_vec_get_or_default_i64(words.handle, id * width + field, -1);
+}
+
+def sh_mir_valid_type(mir: &ShMir, ty: i64) -> bool {
+    ty >= 0 and ty < sh_type_count(&mir.types);
+}
+
+def sh_mir_type_word(mir: &ShMir, ty: i64, field: i64) -> i64 {
+    let result = sh_type_word(&mir.types, ty, field);
+    if result.is_ok() { result.value; } else { -1; };
+}
+
+def sh_mir_type_arg(mir: &ShMir, ty: i64, index: i64) -> i64 {
+    let result = sh_type_argument(&mir.types, ty, index);
+    if result.is_ok() { result.value; } else { -1; };
+}
+
+def sh_mir_fn_count(mir: &ShMir) -> i64 {
+    sh_mir_count(&mir.functions, 8);
+}
+
+def sh_mir_local_count(mir: &ShMir) -> i64 {
+    sh_mir_count(&mir.locals, 10);
+}
+
+def sh_mir_scope_count(mir: &ShMir) -> i64 {
+    sh_mir_count(&mir.scopes, 3);
+}
+
+def sh_mir_block_count(mir: &ShMir) -> i64 {
+    sh_mir_count(&mir.blocks, 8);
+}
+
+def sh_mir_inst_count(mir: &ShMir) -> i64 {
+    sh_mir_count(&mir.instructions, 12);
+}
+
+def sh_mir_term_count(mir: &ShMir) -> i64 {
+    sh_mir_count(&mir.terminators, 10);
+}
+
+def sh_mir_edge_count(mir: &ShMir) -> i64 {
+    sh_mir_count(&mir.edges, 6);
+}
+
+def sh_mir_fn(mir: &ShMir, id: i64, field: i64) -> i64 {
+    sh_mir_word(&mir.functions, 8, id, field);
+}
+
+def sh_mir_local(mir: &ShMir, id: i64, field: i64) -> i64 {
+    sh_mir_word(&mir.locals, 10, id, field);
+}
+
+def sh_mir_scope(mir: &ShMir, id: i64, field: i64) -> i64 {
+    sh_mir_word(&mir.scopes, 3, id, field);
+}
+
+def sh_mir_block(mir: &ShMir, id: i64, field: i64) -> i64 {
+    sh_mir_word(&mir.blocks, 8, id, field);
+}
+
+def sh_mir_inst(mir: &ShMir, id: i64, field: i64) -> i64 {
+    sh_mir_word(&mir.instructions, 12, id, field);
+}
+
+def sh_mir_term(mir: &ShMir, id: i64, field: i64) -> i64 {
+    sh_mir_word(&mir.terminators, 10, id, field);
+}
+
+def sh_mir_edge(mir: &ShMir, id: i64, field: i64) -> i64 {
+    sh_mir_word(&mir.edges, 6, id, field);
+}
+
+def sh_mir_operand(mir: &ShMir, first: i64, count: i64, index: i64) -> i64 {
+    if first < 0 or count < 0 or first > mir.operands.len() or count > mir.operands.len() - first or index < 0 or index >= count { return -1; };
+    sengoo_vec_get_or_default_i64(mir.operands.handle, first + index, -1);
+}
+
+def sh_mir_inst_arg(mir: &ShMir, id: i64, index: i64) -> i64 {
+    sh_mir_operand(mir, sh_mir_inst(mir, id, 4), sh_mir_inst(mir, id, 5), index);
+}
+
+def sh_mir_edge_arg(mir: &ShMir, id: i64, index: i64) -> i64 {
+    sh_mir_operand(mir, sh_mir_edge(mir, id, 2), sh_mir_edge(mir, id, 3), index);
+}
+
+def sh_mir_parameter(mir: &ShMir, block: i64, index: i64) -> i64 {
+    let count = sh_mir_block(mir, block, 3);
+    let first = sh_mir_block(mir, block, 2);
+    if index < 0 or index >= count or first < 0 or first > mir.parameters.len() or count > mir.parameters.len() - first { return -1; };
+    sengoo_vec_get_or_default_i64(mir.parameters.handle, first + index, -1);
+}
+
+def sh_mir_trim(words: &Vec<i64>, length: i64) {
+    while words.len() > length { words.pop(); };
+    ();
+}
+
+def sh_mir_record(mir: &ShMir, words: &Vec<i64>, width: i64, row: &Vec<i64>) -> Result<i64, i64> {
+    let id = sh_mir_count(words, width);
+    if not sh_mir_limit(mir) or id < 0 or id >= mir.limit or row.len() != width { return sh_i64_error(5001); };
+    let before = words.len();
+    let mut i = 0;
+    while i < width { if not words.push(sengoo_vec_get_or_default_i64(row.handle, i, -1)) { sh_mir_trim(words, before); return sh_i64_error(5001); }; i = i + 1; };
+    sh_i64_ok(id);
+}
+
+def sh_mir_source(mir: &ShMir, file: i64, length: i64) -> Result<i64, i64> {
+    if file < 0 or length < 0 { return sh_i64_error(5002); };
+    let mut i = 0;
+    while i < sh_mir_count(&mir.sources, 2) { if sh_mir_word(&mir.sources, 2, i, 0) == file { if sh_mir_word(&mir.sources, 2, i, 1) != length { return sh_i64_error(5002); }; return sh_i64_ok(i); }; i = i + 1; };
+    let row = vec_new_i64();
+    row.push(file);
+    row.push(length);
+    sh_mir_record(mir, &mir.sources, 2, &row);
+}
+
+def sh_mir_span_valid(mir: &ShMir, file: i64, start: i64, end: i64) -> bool {
+    if file == -1 { return start == 0 and end == 0; };
+    if file < 0 or start < 0 or end < start { return false; };
+    let mut i = 0;
+    while i < sh_mir_count(&mir.sources, 2) { if sh_mir_word(&mir.sources, 2, i, 0) == file { return end <= sh_mir_word(&mir.sources, 2, i, 1); }; i = i + 1; };
+    false;
+}
+
+def sh_mir_add_function(mir: &ShMir, name: &String, signature: i64, flags: i64, file: i64, start: i64, end: i64) -> Result<i64, i64> {
+    if sh_mir_type_word(mir, signature, 0) != 11 or flags < 0 or flags > 3 { return sh_i64_error(5003); };
+    if not sh_mir_span_valid(mir, file, start, end) { return sh_i64_error(5002); };
+    if sh_mir_fn_count(mir) >= mir.limit { return sh_i64_error(5001); };
+    let symbol = sh_intern(&mir.symbols, name);
+    if not symbol.is_ok() { return sh_i64_error(5001); };
+    let row = vec_new_i64();
+    row.push(symbol.value);
+    row.push(signature);
+    row.push(-1);
+    row.push(flags);
+    row.push(file);
+    row.push(start);
+    row.push(end);
+    row.push(-1);
+    sh_mir_record(mir, &mir.functions, 8, &row);
+}
+
+def sh_mir_add_scope(mir: &ShMir, function: i64, parent: i64, flags: i64) -> Result<i64, i64> {
+    if function < 0 or function >= sh_mir_fn_count(mir) or parent < -1 or parent >= sh_mir_scope_count(mir) or flags < 0 { return sh_i64_error(5002); };
+    if parent >= 0 and sh_mir_scope(mir, parent, 0) != function { return sh_i64_error(5002); };
+    let row = vec_new_i64();
+    row.push(function);
+    row.push(parent);
+    row.push(flags);
+    let result = sh_mir_record(mir, &mir.scopes, 3, &row);
+    if result.is_ok() and parent == -1 and sh_mir_fn(mir, function, 7) == -1 { mir.functions.set(function * 8 + 7, result.value); (); };
+    result;
+}
+
+def sh_mir_add_local(mir: &ShMir, function: i64, ty: i64, name: i64, kind: i64, flags: i64, scope: i64, ordinal: i64, file: i64, start: i64, end: i64) -> Result<i64, i64> {
+    if function < 0 or function >= sh_mir_fn_count(mir) or not sh_mir_valid_type(mir, ty) or name < -1 or name >= sh_symbol_count(&mir.symbols) or kind < 0 or kind > 3 or flags < 0 or flags > 3 { return sh_i64_error(5002); };
+    if scope < 0 or scope >= sh_mir_scope_count(mir) or sh_mir_scope(mir, scope, 0) != function or not sh_mir_span_valid(mir, file, start, end) { return sh_i64_error(5002); };
+    let row = vec_new_i64();
+    row.push(function);
+    row.push(ty);
+    row.push(name);
+    row.push(kind);
+    row.push(flags);
+    row.push(scope);
+    row.push(ordinal);
+    row.push(file);
+    row.push(start);
+    row.push(end);
+    sh_mir_record(mir, &mir.locals, 10, &row);
+}
+
+def sh_mir_add_block(mir: &ShMir, function: i64, scope: i64, flags: i64, file: i64, start: i64, end: i64) -> Result<i64, i64> {
+    if function < 0 or function >= sh_mir_fn_count(mir) or scope < 0 or scope >= sh_mir_scope_count(mir) or sh_mir_scope(mir, scope, 0) != function or flags < 0 or flags > 1 { return sh_i64_error(5002); };
+    if not sh_mir_span_valid(mir, file, start, end) { return sh_i64_error(5002); };
+    let span = vec_new_i64();
+    span.push(file);
+    span.push(start);
+    span.push(end);
+    let stored_span = sh_mir_record(mir, &mir.spans, 3, &span);
+    if not stored_span.is_ok() { return stored_span; };
+    let row = vec_new_i64();
+    row.push(function);
+    row.push(scope);
+    row.push(-1);
+    row.push(0);
+    row.push(-1);
+    row.push(flags);
+    row.push(stored_span.value);
+    row.push(0);
+    let result = sh_mir_record(mir, &mir.blocks, 8, &row);
+    if not result.is_ok() { sh_mir_trim(&mir.spans, stored_span.value * 3); return result; };
+    if sh_mir_fn(mir, function, 2) == -1 { mir.functions.set(function * 8 + 2, result.value); (); };
+    result;
+}
+
+def sh_mir_add_instruction(mir: &ShMir, block: i64, opcode: i64, ty: i64, operands: &Vec<i64>, aux: i64, extra: i64, flags: i64, file: i64, start: i64, end: i64) -> Result<i64, i64> {
+    if block < 0 or block >= sh_mir_block_count(mir) or opcode < 1 or opcode > 25 or not sh_mir_valid_type(mir, ty) or not sh_mir_span_valid(mir, file, start, end) { return sh_i64_error(5002); };
+    if sh_mir_block(mir, block, 4) != -1 { return sh_i64_error(5004); };
+    let function = sh_mir_block(mir, block, 0);
+    let count = sh_mir_inst_count(mir);
+    if not sh_mir_limit(mir) or count >= mir.limit or operands.len() > mir.limit or mir.operands.len() > mir.limit - operands.len() { return sh_i64_error(5001); };
+    let mut i = 0;
+    while i < operands.len() { let value = sengoo_vec_get_or_default_i64(operands.handle, i, -1); if value < 0 or value >= count or sh_mir_inst(mir, value, 0) != function { return sh_i64_error(5005); }; i = i + 1; };
+    if opcode == 2 { if aux != sh_mir_block(mir, block, 3) or mir.parameters.len() >= mir.limit { return sh_i64_error(5002); }; if aux > 0 and sh_mir_block(mir, block, 2) + aux != mir.parameters.len() { return sh_i64_error(5002); }; i = 0; while i < count { if sh_mir_inst(mir, i, 1) == block and sh_mir_inst(mir, i, 2) != 2 { return sh_i64_error(5005); }; i = i + 1; }; };
+    let before = mir.operands.len();
+    i = 0;
+    while i < operands.len() { if not mir.operands.push(sengoo_vec_get_or_default_i64(operands.handle, i, -1)) { sh_mir_trim(&mir.operands, before); return sh_i64_error(5001); }; i = i + 1; };
+    let row = vec_new_i64();
+    row.push(function);
+    row.push(block);
+    row.push(opcode);
+    row.push(ty);
+    row.push(before);
+    row.push(operands.len());
+    row.push(aux);
+    row.push(extra);
+    row.push(flags);
+    row.push(file);
+    row.push(start);
+    row.push(end);
+    let result = sh_mir_record(mir, &mir.instructions, 12, &row);
+    if not result.is_ok() { sh_mir_trim(&mir.operands, before); return result; };
+    if opcode == 2 { if not mir.parameters.push(result.value) { sh_mir_trim(&mir.instructions, count * 12); sh_mir_trim(&mir.operands, before); return sh_i64_error(5001); }; if aux == 0 { mir.blocks.set(block * 8 + 2, mir.parameters.len() - 1); (); }; mir.blocks.set(block * 8 + 3, aux + 1); (); };
+    result;
+}
+
+def sh_mir_add_terminator(mir: &ShMir, block: i64, kind: i64, value: i64, file: i64, start: i64, end: i64) -> Result<i64, i64> {
+    if block < 0 or block >= sh_mir_block_count(mir) or kind < 1 or kind > 5 or value < -1 or value >= sh_mir_inst_count(mir) or not sh_mir_span_valid(mir, file, start, end) { return sh_i64_error(5002); };
+    if sh_mir_block(mir, block, 4) != -1 { return sh_i64_error(5004); };
+    let function = sh_mir_block(mir, block, 0);
+    if value >= 0 and sh_mir_inst(mir, value, 0) != function { return sh_i64_error(5005); };
+    let row = vec_new_i64();
+    row.push(function);
+    row.push(block);
+    row.push(kind);
+    row.push(value);
+    row.push(sh_mir_edge_count(mir));
+    row.push(0);
+    row.push(sh_mir_inst_count(mir));
+    row.push(file);
+    row.push(start);
+    row.push(end);
+    let result = sh_mir_record(mir, &mir.terminators, 10, &row);
+    if result.is_ok() { mir.blocks.set(block * 8 + 4, result.value); (); };
+    result;
+}
+
+def sh_mir_add_edge(mir: &ShMir, term: i64, target: i64, arguments: &Vec<i64>, case_value: i64, flags: i64) -> Result<i64, i64> {
+    if term < 0 or term >= sh_mir_term_count(mir) or target < 0 or target >= sh_mir_block_count(mir) or flags < 0 or flags > 3 { return sh_i64_error(5002); };
+    let function = sh_mir_term(mir, term, 0);
+    if sh_mir_block(mir, target, 0) != function { return sh_i64_error(5005); };
+    if sh_mir_term(mir, term, 4) + sh_mir_term(mir, term, 5) != sh_mir_edge_count(mir) { return sh_i64_error(5004); };
+    if arguments.len() > mir.limit or mir.operands.len() > mir.limit - arguments.len() { return sh_i64_error(5001); };
+    let before = mir.operands.len();
+    let mut i = 0;
+    while i < arguments.len() { let value = sengoo_vec_get_or_default_i64(arguments.handle, i, -1); if value < 0 or value >= sh_mir_inst_count(mir) or sh_mir_inst(mir, value, 0) != function { return sh_i64_error(5005); }; i = i + 1; };
+    i = 0;
+    while i < arguments.len() { if not mir.operands.push(sengoo_vec_get_or_default_i64(arguments.handle, i, -1)) { sh_mir_trim(&mir.operands, before); return sh_i64_error(5001); }; i = i + 1; };
+    let row = vec_new_i64();
+    row.push(term);
+    row.push(target);
+    row.push(before);
+    row.push(arguments.len());
+    row.push(case_value);
+    row.push(flags);
+    let result = sh_mir_record(mir, &mir.edges, 6, &row);
+    if not result.is_ok() { sh_mir_trim(&mir.operands, before); return result; };
+    mir.terminators.set(term * 10 + 5, sh_mir_term(mir, term, 5) + 1);
+    result;
+}
+
+def sh_mir_add_layout(mir: &ShMir, ty: i64, variant: i64, types: &Vec<i64>, offsets: &Vec<i64>, drop_function: i64, size: i64, alignment: i64) -> Result<i64, i64> {
+    if sh_mir_type_word(mir, ty, 0) != 12 or types.len() != offsets.len() or variant < -1 or drop_function < -1 or drop_function >= sh_mir_fn_count(mir) { return sh_i64_error(5003); };
+    if size < -1 or alignment < -1 or (size >= 0 and alignment < 1) { return sh_i64_error(5003); };
+    if alignment > 4096 { return sh_i64_error(5003); };
+    let mut power = 1;
+    while power < alignment { power = power * 2; };
+    if alignment > 0 and power != alignment { return sh_i64_error(5003); };
+    let mut i = 0;
+    while i < sh_mir_count(&mir.layouts, 7) { if sh_mir_word(&mir.layouts, 7, i, 0) == ty and sh_mir_word(&mir.layouts, 7, i, 1) == variant { return sh_i64_error(5003); }; i = i + 1; };
+    let first = sh_mir_count(&mir.fields, 2);
+    i = 0;
+    while i < types.len() { let field_type = sengoo_vec_get_or_default_i64(types.handle, i, -1); let offset = sengoo_vec_get_or_default_i64(offsets.handle, i, -2); if not sh_mir_valid_type(mir, field_type) or offset < -1 or size >= 0 and (offset < 0 or offset > size) { return sh_i64_error(5003); }; i = i + 1; };
+    i = 0;
+    while i < types.len() { let row = vec_new_i64(); row.push(sengoo_vec_get_or_default_i64(types.handle, i, -1)); row.push(sengoo_vec_get_or_default_i64(offsets.handle, i, -1)); let stored = sh_mir_record(mir, &mir.fields, 2, &row); if not stored.is_ok() { sh_mir_trim(&mir.fields, first * 2); return stored; }; i = i + 1; };
+    let row = vec_new_i64();
+    row.push(ty);
+    row.push(variant);
+    row.push(first);
+    row.push(types.len());
+    row.push(drop_function);
+    row.push(size);
+    row.push(alignment);
+    let result = sh_mir_record(mir, &mir.layouts, 7, &row);
+    if not result.is_ok() { sh_mir_trim(&mir.fields, first * 2); };
+    result;
+}
+
+def sh_mir_field_count(mir: &ShMir, ty: i64, variant: i64) -> i64 {
+    let kind = sh_mir_type_word(mir, ty, 0);
+    if kind == 10 { return sh_mir_type_word(mir, ty, 5); };
+    if kind == 8 { return sh_mir_type_word(mir, ty, 1); };
+    if kind != 12 { return -1; };
+    let mut i = 0;
+    while i < sh_mir_count(&mir.layouts, 7) { if sh_mir_word(&mir.layouts, 7, i, 0) == ty and sh_mir_word(&mir.layouts, 7, i, 1) == variant { return sh_mir_word(&mir.layouts, 7, i, 3); }; i = i + 1; };
+    -1;
+}
+
+def sh_mir_field_type(mir: &ShMir, ty: i64, variant: i64, field: i64) -> i64 {
+    if field < 0 or field >= sh_mir_field_count(mir, ty, variant) { return -1; };
+    let kind = sh_mir_type_word(mir, ty, 0);
+    if kind == 10 { return sh_mir_type_arg(mir, ty, field); };
+    if kind == 8 { return sh_mir_type_arg(mir, ty, 0); };
+    let mut i = 0;
+    while i < sh_mir_count(&mir.layouts, 7) { if sh_mir_word(&mir.layouts, 7, i, 0) == ty and sh_mir_word(&mir.layouts, 7, i, 1) == variant { return sh_mir_word(&mir.fields, 2, sh_mir_word(&mir.layouts, 7, i, 2) + field, 0); }; i = i + 1; };
+    -1;
+}
