@@ -133,3 +133,13 @@ and final process/equality/performance gates SHALL retain their own evidence.
 - **AND** invalid types, source ownership, module/stream metadata and incomplete or poisoned programs SHALL reject before output publication
 - **AND** one supported all-global unit SHALL preserve legacy raw PE/PDB bytes at identical input paths/options
 - **AND** this SHALL NOT claim nondebug SDK/archive units, automatic compiler internalization, different source checkout roots or complete M5/M6/M8 qualification
+
+
+#### Scenario: A nondebug SDK object is explicitly admitted beside checked debug units
+- **WHEN** at least one independently registered debug unit and supported source-locked nondebug COFF objects are submitted for the same actual linked image
+- **THEN** every actual object SHALL retain its own module/contribution identity and complete bound symbols, sections and relocations
+- **AND** a nondebug submission SHALL reject any `.debug`-prefixed section instead of discarding unsupported or partial CodeView
+- **AND** its DBI module SHALL contain zero source files, typed procedures, locals and C13 line bytes, while real external addresses remain in publics and static symbols remain bound metadata
+- **AND** missing, duplicate, mislabeled, mismatched, poisoned and all-nondebug programs SHALL fail explicitly before output publication
+- **AND** real SG-to-C calls and SG source debugging SHALL be independently executed, with public-address observations distinguished from any unsupported debugger name lookup
+- **AND** this SHALL NOT claim arbitrary MSVC aux/COMDAT/CodeView input, invented C type/source records or complete SDK/debugger qualification

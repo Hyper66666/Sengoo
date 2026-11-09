@@ -1,0 +1,181 @@
+import selfhost_link_pdb_modules;
+
+import selfhost_native;
+
+import selfhost_mir_module_sources;
+
+import selfhost_link_native_debug;
+
+import selfhost_link_checked_debug;
+
+import selfhost_link_pe;
+
+import std::args;
+
+import std::file;
+
+import std::io;
+
+import std::assert;
+
+extern "C" {
+    fn sengoo_string_live_handle_count() -> i64;
+    fn sengoo_buffer_live_handle_count() -> i64;
+    fn sengoo_opaque_live_handle_count() -> i64;
+    fn sengoo_file_snapshot_live_handle_count() -> i64;
+    fn sengoo_file_snapshot_live_bytes() -> i64;
+}
+
+def sh_lnt_argument(index: i64) -> Result<String, i64> {
+    let buffer = ffi_buffer_new(arg_len(index).unwrap_or(0))?;
+    let length = arg_copy(index, buffer)?;
+    string_from_utf8(buffer, length);
+}
+
+def sh_lnt_mapping(native: &ShNative, mir: &ShMir) -> ShNativeDebugMap {
+    let map = sh_link_native_debug_map();
+    let mut function = 0;
+    while function < sh_mir_fn_count(mir) { let first = sh_native_at(&native.functions, function); if first >= 0 { map.functions.push(function); map.functions.push(first); map.functions.push(sh_native_at(&native.ends, function)); map.functions.push(sh_native_at(&native.frames, function) + 8); map.functions.push(sh_native_at(&native.prologue_ends, function) - first); map.functions.push(1); (); }; function = function + 1; };
+    let mut instruction = 0;
+    while instruction < sh_mir_inst_count(mir) { let start = sh_native_at(&native.instruction_starts, instruction); if start >= 0 { map.instructions.push(instruction); map.instructions.push(start); map.instructions.push(sh_native_at(&native.instruction_ends, instruction)); (); }; instruction = instruction + 1; };
+    let mut term = 0;
+    while term < sh_mir_term_count(mir) { let start = sh_native_at(&native.terminator_starts, term); if start >= 0 { map.terminators.push(term); map.terminators.push(start); map.terminators.push(sh_native_at(&native.terminator_ends, term)); (); }; term = term + 1; };
+    let mut local = 0;
+    while local < sh_mir_local_count(mir) { let slot = sh_native_at(&native.locals, local); if slot >= 0 { map.locals.push(local); map.locals.push(sh_native_at(&native.frames, sh_mir_local(mir, local, 0)) - slot); (); }; local = local + 1; };
+    let mut index = 0;
+    while index < native.epilogues.len() { map.epilogues.push(sh_native_at(&native.epilogues, index)); index = index + 1; };
+    map;
+}
+
+def sh_lmd_sources(debug: &mut ShLinkDebug, graph: &ShModules) -> Result<i64, i64> {
+    let mut file = 0;
+    while file < graph.units.len() { let path = graph.units.get(file).path.clone()?; let source = graph.units.get(file).source; let length = sh_source_len(&graph.sources, source)?; let text = sh_span_text(&graph.sources, ShSpan { source: source, start: 0, end: length })?; let bytes = sh_lex_bytes(&text)?; let raw = sh_binary_new(1048576); let mut at = 0; while at < length { sh_binary_byte(&raw, sh_lex_byte(&bytes, at))?; at = at + 1; }; sh_link_debug_source_file(debug, source, &path, &raw)?; file = file + 1; };
+    sh_i64_ok(file);
+}
+
+def sh_review_object(source_path: &String, object_path: &String) -> Result<ShBinary, i64> {
+    let config = string_new();
+    let graph = sh_modules_load(source_path.as_str(), "tools/stdlib", &config, 32, 1048576);
+    if graph.error != 0 { return sh_coff_error(graph.error); };
+    let analyzed = sh_modules_check(&graph, 1000000, 1000);
+    if analyzed.error != 0 { return sh_coff_error(analyzed.error); };
+    let mut lowered = sh_lower(&analyzed.front.expanded.text, &analyzed.front.parsed.ast, &analyzed.checked, 100000);
+    if lowered.error != 0 { return sh_coff_error(lowered.error); };
+    sh_module_mir_sources(&graph, &analyzed.front, &mut lowered.mir)?;
+    let object = sh_object_new(1048576);
+    let mut native = sh_native_new(&lowered.mir, 1048576, false);
+    native.collect_debug = true;
+    sh_native_emit_into(&mut native, &lowered.mir, &object)?;
+    let mut symbol = 0;
+    while symbol < object.symbols.len() / 5 { let name = sh_symbol_text(&object.names, sh_object_word(&object.symbols, 5, symbol, 0))?; if name.as_str() == "helper" and sh_object_word(&object.symbols, 5, symbol, 2) > 0 { if sengoo_vec_set_i64(object.symbols.handle, symbol * 5 + 4, 3) == 0 { return sh_coff_error(7995); }; }; symbol = symbol + 1; };
+    let map = sh_lnt_mapping(&native, &lowered.mir);
+    sh_link_checked_debug_names(&map, &lowered.mir, &analyzed.checked)?;
+    let mut debug = sh_link_debug_new();
+    sh_lmd_sources(&mut debug, &graph)?;
+    sh_link_native_debug_fill_sources(&mut debug, &lowered.mir, &map)?;
+    sh_link_codeview_attach(&object, &debug)?;
+    let raw = sh_object_emit(&object)?;
+    if not sh_modules_unchanged(&graph) { return sh_coff_error(5206); };
+    let bytes = sh_binary_buffer(&raw)?;
+    file_write_str_raw(sengoo_stdlib_str_ptr(object_path.as_str()), bytes.ptr(), bytes.used_len())?;
+    Result { is_ok: true, value: raw, error: 0 };
+}
+
+def sh_lmt_unit(program: &mut ShLinkDebugModules, link: &ShLinker, image: &ShBinary, object: i64, path: &String, object_path: &String, invalid: i64) -> Result<i64, i64> {
+    let config = string_new();
+    let graph = sh_modules_load(path.as_str(), "tools/stdlib", &config, 32, 1048576);
+    if graph.error != 0 { return sh_i64_error(graph.error); };
+    let analyzed = sh_modules_check(&graph, 1000000, 1000);
+    if analyzed.error != 0 { return sh_i64_error(analyzed.error); };
+    let mut lowered = sh_lower(&analyzed.front.expanded.text, &analyzed.front.parsed.ast, &analyzed.checked, 100000);
+    if lowered.error != 0 { return sh_i64_error(lowered.error); };
+    sh_module_mir_sources(&graph, &analyzed.front, &mut lowered.mir)?;
+    let mut debug = sh_link_debug_new();
+    sh_lmd_sources(&mut debug, &graph)?;
+    sh_link_native_debug_register(&debug, &lowered.mir)?;
+    if debug.origins.len() == 0 { let mut function = 0; while function < sh_mir_fn_count(&lowered.mir) { if sh_mir_fn(&lowered.mir, function, 3) % 2 == 0 { let name = sh_symbol_text(&lowered.mir.symbols, sh_mir_fn(&lowered.mir, function, 0))?; sh_link_debug_function_origin(&debug, &name, sh_mir_fn(&lowered.mir, function, 4))?; (); }; function = function + 1; }; };
+    if invalid == 3 { debug.origins.set(1, 999); (); };
+    if invalid == 4 { debug.origins.clear(); (); };
+    let result = sh_link_debug_modules_read(program, &debug, link, image, object, object_path);
+    if not result.is_ok() { if program.error != result.error { return sh_i64_error(7996); }; let modules = program.modules.len(); let streams = program.streams.bytes.len(); let repeated = sh_link_debug_modules_read(program, &debug, link, image, object, object_path); if repeated.is_ok() or repeated.error != result.error or program.modules.len() != modules or program.streams.bytes.len() != streams { return sh_i64_error(7997); }; return sh_i64_error(result.error); };
+    if not sh_modules_unchanged(&graph) { return sh_i64_error(5206); };
+    sh_i64_ok(0);
+}
+
+def sh_mixed_submit(program: &mut ShLinkDebugModules, link: &ShLinker, image: &ShBinary, object: i64, path: &String) -> Result<i64, i64> {
+    let result = sh_link_debug_modules_submit_no_debug(program, link, image, object, path);
+    if not result.is_ok() { let modules = program.modules.len(); let streams = program.streams.bytes.len(); let plain = program.plain_symbols.len(); let repeat = sh_link_debug_modules_submit_no_debug(program, link, image, object, path); if program.error != result.error or repeat.is_ok() or repeat.error != result.error or program.modules.len() != modules or program.streams.bytes.len() != streams or program.plain_symbols.len() != plain { return sh_i64_error(7997); }; return sh_i64_error(result.error); };
+    sh_i64_ok(0);
+}
+
+def sh_mixed_scope(a: &String, b: &String, sdk: &String, c: &String, d: &String, e: &String, f: &String, write: bool, invalid: i64, reading: bool, identity_path: &String) -> Result<i64, i64> {
+    if invalid == 19 { let leaf = sh_link_load(sdk.as_str(), 1048576)?; let mut only = sh_link_new(1048576); let id = sh_link_coff(&mut only, &leaf)?; let entry = string_from_str("sengoo_deflate_fixture_output")?; let image = sh_link_pe(&mut only, &entry)?; let mut program = sh_link_debug_modules_new(); sh_link_debug_modules_begin(&mut program, &only, &image, identity_path)?; let name = string_from_str("sdk-only.obj")?; sh_mixed_submit(&mut program, &only, &image, id, &name)?; sh_link_pdb_modules(&program)?; return sh_i64_error(7998); };
+    let left = if reading { sh_link_load(c.as_str(), 1048576); } else { sh_review_object(a, c); };
+    if not left.is_ok() { return sh_i64_error(left.error); };
+    let right = if reading { sh_link_load(d.as_str(), 1048576); } else { sh_review_object(b, d); };
+    if not right.is_ok() { return sh_i64_error(right.error); };
+    let leaf = sh_link_load(sdk.as_str(), 1048576)?;
+    let mut link = sh_link_new(1048576);
+    let lo = sh_link_coff(&mut link, &left.value)?;
+    let ro = sh_link_coff(&mut link, &right.value)?;
+    let co = sh_link_coff(&mut link, &leaf)?;
+    let entry = string_from_str("main")?;
+    let image = sh_link_pe(&mut link, &entry)?;
+    let mut program = sh_link_debug_modules_new();
+    sh_link_debug_modules_begin(&mut program, &link, &image, identity_path)?;
+    let main_module = string_from_str("sg-main.obj")?;
+    let worker_module = string_from_str("sg-worker.obj")?;
+    let sdk_module = string_from_str("sdk-leaf.obj")?;
+    if invalid == 2 { sh_mixed_submit(&mut program, &link, &image, lo, &main_module)?; (); };
+    sh_lmt_unit(&mut program, &link, &image, lo, a, &main_module, 0)?;
+    sh_lmt_unit(&mut program, &link, &image, ro, b, &worker_module, 0)?;
+    if invalid == 20 { link.relocations.set(1, sh_link_word(&link.relocations, 4, 0, 1) + 1); (); };
+    if invalid == 21 { program.bound_relocations.set(1, sh_link_word(&program.bound_relocations, 4, 0, 1) + 1); (); };
+    if invalid == 12 { link.sections.set(7, 1); (); };
+    if invalid == 13 { link.symbols.set(2, 1); (); };
+    if invalid == 14 { sh_binary_patch(&image, 0, 0, 1)?; (); };
+    if invalid == 3 { sh_lmt_unit(&mut program, &link, &image, co, b, &sdk_module, 0)?; (); } else { if invalid != 1 { let name = if invalid == 5 { &main_module; } else { &sdk_module; }; sh_mixed_submit(&mut program, &link, &image, co, name)?; (); }; };
+    if invalid == 4 { sh_mixed_submit(&mut program, &link, &image, co, &sdk_module)?; (); };
+    if invalid == 6 { program.schema = 1; };
+    if invalid == 7 { program.module_kinds.set(2, 0); (); };
+    if invalid == 8 { program.plain_symbols.set(3, 999); (); };
+    if invalid == 9 { program.streams.bytes.set(sh_link_word(&program.streams.ranges, 2, 2, 0), 0); (); };
+    if invalid == 10 { program.modules.set(2 * 12 + 3, 1); (); };
+    if invalid == 11 { program.modules.set(2 * 12 + 5, 1); (); };
+    if invalid == 15 { program.error = 7331; };
+    if invalid == 16 { program.plain_symbols.pop(); (); };
+    if invalid == 17 { program.modules.set(2 * 12 + 7, 40); (); };
+    if invalid == 18 { program.contributions.set(program.contributions.len() - 1, 0); (); };
+    let linked = sh_link_debug_modules_image(&program)?;
+    let pdb = sh_link_pdb_modules(&program)?;
+    if write { let image_bytes = sh_binary_buffer(&linked)?; let pdb_bytes = sh_binary_buffer(&pdb)?; file_write_str_raw(sengoo_stdlib_str_ptr(e.as_str()), image_bytes.ptr(), image_bytes.used_len())?; file_write_str_raw(sengoo_stdlib_str_ptr(f.as_str()), pdb_bytes.ptr(), pdb_bytes.used_len())?; (); };
+    sh_i64_ok(0);
+}
+
+def main() -> i64 {
+    if args_len() == 1 { let mode = sh_lnt_argument(0); if not mode.is_ok() { return 64; }; if mode.value.as_str() == "--fail-equality" { assert_eq_i64(1, 2, "mixeddebug.sg", 1); (); }; if mode.value.as_str() == "--fail-truth" { assert_true(false, "mixeddebug.sg", 2); (); }; return 66; };
+    if args_len() != 7 and args_len() != 8 and args_len() != 9 { return 64; };
+    let a = sh_lnt_argument(0);
+    let b = sh_lnt_argument(1);
+    let sdk = sh_lnt_argument(2);
+    let c = sh_lnt_argument(3);
+    let d = sh_lnt_argument(4);
+    let e = sh_lnt_argument(5);
+    let f = sh_lnt_argument(6);
+    if not a.is_ok() or not b.is_ok() or not sdk.is_ok() or not c.is_ok() or not d.is_ok() or not e.is_ok() or not f.is_ok() { return 64; };
+    let mut reading = false;
+    let invalid = if args_len() >= 8 { let mode = sh_lnt_argument(7); if not mode.is_ok() { return 64; }; if mode.value.as_str() == "read" { reading = true; 0; } else { let bytes = sh_lex_bytes(&mode.value); if not bytes.is_ok() { return 64; }; sh_lex_byte(&bytes.value, 0) - 64; }; } else { 0; };
+    let identity = if args_len() == 9 { sh_lnt_argument(8); } else { f.value.clone(); };
+    if not identity.is_ok() { return 64; };
+    let strings = sengoo_string_live_handle_count();
+    let buffers = sengoo_buffer_live_handle_count();
+    let opaque = sengoo_opaque_live_handle_count();
+    let snapshots = sengoo_file_snapshot_live_handle_count();
+    let bytes = sengoo_file_snapshot_live_bytes();
+    let mut round = 0;
+    let mut expected = -1;
+    while round < 5 { let result = sh_mixed_scope(&a.value, &b.value, &sdk.value, &c.value, &d.value, &e.value, &f.value, round == 0, invalid, reading, &identity.value); let code = if result.is_ok() { 0; } else { result.error; }; assert_eq_i64(sengoo_string_live_handle_count(), strings, "mixeddebug.sg", 1); assert_eq_i64(sengoo_buffer_live_handle_count(), buffers, "mixeddebug.sg", 1); assert_eq_i64(sengoo_opaque_live_handle_count(), opaque, "mixeddebug.sg", 1); assert_eq_i64(sengoo_file_snapshot_live_handle_count(), snapshots, "mixeddebug.sg", 1); assert_eq_i64(sengoo_file_snapshot_live_bytes(), bytes, "mixeddebug.sg", 1); if expected < 0 { expected = code; } else { assert_eq_i64(code, expected, "mixeddebug.sg", 2); (); }; round = round + 1; };
+    if expected != 0 { println(expected); return 65; };
+    println("mixed SG debug and source-locked C leaf: ok");
+    0;
+}

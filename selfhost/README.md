@@ -176,9 +176,13 @@ debugger source switching and local values. Independent COFF compile-unit
 merging is qualified separately by `link_units_gate.py`: it preserves each
 object's source registry and type-index namespace, merges PDB module streams,
 and verifies real cross-object calls, same-named static functions and debugger
-stepping. This focused library gate requires supported debug records for every
-input object; mixed nondebug SDK objects, archive debug units and automatic
-native symbol internalization remain open.
+stepping. `mixeddebug_gate.py` additionally qualifies explicitly classified
+nondebug SDK objects with their actual sections, relocations and address-only
+public symbols. Such objects receive no invented source, type or line records;
+at least one checked SG debug unit is required. Archive debug units and
+automatic native symbol internalization remain open. The pinned LLDB 19 reader
+does not resolve address-only C publics by name; exact C-address stops and
+independent clang/lld controls record that debugger boundary separately.
 It is not yet the public `sgc` command interface. Resolved root and structural
 cleanup, stack probing and unwind records have focused execution gates; pending
 runtime glue, conditional field cleanup, async, full module/tool compatibility,

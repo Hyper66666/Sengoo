@@ -2,10 +2,14 @@ import selfhost_link_codeview;
 
 struct ShLinkDebugModules {
     catalog: ShLinkDebug,
+    schema: i64,
+    module_kinds: Vec<i64>,
+    plain_symbols: Vec<i64>,
     bound_names: ShSymbols,
     bound_sections: Vec<i64>,
     bound_symbols: Vec<i64>,
     bound_groups: Vec<i64>,
+    bound_relocations: Vec<i64>,
     bound_hash: ShBinary,
     seal: ShBinary,
     image: ShBinary,
@@ -30,11 +34,11 @@ struct ShLinkDebugModules {
 }
 
 def sh_link_debug_modules_new() -> ShLinkDebugModules {
-    ShLinkDebugModules { catalog: sh_link_debug_new(), bound_names: sh_symbols_new(100000), bound_sections: vec_new_i64(), bound_symbols: vec_new_i64(), bound_groups: vec_new_i64(), bound_hash: sh_binary_new(32), seal: sh_binary_new(32), image: sh_binary_new(16777216), image_hash: sh_binary_new(32), modules: vec_new_i64(), file_map: vec_new_i64(), source_ids: vec_new_i64(), registry: vec_new_i64(), functions: vec_new_i64(), contributions: vec_new_i64(), streams: sh_link_msf_new(16777216), symbols: sh_binary_new(1048576), globals: vec_new_i64(), publics: vec_new_i64(), public_addresses: vec_new_i64(), single_image: sh_binary_new(16777216), single_pdb: sh_binary_new(16777216), single_hash: sh_binary_new(64), path: -1, expected: 0, error: 0 };
+    ShLinkDebugModules { catalog: sh_link_debug_new(), schema: 2, module_kinds: vec_new_i64(), plain_symbols: vec_new_i64(), bound_names: sh_symbols_new(100000), bound_sections: vec_new_i64(), bound_symbols: vec_new_i64(), bound_groups: vec_new_i64(), bound_relocations: vec_new_i64(), bound_hash: sh_binary_new(32), seal: sh_binary_new(32), image: sh_binary_new(16777216), image_hash: sh_binary_new(32), modules: vec_new_i64(), file_map: vec_new_i64(), source_ids: vec_new_i64(), registry: vec_new_i64(), functions: vec_new_i64(), contributions: vec_new_i64(), streams: sh_link_msf_new(16777216), symbols: sh_binary_new(1048576), globals: vec_new_i64(), publics: vec_new_i64(), public_addresses: vec_new_i64(), single_image: sh_binary_new(16777216), single_pdb: sh_binary_new(16777216), single_hash: sh_binary_new(64), path: -1, expected: 0, error: 0 };
 }
 
 def sh_link_debug_modules_begin(program: &mut ShLinkDebugModules, link: &ShLinker, image: &ShBinary, path: &String) -> Result<i64, i64> {
-    if program.expected != 0 or program.path >= 0 or program.error != 0 or program.modules.len() != 0 or sh_binary_len(&program.image) != 0 or not link.linked { return sh_i64_error(7331); };
+    if program.schema != 2 or program.module_kinds.len() != 0 or program.plain_symbols.len() != 0 or program.expected != 0 or program.path >= 0 or program.error != 0 or program.modules.len() != 0 or sh_binary_len(&program.image) != 0 or not link.linked { return sh_i64_error(7331); };
     if link.objects < 1 or link.objects > 32 or sh_binary_len(image) > 16777216 { return sh_i64_error(7332); };
     program.path = sh_link_debug_name(&program.catalog, path)?;
     sh_link_debug_append(&program.image, image)?;
@@ -46,6 +50,7 @@ def sh_link_debug_modules_begin(program: &mut ShLinkDebugModules, link: &ShLinke
     sh_ldm_copy_words(&program.bound_sections, &link.sections)?;
     sh_ldm_copy_words(&program.bound_symbols, &link.symbols)?;
     sh_ldm_copy_words(&program.bound_groups, &link.groups)?;
+    sh_ldm_copy_words(&program.bound_relocations, &link.relocations)?;
     let binding = sh_ldm_binding_hash(program)?;
     sh_link_debug_append(&program.bound_hash, &binding)?;
     program.expected = link.objects;
@@ -113,7 +118,7 @@ def sh_ldm_write_global(symbols: &ShBinary, globals: &Vec<i64>, publics: &Vec<i6
 
 def sh_ldm_read_inner(program: &mut ShLinkDebugModules, unit: &ShLinkDebug, link: &ShLinker, image: &ShBinary, object: i64, object_path: &String) -> Result<i64, i64> {
     let module = program.modules.len() / 12;
-    if program.expected < 1 or program.expected != link.objects or module >= program.expected or object != module or (not sh_ldm_image_equal(program, image)) or (not sh_ldm_binding_equal(program, link)) { return sh_i64_error(7331); };
+    if program.schema != 2 or program.module_kinds.len() != module or program.expected < 1 or program.expected != link.objects or module >= program.expected or object != module or (not sh_ldm_image_equal(program, image)) or (not sh_ldm_binding_equal(program, link)) { return sh_i64_error(7331); };
     if program.expected > 1 and unit.origins.len() == 0 { return sh_i64_error(7333); };
     let scopes = vec_new_i64();
     sh_link_codeview_read_scoped(unit, link, image, object, true, &scopes)?;
@@ -146,6 +151,7 @@ def sh_ldm_read_inner(program: &mut ShLinkDebugModules, unit: &ShLinkDebug, link
     sh_binary_unsigned(&stream, 0, 4)?;
     let stream_id = sh_link_msf_add(&program.streams, &stream)?;
     if stream_id != module { return sh_i64_error(7331); };
+    sh_link_push(&program.module_kinds, 0)?;
     sh_link_push(&program.modules, object)?;
     sh_link_push(&program.modules, module_name)?;
     sh_link_push(&program.modules, file_first)?;
@@ -190,6 +196,9 @@ def sh_ldm_binding_hash(program: &ShLinkDebugModules) -> Result<ShBinary, i64> {
     sh_binary_unsigned(&input, program.bound_groups.len(), 8)?;
     at = 0;
     while at < program.bound_groups.len() { sh_binary_unsigned(&input, sengoo_vec_get_or_default_i64(program.bound_groups.handle, at, 0), 8)?; at = at + 1; };
+    sh_binary_unsigned(&input, program.bound_relocations.len(), 8)?;
+    at = 0;
+    while at < program.bound_relocations.len() { sh_binary_unsigned(&input, sengoo_vec_get_or_default_i64(program.bound_relocations.handle, at, 0), 8)?; at = at + 1; };
     sh_binary_unsigned(&input, sh_symbol_count(&program.bound_names), 8)?;
     at = 0;
     while at < sh_symbol_count(&program.bound_names) { let text = sh_symbol_text(&program.bound_names, at)?; sh_link_debug_text(&input, &text)?; at = at + 1; };
@@ -197,13 +206,15 @@ def sh_ldm_binding_hash(program: &ShLinkDebugModules) -> Result<ShBinary, i64> {
 }
 
 def sh_ldm_binding_equal(program: &ShLinkDebugModules, link: &ShLinker) -> bool {
-    if program.bound_sections.len() != link.sections.len() or program.bound_symbols.len() != link.symbols.len() or program.bound_groups.len() != link.groups.len() or sh_symbol_count(&program.bound_names) != sh_symbol_count(&link.names) { return false; };
+    if program.bound_sections.len() != link.sections.len() or program.bound_symbols.len() != link.symbols.len() or program.bound_groups.len() != link.groups.len() or program.bound_relocations.len() != link.relocations.len() or sh_symbol_count(&program.bound_names) != sh_symbol_count(&link.names) { return false; };
     let mut at = 0;
     while at < link.sections.len() { if sengoo_vec_get_or_default_i64(program.bound_sections.handle, at, -1) != sengoo_vec_get_or_default_i64(link.sections.handle, at, -2) { return false; }; at = at + 1; };
     at = 0;
     while at < link.symbols.len() { if sengoo_vec_get_or_default_i64(program.bound_symbols.handle, at, -1) != sengoo_vec_get_or_default_i64(link.symbols.handle, at, -2) { return false; }; at = at + 1; };
     at = 0;
     while at < link.groups.len() { if sengoo_vec_get_or_default_i64(program.bound_groups.handle, at, -1) != sengoo_vec_get_or_default_i64(link.groups.handle, at, -2) { return false; }; at = at + 1; };
+    at = 0;
+    while at < link.relocations.len() { if sengoo_vec_get_or_default_i64(program.bound_relocations.handle, at, -1) != sengoo_vec_get_or_default_i64(link.relocations.handle, at, -2) { return false; }; at = at + 1; };
     at = 0;
     while at < sh_symbol_count(&link.names) { let a = sh_symbol_text(&program.bound_names, at); let b = sh_symbol_text(&link.names, at); if not a.is_ok() or not b.is_ok() or sengoo_string_eq(a.value.handle, b.value.handle) == 0 { return false; }; at = at + 1; };
     true;
@@ -220,8 +231,11 @@ def sh_ldm_commit_words(output: &ShBinary, words: &Vec<i64>, bytes: bool) -> Res
 
 def sh_ldm_state_hash(program: &ShLinkDebugModules) -> Result<ShBinary, i64> {
     let output = sh_binary_new(4096);
-    let domain = string_from_str("Sengoo-debug-modules-state-v1")?;
+    let domain = string_from_str("Sengoo-debug-modules-state-v2")?;
     sh_link_debug_text(&output, &domain)?;
+    sh_binary_unsigned(&output, program.schema, 8)?;
+    sh_ldm_commit_words(&output, &program.module_kinds, false)?;
+    sh_ldm_commit_words(&output, &program.plain_symbols, false)?;
     sh_binary_unsigned(&output, program.expected, 8)?;
     sh_binary_unsigned(&output, program.path, 8)?;
     sh_ldm_commit_words(&output, &program.modules, false)?;
@@ -253,4 +267,84 @@ def sh_ldm_state_hash(program: &ShLinkDebugModules) -> Result<ShBinary, i64> {
     let digest = sh_link_sha256(&names)?;
     sh_link_debug_append(&output, &digest)?;
     sh_link_sha256(&output);
+}
+
+def sh_ldm_plain_check(names: &ShSymbols, sections: &Vec<i64>, object: i64) -> Result<i64, i64> {
+    let mut section = 0;
+    let mut found = 0;
+    while section < sections.len() / 10 { if sh_link_word(sections, 10, section, 0) == object { let name = sh_symbol_text(names, sh_link_word(sections, 10, section, 1))?; if name.len() >= 6 { let prefix = name.get(0, 6)?; if prefix.as_str() == ".debug" { return sh_i64_error(7333); }; }; found = found + 1; }; section = section + 1; };
+    if found == 0 { return sh_i64_error(7331); };
+    sh_i64_ok(found);
+}
+
+def sh_ldm_plain_stream(path: &String) -> Result<ShBinary, i64> {
+    let header = sh_link_debug_new();
+    let stream = sh_binary_new(1048576);
+    sh_link_pdb_symbols_named(&header, &stream, path)?;
+    Result { is_ok: true, value: stream, error: 0 };
+}
+
+def sh_ldm_plain_symbols(destination: &Vec<i64>, catalog: &ShSymbols, names: &ShSymbols, sections: &Vec<i64>, symbols: &Vec<i64>, object: i64, module: i64) -> Result<i64, i64> {
+    let mut symbol = 0;
+    let mut count = 0;
+    while symbol < symbols.len() / 6 { let section = sh_link_word(symbols, 6, symbol, 3) - 1; if sh_link_word(symbols, 6, symbol, 0) == object and section >= 0 { let storage = sh_link_word(symbols, 6, symbol, 4); let value = sh_link_word(symbols, 6, symbol, 2); if storage != 2 and storage != 3 or sh_link_word(sections, 10, section, 0) != object or value < 0 or value > sh_link_word(sections, 10, section, 3) { return sh_i64_error(7331); }; let text = sh_symbol_text(names, sh_link_word(symbols, 6, symbol, 1))?; let name = sh_intern(catalog, &text)?; sh_link_push(destination, module)?; sh_link_push(destination, name)?; sh_link_push(destination, sh_link_word(sections, 10, section, 6) + 1)?; sh_link_push(destination, sh_link_word(sections, 10, section, 7) + value)?; sh_link_push(destination, storage)?; sh_link_push(destination, if (sh_link_word(sections, 10, section, 4) & 536870912) != 0 { 2; } else { 0; })?; count = count + 1; }; if sh_link_word(symbols, 6, symbol, 0) == object and section < -1 { return sh_i64_error(7333); }; symbol = symbol + 1; };
+    sh_i64_ok(count);
+}
+
+def sh_ldm_plain_public(symbols: &ShBinary, publics: &Vec<i64>, addresses: &Vec<i64>, names: &ShSymbols, name: i64, segment: i64, offset: i64, flags: i64) -> Result<i64, i64> {
+    let text = sh_symbol_text(names, name)?;
+    let record = sh_link_pdb_begin(symbols, 4366)?;
+    sh_binary_unsigned(symbols, flags, 4)?;
+    sh_binary_unsigned(symbols, offset, 4)?;
+    sh_binary_unsigned(symbols, segment, 2)?;
+    sh_link_debug_text(symbols, &text)?;
+    sh_link_pdb_end(symbols, record)?;
+    sh_link_push(publics, name)?;
+    sh_link_push(publics, record)?;
+    sh_link_push(addresses, segment)?;
+    sh_link_push(addresses, offset)?;
+    sh_i64_ok(record);
+}
+
+def sh_ldm_submit_no_debug_inner(program: &mut ShLinkDebugModules, link: &ShLinker, image: &ShBinary, object: i64, object_path: &String) -> Result<i64, i64> {
+    let module = program.modules.len() / 12;
+    if program.schema != 2 or program.module_kinds.len() != module or program.expected < 1 or program.expected != link.objects or module >= program.expected or object != module or not sh_ldm_image_equal(program, image) or not sh_ldm_binding_equal(program, link) { return sh_i64_error(7331); };
+    sh_ldm_plain_check(&link.names, &link.sections, object)?;
+    let name = sh_link_debug_name(&program.catalog, object_path)?;
+    let mut previous = 0;
+    while previous < module { if sh_link_word(&program.modules, 12, previous, 1) == name { return sh_i64_error(7331); }; previous = previous + 1; };
+    let stream = sh_ldm_plain_stream(object_path)?;
+    let symbols_size = sh_binary_len(&stream);
+    sh_binary_unsigned(&stream, 0, 4)?;
+    let id = sh_link_msf_add(&program.streams, &stream)?;
+    if id != module { return sh_i64_error(7331); };
+    let first = program.plain_symbols.len() / 6;
+    sh_ldm_plain_symbols(&program.plain_symbols, &program.catalog.names, &link.names, &link.sections, &link.symbols, object, module)?;
+    let mut symbol = first;
+    while symbol < program.plain_symbols.len() / 6 { if sh_link_word(&program.plain_symbols, 6, symbol, 4) == 2 { sh_ldm_plain_public(&program.symbols, &program.publics, &program.public_addresses, &program.catalog.names, sh_link_word(&program.plain_symbols, 6, symbol, 1), sh_link_word(&program.plain_symbols, 6, symbol, 2), sh_link_word(&program.plain_symbols, 6, symbol, 3), sh_link_word(&program.plain_symbols, 6, symbol, 5))?; (); }; symbol = symbol + 1; };
+    sh_link_push(&program.module_kinds, 1)?;
+    sh_link_push(&program.modules, object)?;
+    sh_link_push(&program.modules, name)?;
+    sh_link_push(&program.modules, program.file_map.len())?;
+    sh_link_push(&program.modules, 0)?;
+    sh_link_push(&program.modules, program.functions.len() / 8)?;
+    sh_link_push(&program.modules, 0)?;
+    sh_link_push(&program.modules, symbols_size)?;
+    sh_link_push(&program.modules, 0)?;
+    sh_link_push(&program.modules, id)?;
+    sh_link_push(&program.modules, 0)?;
+    let contribution_first = program.contributions.len() / 5;
+    let mut section = 0;
+    while section < link.sections.len() / 10 { if sh_link_word(&link.sections, 10, section, 0) == object and sh_link_word(&link.sections, 10, section, 3) > 0 { sh_link_push(&program.contributions, module)?; sh_link_push(&program.contributions, sh_link_word(&link.sections, 10, section, 6) + 1)?; sh_link_push(&program.contributions, sh_link_word(&link.sections, 10, section, 7))?; sh_link_push(&program.contributions, sh_link_word(&link.sections, 10, section, 3))?; sh_link_push(&program.contributions, sh_link_word(&link.sections, 10, section, 4))?; (); }; section = section + 1; };
+    sh_link_push(&program.modules, contribution_first)?;
+    sh_link_push(&program.modules, program.contributions.len() / 5 - contribution_first)?;
+    if program.modules.len() / 12 == program.expected { let seal = sh_ldm_state_hash(program)?; sh_link_debug_append(&program.seal, &seal)?; (); };
+    sh_i64_ok(module);
+}
+
+def sh_link_debug_modules_submit_no_debug(program: &mut ShLinkDebugModules, link: &ShLinker, image: &ShBinary, object: i64, object_path: &String) -> Result<i64, i64> {
+    if program.error != 0 { return sh_i64_error(program.error); };
+    let result = sh_ldm_submit_no_debug_inner(program, link, image, object, object_path);
+    if not result.is_ok() { program.error = result.error; };
+    result;
 }

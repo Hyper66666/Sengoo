@@ -502,3 +502,82 @@ arrays are empty; the retained prefix SHA-256 is
 The 109/79/44-command reports do not consume this pure runner in their recorded
 or actual Python import closures; their input hashes remain matched after this
 runner-only repair.
+
+
+## Explicit nondebug objects beside checked SG debug units
+
+- [x] Bind schema-2 unit classifications and complete actual COFF metadata including relocations without reducing the expected object count.
+- [x] Require explicit nondebug submission and reject known, unknown and partial `.debug` contributions.
+- [x] Preserve real nondebug module/section/symbol identity with zero invented source/type/line records.
+- [x] Requalify the historical immutable C fixture branch from source, headers, raw/normalized object, tool and normalization evidence.
+- [x] Execute two real SG debug units plus the C leaf/data object, inspect the three modules and verify precise SG source debugging and scoped static helpers.
+- [x] Check exact public hash/address structures and distinguish actual C-address debugger stops from unsupported name lookup with an independent clang/lld control.
+- [x] Verify first-call success/failure resources, missing/mislabeled/poisoned units and actual relocation/source/stream mutations, including an explicit all-nondebug refusal.
+- [x] Regress the 109-command independent-unit/N=1 corpus and retain only unchanged, artifact-matched 93/79/44 reports for unaffected closures.
+- [x] Freeze exact reports/source/tool/artifact identities and strict specs while full SDK/debugger/runtime milestones remain open.
+
+
+This extension is qualified by
+`target/selfhost/m5-mixeddebug-sdk-qualified/evidence.json`, SHA-256
+`f0bcc7423d652813588ffe67f80eff9318a691b325e2d17e93252ce2cb1022e8`:
+66 commands, 258 consumed inputs, 46 recorded tools and 25 SG rejection cases.
+It emits two actual SG debug objects and links the independently requalified
+C leaf/data object as a third real object. Its three PDB modules have file
+counts 2/2/0 and C13 byte counts 208/200/0; DBI retains four SG file
+contributions over three unique physical paths. The C module contributes real
+.text/.data/.rdata sections, four external public addresses and four static
+data names only in bound metadata. An independent byte oracle checks complete
+public hash buckets/bitmap/record pointers and the address map, with four
+malformed-byte controls. Real SG-to-C calls, SG source/stack/local debugging
+and shared-file static helper stops execute separately to exit 42.
+
+The exact C public file address is `0x140001a20`. A separate LLDB process
+actually stops there at RIP `0x7ff6903c1a20`, equal to its recorded module slide
+`0x7ff5503c0000` plus that file address, reads RCX 0 and has no invented source
+frame; the task explicitly kills that stopped process. The SG PDB and an
+independent clang/lld PDB both retain a pending C-name breakpoint under pinned
+LLDB 19.1.7. Those negative observations do not qualify name lookup or successful
+continuation through the retained untyped int3 limitation. The primary source
+path, SHA-256, canonical tag URL and actual physical line numbers are recorded
+in the design; a newer debugger and full SDK typed/name/source experience
+remain open.
+
+The historical SDK branch consumes only the pinned C source/header/tool/raw
+object/normalization branch of report
+`runtime-deflate-final-checkpoint`, SHA-256
+`7896f7263042359b916d3efe2905da312e8563bf60d554891b229445f708c718`.
+Fresh normalization reproduces exact historical object SHA-256
+`d5b3c8cea56a930f7f8e2d707b84773331e05c5dfc835b3fec242a76a130ee70`;
+raw code/data, relocation targets, defined/referenced symbol addresses and
+static data preservation are independently checked. This does not consume
+unrelated live SG DEFLATE algorithm sources or qualify arbitrary raw clang
+auxiliary metadata. Raw auxiliary COFF rejects 7203. Single `.debug$S`, single
+`.debug$T` and unknown `.debug` sections reject 7333. The 21 state cases also
+exercise missing/duplicate/mislabeled units, schema 1, minimal streams, actual
+sections/symbols/image/relocations, bound relocation copies and all-nondebug
+rejection. Each of all 25 SG failures checks all five resource counters after
+each of five scopes starting before its first call and preserves sentinel
+outputs; both assertion controls really exit 1.
+
+Two fresh artifact directories use the same three logical names
+`sg-main.obj`, `sg-worker.obj`, `sdk-leaf.obj`, identical actual physical source
+inputs and the explicitly recorded fixed RSDS path. Their objects, PE and PDB
+bytes match. This is not different-source-checkout or path-remapping evidence.
+The schema-2 and relocation-binding changes additionally pass the unmodified
+109-command gate at
+`target/selfhost/m5-independent-units-mixed-regression/evidence.json`, SHA-256
+`75a27779a3684c4ae826475d096a2f6498fc1fd41dfc4b64ea092663d607fce1`:
+408 inputs, 42 tools, nine exact legacy N=1 PE/PDB comparisons and all 52
+existing rejection/resource cases. Both new reports start and end at full
+revision `32c70b734e05f9101b914334e4fd00dd147276e5` on their recorded Windows
+host, with empty source/tool/config/original-checkout change arrays.
+
+The unchanged 93/79/44-command reports named above remain qualified for their
+unaffected closures: every consumed source/tool and every listed terminal
+artifact has been rehashed and still matches. They do not import either
+changed module-container source. Their historical revision intervals remain
+as recorded above; they are not represented as freshly rerun. The final freeze
+separately records recursive output manifests, exact current source/tool and
+present/absent-config rechecks and the primary debugger source. Development
+compilation still uses its recorded C/Rust runtime. Full M5, archive/debugger
+coverage, installed SDK packaging, M6 and different-checkout M8 remain open.

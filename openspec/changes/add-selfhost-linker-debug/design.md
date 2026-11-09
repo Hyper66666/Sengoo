@@ -555,3 +555,68 @@ confirm two independent modules and source/stack/local behavior. Full revision
 changed captured sources, tools, Cargo configurations or original checkout
 inputs. Complete previous 93/79/44-command debug gates also pass as listed in
 the tasks. These bounded results do not close the broader exclusions above.
+
+
+## Mixed debug units and explicit nondebug COFF objects
+
+The module container schema is now 2. It records one classification per real
+COFF object: a checked debug unit or an explicitly submitted nondebug unit.
+`sh_link_debug_modules_submit_no_debug` requires the same actual linked-object
+ID/order, image and complete bound section/symbol/group/name/relocation tables
+as debug submission. Every section of that object is inspected, including
+empty sections. Any `.debug` prefix, including a single `.debug$S`, a single
+`.debug$T`, or an unknown debug subsection, rejects; this entry point cannot
+silently discard unsupported debug records. Every actual object remains
+required once, so the expected count is not reduced to the number of debug
+units. A failed submission poisons the container and repeated submission cannot
+mutate it further. Schema 1 and all-nondebug PDB programs reject explicitly;
+this admission requires at least one checked debug unit.
+
+An accepted nondebug object has its own DBI module and contribution ownership,
+a minimal S_OBJNAME/S_COMPILE3 symbol stream, zero source files, zero typed
+procedures/locals and zero C13 bytes. Real code/data symbols are preserved in
+the bound metadata and source-bound program identity. External definitions
+receive address-only S_PUB32 records with flags derived from their executable
+section; static symbols remain bound metadata without fabricated public or
+typed procedure records. Independent export validation reconstructs the minimal
+stream, replays the exact bound COFF symbols and contributions and checks the
+completed program seal. Debug units continue to require their independent
+physical-source registry before decoding their own CodeView.
+
+The initial SDK object is the source-locked C fixture leaf from the historical
+`runtime-deflate-final-checkpoint` report, pinned SHA-256
+`7896f7263042359b916d3efe2905da312e8563bf60d554891b229445f708c718`.
+Only its C branch is consumed: immutable fixture source, exact header closure,
+compiler/objcopy/objdump identities, retained raw and normalized objects,
+normalization operations and actual code/data/symbol/relocation preservation.
+The fresh gate recompiles that source and proves its normalized object equal
+to historical SHA-256
+`d5b3c8cea56a930f7f8e2d707b84773331e05c5dfc835b3fec242a76a130ee70`.
+Unrelated current SG DEFLATE algorithms are not consumed through this branch.
+The C object contains fixed test data and leaf getters/checker, not a compiler
+or text/decompression policy fallback. Raw clang auxiliary-symbol COFF remains
+explicitly rejected under the current parser; normalized C metadata admission
+does not imply arbitrary MSVC aux/COMDAT/CodeView or final SDK packaging.
+
+The pinned LLDB 19.1.7 consumer has a specific public-name limitation. Its
+NativePDB `AddSymbols` implementation is empty and `FindFunctions` selects only
+S_PROCREF/S_LPROCREF. The exact primary source is preserved at
+`target/selfhost/m5-linker-dev/llvmorg-19.1.7-SymbolFileNativePDB.cpp`, SHA-256
+`7434e4c38399d0564aa7d17c583fe89c2d05ff3457b98395d066dacc4a99e71e`
+(physical lines 1046, 1676 and 1696). Canonical source:
+https://github.com/llvm/llvm-project/blob/llvmorg-19.1.7/lldb/source/Plugins/SymbolFile/NativePDB/SymbolFileNativePDB.cpp
+The later primary change implementing public AddSymbols is:
+https://github.com/llvm/llvm-project/commit/65787728b72a2b1f1bfdefd15d32ec0a69f2b941
+The SG output and an independent clang/lld image using the same nondebug C leaf
+both retain a pending C-name breakpoint with this debugger. This is not a
+successful name-breakpoint gate. The independent byte oracle validates public
+GSI name hashes, record pointers, bitmap/bucket associations and the full
+address map against actual COFF section contributions and symbol offsets.
+A separate debugger process sets a module-qualified file-address breakpoint,
+checks that actual RIP equals module slide plus that public file address and
+RCX is zero, observes no fabricated source frame, then explicitly kills that
+process. Windows LLDB continuation through this untyped software breakpoint
+has a retained int3 limitation; no continuation-success claim is made. Separate
+fresh product and SG source-debugger processes execute the real C calls and
+exit 42. Full SDK typed/source/name debugging and qualification of a newer
+consumer remain open.
