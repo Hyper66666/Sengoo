@@ -58,6 +58,14 @@ def sh_x64_call_register(output: &ShBinary, register: i64) -> Result<i64, i64> {
     sh_i64_ok(start);
 }
 
+def sh_x64_probe_stack(output: &ShBinary, frame: i64) -> Result<i64, i64> {
+    if frame <= 4096 or frame > 2147483632 or frame % 16 != 0 { return sh_i64_error(6101); };
+    let start = sh_binary_len(output);
+    let valid = sh_x64_mov_imm(output, 0, frame).is_ok() and sh_x64_branch(output, 1, 0).is_ok() and sh_binary_byte(output, 72).is_ok() and sh_binary_byte(output, 41).is_ok() and sh_binary_byte(output, 196).is_ok();
+    if not valid { return sh_x64_rewind(output, start, 6001); };
+    sh_i64_ok(start);
+}
+
 def sh_x64_rip_address(output: &ShBinary, register: i64) -> Result<i64, i64> {
     if not sh_x64_register(register) { return sh_i64_error(6101); };
     let start = sh_binary_len(output);

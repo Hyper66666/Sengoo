@@ -7,6 +7,8 @@
 - [x] Emit deterministic multiple initialized COFF sections, short/long section and symbol names, external/static symbols and checked AMD64 relocations; independently inspect and link/execute external calls, cross-section loads and absolute data pointers (`target/selfhost/m4-object-checked/evidence.json`). Auxiliary/COMDAT/BSS/debug/unwind records remain open.
 - [x] Implement and independently execute the initial validated scalar MIR consumer, including parallel CFG edge copies, integer widths, local memory, direct/indirect calls, six-argument Windows C calls, checked arithmetic failures and wrapping mode (`target/selfhost/m4-scalar-initialization/evidence.json`). Complete MIR/native ABI and cleanup support remain open.
 - [x] Verify the initial SG source-to-native-object CLI through frontend/semantics/owned HIR/MIR/x64/COFF against the frozen qualified Rust/LLVM reference for nine exact source programs and three output-preserving rejections (`target/selfhost/m4-source-supported/evidence.json`). Public sgc/module/tool parity remains open.
+- [x] Emit fixed-frame Windows x64 `.pdata/.xdata` unwind records and checked `__chkstk` probes for >4 KiB frames; verify LLVM inspection, `RtlLookupFunctionEntry`, `RtlVirtualUnwind`, deterministic objects and exact resource recovery (`target/selfhost/m4-unwind-final3/evidence.json`). Exception handlers, XMM saves and CodeView remain open.
+- [x] Emit fixed-frame Windows x64 `.pdata/.xdata` unwind records and checked `__chkstk` probes for >4 KiB frames; verify LLVM inspection, `RtlLookupFunctionEntry`, `RtlVirtualUnwind`, deterministic objects and exact resource recovery (`target/selfhost/m4-unwind-final3/evidence.json`). Exception handlers, XMM saves and CodeView remain open.
 
 ## Supported target behavior
 
@@ -64,3 +66,14 @@ failures preserved previous output bytes. The initial trial in
 `target/selfhost/m4-source-final/` used an unsuffixed narrow-literal form rejected
 by the frozen reference and remains a failed report; the successful gate uses
 its explicitly supported `40i8`/`2i8` counterpart. These gates do not close M4.
+
+Fixed-frame unwind evidence: report SHA-256
+`9144e97e16d31a91f435363ca5b91785aad21ddb2366d03e78deabc8c00b1e95`,
+revision `709fb7c` plus the recorded native backend source edits, Windows 11
+x64. Twenty commands passed with unchanged source/tool identities, including
+deterministic repeated objects, LLVM `ALLOC_SMALL` inspection, Windows runtime
+function lookup/unwind at multiple offsets, and five overflow exits plus
+wrapping. Boundary fixtures cover invalid unwind frame sizes, incomplete
+buffers and the >4 KiB `__chkstk` encoder. The prior report remains retained
+as development evidence; exception handlers, XMM saves, CodeView and actual
+large-frame execution remain open.

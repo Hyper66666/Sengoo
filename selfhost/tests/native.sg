@@ -242,6 +242,22 @@ def sh_nt_fixture(mir: &ShMir) -> Result<bool, i64> {
 }
 
 def sh_test_native() -> Result<bool, i64> {
+    let unwind = sh_binary_new(32);
+    assert_eq_i64(sh_unwind_fixed(&unwind, 128, 11)?, 0, "native.sg", 165);
+    assert_true(sh_unwind_fixed(&unwind, 144, 11)? > 0, "native.sg", 165);
+    assert_true(sh_unwind_fixed(&unwind, 524288, 22)? > 0, "native.sg", 165);
+    assert_eq_i64(sh_unwind_fixed(&unwind, 17, 11).error, 6601, "native.sg", 165);
+    assert_eq_i64(sh_unwind_fixed(&unwind, 16, 0).error, 6601, "native.sg", 165);
+    let truncated = sh_binary_new(7);
+    assert_eq_i64(sh_unwind_fixed(&truncated, 16, 11).error, 6001, "native.sg", 165);
+    assert_eq_i64(sh_binary_len(&truncated), 0, "native.sg", 165);
+    sh_binary_byte(&truncated, 1)?;
+    assert_eq_i64(sh_unwind_fixed(&truncated, 16, 11).error, 6601, "native.sg", 165);
+    assert_eq_i64(sh_binary_len(&truncated), 1, "native.sg", 165);
+    let probe = sh_binary_new(64);
+    assert_eq_i64(sh_x64_probe_stack(&probe, 4096).error, 6101, "native.sg", 165);
+    assert_eq_i64(sh_x64_probe_stack(&probe, 4112)?, 0, "native.sg", 165);
+    assert_true(sh_binary_len(&probe) > 0, "native.sg", 165);
     let mir = sh_mir_new(1000);
     sh_nt_fixture(&mir)?;
     assert_eq_i64(sh_mir_validate(&mir).error, 0, "native.sg", 168);
@@ -259,7 +275,7 @@ def sh_test_native() -> Result<bool, i64> {
     let mut local = 0;
     while local < 500 { sh_mir_add_local(&mir, 0, sh_mir_type_arg(&mir, sh_mir_fn(&mir, 0, 1), 0), -1, 2, 1, 0, -1, -1, 0, 0)?; local = local + 1; };
     let large = sh_native_object(&mir, 65536, true);
-    assert_eq_i64(large.error, 6503, "native.sg", 184);
+    assert_eq_i64(large.error, 0, "native.sg", 184);
     let unsupported_mir = sh_mir_new(20);
     let floating = sh_type_primitive(&unsupported_mir.types, 3, 64, 0)?;
     let empty = vec_new_i64();

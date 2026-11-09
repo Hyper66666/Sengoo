@@ -85,6 +85,18 @@ unwinding across its frames. Independent C callers execute actual generated
 machine code and test checked failure exits and wrapping results; raw MIR
 validation and output limits are checked before publishing an object.
 
+The current scalar path also emits fixed-frame `.xdata`/`.pdata` records. The
+record describes the actual RBP push and fixed allocation, uses the shortest
+Windows `UWOP_ALLOC_SMALL`/`UWOP_ALLOC_LARGE` form, and is linked through
+section-relative relocations. The generated prologue is checked against the
+record at each instruction boundary by `RtlVirtualUnwind`; the C probe also
+looks up both generated functions through `RtlLookupFunctionEntry`. Frames over
+one page emit a checked `mov RAX, size; call __chkstk; sub RSP, RAX` sequence;
+the external `__chkstk` relocation is explicit in the object. Large frame
+execution remains outside this fixture until a complete runtime probe is
+added. Exception/termination handlers, chained entries, XMM saves and
+CodeView locals remain open.
+
 `tools/native.sg` joins the SG frontend, semantic checker, owned HIR/MIR and
 scalar consumer into a single-source development CLI. Its positional interface
 is `INPUT OUTPUT.obj [--wrap]`; JSON schema-version-1 diagnostics identify the

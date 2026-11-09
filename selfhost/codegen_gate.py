@@ -29,7 +29,7 @@ def main():
     out.mkdir(parents=True, exist_ok=True)
     paths = {name: getattr(args, name).resolve() for name in ("seed", "clang", "formatter")}
     lock = json.loads((ROOT / "selfhost/bootstrap.lock").read_text())
-    names = ("core", "types", "lexer", "mir", "mir_validate", "binary", "coff", "object", "x64", "x64_scalar", "native")
+    names = ("core", "types", "lexer", "mir", "mir_validate", "binary", "coff", "object", "x64", "x64_scalar", "unwind", "native")
     inputs = [Path(__file__), ROOT / "selfhost/bootstrap.lock", ROOT / "selfhost/tests/native.sg", ROOT / "selfhost/tests/native_probe.c"]
     inputs += [ROOT / "selfhost/src" / (name + ".sg") for name in names]
     inputs += sorted((ROOT / "tools/stdlib").rglob("*.sg"))
@@ -39,8 +39,8 @@ def main():
               "host": platform.platform(), "sources": {str(p.relative_to(ROOT)): sha(p) for p in inputs if p.is_file()},
               "tools": {}, "steps": [], "m4_complete": False,
               "limits": ["validated scalar MIR only; floating/aggregates/ownership/async/string data remain explicit unsupported errors",
-                         "stack-slot allocation; frame limited to 4000 bytes until stack probing and unwind metadata land",
-                         "no unwind or CodeView records yet; normal C calls only, no unwinding across generated frames",
+                         "stack-slot allocation; frames over 4096 bytes call __chkstk through a checked REL32 placeholder",
+                         "fixed-stack unwind records; exception cleanup handlers and CodeView remain open",
                          "division/remainder and full ABI coverage remain open; shift fixtures use defined in-width counts",
                          "SG emits bytes directly; external tools only independently inspect/link the verification caller",
                          "not an SG linker, complete backend or self-compilation fixed point"]}
@@ -71,7 +71,7 @@ def main():
             if digest != lock[name]["sha256"]:
                 raise ValueError(f"{name} identity mismatch")
             report["tools"][name] = {"path": str(path), "sha256": digest}
-        for name in ("src/native.sg", "src/x64_scalar.sg", "tests/native.sg"):
+        for name in ("src/native.sg", "src/x64_scalar.sg", "src/unwind.sg", "tests/native.sg"):
             run("format-" + name.replace("/", "-"), [paths["formatter"], "--check", ROOT / "selfhost" / name])
         binary = out / "native-tests.exe"
         binary.unlink(missing_ok=True)
@@ -88,12 +88,14 @@ def main():
         disassembler = paths["clang"].parent / "llvm-objdump.exe"
         for name, path in (("inspector", inspector), ("disassembler", disassembler)):
             report["tools"][name] = {"path": str(path), "sha256": sha(path)}
-        run("inspect", [inspector, "--file-headers", "--sections", "--symbols", "--relocations", checked], b"sg_native_indirect")
+        run("inspect", [inspector, "--file-headers", "--sections", "--symbols", "--relocations", "--unwind", checked], b"ALLOC_SMALL")
         run("disassemble", [disassembler, "-d", checked], b"sg_native_loop")
         probe, wrap_probe = out / "native-probe.exe", out / "wrap-probe.exe"
         for name, obj, exe in (("checked", checked, probe), ("wrap", wrapping, wrap_probe)):
             run("link-" + name, [paths["clang"], ROOT / "selfhost/tests/native_probe.c", obj, "-Werror", "-o", exe])
-        run("execute-checked", [probe], b"native MIR calls, loop, pointers, narrow memory and checked arithmetic: ok")
+        executed = run("execute-checked", [probe], b"native MIR calls, loop, pointers, narrow memory and checked arithmetic: ok")
+        if b"native unwind metadata: ok" not in executed:
+            raise AssertionError("Windows stack walk did not traverse generated function metadata")
         for case in ("overflow", "overflow8", "umul-overflow", "uadd-overflow", "mul-overflow"):
             run("reject-" + case, [probe, case], b"integer overflow", 63)
         run("execute-wrap", [wrap_probe, "wrap"], b"native wrapping arithmetic: ok")

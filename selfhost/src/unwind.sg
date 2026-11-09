@@ -1,0 +1,14 @@
+import selfhost_binary;
+
+def sh_unwind_fixed(output: &ShBinary, frame: i64, allocation_end: i64) -> Result<i64, i64> {
+    if frame < 16 or frame > 2147483632 or frame % 16 != 0 or allocation_end < 2 or allocation_end > 255 or sh_binary_len(output) % 4 != 0 { return sh_i64_error(6601); };
+    let start = sh_binary_len(output);
+    let count = if frame <= 128 { 2; } else { if frame <= 524280 { 3; } else { 4; }; };
+    let mut valid = sh_binary_byte(output, 1).is_ok() and sh_binary_byte(output, allocation_end).is_ok() and sh_binary_byte(output, count).is_ok() and sh_binary_byte(output, 0).is_ok();
+    valid = valid and sh_binary_byte(output, allocation_end).is_ok();
+    if frame <= 128 { valid = valid and sh_binary_byte(output, ((frame / 8 - 1) << 4) | 2).is_ok(); } else { if frame <= 524280 { valid = valid and sh_binary_byte(output, 1).is_ok() and sh_binary_unsigned(output, frame / 8, 2).is_ok(); } else { valid = valid and sh_binary_byte(output, 17).is_ok() and sh_binary_unsigned(output, frame, 4).is_ok(); }; };
+    valid = valid and sh_binary_byte(output, 1).is_ok() and sh_binary_byte(output, 80).is_ok();
+    if count % 2 != 0 { valid = valid and sh_binary_unsigned(output, 0, 2).is_ok(); };
+    if not valid { while output.bytes.len() > start { output.bytes.pop(); }; return sh_i64_error(6001); };
+    sh_i64_ok(start);
+}
