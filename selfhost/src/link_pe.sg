@@ -1,0 +1,276 @@
+import selfhost_link_coff;
+
+struct ShPePlan {
+    imports: i64,
+    thunk: i64,
+    start: i64,
+    unwind: i64,
+    pdata: i64,
+    reloc: i64,
+    entry_symbol: i64,
+    thunk_symbol: i64,
+    iat_symbol: i64,
+    start_symbol: i64,
+}
+
+def sh_link_intern(link: &ShLinker, text: &str) -> Result<i64, i64> {
+    let owned = string_from_str(text)?;
+    sh_intern(&link.names, &owned);
+}
+
+def sh_link_ascii(output: &ShBinary, text: &str) -> Result<i64, i64> {
+    let owned = string_from_str(text)?;
+    let bytes = sh_coff_symbol_bytes(&owned)?;
+    let mut index = 0;
+    while index < owned.len() { sh_binary_byte(output, bytes.get_u8(index)?)?; index = index + 1; };
+    sh_i64_ok(owned.len());
+}
+
+def sh_link_zeros(output: &ShBinary, count: i64) -> Result<i64, i64> {
+    if count < 0 or count > output.limit - sh_binary_len(output) { return sh_i64_error(7202); };
+    let mut index = 0;
+    while index < count { sh_binary_byte(output, 0)?; index = index + 1; };
+    sh_i64_ok(count);
+}
+
+def sh_link_external(link: &ShLinker, name: i64) -> Result<i64, i64> {
+    let mut found = -1;
+    let mut index = 0;
+    while index < link.symbols.len() / 6 { if sh_link_word(&link.symbols, 6, index, 1) == name and sh_link_word(&link.symbols, 6, index, 4) == 2 and sh_link_word(&link.symbols, 6, index, 3) != 0 { if found >= 0 { return sh_i64_error(7205); }; found = index; }; index = index + 1; };
+    sh_i64_ok(found);
+}
+
+def sh_link_synthetic(link: &mut ShLinker, entry: &String) -> Result<ShPePlan, i64> {
+    let invalid = ShPePlan { imports: -1, thunk: -1, start: -1, unwind: -1, pdata: -1, reloc: -1, entry_symbol: -1, thunk_symbol: -1, iat_symbol: -1, start_symbol: -1 };
+    let name = sh_intern(&link.names, entry)?;
+    let entry_symbol = sh_link_external(link, name)?;
+    if entry_symbol < 0 { return Result { is_ok: false, value: invalid, error: 7204 }; };
+    let entry_section = sh_link_word(&link.symbols, 6, entry_symbol, 3) - 1;
+    if entry_section < 0 or (sh_link_word(&link.sections, 10, entry_section, 4) & 536870912) == 0 or sh_link_word(&link.symbols, 6, entry_symbol, 2) >= sh_link_word(&link.sections, 10, entry_section, 3) { return Result { is_ok: false, value: invalid, error: 7207 }; };
+    let idata = sh_binary_new(link.limit);
+    sh_link_zeros(&idata, 72)?;
+    sh_binary_unsigned(&idata, 0, 2)?;
+    sh_link_ascii(&idata, "ExitProcess")?;
+    sh_binary_byte(&idata, 0)?;
+    sh_link_ascii(&idata, "KERNEL32.dll")?;
+    sh_binary_byte(&idata, 0)?;
+    sh_binary_align(&idata, 8, 0)?;
+    let object = link.objects;
+    let imports = sh_link_add_section(link, object, sh_link_intern(link, ".idata")?, &idata, 3221225536, 8)?;
+    let thunk_bytes = sh_binary_new(6);
+    sh_binary_byte(&thunk_bytes, 255)?;
+    sh_binary_byte(&thunk_bytes, 37)?;
+    sh_binary_unsigned(&thunk_bytes, 0, 4)?;
+    let thunk = sh_link_add_section(link, object, sh_link_intern(link, ".text")?, &thunk_bytes, 1610612768, 16)?;
+    let start_bytes = sh_binary_new(19);
+    sh_binary_unsigned(&start_bytes, 686588744, 4)?;
+    sh_binary_byte(&start_bytes, 232)?;
+    sh_binary_unsigned(&start_bytes, 0, 4)?;
+    sh_binary_byte(&start_bytes, 72)?;
+    sh_binary_byte(&start_bytes, 137)?;
+    sh_binary_byte(&start_bytes, 193)?;
+    sh_binary_byte(&start_bytes, 232)?;
+    sh_binary_unsigned(&start_bytes, 0, 4)?;
+    sh_binary_byte(&start_bytes, 15)?;
+    sh_binary_byte(&start_bytes, 11)?;
+    let start = sh_link_add_section(link, object, sh_link_intern(link, ".text")?, &start_bytes, 1610612768, 16)?;
+    let unwind_bytes = sh_binary_new(8);
+    sh_binary_byte(&unwind_bytes, 1)?;
+    sh_binary_byte(&unwind_bytes, 4)?;
+    sh_binary_byte(&unwind_bytes, 1)?;
+    sh_binary_byte(&unwind_bytes, 0)?;
+    sh_binary_byte(&unwind_bytes, 4)?;
+    sh_binary_byte(&unwind_bytes, 66)?;
+    sh_binary_unsigned(&unwind_bytes, 0, 2)?;
+    let unwind = sh_link_add_section(link, object, sh_link_intern(link, ".xdata")?, &unwind_bytes, 1073741888, 4)?;
+    let pdata_bytes = sh_binary_new(12);
+    sh_binary_unsigned(&pdata_bytes, 0, 4)?;
+    sh_binary_unsigned(&pdata_bytes, 19, 4)?;
+    sh_binary_unsigned(&pdata_bytes, 0, 4)?;
+    let pdata = sh_link_add_section(link, object, sh_link_intern(link, ".pdata")?, &pdata_bytes, 1073741888, 4)?;
+    let reloc_bytes = sh_binary_new(0);
+    let reloc = sh_link_add_section(link, object, sh_link_intern(link, ".reloc")?, &reloc_bytes, 1107296320, 4)?;
+    let thunk_symbol = sh_link_add_symbol(link, object, sh_link_intern(link, "__sg_link_exit_thunk")?, 0, thunk + 1, 3)?;
+    let iat_symbol = sh_link_add_symbol(link, object, sh_link_intern(link, "__sg_link_exit_iat")?, 56, imports + 1, 3)?;
+    let start_symbol = sh_link_add_symbol(link, object, sh_link_intern(link, "__sg_link_start")?, 0, start + 1, 3)?;
+    let unwind_symbol = sh_link_add_symbol(link, object, sh_link_intern(link, "__sg_link_start_unwind")?, 0, unwind + 1, 3)?;
+    sh_link_add_relocation(link, thunk, 2, iat_symbol, 4)?;
+    sh_link_add_relocation(link, start, 5, entry_symbol, 4)?;
+    sh_link_add_relocation(link, start, 13, thunk_symbol, 4)?;
+    sh_link_add_relocation(link, pdata, 0, start_symbol, 3)?;
+    sh_link_add_relocation(link, pdata, 4, start_symbol, 3)?;
+    sh_link_add_relocation(link, pdata, 8, unwind_symbol, 3)?;
+    let plan = ShPePlan { imports: imports, thunk: thunk, start: start, unwind: unwind, pdata: pdata, reloc: reloc, entry_symbol: entry_symbol, thunk_symbol: thunk_symbol, iat_symbol: iat_symbol, start_symbol: start_symbol };
+    Result { is_ok: true, value: plan, error: 0 };
+}
+
+def sh_link_resolve(link: &ShLinker, plan: &ShPePlan) -> Result<i64, i64> {
+    let mut index = 0;
+    while index < link.symbols.len() / 6 { let section = sh_link_word(&link.symbols, 6, index, 3); let name = sh_link_word(&link.symbols, 6, index, 1); let mut target = index; if sh_link_word(&link.symbols, 6, index, 4) == 2 { let definition = sh_link_external(link, name)?; if section == 0 { target = definition; if target < 0 and sh_link_name_equal(link, name, "ExitProcess") { target = plan.thunk_symbol; }; if target < 0 and sh_link_name_equal(link, name, "__imp_ExitProcess") { target = plan.iat_symbol; }; if target < 0 { return sh_i64_error(7204); }; }; }; if not link.symbols.set(index * 6 + 5, target) { return sh_i64_error(7202); }; index = index + 1; };
+    sh_i64_ok(0);
+}
+
+def sh_link_groups(link: &ShLinker) -> Result<i64, i64> {
+    let mut section = 0;
+    while section < link.sections.len() / 10 { let name = sh_link_word(&link.sections, 10, section, 1); let flags = sh_link_word(&link.sections, 10, section, 4); let alignment = sh_link_word(&link.sections, 10, section, 5); let mut group = 0; while group < link.groups.len() / 6 and sh_link_word(&link.groups, 6, group, 0) != name { group = group + 1; }; if group == link.groups.len() / 6 { if group >= 96 { return sh_i64_error(7202); }; sh_link_push(&link.groups, name)?; sh_link_push(&link.groups, flags)?; sh_link_push(&link.groups, alignment)?; sh_link_push(&link.groups, 0)?; sh_link_push(&link.groups, -1)?; sh_link_push(&link.groups, -1)?; (); } else { if sh_link_word(&link.groups, 6, group, 1) != flags { return sh_i64_error(7203); }; if alignment > sh_link_word(&link.groups, 6, group, 2) { link.groups.set(group * 6 + 2, alignment); (); }; }; let offset = sh_link_align(sh_link_word(&link.groups, 6, group, 3), alignment, link.limit)?; let size = sh_link_word(&link.sections, 10, section, 3); if size > link.limit - offset { return sh_i64_error(7202); }; if not link.groups.set(group * 6 + 3, offset + size) or not link.sections.set(section * 10 + 6, group) or not link.sections.set(section * 10 + 7, offset) { return sh_i64_error(7202); }; section = section + 1; };
+    sh_i64_ok(link.groups.len() / 6);
+}
+
+def sh_link_layout(link: &ShLinker, headers: i64) -> Result<i64, i64> {
+    let mut rva = 4096;
+    let mut raw = headers;
+    let mut group = 0;
+    while group < link.groups.len() / 6 { let alignment = sh_link_word(&link.groups, 6, group, 2); rva = sh_link_align(rva, if alignment > 4096 { alignment; } else { 4096; }, link.limit)?; let size = sh_link_word(&link.groups, 6, group, 3); if not link.groups.set(group * 6 + 4, rva) or not link.groups.set(group * 6 + 5, raw) { return sh_i64_error(7202); }; let padded = sh_link_align(size, 512, link.limit)?; if size > link.limit - rva or padded > link.limit - raw { return sh_i64_error(7202); }; rva = sh_link_align(rva + size, 4096, link.limit)?; raw = raw + padded; group = group + 1; };
+    let mut section = 0;
+    while section < link.sections.len() / 10 { let owner = sh_link_word(&link.sections, 10, section, 6); let offset = sh_link_word(&link.sections, 10, section, 7); if not link.sections.set(section * 10 + 8, sh_link_word(&link.groups, 6, owner, 4) + offset) or not link.sections.set(section * 10 + 9, sh_link_word(&link.groups, 6, owner, 5) + offset) { return sh_i64_error(7202); }; section = section + 1; };
+    sh_i64_ok(raw);
+}
+
+def sh_link_target(link: &ShLinker, symbol: i64) -> i64 {
+    let target = sh_link_word(&link.symbols, 6, symbol, 5);
+    if target < 0 or target >= link.symbols.len() / 6 { return -1; };
+    target;
+}
+
+def sh_link_symbol_rva(link: &ShLinker, symbol: i64) -> Result<i64, i64> {
+    let target = sh_link_target(link, symbol);
+    let section = sh_link_word(&link.symbols, 6, target, 3);
+    let value = sh_link_word(&link.symbols, 6, target, 2);
+    if target < 0 or section == 0 { return sh_i64_error(7204); };
+    if section == -1 { return sh_i64_ok(value); };
+    sh_i64_ok(sh_link_word(&link.sections, 10, section - 1, 8) + value);
+}
+
+def sh_link_base_relocations(link: &ShLinker) -> Result<ShBinary, i64> {
+    let sites = vec_new_i64();
+    let mut index = 0;
+    while index < link.relocations.len() / 4 { if sh_link_word(&link.relocations, 4, index, 3) == 1 { let target = sh_link_target(link, sh_link_word(&link.relocations, 4, index, 2)); if sh_link_word(&link.symbols, 6, target, 3) > 0 { let section = sh_link_word(&link.relocations, 4, index, 0); let rva = sh_link_word(&link.sections, 10, section, 8) + sh_link_word(&link.relocations, 4, index, 1); let mut slot = sites.len(); sh_link_push(&sites, rva)?; while slot > 0 and sengoo_vec_get_or_default_i64(sites.handle, slot - 1, -1) > rva { sites.set(slot, sengoo_vec_get_or_default_i64(sites.handle, slot - 1, -1)); slot = slot - 1; }; sites.set(slot, rva); (); }; }; index = index + 1; };
+    let output = sh_binary_new(link.limit);
+    index = 0;
+    while index < sites.len() { let page = sengoo_vec_get_or_default_i64(sites.handle, index, 0) & -4096; let start = sh_binary_len(&output); sh_binary_unsigned(&output, page, 4)?; sh_binary_unsigned(&output, 0, 4)?; while index < sites.len() and (sengoo_vec_get_or_default_i64(sites.handle, index, 0) & -4096) == page { sh_binary_unsigned(&output, 40960 | (sengoo_vec_get_or_default_i64(sites.handle, index, 0) & 4095), 2)?; index = index + 1; }; sh_binary_align(&output, 4, 0)?; sh_binary_patch(&output, start + 4, sh_binary_len(&output) - start, 4)?; };
+    if sites.len() == 0 { sh_binary_unsigned(&output, 0, 4)?; sh_binary_unsigned(&output, 12, 4)?; sh_binary_unsigned(&output, 0, 4)?; (); };
+    Result { is_ok: true, value: output, error: 0 };
+}
+
+def sh_link_patch_relocations(link: &ShLinker, output: &ShBinary) -> Result<i64, i64> {
+    let mut index = 0;
+    while index < link.relocations.len() / 4 { let section = sh_link_word(&link.relocations, 4, index, 0); let offset = sh_link_word(&link.relocations, 4, index, 1); let symbol = sh_link_word(&link.relocations, 4, index, 2); let kind = sh_link_word(&link.relocations, 4, index, 3); let target = sh_link_target(link, symbol); let symbol_section = sh_link_word(&link.symbols, 6, target, 3); let target_rva = sh_link_symbol_rva(link, symbol)?; let width = sh_object_relocation_width(kind); let raw = sh_link_word(&link.sections, 10, section, 9) + offset; let patch_rva = sh_link_word(&link.sections, 10, section, 8) + offset; let addend = sh_link_uint(output, raw, width)?; let mut value = 0; if kind == 1 or kind == 2 { let address = target_rva + if symbol_section > 0 { 5368709120; } else { 0; }; if kind == 1 { if addend > 9223372036854775807 - address or addend < -address { return sh_i64_error(7206); }; value = address + addend; } else { if address > 4294967295 or addend > 4294967295 - address { return sh_i64_error(7206); }; value = address + addend; }; } else { if kind == 3 { if target_rva > 4294967295 or addend > 4294967295 - target_rva { return sh_i64_error(7206); }; value = target_rva + addend; } else { if kind >= 4 and kind <= 9 { let signed_addend = if addend >= 2147483648 { addend - 4294967296; } else { addend; }; value = target_rva + signed_addend - patch_rva - 4 - (kind - 4); if symbol_section <= 0 or value < -2147483648 or value > 2147483647 { return sh_i64_error(7206); }; value = value & 4294967295; } else { if symbol_section <= 0 { return sh_i64_error(7206); }; let group = sh_link_word(&link.sections, 10, symbol_section - 1, 6); if kind == 10 { value = group + 1 + addend; if value > 65535 { return sh_i64_error(7206); }; } else { if kind != 11 { return sh_i64_error(7203); }; value = sh_link_word(&link.sections, 10, symbol_section - 1, 7) + sh_link_word(&link.symbols, 6, target, 2) + addend; if value > 4294967295 { return sh_i64_error(7206); }; }; }; }; }; sh_binary_patch(output, raw, value, width)?; index = index + 1; };
+    sh_i64_ok(0);
+}
+
+def sh_link_group_named(link: &ShLinker, name: &str) -> i64 {
+    let mut group = 0;
+    while group < link.groups.len() / 6 { if sh_link_name_equal(link, sh_link_word(&link.groups, 6, group, 0), name) { return group; }; group = group + 1; };
+    -1;
+}
+
+def sh_link_headers(link: &ShLinker, output: &ShBinary, plan: &ShPePlan, headers: i64) -> Result<i64, i64> {
+    let count = link.groups.len() / 6;
+    let mut code_size = 0;
+    let mut initialized = 0;
+    let mut base_code = 0;
+    let mut image_size = headers;
+    let mut group = 0;
+    while group < count { let flags = sh_link_word(&link.groups, 6, group, 1); let size = sh_link_word(&link.groups, 6, group, 3); let rva = sh_link_word(&link.groups, 6, group, 4); let padded = sh_link_align(size, 512, link.limit)?; if (flags & 32) != 0 { code_size = code_size + padded; if base_code == 0 { base_code = rva; }; } else { initialized = initialized + padded; }; image_size = sh_link_align(rva + size, 4096, link.limit)?; group = group + 1; };
+    sh_binary_patch(output, 0, 23117, 2)?;
+    sh_binary_patch(output, 60, 64, 4)?;
+    sh_binary_patch(output, 64, 17744, 4)?;
+    sh_binary_patch(output, 68, 34404, 2)?;
+    sh_binary_patch(output, 70, count, 2)?;
+    sh_binary_patch(output, 84, 240, 2)?;
+    sh_binary_patch(output, 86, 34, 2)?;
+    let optional = 88;
+    sh_binary_patch(output, optional, 523, 2)?;
+    sh_binary_patch(output, optional + 2, 1, 1)?;
+    sh_binary_patch(output, optional + 4, code_size, 4)?;
+    sh_binary_patch(output, optional + 8, initialized, 4)?;
+    sh_binary_patch(output, optional + 16, sh_link_word(&link.sections, 10, plan.start, 8), 4)?;
+    sh_binary_patch(output, optional + 20, base_code, 4)?;
+    sh_binary_patch(output, optional + 24, 5368709120, 8)?;
+    sh_binary_patch(output, optional + 32, 4096, 4)?;
+    sh_binary_patch(output, optional + 36, 512, 4)?;
+    sh_binary_patch(output, optional + 40, 6, 2)?;
+    sh_binary_patch(output, optional + 48, 6, 2)?;
+    sh_binary_patch(output, optional + 56, image_size, 4)?;
+    sh_binary_patch(output, optional + 60, headers, 4)?;
+    sh_binary_patch(output, optional + 68, 3, 2)?;
+    sh_binary_patch(output, optional + 70, 33120, 2)?;
+    sh_binary_patch(output, optional + 72, 1048576, 8)?;
+    sh_binary_patch(output, optional + 80, 4096, 8)?;
+    sh_binary_patch(output, optional + 88, 1048576, 8)?;
+    sh_binary_patch(output, optional + 96, 4096, 8)?;
+    sh_binary_patch(output, optional + 108, 16, 4)?;
+    let imports = sh_link_word(&link.sections, 10, plan.imports, 8);
+    sh_binary_patch(output, optional + 120, imports, 4)?;
+    sh_binary_patch(output, optional + 124, 40, 4)?;
+    let pdata = sh_link_group_named(link, ".pdata");
+    sh_binary_patch(output, optional + 136, sh_link_word(&link.groups, 6, pdata, 4), 4)?;
+    sh_binary_patch(output, optional + 140, sh_link_word(&link.groups, 6, pdata, 3), 4)?;
+    sh_binary_patch(output, optional + 152, sh_link_word(&link.sections, 10, plan.reloc, 8), 4)?;
+    sh_binary_patch(output, optional + 156, sh_link_word(&link.sections, 10, plan.reloc, 3), 4)?;
+    sh_binary_patch(output, optional + 208, imports + 56, 4)?;
+    sh_binary_patch(output, optional + 212, 16, 4)?;
+    group = 0;
+    while group < count { let row = 328 + group * 40; let name = sh_symbol_text(&link.names, sh_link_word(&link.groups, 6, group, 0))?; let bytes = sh_coff_symbol_bytes(&name)?; if name.len() <= 8 { let mut index = 0; while index < name.len() { sh_binary_patch(output, row + index, bytes.get_u8(index)?, 1)?; index = index + 1; }; } else { sh_binary_patch(output, row, 46, 1)?; sh_binary_patch(output, row + 1, 115, 1)?; sh_binary_patch(output, row + 2, 103, 1)?; sh_binary_patch(output, row + 3, 48 + group / 10, 1)?; sh_binary_patch(output, row + 4, 48 + group % 10, 1)?; (); }; let size = sh_link_word(&link.groups, 6, group, 3); sh_binary_patch(output, row + 8, size, 4)?; sh_binary_patch(output, row + 12, sh_link_word(&link.groups, 6, group, 4), 4)?; sh_binary_patch(output, row + 16, sh_link_align(size, 512, link.limit)?, 4)?; sh_binary_patch(output, row + 20, if size > 0 { sh_link_word(&link.groups, 6, group, 5); } else { 0; }, 4)?; sh_binary_patch(output, row + 36, sh_link_word(&link.groups, 6, group, 1), 4)?; group = group + 1; };
+    sh_i64_ok(image_size);
+}
+
+def sh_link_rva_raw(link: &ShLinker, rva: i64, count: i64, executable: bool) -> Result<i64, i64> {
+    let mut group = 0;
+    while group < link.groups.len() / 6 { let base = sh_link_word(&link.groups, 6, group, 4); let size = sh_link_word(&link.groups, 6, group, 3); if rva >= base and rva - base <= size and count <= size - (rva - base) { if executable and (sh_link_word(&link.groups, 6, group, 1) & 536870912) == 0 { return sh_i64_error(7207); }; return sh_i64_ok(sh_link_word(&link.groups, 6, group, 5) + rva - base); }; group = group + 1; };
+    sh_i64_error(7207);
+}
+
+def sh_link_validate_pdata(link: &ShLinker, output: &ShBinary) -> Result<i64, i64> {
+    let group = sh_link_group_named(link, ".pdata");
+    let size = sh_link_word(&link.groups, 6, group, 3);
+    let raw = sh_link_word(&link.groups, 6, group, 5);
+    if size < 12 or size % 12 != 0 or size / 12 > 100000 { return sh_i64_error(7207); };
+    let mut index = 0;
+    while index < size / 12 { let begin = sh_link_uint(output, raw + index * 12, 4)?; let end = sh_link_uint(output, raw + index * 12 + 4, 4)?; let unwind = sh_link_uint(output, raw + index * 12 + 8, 4)?; if begin >= end or unwind % 4 != 0 { return sh_i64_error(7207); }; sh_link_rva_raw(link, begin, end - begin, true)?; let unwind_raw = sh_link_rva_raw(link, unwind, 4, false)?; if sh_link_uint(output, unwind_raw, 1)? != 1 { return sh_i64_error(7203); }; let codes = sh_link_uint(output, unwind_raw + 2, 1)?; sh_link_rva_raw(link, unwind, 4 + ((codes + 1) / 2) * 4, false)?; let mut slot = index; while slot > 0 and sh_link_uint(output, raw + (slot - 1) * 12, 4)? > begin { let mut field = 0; while field < 3 { sh_binary_patch(output, raw + slot * 12 + field * 4, sh_link_uint(output, raw + (slot - 1) * 12 + field * 4, 4)?, 4)?; field = field + 1; }; slot = slot - 1; }; sh_binary_patch(output, raw + slot * 12, begin, 4)?; sh_binary_patch(output, raw + slot * 12 + 4, end, 4)?; sh_binary_patch(output, raw + slot * 12 + 8, unwind, 4)?; index = index + 1; };
+    index = 1;
+    while index < size / 12 { if sh_link_uint(output, raw + (index - 1) * 12 + 4, 4)? > sh_link_uint(output, raw + index * 12, 4)? { return sh_i64_error(7207); }; index = index + 1; };
+    sh_i64_ok(size / 12);
+}
+
+def sh_link_pe_inner(link: &mut ShLinker, entry: &String) -> Result<ShBinary, i64> {
+    if link.error != 0 { return sh_coff_error(link.error); };
+    if link.linked { return sh_coff_error(7208); };
+    link.linked = true;
+    if link.objects < 1 { return sh_coff_error(7201); };
+    let prepared = sh_link_synthetic(link, entry)?;
+    let plan = prepared;
+    sh_link_resolve(link, &plan)?;
+    let group_count = sh_link_groups(link)?;
+    let headers = sh_link_align(328 + group_count * 40, 512, link.limit)?;
+    sh_link_layout(link, headers)?;
+    let base = sh_link_base_relocations(link)?;
+    let reloc_group = sh_link_word(&link.sections, 10, plan.reloc, 6);
+    link.groups.set(reloc_group * 6 + 3, sh_binary_len(&base));
+    link.sections.set(plan.reloc * 10 + 3, sh_binary_len(&base));
+    let file_size = sh_link_layout(link, headers)?;
+    let output = sh_binary_new(link.limit);
+    sh_link_zeros(&output, file_size)?;
+    let mut section = 0;
+    while section < link.sections.len() / 10 { if section != plan.reloc { let first = sh_link_word(&link.sections, 10, section, 2); let size = sh_link_word(&link.sections, 10, section, 3); let raw = sh_link_word(&link.sections, 10, section, 9); let mut index = 0; while index < size { sh_binary_patch(&output, raw + index, sengoo_vec_get_or_default_i64(link.data.handle, first + index, -1), 1)?; index = index + 1; }; }; section = section + 1; };
+    let mut index = 0;
+    let reloc_raw = sh_link_word(&link.sections, 10, plan.reloc, 9);
+    while index < sh_binary_len(&base) { sh_binary_patch(&output, reloc_raw + index, sh_binary_get(&base, index)?, 1)?; index = index + 1; };
+    sh_link_patch_relocations(link, &output)?;
+    let imports_rva = sh_link_word(&link.sections, 10, plan.imports, 8);
+    let imports_raw = sh_link_word(&link.sections, 10, plan.imports, 9);
+    sh_binary_patch(&output, imports_raw, imports_rva + 40, 4)?;
+    sh_binary_patch(&output, imports_raw + 12, imports_rva + 86, 4)?;
+    sh_binary_patch(&output, imports_raw + 16, imports_rva + 56, 4)?;
+    sh_binary_patch(&output, imports_raw + 40, imports_rva + 72, 8)?;
+    sh_binary_patch(&output, imports_raw + 56, imports_rva + 72, 8)?;
+    sh_link_headers(link, &output, &plan, headers)?;
+    sh_link_validate_pdata(link, &output)?;
+    Result { is_ok: true, value: output, error: 0 };
+}
+
+def sh_link_pe(link: &mut ShLinker, entry: &String) -> Result<ShBinary, i64> {
+    let result = sh_link_pe_inner(link, entry);
+    if not result.is_ok() { sh_link_fail(link, result.error, 0); (); };
+    result;
+}

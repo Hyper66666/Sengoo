@@ -1,0 +1,107 @@
+import selfhost_object;
+
+struct ShLinker {
+    names: ShSymbols,
+    sections: Vec<i64>,
+    data: Vec<i64>,
+    symbols: Vec<i64>,
+    relocations: Vec<i64>,
+    groups: Vec<i64>,
+    objects: i64,
+    linked: bool,
+    limit: i64,
+    error: i64,
+    offset: i64,
+}
+
+def sh_link_new(limit: i64) -> ShLinker {
+    ShLinker { names: sh_symbols_new(100000), sections: vec_new_i64(), data: vec_new_i64(), symbols: vec_new_i64(), relocations: vec_new_i64(), groups: vec_new_i64(), objects: 0, linked: false, limit: limit, error: 0, offset: 0 };
+}
+
+def sh_link_word(words: &Vec<i64>, width: i64, row: i64, field: i64) -> i64 {
+    sh_object_word(words, width, row, field);
+}
+
+def sh_link_fail(link: &mut ShLinker, code: i64, offset: i64) -> i64 {
+    if link.error == 0 { link.error = code; link.offset = offset; };
+    code;
+}
+
+def sh_link_uint(bytes: &ShBinary, offset: i64, width: i64) -> Result<i64, i64> {
+    if width != 1 and width != 2 and width != 4 and width != 8 or offset < 0 or offset > sh_binary_len(bytes) or width > sh_binary_len(bytes) - offset { return sh_i64_error(7201); };
+    let mut value = 0;
+    let mut index = width;
+    while index > 0 { index = index - 1; let byte = sh_binary_get(bytes, offset + index)?; if byte < 0 or byte > 255 { return sh_i64_error(7201); }; value = (value << 8) | byte; };
+    sh_i64_ok(value);
+}
+
+def sh_link_align(value: i64, alignment: i64, maximum: i64) -> Result<i64, i64> {
+    if value < 0 or value > maximum or alignment < 1 or alignment > 8192 or (alignment & (alignment - 1)) != 0 { return sh_i64_error(7202); };
+    let padding = (alignment - value % alignment) % alignment;
+    if padding > maximum - value { return sh_i64_error(7202); };
+    sh_i64_ok(value + padding);
+}
+
+def sh_link_push(words: &Vec<i64>, value: i64) -> Result<i64, i64> {
+    if not words.push(value) { return sh_i64_error(7202); };
+    sh_i64_ok(words.len() - 1);
+}
+
+def sh_link_add_section(link: &ShLinker, object: i64, name: i64, bytes: &ShBinary, flags: i64, alignment: i64) -> Result<i64, i64> {
+    if link.sections.len() / 10 >= 1024 or link.limit < 0 or link.limit > 67108864 or link.data.len() > link.limit or sh_binary_len(bytes) > link.limit - link.data.len() { return sh_i64_error(7202); };
+    let first = link.data.len();
+    let mut index = 0;
+    while index < sh_binary_len(bytes) { sh_link_push(&link.data, sh_binary_get(bytes, index)?)?; index = index + 1; };
+    let id = link.sections.len() / 10;
+    sh_link_push(&link.sections, object)?;
+    sh_link_push(&link.sections, name)?;
+    sh_link_push(&link.sections, first)?;
+    sh_link_push(&link.sections, sh_binary_len(bytes))?;
+    sh_link_push(&link.sections, flags)?;
+    sh_link_push(&link.sections, alignment)?;
+    index = 0;
+    while index < 4 { sh_link_push(&link.sections, -1)?; index = index + 1; };
+    sh_i64_ok(id);
+}
+
+def sh_link_add_symbol(link: &ShLinker, object: i64, name: i64, value: i64, section: i64, storage: i64) -> Result<i64, i64> {
+    if link.symbols.len() / 6 >= 100000 { return sh_i64_error(7202); };
+    let id = link.symbols.len() / 6;
+    sh_link_push(&link.symbols, object)?;
+    sh_link_push(&link.symbols, name)?;
+    sh_link_push(&link.symbols, value)?;
+    sh_link_push(&link.symbols, section)?;
+    sh_link_push(&link.symbols, storage)?;
+    sh_link_push(&link.symbols, -1)?;
+    sh_i64_ok(id);
+}
+
+def sh_link_add_relocation(link: &ShLinker, section: i64, offset: i64, symbol: i64, kind: i64) -> Result<i64, i64> {
+    if link.relocations.len() / 4 >= 100000 { return sh_i64_error(7202); };
+    let id = link.relocations.len() / 4;
+    sh_link_push(&link.relocations, section)?;
+    sh_link_push(&link.relocations, offset)?;
+    sh_link_push(&link.relocations, symbol)?;
+    sh_link_push(&link.relocations, kind)?;
+    sh_i64_ok(id);
+}
+
+def sh_link_name_equal(link: &ShLinker, name: i64, expected: &str) -> bool {
+    let text = sh_symbol_text(&link.names, name);
+    if not text.is_ok() { return false; };
+    let comparison = string_from_str(expected);
+    comparison.is_ok() and sengoo_string_eq(text.value.handle, comparison.value.handle) != 0;
+}
+
+def sh_link_load(path: &str, maximum: i64) -> Result<ShBinary, i64> {
+    let snapshot = file_snapshot_open(path, maximum)?;
+    let length = snapshot.len()?;
+    if length < 0 or length > maximum { return sh_coff_error(7202); };
+    let mut buffer = ffi_buffer_new(length)?;
+    let count = snapshot.copy_bytes(&mut buffer)?;
+    if count != length { return sh_coff_error(7201); };
+    let output = sh_binary_new(maximum);
+    let mut index = 0;
+    while index < count { sh_binary_byte(&output, buffer.get_u8(index)?)?; index = index + 1; };
+    Result { is_ok: true, value: output, error: 0 };
+}

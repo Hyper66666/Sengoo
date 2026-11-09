@@ -1,0 +1,134 @@
+import selfhost_link_pe;
+
+import std::assert;
+
+import std::args;
+
+import std::file;
+
+import std::io;
+
+extern "C" {
+    fn sengoo_string_live_handle_count() -> i64;
+    fn sengoo_buffer_live_handle_count() -> i64;
+    fn sengoo_opaque_live_handle_count() -> i64;
+    fn sengoo_file_snapshot_live_handle_count() -> i64;
+    fn sengoo_file_snapshot_live_bytes() -> i64;
+}
+
+def sh_lkt_name(text: &str) -> Result<String, i64> {
+    string_from_str(text);
+}
+
+def sh_lkt_object(first: bool) -> Result<ShBinary, i64> {
+    let object = sh_object_new(16384);
+    let code = sh_binary_new(128);
+    if first { sh_binary_unsigned(&code, 686588744, 4)?; sh_binary_byte(&code, 232)?; sh_binary_unsigned(&code, 0, 4)?; sh_binary_byte(&code, 73)?; sh_binary_byte(&code, 186)?; sh_binary_unsigned(&code, 0, 8)?; sh_binary_byte(&code, 77)?; sh_binary_byte(&code, 139)?; sh_binary_byte(&code, 18)?; sh_binary_byte(&code, 73)?; sh_binary_byte(&code, 3)?; sh_binary_byte(&code, 2)?; sh_binary_unsigned(&code, 683967304, 4)?; sh_binary_byte(&code, 195)?; (); } else { sh_binary_byte(&code, 72)?; sh_binary_byte(&code, 184)?; sh_binary_unsigned(&code, 40, 8)?; sh_binary_byte(&code, 195)?; (); };
+    let text_name = sh_lkt_name(".text")?;
+    let text = sh_object_add_section(&object, &text_name, &code, 1610612768, 16)?;
+    let data = sh_binary_new(128);
+    sh_binary_unsigned(&data, if first { 99; } else { 2; }, 8)?;
+    if not first { sh_link_zeros(&data, 44)?; (); };
+    let data_name = sh_lkt_name(".rdata")?;
+    let rdata = sh_object_add_section(&object, &data_name, &data, 1073741888, 8)?;
+    let main_name = sh_lkt_name(if first { "main"; } else { "linked_helper_世界"; })?;
+    let function = sh_object_add_symbol(&object, &main_name, 0, text + 1, true, 2)?;
+    let private_name = sh_lkt_name("private")?;
+    sh_object_add_symbol(&object, &private_name, 0, text + 1, true, 3)?;
+    if first { let helper_name = sh_lkt_name("linked_helper_世界")?; let helper = sh_object_add_symbol(&object, &helper_name, 0, 0, true, 2)?; let pointer_name = sh_lkt_name("linked_pointer_to_value")?; let pointer = sh_object_add_symbol(&object, &pointer_name, 0, 0, false, 2)?; sh_object_add_relocation(&object, text, 5, helper, 4)?; sh_object_add_relocation(&object, text, 11, pointer, 1)?; let unwind_bytes = sh_binary_new(8); sh_binary_byte(&unwind_bytes, 1)?; sh_binary_byte(&unwind_bytes, 4)?; sh_binary_byte(&unwind_bytes, 1)?; sh_binary_byte(&unwind_bytes, 0)?; sh_binary_byte(&unwind_bytes, 4)?; sh_binary_byte(&unwind_bytes, 66)?; sh_binary_unsigned(&unwind_bytes, 0, 2)?; let unwind_name = sh_lkt_name(".xdata")?; let unwind = sh_object_add_section(&object, &unwind_name, &unwind_bytes, 1073741888, 4)?; let unwind_symbol_name = sh_lkt_name("main_unwind")?; let unwind_symbol = sh_object_add_symbol(&object, &unwind_symbol_name, 0, unwind + 1, false, 3)?; let pdata_bytes = sh_binary_new(12); sh_binary_unsigned(&pdata_bytes, 0, 4)?; sh_binary_unsigned(&pdata_bytes, sh_binary_len(&code), 4)?; sh_binary_unsigned(&pdata_bytes, 0, 4)?; let pdata_name = sh_lkt_name(".pdata")?; let pdata = sh_object_add_section(&object, &pdata_name, &pdata_bytes, 1073741888, 4)?; sh_object_add_relocation(&object, pdata, 0, function, 3)?; sh_object_add_relocation(&object, pdata, 4, function, 3)?; sh_object_add_relocation(&object, pdata, 8, unwind_symbol, 3)?; (); } else { let value_name = sh_lkt_name("linked_value")?; let value = sh_object_add_symbol(&object, &value_name, 0, rdata + 1, false, 2)?; let pointer_name = sh_lkt_name("linked_pointer_to_value")?; sh_object_add_symbol(&object, &pointer_name, 8, rdata + 1, false, 2)?; let absolute_name = sh_lkt_name("absolute_1234")?; let absolute = sh_object_add_symbol(&object, &absolute_name, 1234, -1, false, 3)?; sh_object_add_relocation(&object, rdata, 8, value, 1)?; sh_object_add_relocation(&object, rdata, 16, value, 3)?; sh_object_add_relocation(&object, rdata, 20, value, 10)?; sh_object_add_relocation(&object, rdata, 24, value, 11)?; sh_object_add_relocation(&object, rdata, 28, absolute, 2)?; let mut index = 0; while index < 5 { sh_object_add_relocation(&object, rdata, 32 + index * 4, value, 5 + index)?; index = index + 1; }; let extra_name = sh_lkt_name(".rodata.extra.long")?; sh_object_add_section(&object, &extra_name, &code, 1073741888, 1)?; (); };
+    sh_object_emit(&object);
+}
+
+def sh_lkt_image(a: &ShBinary, b: &ShBinary) -> Result<ShBinary, i64> {
+    let mut link = sh_link_new(1048576);
+    sh_link_coff(&mut link, a)?;
+    sh_link_coff(&mut link, b)?;
+    let entry = sh_lkt_name("main")?;
+    sh_link_pe(&mut link, &entry);
+}
+
+def sh_lkt_scope() -> Result<bool, i64> {
+    let a = sh_lkt_object(true)?;
+    let b = sh_lkt_object(false)?;
+    let image = sh_lkt_image(&a, &b)?;
+    let repeated = sh_lkt_image(&a, &b)?;
+    assert_eq_i64(sh_binary_len(&image), sh_binary_len(&repeated), "linker.sg", 96);
+    let mut index = 0;
+    while index < sh_binary_len(&image) { assert_eq_i64(sh_binary_get(&image, index)?, sh_binary_get(&repeated, index)?, "linker.sg", 98); index = index + 1; };
+    assert_eq_i64(sh_link_uint(&image, 0, 2)?, 23117, "linker.sg", 99);
+    assert_eq_i64(sh_link_uint(&image, 64, 4)?, 17744, "linker.sg", 100);
+    assert_eq_i64(sh_link_uint(&image, 88, 2)?, 523, "linker.sg", 101);
+    assert_eq_i64(sh_link_uint(&image, 72, 4)?, 0, "linker.sg", 102);
+    assert_eq_i64(sh_link_uint(&image, 112, 8)?, 5368709120, "linker.sg", 103);
+    let mut duplicate = sh_link_new(1048576);
+    sh_link_coff(&mut duplicate, &a)?;
+    sh_link_coff(&mut duplicate, &a)?;
+    let entry = sh_lkt_name("main")?;
+    let conflict = sh_link_pe(&mut duplicate, &entry);
+    assert_eq_i64(conflict.error, 7205, "linker.sg", 109);
+    let mut missing = sh_link_new(1048576);
+    sh_link_coff(&mut missing, &a)?;
+    let unresolved = sh_link_pe(&mut missing, &entry);
+    assert_eq_i64(unresolved.error, 7204, "linker.sg", 113);
+    let mut one_shot = sh_link_new(1048576);
+    sh_link_coff(&mut one_shot, &a)?;
+    sh_link_coff(&mut one_shot, &b)?;
+    let first = sh_link_pe(&mut one_shot, &entry)?;
+    let again = sh_link_pe(&mut one_shot, &entry);
+    assert_eq_i64(again.error, 7208, "linker.sg", 118);
+    assert_true(sh_binary_len(&first) > 0, "linker.sg", 119);
+    let truncated = sh_binary_new(16);
+    let mut bad = sh_link_new(1048576);
+    assert_eq_i64(sh_link_coff(&mut bad, &truncated).error, 7201, "linker.sg", 122);
+    let mut malformed = sh_link_new(1048576);
+    sh_binary_patch(&a, 12, 4294967295, 4)?;
+    assert_eq_i64(sh_link_coff(&mut malformed, &a).error, 7202, "linker.sg", 125);
+    let bounds = sh_link_uint(&image, 9223372036854775807, 8);
+    assert_eq_i64(bounds.error, 7201, "linker.sg", 127);
+    Result { is_ok: true, value: true, error: 0 };
+}
+
+def sh_lkt_argument(index: i64) -> Result<String, i64> {
+    let buffer = ffi_buffer_new(arg_len(index).unwrap_or(0))?;
+    let copied = arg_copy(index, buffer)?;
+    string_from_utf8(buffer, copied);
+}
+
+def sh_lkt_write(path: &str, bytes: &ShBinary) -> Result<i64, i64> {
+    let buffer = sh_binary_buffer(bytes)?;
+    file_write_str_raw(sengoo_stdlib_str_ptr(path), buffer.ptr(), buffer.used_len());
+}
+
+def sh_lkt_cli() -> Result<i64, i64> {
+    let mode = sh_lkt_argument(0)?;
+    let emit_name = string_from_str("emit")?;
+    if sengoo_string_eq(mode.handle, emit_name.handle) != 0 { if args_len() != 3 { return sh_i64_ok(64); }; let first_path = sh_lkt_argument(1)?; let second_path = sh_lkt_argument(2)?; let a = sh_lkt_object(true)?; let b = sh_lkt_object(false)?; sh_lkt_write(first_path.as_str(), &a)?; sh_lkt_write(second_path.as_str(), &b)?; return sh_i64_ok(0); };
+    let link_name = string_from_str("link")?;
+    if sengoo_string_eq(mode.handle, link_name.handle) == 0 or args_len() < 4 { return sh_i64_ok(64); };
+    let output = sh_lkt_argument(1)?;
+    let entry = sh_lkt_argument(2)?;
+    let mut link = sh_link_new(67108864);
+    let mut index = 3;
+    while index < args_len() { let path = sh_lkt_argument(index)?; let bytes = sh_link_load(path.as_str(), 67108864)?; sh_link_coff(&mut link, &bytes)?; index = index + 1; };
+    let image = sh_link_pe(&mut link, &entry)?;
+    sh_lkt_write(output.as_str(), &image)?;
+    sh_i64_ok(0);
+}
+
+def main() -> i64 {
+    if args_len() > 0 { let result = sh_lkt_cli(); if not result.is_ok() { println(result.error); return 65; }; return result.value; };
+    let strings = sengoo_string_live_handle_count();
+    let buffers = sengoo_buffer_live_handle_count();
+    let opaque = sengoo_opaque_live_handle_count();
+    let snapshots = sengoo_file_snapshot_live_handle_count();
+    let snapshot_bytes = sengoo_file_snapshot_live_bytes();
+    let mut round = 0;
+    while round < 50 { let result = sh_lkt_scope(); if not result.is_ok() { println(result.error); return 1; }; round = round + 1; };
+    assert_eq_i64(sengoo_string_live_handle_count(), strings, "linker.sg", 185);
+    assert_eq_i64(sengoo_buffer_live_handle_count(), buffers, "linker.sg", 186);
+    assert_eq_i64(sengoo_opaque_live_handle_count(), opaque, "linker.sg", 187);
+    assert_eq_i64(sengoo_file_snapshot_live_handle_count(), snapshots, "linker.sg", 188);
+    assert_eq_i64(sengoo_file_snapshot_live_bytes(), snapshot_bytes, "linker.sg", 189);
+    println("selfhost SG COFF/PE linker foundation: ok");
+    0;
+}

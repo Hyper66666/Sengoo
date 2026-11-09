@@ -1,0 +1,69 @@
+import selfhost_link_model;
+
+def sh_link_interval(intervals: &Vec<i64>, start: i64, length: i64, total: i64) -> Result<i64, i64> {
+    if start < 0 or length < 0 or start > total or length > total - start { return sh_i64_error(7201); };
+    if length == 0 { return sh_i64_ok(0); };
+    let mut index = 0;
+    while index < intervals.len() { let old_start = sengoo_vec_get_or_default_i64(intervals.handle, index, -1); let old_end = sengoo_vec_get_or_default_i64(intervals.handle, index + 1, -1); if start < old_end and old_start < start + length { return sh_i64_error(7201); }; index = index + 2; };
+    sh_link_push(intervals, start)?;
+    sh_link_push(intervals, start + length)?;
+    sh_i64_ok(start);
+}
+
+def sh_link_coff_name(link: &ShLinker, bytes: &ShBinary, field: i64, strings: i64, string_length: i64, section: bool) -> Result<i64, i64> {
+    let mut start = field;
+    let mut end = field + 8;
+    let mut long = false;
+    let mut offset = 0;
+    if section and sh_link_uint(bytes, field, 1)? == 47 { let mut index = 1; while index < 8 { let byte = sh_link_uint(bytes, field + index, 1)?; if byte == 0 { break; }; if byte < 48 or byte > 57 { return sh_i64_error(7201); }; offset = offset * 10 + byte - 48; index = index + 1; }; long = true; } else { if not section and sh_link_uint(bytes, field, 4)? == 0 { offset = sh_link_uint(bytes, field + 4, 4)?; long = true; }; };
+    if long { if offset < 4 or offset >= string_length { return sh_i64_error(7201); }; start = strings + offset; end = strings + string_length; };
+    let mut length = 0;
+    while start + length < end and sh_link_uint(bytes, start + length, 1)? != 0 { length = length + 1; if length > 1048576 { return sh_i64_error(7202); }; };
+    if length == 0 or long and start + length == end { return sh_i64_error(7201); };
+    let buffer = ffi_buffer_new(length)?;
+    let mut index = 0;
+    while index < length { buffer.push_u8(sh_link_uint(bytes, start + index, 1)?)?; index = index + 1; };
+    let decoded = string_from_utf8(buffer, length);
+    if not decoded.is_ok() { return sh_i64_error(7201); };
+    sh_intern(&link.names, &decoded.value);
+}
+
+def sh_link_coff_inner(link: &mut ShLinker, bytes: &ShBinary) -> Result<i64, i64> {
+    let length = sh_binary_len(bytes);
+    if link.error != 0 { return sh_i64_error(link.error); };
+    if link.linked { return sh_i64_error(7208); };
+    if link.objects >= 128 or length > link.limit or link.limit < 0 or link.limit > 67108864 { return sh_i64_error(7202); };
+    if length < 20 { return sh_i64_error(7201); };
+    let machine = sh_link_uint(bytes, 0, 2)?;
+    if machine == 0 and sh_link_uint(bytes, 2, 2)? == 65535 { return sh_i64_error(7203); };
+    if machine != 34404 or sh_link_uint(bytes, 16, 2)? != 0 or sh_link_uint(bytes, 18, 2)? != 0 { return sh_i64_error(7203); };
+    let sections = sh_link_uint(bytes, 2, 2)?;
+    let symbols_at = sh_link_uint(bytes, 8, 4)?;
+    let symbols = sh_link_uint(bytes, 12, 4)?;
+    if sections < 1 or sections > 1024 or symbols > 100000 { return sh_i64_error(7202); };
+    let header_end = 20 + sections * 40;
+    if header_end > length or symbols_at < header_end or symbols_at > length or symbols * 18 > length - symbols_at { return sh_i64_error(7201); };
+    let strings = symbols_at + symbols * 18;
+    let string_length = sh_link_uint(bytes, strings, 4)?;
+    if string_length < 4 or string_length > length - strings { return sh_i64_error(7201); };
+    let intervals = vec_new_i64();
+    sh_link_interval(&intervals, 0, header_end, length)?;
+    sh_link_interval(&intervals, symbols_at, symbols * 18 + string_length, length)?;
+    let object = link.objects;
+    let section_base = link.sections.len() / 10;
+    let symbol_base = link.symbols.len() / 6;
+    let mut section = 0;
+    while section < sections { let row = 20 + section * 40; let name = sh_link_coff_name(link, bytes, row, strings, string_length, true)?; if sh_link_name_equal(link, name, ".reloc") or sh_link_name_equal(link, name, ".idata") or sh_link_name_equal(link, name, ".drectve") { return sh_i64_error(7203); }; if sh_link_uint(bytes, row + 8, 4)? != 0 or sh_link_uint(bytes, row + 12, 4)? != 0 or sh_link_uint(bytes, row + 28, 4)? != 0 or sh_link_uint(bytes, row + 34, 2)? != 0 { return sh_i64_error(7203); }; let size = sh_link_uint(bytes, row + 16, 4)?; let raw = sh_link_uint(bytes, row + 20, 4)?; let rel_at = sh_link_uint(bytes, row + 24, 4)?; let rel_count = sh_link_uint(bytes, row + 32, 2)?; let flags = sh_link_uint(bytes, row + 36, 4)?; if (flags & 16784256) != 0 or (flags & 96) == 0 { return sh_i64_error(7203); }; let encoded_alignment = (flags >> 20) & 15; if encoded_alignment == 15 { return sh_i64_error(7203); }; let alignment = if encoded_alignment == 0 { 16; } else { 1 << (encoded_alignment - 1); }; if size > 0 { sh_link_interval(&intervals, raw, size, length)?; (); } else { if raw > length { return sh_i64_error(7201); }; }; if rel_count > 0 { sh_link_interval(&intervals, rel_at, rel_count * 10, length)?; (); } else { if rel_at > length { return sh_i64_error(7201); }; }; let content = sh_binary_new(link.limit); let mut index = 0; while index < size { sh_binary_byte(&content, sh_link_uint(bytes, raw + index, 1)?)?; index = index + 1; }; sh_link_add_section(link, object, name, &content, flags & 4279238655, alignment)?; section = section + 1; };
+    let mut symbol = 0;
+    while symbol < symbols { let row = symbols_at + symbol * 18; let name = sh_link_coff_name(link, bytes, row, strings, string_length, false)?; let value = sh_link_uint(bytes, row + 8, 4)?; let mut section_number = sh_link_uint(bytes, row + 12, 2)?; if section_number == 65535 { section_number = -1; }; let ty = sh_link_uint(bytes, row + 14, 2)?; let storage = sh_link_uint(bytes, row + 16, 1)?; let auxiliary = sh_link_uint(bytes, row + 17, 1)?; if auxiliary != 0 or ty != 0 and ty != 32 or storage != 2 and storage != 3 or section_number < -1 or section_number > sections or section_number == 0 and value != 0 or storage == 3 and section_number == 0 { return sh_i64_error(7203); }; if section_number > 0 { let global = section_base + section_number - 1; if value > sh_link_word(&link.sections, 10, global, 3) { return sh_i64_error(7201); }; section_number = global + 1; }; sh_link_add_symbol(link, object, name, value, section_number, storage)?; symbol = symbol + 1; };
+    section = 0;
+    while section < sections { let row = 20 + section * 40; let rel_at = sh_link_uint(bytes, row + 24, 4)?; let rel_count = sh_link_uint(bytes, row + 32, 2)?; let size = sh_link_word(&link.sections, 10, section_base + section, 3); let fields = vec_new_i64(); let mut index = 0; while index < rel_count { let relocation = rel_at + index * 10; let offset = sh_link_uint(bytes, relocation, 4)?; let target = sh_link_uint(bytes, relocation + 4, 4)?; let kind = sh_link_uint(bytes, relocation + 8, 2)?; let width = sh_object_relocation_width(kind); if kind != 0 and width < 0 { return sh_i64_error(7203); }; if kind != 0 { if target >= symbols or offset > size or width > size - offset { return sh_i64_error(7201); }; sh_link_interval(&fields, offset, width, size)?; sh_link_add_relocation(link, section_base + section, offset, symbol_base + target, kind)?; (); }; index = index + 1; }; section = section + 1; };
+    link.objects = link.objects + 1;
+    sh_i64_ok(object);
+}
+
+def sh_link_coff(link: &mut ShLinker, bytes: &ShBinary) -> Result<i64, i64> {
+    let result = sh_link_coff_inner(link, bytes);
+    if not result.is_ok() { sh_link_fail(link, result.error, 0); (); };
+    result;
+}
