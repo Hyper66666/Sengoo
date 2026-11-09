@@ -143,14 +143,14 @@ hosts continue to require their own evidence.
 
 ## Native development preview
 
-`source_codegen_gate.py` builds `tools/native.sg` and runs 34 exact source
-programs. Thirty-three execute with exit status 42 and identical stdout/stderr
+`source_codegen_gate.py` builds `tools/native.sg` and runs 46 exact source
+programs. Forty-three execute with exit status 42 and identical stdout/stderr
 through both the SG native and frozen qualified Rust/LLVM paths. The remaining
-Result try fixture executes 42 through SG and preserves the reviewed reference
-invalid-LLVM failure in `REFERENCE_GAPS.md`; it is not counted as equivalent.
+three fixtures execute 42 through SG and preserve the reviewed reference
+source/invalid-LLVM failures in `REFERENCE_GAPS.md`; they are not counted as equivalent.
 Fixtures cover calls, control flow, generics, aggregate/float/numeric operations,
-class/impl methods, try propagation, user Drop and Unicode source paths.
-Repeated SG objects must have identical bytes; four deliberate failures preserve
+class/impl methods, try propagation, user Drop, arrays and readonly string data.
+Repeated SG objects must have identical bytes; five deliberate failures preserve
 existing output. The gate accepts `--seed`, `--formatter`, `--clang`, `--reference`
 and `--output`; the reference identity comes from `reference-baseline.lock`.
 
@@ -172,7 +172,8 @@ failure; there is no automatic LLVM fallback.
 `linker_gate.py` separately qualifies SG COFF/archive/PE linking, real Windows
 SDK imports and independently observed Windows execution. `native_link_gate.py`
 consumes passed source/linker evidence and rechecks every input/tool/artifact
-hash before running SG source emission, SG linking and generated programs with
+hash before copying the qualified implementation sources into an immutable
+test snapshot and running SG source emission, SG linking and generated programs with
 an empty PATH. It compares object and PE bytes across two fresh directories.
 The SG numeric SDK fixture only provides verification exit hooks; this gate does
 not rebuild the compiler itself or qualify the full runtime SDK.

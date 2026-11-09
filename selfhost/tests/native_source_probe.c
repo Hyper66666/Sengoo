@@ -1,6 +1,7 @@
 #include <stdint.h>
 #include <stdio.h>
 #include <stdlib.h>
+#include <string.h>
 
 void sengoo_panic_integer_overflow(int64_t overflow) {
     if (overflow) { fputs("integer overflow\n", stderr); exit(63); }
@@ -21,4 +22,14 @@ void sg_drop_record(int64_t value) {
 int64_t sg_drop_count(void) { return drop_count; }
 int64_t sg_drop_at(int64_t index) {
     return index >= 0 && index < drop_count ? drop_values[index] : -1;
+}
+
+int64_t sg_source_string(const uint8_t *value,int64_t kind) {
+    const uint8_t utf8[]={0xE4,0xB8,0x96,0xE7,0x95,0x8C,0x20,0x26,
+        0x0A,0x09,0x22,0x5C,0x0D,0xF0,0x9F,0x98,0x80,0};
+    const uint8_t nul[]={'A',0,'B',0};
+    if (kind==0) return memcmp(value,utf8,sizeof(utf8))==0 ? 42 : 1;
+    if (kind==1) return value[0]==0 ? 42 : 1;
+    if (kind==2) return memcmp(value,nul,sizeof(nul))==0 ? 42 : 1;
+    return 1;
 }

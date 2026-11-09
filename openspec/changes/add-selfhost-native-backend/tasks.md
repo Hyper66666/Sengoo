@@ -19,6 +19,7 @@
 - [x] Run the qualified SG native emitter with the separately qualified SG linker and real SDK import archive under an empty PATH; execute 32 programs in two clean directories and compare object/PE bytes exactly (`target/selfhost/m5-native-source-link-qualified/evidence.json`). Compiler self-rebuild, full runtime and M4/M5 closure remain open.
 - [x] Emit typed array/raw-pointer index strides and unsafe opcode-22 byte memmove; independently execute 76,875 overlap cases across u8/u64/aggregate pointees, unaligned/separate ranges, zero-count null pointers, protected-page boundaries and 1/3/8/16-byte strides (`target/selfhost/m4-memory-ranges/evidence.json`). Slices, full runtime extents and supported-corpus closure remain open.
 - [x] Emit decoded string literals into readonly `.rdata` with private symbols and checked RIP-relative relocations; independently verify UTF-8, escapes, empty/interior-NUL strings, repeated storage identity and Windows page permissions (`target/selfhost/m4-string-data-checked/evidence.json`). Owned String/runtime SDK behavior remains open.
+- [x] Replay HIR schema 3 through the native source CLI for 46 programs, including arrays, string literal ABI, impl discarded contexts and aggregate operator calls; retain 43 actual frozen-reference equal executions and three explicitly unequal reference gaps (`target/selfhost/m4-source-hir3-qualified/evidence.json`). Full parity remains open.
 
 ## Supported target behavior
 
@@ -241,3 +242,16 @@ unwind metadata after insertion of the additional section. The earlier trial
 used an unsupported seed integer-to-char cast in its NUL fixture; the checked
 fixture constructs the explicit NUL character instead. Literal bytes do not
 implement owned String allocation, runtime glue or complete string semantics.
+
+HIR3/source integration: `target/selfhost/m4-source-hir3-qualified/evidence.json`,
+SHA-256 `9dc4e4f1e6f1969da7ce8a51c7d45650799335d4f26cd1e0d55a23ba473c2b80`,
+start revision `c32037ff9941ae3f10094c5b17dd8909fd63a698`, Windows 11 AMD64.
+All 325 commands passed with unchanged inputs/tools. Forty-six programs produce
+repeat-identical SG objects and execute 42; forty-three also execute with equal
+exit/stdout/stderr through the frozen reference. Array break and Result try
+preserve named invalid-LLVM link failures, while tuple-loop destructuring
+preserves the named source rejection; all three record `result_equal=false`.
+Adjacent simple array loops and tuple field reads still require both executions.
+Five negative cases preserve the previous output, including constant array
+bounds and pending nested destructor glue. This checkpoint consumes HIR schema
+3 but does not qualify complete semantics, ABI, ownership, runtime or M4.

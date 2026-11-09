@@ -39,6 +39,18 @@ CASES = {
     "class-write": "class Parent{value:i64;def update(&mut self){self.value=42;();}} class Child:Parent{extra:i64;} def main()->i64{let mut child=Child{value:0,extra:0};child.update();child.value}",
     "method-names": "struct First{value:i64} struct Second{value:i64} impl First{def score(&self)->i64{self.value}} impl Second{def score(&self)->i64{self.value}} def main()->i64{let a=First{value:20};let b=Second{value:22};a.score()+b.score()}",
     "method-effect-tail": "struct Counter{value:i64} impl Counter{def bump(&mut self){self.value=self.value+1;true;}} def main()->i64{let mut counter=Counter{value:41};counter.bump();counter.value}",
+    "array-read": "def answer(index:i64)->i64{let values=[20,22];values[0]+values[index]} def main()->i64{answer(1)}",
+    "array-write": "def main()->i64{let mut values=[1,2,3];values[1]=42;values[1]}",
+    "array-for": "def main()->i64{let mut sum=0;for value in [20,22,99]{if value==99{break;};sum=sum+value;};sum}",
+    "array-tuple-for": "def main()->i64{let mut sum=0;for (a,b) in [(20,22),(1,2)]{sum=sum+a+b;};sum-3}",
+    "array-for-simple": "def main()->i64{let mut sum=0;for value in [20,22]{sum=sum+value;};sum}",
+    "array-tuple-read": "def main()->i64{let mut sum=0;for pair in [(20,22),(1,2)]{sum=sum+pair.0+pair.1;};sum-3}",
+    "string-utf8": r'extern "C"{fn sg_source_string(value:&str,kind:i64)->i64;} def text()->&str{"世界 &\n\t\"\\\r😀"} def main()->i64{sg_source_string(text(),0)}',
+    "string-empty": 'extern "C"{fn sg_source_string(value:&str,kind:i64)->i64;} def main()->i64{sg_source_string("",1)}',
+    "string-nul": r'extern "C"{fn sg_source_string(value:&str,kind:i64)->i64;} def main()->i64{sg_source_string("A\0B",2)}',
+    "impl-if-branches": "def insert()->bool{true} struct State{} impl State{def run(&self)->i64{let mut done=false;while !done{if done{done=true}else{done=true;insert();}}42}} def main()->i64{let s=State{};s.run()}",
+    "impl-if-no-else": "def insert()->bool{true} struct State{} impl State{def run(&self)->i64{let mut done=false;while !done{if !done{done=true;insert();}}42}} def main()->i64{let s=State{};s.run()}",
+    "operator-add": "trait Add<Rhs,Output>{def add(self,rhs:Rhs)->Output{}} struct Value{n:i64} impl Add<Value,i64> for Value{def add(self,rhs:Value)->i64{self.n+rhs.n}} def main()->i64{let a=Value{n:20};let b=Value{n:22};a+b}",
     "for-break": "def main()->i64{for value in 0..4{break;};42}",
     "for-return": "def main()->i64{for value in 0..4{return 42;};0}",
     "try-result": "struct Result<T,E>{is_ok:bool,value:T,error:E} def answer()->Result<i64,i64>{Result{is_ok:true,value:42,error:0}} def main()->i64{let result=try{let value=answer()?;value;};result.value}",
@@ -52,8 +64,10 @@ CASES = {
 # The frozen reference accepts this source but emits invalid LLVM IR. Keep the
 # exact failed link and independently execute the SG result; never call it equal.
 REFERENCE_LINK_GAPS = {
-    "try-result": b"defined with type 'ptr' but expected 'i64'",
+    "try-result": (b"defined with type 'ptr' but expected 'i64'", b"insertvalue"),
+    "array-for": (b"expected instruction opcode",),
 }
+REFERENCE_SOURCE_GAPS = {"array-tuple-for": "未定义的变量: a".encode("utf-8")}
 
 
 def sha(path):
@@ -97,7 +111,7 @@ def main():
     report = {"schema": 1, "result": "running", "stage": "sg-source-to-native-object",
               "revision": subprocess.check_output(["git", "rev-parse", "HEAD"], cwd=ROOT, text=True).strip(),
               "host": platform.platform(), "sources": {str(p.relative_to(ROOT)): sha(p) for p in inputs if p.is_file()},
-              "tools": {}, "steps": [], "cases": [], "m4_complete": False, "reference_link_gaps": [],
+              "tools": {}, "steps": [], "cases": [], "m4_complete": False, "reference_link_gaps": [], "reference_source_gaps": [],
               "limits": ["single-source development CLI; not sgc command/module/configuration parity",
                          "SG performs frontend/semantics/HIR/MIR/x64/COFF emission; external clang only links verification artifacts",
                          "frozen qualified Rust reference separately emits LLVM IR for the exact same source bytes",
@@ -152,12 +166,21 @@ def main():
                 raise AssertionError("source object emission is nondeterministic")
             run(name + "-native-link", [paths["clang"], ROOT / "selfhost/tests/native_source_probe.c", obj, "-o", native_exe])
             actual = run(name + "-native-execute", [native_exe], 42)
-            run(name + "-reference-ir", [paths["reference"], "--runtime-mode", "source-development", "build", source,
-                                         "--force-rebuild", "-O", "0", "--emit-llvm", "-o", ir])
+            reference = run(name + "-reference-ir", [paths["reference"], "--runtime-mode", "source-development", "build", source,
+                                         "--force-rebuild", "-O", "0", "--emit-llvm", "-o", ir],
+                            1 if name in REFERENCE_SOURCE_GAPS else 0)
+            if name in REFERENCE_SOURCE_GAPS:
+                if REFERENCE_SOURCE_GAPS[name] not in reference.stderr or ir.exists():
+                    raise AssertionError("frozen reference source failure differs from the reviewed gap")
+                if sha(source) != row["sha256"] or actual.stdout or actual.stderr:
+                    raise AssertionError("independent SG execution changed inputs or output")
+                row.update(object_sha256=sha(obj), result_equal=False, reference_source_gap=True, native_expected_exit_code=42)
+                report["reference_source_gaps"].append(name)
+                continue
             linked = run(name + "-reference-link", [paths["clang"], ROOT / "selfhost/tests/native_source_probe.c", ir, "-o", reference_exe],
                          1 if name in REFERENCE_LINK_GAPS else 0)
             if name in REFERENCE_LINK_GAPS:
-                if REFERENCE_LINK_GAPS[name] not in linked.stderr or b"insertvalue" not in linked.stderr:
+                if not all(marker in linked.stderr for marker in REFERENCE_LINK_GAPS[name]):
                     raise AssertionError("frozen reference failure differs from the reviewed LLVM link gap")
                 if sha(source) != row["sha256"] or actual.stdout or actual.stderr:
                     raise AssertionError("independent SG execution changed inputs or output")
@@ -173,7 +196,8 @@ def main():
             ("bad-syntax", "def main()->i64{", "frontend"),
             ("bad-semantics", "def main()->i64{missing}", "semantics"),
             ("class-unit-tail", "class Counter{value:i64;def bump(&mut self){self.value=self.value+1;true;}} def main()->i64{42}", "semantics"),
-            ("unsupported-string", 'def main()->i64{let text="pending native string data";42}', "native"),
+            ("array-constant-bounds", "def main()->i64{let values=[1,2,3];values[3]}", "semantics"),
+            ("unsupported-nested-drop", "struct Child{value:i64} impl Drop for Child{def drop(&mut self){}} struct Parent{child:Child} impl Drop for Parent{def drop(&mut self){self.child.drop();}} def main()->i64{let value=Parent{child:Child{value:42}};42}", "native"),
         ):
             source, obj = out / (name + ".sg"), out / (name + ".obj")
             source.write_bytes(text.encode("utf-8"))
@@ -186,7 +210,7 @@ def main():
             report["cases"].append({"name": name, "sha256": sha(source), "diagnostic": diagnostic, "previous_output_preserved": True})
         report["artifacts"] = {binary.name: sha(binary)}
         report["result"] = "passed"
-        report["reference_parity_complete"] = not report["reference_link_gaps"]
+        report["reference_parity_complete"] = not (report["reference_link_gaps"] or report["reference_source_gaps"])
     except BaseException as error:
         report.update(result="failed", error=repr(error))
         raise

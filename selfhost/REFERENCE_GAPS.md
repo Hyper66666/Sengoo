@@ -21,3 +21,24 @@ An unexpected reference success or a different failure fails the gate. The
 adjacent Option try/success, Result propagation/failure and Option-none cases
 still require both native executables to run and match. The original failure
 is preserved in `target/selfhost/m4-source-cleanup-checked/`.
+
+## Array loop with break: missing LLVM terminator
+
+Case `array-for` sums 20 and 22, then breaks when its third element is 99.
+SG executes 42. The frozen reference emits LLVM successfully, but clang reports
+`expected instruction opcode` at the closing brace of a function containing an
+unterminated block. The exact failed link is retained and marked unequal.
+Case `array-for-simple` independently requires the simple array loop to execute
+through both compilers. Original failure:
+`target/selfhost/m4-source-hir3-arrays-strings/`.
+
+## Destructured array-loop binding: undeclared variable
+
+Case `array-tuple-for` binds `(a,b)` from two tuple elements, sums their fields
+and subtracts three. SG executes 42. The frozen reference rejects the source
+with the named undeclared-variable diagnostic for `a`, before writing LLVM.
+The gate requires that exact UTF-8 diagnostic and the absence of an IR artifact,
+and records `reference_source_gap=true` and `result_equal=false`. The adjacent
+`array-tuple-read` case retains a single loop binding and reads `.0/.1`; it must
+execute 42 through both compilers. Independent original reference failures are
+retained under `target/selfhost/m4-new-reference-development/`.
