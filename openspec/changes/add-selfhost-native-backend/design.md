@@ -153,8 +153,6 @@ arithmetic, inherited reads/mutable updates and independently mangled same-name
 methods, along with the earlier scalar subset. The native path emits COFF
 without invoking the reference; the latter is run separately by the gate.
 
-Primary references:
-
 `float_literal.sg` uses bounded base-2^30 rational integers, exact remainder
 comparison and nearest-even rounding to produce IEEE bits entirely in SG. It
 handles subnormals, signed zero, overflow and underflow. `sh_float_literal`
@@ -167,6 +165,18 @@ report malformed literals and bounded-resource failures. Signs are accepted
 by the reusable API although the source lexer normally represents a unary sign
 separately. Decimal fractions, exponents, separators and f32/f64 suffixes are
 supported; inf/nan/hex spellings are not parsed as decimal literals.
+
+The scalar conversion path uses SSE integer/float conversion instructions with
+explicit unsigned-64 handling. Float-to-integer conversions check NaN and both
+range boundaries before truncating, preserving the reference saturating
+intrinsics: NaN yields zero, negative unsigned inputs yield zero, and overflow
+clamps to the signed or unsigned limit. The upper half of u64 is handled around
+2^63 without signed overflow. Integer-to-float u64 conversion rounds a shifted
+sticky-bit value and doubles it; f32/f64 conversion uses the corresponding SSE
+width conversion. Independent C cases cover NaN, infinities, signed zero,
+in-range truncation, boundaries and 4,096 deterministic integer bit patterns.
+
+Primary references:
 
 - Intel instruction reference: https://www.intel.com/content/www/us/en/content-details/671110/intel-64-and-ia-32-architectures-software-developer-s-manual-combined-volumes-2a-2b-2c-and-2d-instruction-set-reference-a-z.html
 - Windows ABI: https://learn.microsoft.com/en-us/cpp/build/x64-calling-convention?view=msvc-170

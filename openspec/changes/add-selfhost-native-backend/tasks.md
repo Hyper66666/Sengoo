@@ -13,6 +13,7 @@
 - [x] Classify and execute initial aggregate parameters/results with size-aware values, typed field construction/extraction, aggregate CFG edge snapshots, indirect argument copies and hidden return pointers; independently verify 3/8/16-byte structures and enum payload storage using C (`target/selfhost/m4-aggregate-abi/evidence.json`). Complete cleanup/indexing/overlap/ABI coverage remains open.
 - [x] Convert bounded decimal floating literals entirely in SG with exact rational IEEE rounding and an edition-2026-compatible f64-to-f32 path; independently verify 3,332 cases, 15 actual reference double-rounding executions and 100 resource rounds (`target/selfhost/m4-float-literal-exact/evidence.json`). Numeric casts and complete backend integration remain open.
 - [x] Connect reference-compatible decimal literals and compare 19 exact supported programs through the SG native CLI and frozen Rust/LLVM path, including generic instances, structures, float literals and class methods (`target/selfhost/m4-source-expanded/evidence.json`). Full language/tool/backend support remains open.
+- [x] Preserve saturating float-to-signed/unsigned integer conversion, integer-to-float rounding and f32/f64 width conversion with independently executed boundary/NaN/infinity cases and 4,096 integer bit patterns (`target/selfhost/m4-numeric-casts/evidence.json`). Full M4 semantics remain open.
 - [x] Emit fixed-frame Windows x64 `.pdata/.xdata` unwind records and checked `__chkstk` probes for >4 KiB frames; verify LLVM inspection, `RtlLookupFunctionEntry`, `RtlVirtualUnwind`, deterministic objects and exact resource recovery (`target/selfhost/m4-unwind-final3/evidence.json`). Exception handlers, XMM saves and CodeView remain open.
 
 ## Supported target behavior
@@ -144,3 +145,12 @@ and matched reference exit 42/stdout/stderr, while three deliberate failures
 preserved prior outputs. The source CLI still rejects unimplemented numeric
 casts explicitly. The runner's later wording-only boundary update does not
 alter the recorded executed cases or results.
+
+Numeric conversion evidence: `target/selfhost/m4-numeric-casts/evidence.json`,
+SHA-256 `9204fede55b4d7f10eac55d66708fa7df8c1c9f4e67145052326bbc5c373d462`,
+revision `77fa0ce6fda291a678921feb07698c458fca5bdb`, Windows 11 x64.
+Twenty-six commands passed with unchanged inputs/tools. C execution verifies
+NaN/infinity/zero/range saturation to i8/u8/i64/u64, f32 and f64 sources,
+in-range truncation and f32/f64 width casts, plus 4,096 signed/unsigned integer
+rounding cases. All preceding scalar/aggregate/call/unwind/probe/overflow and
+resource regressions remain green; a complete backend gate remains open.

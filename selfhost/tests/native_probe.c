@@ -32,6 +32,12 @@ extern double sg_native_fconstant(void);
 extern bool sg_native_feq(double,double), sg_native_fne(double,double), sg_native_flt(double,double);
 extern bool sg_native_fle(double,double), sg_native_fgt(double,double), sg_native_fge(double,double);
 extern double sg_native_float_call6(int64_t,double,int64_t,float,double,int64_t);
+extern int64_t sg_cast_f64_i64(double), sg_cast_f32_i64(float);
+extern uint64_t sg_cast_f64_u64(double), sg_cast_f32_u64(float);
+extern int8_t sg_cast_f64_i8(double);
+extern uint8_t sg_cast_f64_u8(double);
+extern double sg_cast_i64_f64(int64_t), sg_cast_u64_f64(uint64_t), sg_cast_f32_f64(float);
+extern float sg_cast_u64_f32(uint64_t), sg_cast_f64_f32(double);
 double sg_native_float_external6(int64_t a,double b,int64_t c,float d,double e,int64_t f) {
     if (a!=1 || b!=2 || c!=3 || d!=4 || e!=5 || f!=27) exit(71);
     return a+b+c+d+e+f;
@@ -70,6 +76,33 @@ int64_t sg_native_external6(int64_t a,int64_t b,int64_t c,int64_t d,int64_t e,in
     return a+b+c+d+e+f;
 }
 static int64_t c_add(int64_t a,int64_t b) { return a+b; }
+static int test_casts(void) {
+    const double values[]={NAN,INFINITY,-INFINITY,0.0,-0.0,42.9,-42.9,127.9,128,-129,
+        255.9,256,-1,0x1p63,-0x1p63,0x1p64,0x1.fffffffffffffp62,0x1.fffffffffffffp63,
+        1e-300,-1e-300,1e300,-1e300};
+    for (unsigned i=0;i<sizeof(values)/sizeof(values[0]);++i) {
+        double v=values[i];
+        int64_t s=isnan(v)?0:v>=0x1p63?INT64_MAX:v<=-0x1p63?INT64_MIN:(int64_t)v;
+        uint64_t u=isnan(v)||v<=0?0:v>=0x1p64?UINT64_MAX:(uint64_t)v;
+        int8_t s8=isnan(v)?0:v>=128?127:v<=-128?-128:(int8_t)v;
+        uint8_t u8=isnan(v)||v<=0?0:v>=256?255:(uint8_t)v;
+        if (sg_cast_f64_i64(v)!=s || sg_cast_f64_u64(v)!=u ||
+            sg_cast_f64_i8(v)!=s8 || sg_cast_f64_u8(v)!=u8) return 1;
+        float f=(float)v;
+        int64_t fs=isnan(f)?0:f>=0x1p63f?INT64_MAX:f<=-0x1p63f?INT64_MIN:(int64_t)f;
+        uint64_t fu=isnan(f)||f<=0?0:f>=0x1p64f?UINT64_MAX:(uint64_t)f;
+        if (sg_cast_f32_i64(f)!=fs || sg_cast_f32_u64(f)!=fu) return 2;
+        if (!isnan(v) && sg_cast_f64_f32(v)!=(float)v) return 3;
+        if (!isnan(f) && sg_cast_f32_f64(f)!=(double)f) return 4;
+    }
+    uint64_t state=0x1234abcdef987654ULL;
+    for (unsigned i=0;i<4096;++i) {
+        state=state*6364136223846793005ULL+1442695040888963407ULL;
+        if (sg_cast_u64_f64(state)!=(double)state || sg_cast_u64_f32(state)!=(float)state ||
+            sg_cast_i64_f64((int64_t)state)!=(double)(int64_t)state) return 5;
+    }
+    return 0;
+}
 static int virtual_unwind(void *function) {
     DWORD64 image=0;
     PRUNTIME_FUNCTION entry=RtlLookupFunctionEntry((DWORD64)(uintptr_t)function,&image,NULL);
@@ -125,6 +158,7 @@ int main(int argc,char **argv) {
         sg_native_uadd(40,2)!=42 || sg_native_umul(6,7)!=42 ||
         sg_native_large(1,2,3,4,5,6)!=42 || checks<4 || unwound!=7) return 67;
     if (virtual_unwind(sg_native_add) || virtual_unwind(sg_native_swap)) return 68;
+    if (test_casts()) return 74;
     struct Pair pair=sg_native_pair(40,2);
     struct Pair called_pair=sg_native_pair_call(pair);
     struct Odd odd=sg_native_odd((struct Odd){1,2,3});
@@ -146,5 +180,6 @@ int main(int argc,char **argv) {
     puts("native large stack probe: ok");
     puts("native float arithmetic, NaN and mixed Windows ABI: ok");
     puts("native aggregate Windows parameters and return pointers: ok");
+    puts("native saturating casts, NaN, ranges and integer rounding: ok");
     return 0;
 }

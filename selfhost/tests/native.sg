@@ -135,6 +135,39 @@ def sh_nt_floats(mir: &ShMir, integer: i64, boolean: i64) -> Result<bool, i64> {
     Result { is_ok: true, value: true, error: 0 };
 }
 
+def sh_nt_cast_function(mir: &ShMir, name: &str, input: i64, target: i64) -> Result<i64, i64> {
+    let types = vec_new_i64();
+    types.push(input);
+    let function = sh_nt_fn(mir, name, &types, target, 0, false)?;
+    let scope = sh_mir_add_scope(mir, function, -1, 0)?;
+    let block = sh_nt_block(mir, function, scope)?;
+    types.clear();
+    let parameter = sh_nt_inst(mir, block, 1, input, &types, 0, 0)?;
+    types.push(parameter);
+    let value = sh_nt_inst(mir, block, 12, target, &types, 0, 0)?;
+    sh_nt_return(mir, block, value);
+}
+
+def sh_nt_casts(mir: &ShMir, integer: i64) -> Result<bool, i64> {
+    let f64_type = sh_type_primitive(&mir.types, 3, 64, 0)?;
+    let f32_type = sh_type_primitive(&mir.types, 3, 32, 0)?;
+    let unsigned = sh_type_primitive(&mir.types, 2, 64, 0)?;
+    let i8_type = sh_type_primitive(&mir.types, 2, 8, 1)?;
+    let u8_type = sh_type_primitive(&mir.types, 2, 8, 0)?;
+    sh_nt_cast_function(mir, "sg_cast_f64_i64", f64_type, integer)?;
+    sh_nt_cast_function(mir, "sg_cast_f64_u64", f64_type, unsigned)?;
+    sh_nt_cast_function(mir, "sg_cast_f64_i8", f64_type, i8_type)?;
+    sh_nt_cast_function(mir, "sg_cast_f64_u8", f64_type, u8_type)?;
+    sh_nt_cast_function(mir, "sg_cast_f32_i64", f32_type, integer)?;
+    sh_nt_cast_function(mir, "sg_cast_f32_u64", f32_type, unsigned)?;
+    sh_nt_cast_function(mir, "sg_cast_i64_f64", integer, f64_type)?;
+    sh_nt_cast_function(mir, "sg_cast_u64_f64", unsigned, f64_type)?;
+    sh_nt_cast_function(mir, "sg_cast_u64_f32", unsigned, f32_type)?;
+    sh_nt_cast_function(mir, "sg_cast_f64_f32", f64_type, f32_type)?;
+    sh_nt_cast_function(mir, "sg_cast_f32_f64", f32_type, f64_type)?;
+    Result { is_ok: true, value: true, error: 0 };
+}
+
 def sh_nt_aggregates(mir: &ShMir, integer: i64) -> Result<bool, i64> {
     let types = vec_new_i64();
     types.push(integer);
@@ -415,6 +448,7 @@ def sh_nt_fixture(mir: &ShMir) -> Result<bool, i64> {
     let restored = sh_nt_inst(mir, large_block, 14, integer, &args, 0, 0)?;
     sh_nt_return(mir, large_block, restored)?;
     sh_nt_floats(mir, integer, boolean)?;
+    sh_nt_casts(mir, integer)?;
     sh_nt_aggregates(mir, integer)?;
     Result { is_ok: true, value: true, error: 0 };
 }

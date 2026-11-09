@@ -106,6 +106,8 @@ def main():
             raise AssertionError("float and mixed-ABI cases did not execute")
         if b"native aggregate Windows parameters and return pointers: ok" not in executed:
             raise AssertionError("aggregate C ABI cases did not execute")
+        if b"native saturating casts, NaN, ranges and integer rounding: ok" not in executed:
+            raise AssertionError("numeric conversion cases did not execute")
         for case in ("overflow", "overflow8", "umul-overflow", "uadd-overflow", "mul-overflow"):
             run("reject-" + case, [probe, case], b"integer overflow", 63)
         run("execute-wrap", [wrap_probe, "wrap"], b"native wrapping arithmetic: ok")

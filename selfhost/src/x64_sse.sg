@@ -36,3 +36,14 @@ def sh_x64_sse_movq(output: &ShBinary, xmm: i64, register: i64) -> Result<i64, i
     if not valid { return sh_x64_rewind(output, start, 6001); };
     sh_i64_ok(start);
 }
+
+def sh_x64_sse_convert(output: &ShBinary, operation: i64, single: bool, destination: i64, source: i64) -> Result<i64, i64> {
+    if operation < 0 or operation > 2 or destination < 0 or destination > 15 or source < 0 or source > 15 { return sh_i64_error(6101); };
+    let start = sh_binary_len(output);
+    let prefix = if single { 243; } else { 242; };
+    let wide = if operation < 2 { 8; } else { 0; };
+    let opcode = if operation == 0 { 42; } else { if operation == 1 { 44; } else { 90; }; };
+    let valid = sh_binary_byte(output, prefix).is_ok() and sh_binary_byte(output, 64 | wide | ((destination >> 3) << 2) | (source >> 3)).is_ok() and sh_binary_byte(output, 15).is_ok() and sh_binary_byte(output, opcode).is_ok() and sh_binary_byte(output, 192 | ((destination & 7) << 3) | (source & 7)).is_ok();
+    if not valid { return sh_x64_rewind(output, start, 6001); };
+    sh_i64_ok(start);
+}
