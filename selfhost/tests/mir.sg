@@ -346,6 +346,10 @@ def sh_mt_cleanup_case(source: &str, expected_drops: i64, expected_projections: 
 }
 
 def sh_mt_lower() -> Result<bool, i64> {
+    sh_mt_lower_case("def checked(value:i64)->i64 requires false { value; } def main()->i64 { checked(42); }", 5008)?;
+    sh_mt_lower_case("def checked(value:i64)->i64 ensures result > 0 { value; } def main()->i64 { checked(42); }", 5008)?;
+    sh_mt_lower_case("struct Cell{n:i64} impl Cell{def lend(&self)->&i64{&self.n}} def read(value:&i64)->i64{*value} def main()->i64{read(Cell{n:42}.lend())}", 0)?;
+    sh_mt_lower_case("struct Cell{n:i64} impl Cell{def lend(&self)->&i64{&self.n}} def read(value:&i64)->i64{*value} def main()->i64{let alias=Cell{n:42}.lend();read(alias)}", 0)?;
     sh_mt_lower_case("trait Add<Rhs,Output>{def add(&self,rhs:Rhs)->Output{}} struct Value{n:i64} impl Add<i64,i64> for Value{def add(&self,rhs:i64)->i64{self.n+rhs}} def main()->i64{let value=Value{n:20};(value+1)+(value+1)}", 0)?;
     sh_mt_lower_case("struct Counter { value:i64, } impl Counter { def bump(&mut self) { if self.value > 0 { self.value = 42; true; } else { (); }; while self.value < 42 { self.value = self.value + 1; true; }; } } def main()->i64 { let mut counter=Counter{value:1}; counter.bump(); counter.value; }", 0)?;
     sh_mt_lower_case("trait Add<Rhs,Output>{def add(self,rhs:Rhs)->Output{}} struct Value{n:i64} impl Add<Value,Value> for Value{def add(self,rhs:Value)->Value{Value{n:self.n+rhs.n}}} def main()->i64{let a=Value{n:20};let b=Value{n:22};(a+b).n}", 0)?;

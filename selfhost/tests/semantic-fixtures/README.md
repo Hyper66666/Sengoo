@@ -13,6 +13,8 @@ Do not classify every `.sg` file in this directory as a supported positive corpu
 | modules/missing.sg, standard_missing.sg | Missing import rejection 5201 |
 | modules/error_root.sg, error_leaf.sg | Located dependency type error 5104 |
 | modules/invalid_utf8.sg | Intentional raw FF byte; UTF-8 rejection 5207 |
+| modules/bom_root.sg, bom_leaf.sg | Physical-file leading BOM and original byte mapping |
+| modules/embedded_bom.sg | Interior BOM remains a lexical rejection |
 
 The native test also checks malformed maps and module/byte limits, and recovers
 String, Buffer, opaque and FileSnapshot resources exactly after ten rounds.

@@ -71,6 +71,19 @@ def sh_modules_failure() -> Result<bool, i64> {
     assert_true(error_checked.end > error_checked.start, "semantic_modules.sg", 38);
     let missing_std = sh_modules_load("selfhost/tests/semantic-fixtures/modules/standard_missing.sg", "tools/stdlib", &config, 32, 1048576);
     assert_eq_i64(missing_std.error, 5201, "semantic_modules.sg", 39);
+    let bom_graph = sh_modules_load("selfhost/tests/semantic-fixtures/modules/bom_root.sg", "tools/stdlib", &config, 32, 1048576);
+    let bom_checked = sh_modules_check(&bom_graph, 100000, 100);
+    assert_eq_i64(bom_checked.error, 0, "semantic_modules.sg", 40);
+    let original = sh_span_text(&bom_graph.sources, ShSpan { source: 1, start: 0, end: 3 })?;
+    assert_eq_i64(original.len(), 3, "semantic_modules.sg", 41);
+    let prefix = bom_graph.text.get(0, 3)?;
+    assert_true(sh_s_text_equal(&prefix, "   "), "semantic_modules.sg", 42);
+    let mapped_bom = sh_modules_span(&bom_graph, 3, 6);
+    assert_eq_i64(mapped_bom.source, 1, "semantic_modules.sg", 43);
+    assert_eq_i64(mapped_bom.start, 3, "semantic_modules.sg", 44);
+    let embedded = sh_modules_load("selfhost/tests/semantic-fixtures/modules/embedded_bom.sg", "tools/stdlib", &config, 32, 1048576);
+    assert_eq_i64(embedded.error, 1103, "semantic_modules.sg", 45);
+    assert_eq_i64(embedded.start, 14, "semantic_modules.sg", 46);
     Result { is_ok: true, value: true, error: 0 };
 }
 

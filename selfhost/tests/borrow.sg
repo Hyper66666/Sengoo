@@ -22,6 +22,14 @@ def sh_borrow_case(raw: &str, expected: i64) -> Result<bool, i64> {
 }
 
 def sh_test_borrow_round() -> Result<bool, i64> {
+    sh_borrow_case("struct String{handle:i64} extern \"C\"{fn view(handle:i64)->&str;} impl String{def as_str(&self)->&str{view(self.handle)}} def make()->String{String{handle:1}} def escape(flag:bool)->&str{if flag{make().as_str()}else{\"literal\"}}", 6105)?;
+    sh_borrow_case("struct Cell{n:i64} impl Cell{def lend(&self)->&i64{&self.n}} def leak()->&i64{Cell{n:42}.lend()}", 6105)?;
+    sh_borrow_case("struct Cell{n:i64} impl Cell{def lend(&self)->&i64{&self.n}} def leak()->&i64{return Cell{n:42}.lend();}", 6105)?;
+    sh_borrow_case("struct Cell{n:i64} impl Cell{def lend(&self)->&i64{&self.n}} def leak(flag:bool)->&i64{if flag{Cell{n:42}.lend()}else{Cell{n:7}.lend()}}", 6105)?;
+    sh_borrow_case("struct Cell{n:i64} impl Cell{def lend(&self)->&i64{&self.n}} def observe(value:&i64) {} def valid(){observe(Cell{n:42}.lend());}", 0)?;
+    sh_borrow_case("struct Cell{n:i64} impl Cell{def lend(&self)->&i64{&self.n}} def valid(value:&Cell)->&i64{value.lend()}", 0)?;
+    sh_borrow_case("struct Cell{n:i64} impl Cell{def lend(&self)->&i64{&self.n}} def observe(value:&i64) {} def valid(){let alias=Cell{n:42}.lend();observe(alias);}", 0)?;
+    sh_borrow_case("struct Cell{n:i64} impl Cell{def lend(&self)->&i64{&self.n}} def leak()->&i64{let alias=Cell{n:42}.lend();alias}", 6105)?;
     sh_borrow_case("struct Pair { left:i64, right:i64, } def f(mut pair:Pair,flag:bool) { if flag { pair.left=42; (); }; let copy=pair.left; }", 0)?;
     sh_borrow_case("struct Pair { left:i64, right:i64, } def f(mut pair:Pair,flag:bool) { if flag { (); } else { pair.left=42; (); }; let copy=pair.left; }", 0)?;
     sh_borrow_case("struct Pair { left:i64, right:i64, } def f(mut pair:Pair,flag:bool) { while flag { pair.left=42; break; }; let copy=pair.left; }", 0)?;

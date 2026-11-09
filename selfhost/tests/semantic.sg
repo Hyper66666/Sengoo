@@ -230,10 +230,24 @@ def sh_semantic_deferred_facts() -> Result<bool, i64> {
     Result { is_ok: true, value: true, error: 0 };
 }
 
+def sh_semantic_asstr_facts() -> Result<bool, i64> {
+    let text = string_from_str("struct String{handle:i64} def shared(value:&String)->&str{value.as_str()} def unique(value:&mut String)->&str{value.as_str()} def owned(value:String)->i64{let text=value.as_str();text.len()}")?;
+    let parsed = sh_parse(&text, 0, 10000);
+    let checked = sh_check(&text, &parsed.ast, 100);
+    assert_eq_i64(checked.error, 0, "asstr-facts.sg", 1);
+    let mut node = 0;
+    let mut seen = 0;
+    while node < sh_ast_count(&parsed.ast) { if sh_ast_word(&parsed.ast, node, 0) == 53 { let callee = sh_ast_child(&parsed.ast, node, 0); if sh_ast_word(&parsed.ast, callee, 0) == 55 { let name = sh_s_name(&text, &parsed.ast, sh_ast_child(&parsed.ast, callee, 1))?; if sh_s_text_equal(&name, "as_str") { let signature = sh_node_callable_type(&checked, node); let receiver = sh_s_argument(&checked, signature, 0); assert_eq_i64(sh_s_kind(&checked, receiver), 6, "asstr-facts.sg", 2); assert_eq_i64(sh_s_flags(&checked, receiver), 0, "asstr-facts.sg", 3); assert_eq_i64(sh_s_kind(&checked, sh_s_argument(&checked, receiver, 0)), 12, "asstr-facts.sg", 4); seen = seen + 1; }; }; }; node = node + 1; };
+    assert_eq_i64(seen, 3, "asstr-facts.sg", 5);
+    Result { is_ok: true, value: true, error: 0 };
+}
+
 def main() -> i64 {
     let strings = sengoo_string_live_handle_count();
     let buffers = sengoo_buffer_live_handle_count();
     let opaque = sengoo_opaque_live_handle_count();
+    let asstr = sh_semantic_asstr_facts();
+    if not asstr.is_ok() { return 6; };
     let deferred = sh_semantic_deferred_facts();
     if not deferred.is_ok() { return 5; };
     let positive = sh_semantic_positive();

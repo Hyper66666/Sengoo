@@ -65,3 +65,14 @@ frontend state.
 - **THEN** lowering SHALL preserve its receiver, argument, result and calling convention through an actual method call
 - **AND** generic trait dispatch SHALL select the matching concrete implementation or reject an unresolved or ambiguous instance
 - **AND** poisoned operator targets or signatures SHALL be rejected before emission
+
+#### Scenario: An anonymous borrowed result outlives temporary storage
+- **WHEN** a function returns a borrowed call result whose receiver or argument is local or temporary storage
+- **THEN** ownership checking SHALL reject the escape regardless of whether that storage requires Drop
+- **AND** a borrowed result consumed within its full expression or retained by a valid local alias SHALL preserve its storage lifetime
+- **AND** synthetic borrowed receiver signatures SHALL retain the same shared borrowing contract as the supported operation
+
+#### Scenario: Runtime contracts have no lowering implementation
+- **WHEN** a checked callable declares requires or ensures and executable contract lowering is unavailable
+- **THEN** lowering SHALL explicitly reject that callable as unsupported instead of silently discarding its runtime checks
+- **AND** generic where clauses SHALL retain their separate type obligation meaning

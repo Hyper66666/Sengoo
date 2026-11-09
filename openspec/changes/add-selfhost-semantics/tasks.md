@@ -398,6 +398,31 @@ patterns, runtime drop ABI, conditional field cleanup, async/cancellation and
 the full supported corpus remain open. No compiler self-build or performance
 qualification is claimed by this gate.
 
+## Anonymous result lifetime checkpoint
+
+- [x] Reject borrowed anonymous call results that escape local or temporary storage, including negative corpus fixture 803, explicit returns, branch returns and local aliases of temporary storage.
+- [x] Track addressable temporary storage independently of Drop obligations, preserving full-expression uses, parameter-derived returns and local alias lifetime extension; retain accurate MIR local Drop flags for storage-only temporaries.
+- [x] Bind the corrected synthetic String.as_str shared receiver signature, including owned/shared/mutable source receiver forms, to the real loan path rather than consuming an owned synthetic parameter.
+- [x] Reject requires/ensures-bearing callables with 5008 until runtime contract lowering exists; preserve generic where-clause lowering.
+
+Report: `target/selfhost/m3-borrow-escape/checkpoint/evidence.json`, SHA-256
+`9fdd33c4b83977b3107b5de7c0203643b6ae4a91bdc8ac1a7a6ba24fed3b408a`.
+It records identical start/end revision
+`f1967f2f3167d3ef802f6dff17b2fcaa8d558d9f`, Windows 11 AMD64,
+Python 3.12.14, 175 input hashes and empty source/tool change lists. All four
+build/native commands passed with the eight new temporary-lifetime cases,
+50 ownership rounds, 10 HIR schema-three roundtrip/lowering/cleanup rounds and
+30 raw MIR rounds, with exact String, Buffer and opaque handle counts.
+The development failures remain preserved, including the synthetic receiver
+fact error and the initial overly broad contract-node check that also matched
+where clauses. The final check selects requires/ensures payloads explicitly.
+
+This closes the named 803 lifetime reproduction, not the full borrowed-result
+or standard-library corpus. Projected-only wrapper specialization, generic
+ownership summaries, explicit handle transfer/inactivation, executable runtime
+contracts, closure environments, owned patterns, runtime drop ABI, conditional
+field cleanup and async/cancellation remain open, with `m3_complete: false`.
+
 
 ## Physical module graph and class-tail correction checkpoint
 
@@ -459,3 +484,28 @@ large-corpus discovery rerun exceeded its old 20-second per-case deadline
 because imports are now genuinely analyzed. Those aborted runs remain
 incomplete development evidence; the replacement scanner saves every case,
 uses a bounded 120-second deadline and records faults separately from rejection.
+
+
+## Borrowed receiver facts and physical source BOM checkpoint
+
+- [x] Give synthetic String.as_str a shared &String receiver signature for owned, shared and mutable receiver inputs, and verify the three callable facts with exact resources.
+- [x] Preserve leading BOM bytes in each physical snapshot while masking only the three leading bytes during module merge; verify original byte mapping and reject an interior BOM.
+- [x] Rebuild and execute the unchanged final semantic/type/module/CLI snapshot after the independent commit window, retaining historical revision-changing and artifact-replay evidence rather than rewriting it.
+
+Final source-bound report: `target/selfhost/m3-semantic/evidence.json`, SHA-256
+`619956dc189c081df082d2af288b5674ab62ef5b76c338e020b11bd945754973`.
+It records identical start/end revision
+`59f1c9c601456b083e4b36cb05b3a6e8ad014e9c`, Windows 11 AMD64, unchanged
+source/tool identities, all 188 semantic fixtures plus receiver-fact assertions,
+100 semantic/type resource scopes, ten module resource cycles, native CLI build
+and the fresh 49-case comparison retaining the five reviewed differences.
+The coordinated ownership/MIR gate separately verifies anonymous borrowed-view
+escape rejection, no-Drop storage lifetimes and valid full-expression observation.
+
+The eleven physical module cases, including a BOM-bearing imported source,
+match qualified reference acceptance/rejection. Independent report
+`target/selfhost/m3-semantic/module-reference-11case-evidence.json` has SHA-256
+`eb444b105bf5886d6e7bae8a943c77f1b4ef1a444cb983bd9c1e994a4c59675e`.
+The earlier ten-case report remains preserved separately. Large module-aware
+corpus discovery is still classified by phase and missing dependency context;
+its development results do not close M3 or establish complete stdlib/async support.

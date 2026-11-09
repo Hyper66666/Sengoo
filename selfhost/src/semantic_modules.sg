@@ -251,7 +251,11 @@ def sh_module_emit(graph: &mut ShModules, module: i64) {
     let text = sh_span_text(&graph.sources, ShSpan { source: module, start: 0, end: length });
     if not text.is_ok() { sh_module_fail(graph, 5207, module, 0, 0); return; };
     let start = graph.text.len();
-    if start > graph.maximum - text.value.len() or not sh_module_append(&graph.text, &text.value) { sh_module_fail(graph, 5204, module, 0, 0); return; };
+    if start > graph.maximum - text.value.len() { sh_module_fail(graph, 5204, module, 0, 0); return; };
+    let bytes = sh_lex_bytes(&text.value);
+    if not bytes.is_ok() { sh_module_fail(graph, 5204, module, 0, 0); return; };
+    let bom = text.value.len() >= 3 and sh_lex_byte(&bytes.value, 0) == 239 and sh_lex_byte(&bytes.value, 1) == 187 and sh_lex_byte(&bytes.value, 2) == 191;
+    if bom { let tail = text.value.get(3, text.value.len()); if not tail.is_ok() or not graph.text.push_str("   ").is_ok() or not sh_module_append(&graph.text, &tail.value) { sh_module_fail(graph, 5204, module, 0, 0); return; }; } else if not sh_module_append(&graph.text, &text.value) { sh_module_fail(graph, 5204, module, 0, 0); return; };
     graph.mapping.push(start);
     graph.mapping.push(graph.text.len());
     graph.mapping.push(module);

@@ -199,7 +199,9 @@ def sh_b_temporary(result: &mut ShOwnership, checked: &ShChecked, ast: &ShAst, n
     let kind = sh_ast_word(ast, node, 0);
     let produces = kind == 53 or kind == 60 or kind == 59 or kind == 56 or kind == 68 and sh_ast_word(ast, node, 4) == sh_kind("try") or kind == 58 and sh_ast_word(ast, node, 4) == 1;
     let ty = sh_node_type(checked, node);
-    if not produces or not sh_b_drop_inner(checked, ty, 0) or result.flow != 0 { return; };
+    let type_kind = sh_s_kind(checked, sh_s_resolve(checked, ty));
+    let borrowed_storage = not moving and result.access_mode == 1 and type_kind != 5 and type_kind != 6 and type_kind != 9;
+    if not produces or not (sh_b_drop_inner(checked, ty, 0) or borrowed_storage) or result.flow != 0 { return; };
     let binding = -node - 1;
     let path = sh_b_path(result, binding, -1, -1, ty);
     result.state.set(path, 1);
@@ -224,7 +226,7 @@ def sh_b_temporaries_end(result: &mut ShOwnership, checked: &ShChecked, ast: &Sh
     let mut expression_loan = 0;
     while expression_loan < result.loans.len() { if result.loans.get(expression_loan + 1).unwrap_or(-1) == -1 { result.loans.set(expression_loan + 4, 0); (); }; expression_loan = expression_loan + 5; };
     let mut index = result.definitions.len() - 5;
-    while index >= 0 { let binding = result.definitions.get(index).unwrap_or(0); let keeper = result.definitions.get(index + 4).unwrap_or(-1); let keep_live = sh_b_keeper_live(result, checked, keeper, sh_ast_word(ast, node, 3)); if binding < 0 and result.definitions.get(index + 3).unwrap_or(-1) == result.function and not keep_live { let path = result.definitions.get(index + 1).unwrap_or(-1); if (result.state.get(path).unwrap_or(0) & 1) != 0 { let mut loan = 0; while loan < result.loans.len() { if sh_b_path_root(result, result.loans.get(loan).unwrap_or(-1)) == binding { result.loans.set(loan + 4, 0); (); }; loan = loan + 5; }; sh_b_drop_path(result, checked, ast, node, path, result.definitions.get(index + 2).unwrap_or(result.scope), 0, 0); }; }; index = index - 5; };
+    while index >= 0 { let binding = result.definitions.get(index).unwrap_or(0); let keeper = result.definitions.get(index + 4).unwrap_or(-1); let keep_live = sh_b_keeper_live(result, checked, keeper, sh_ast_word(ast, node, 3)); if binding < 0 and result.definitions.get(index + 3).unwrap_or(-1) == result.function and not keep_live { let path = result.definitions.get(index + 1).unwrap_or(-1); if (result.state.get(path).unwrap_or(0) & 1) != 0 { let mut loan = 0; while loan < result.loans.len() { if sh_b_path_root(result, result.loans.get(loan).unwrap_or(-1)) == binding { result.loans.set(loan + 4, 0); (); }; loan = loan + 5; }; if sh_b_drop_inner(checked, result.paths.get(path * 4 + 3).unwrap_or(-1), 0) { sh_b_drop_path(result, checked, ast, node, path, result.definitions.get(index + 2).unwrap_or(result.scope), 0, 0); } else { result.state.set(path, 0); (); }; }; }; index = index - 5; };
 }
 
 def sh_b_join_state(left: i64, right: i64) -> i64 {
@@ -432,6 +434,7 @@ def sh_b_escape(result: &mut ShOwnership, checked: &ShChecked, ast: &ShAst, node
     if kind == 40 { let tail = sh_ast_child(ast, node, sh_ast_word(ast, node, 6) - 1); if tail >= 0 { sh_b_escape(result, checked, ast, tail); }; return; };
     if kind == 43 or kind == 58 or kind == 59 or kind == 60 or kind == 23 or kind == 66 { let mut index = if kind == 60 { 1; } else { 0; }; while index < sh_ast_word(ast, node, 6) { sh_b_escape(result, checked, ast, sh_ast_child(ast, node, index)); index = index + 1; }; return; };
     if kind == 61 or kind == 65 { let mut index = 1; while index < sh_ast_word(ast, node, 6) { sh_b_escape(result, checked, ast, sh_ast_child(ast, node, index)); index = index + 1; }; return; };
+    if (kind == 53 or kind == 50 or kind == 51) and sh_b_carries_borrow(checked, sh_node_type(checked, node), 0) { let mut loan = 0; while loan < result.loans.len() { if result.loans.get(loan + 1).unwrap_or(-1) == -1 and result.loans.get(loan + 3).unwrap_or(-1) == node { let owner = sh_b_path_root(result, result.loans.get(loan).unwrap_or(-1)); if owner < 0 or sh_binding_word(checked, owner, 2) == 0 or sh_binding_word(checked, owner, 2) == 1 and sh_s_kind(checked, sh_s_resolve(checked, sh_binding_word(checked, owner, 3))) != 6 { sh_b_error(result, ast, node, 6105, owner, node); }; }; loan = loan + 5; }; };
     let path = sh_b_place(result, checked, ast, node);
     if path >= 0 { let binding = sh_b_path_root(result, path); let mut index = 0; while index < result.loans.len() { if result.loans.get(index + 1).unwrap_or(-1) == binding { let owner = sh_b_path_root(result, result.loans.get(index).unwrap_or(-1)); if owner < 0 or sh_binding_word(checked, owner, 2) == 0 or sh_binding_word(checked, owner, 2) == 1 and sh_s_kind(checked, sh_s_resolve(checked, sh_binding_word(checked, owner, 3))) != 6 { sh_b_error(result, ast, node, 6105, owner, result.loans.get(index + 3).unwrap_or(-1)); }; }; index = index + 5; }; };
     if sh_ast_word(ast, node, 0) == 50 and sh_ast_word(ast, node, 4) % 1000 == sh_kind("&") { let operand = sh_b_place(result, checked, ast, sh_ast_child(ast, node, 0)); let root = if operand < 0 { -1; } else { sh_b_path_root(result, operand); }; if root < 0 or sh_s_kind(checked, sh_s_resolve(checked, sh_binding_word(checked, root, 3))) != 6 { sh_b_error(result, ast, node, 6105, root, -1); }; };

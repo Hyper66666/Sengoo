@@ -283,3 +283,20 @@ forms, for Send capture checking. The SG checker applies the same constraint to
 resolved lambda capture bindings even when the source declares a wrapper with
 that name. This typing rule does not authorize backend dispatch by source
 spelling or fabricate a native runtime implementation.
+
+
+## Borrowed string views and per-file BOM provenance
+
+The synthetic String.as_str callable signature borrows shared storage from its
+receiver. Owned, shared and mutable String inputs all produce a shared &String
+receiver parameter and &str result; they do not consume the String or upgrade
+mutability. Ownership analysis must retain the anonymous returned loan and its
+storage owner even when the type has no destructor. A borrowed view leaving a
+temporary storage lifetime is rejected, while full-expression observation and
+borrowed-parameter forwarding retain their valid lifetimes.
+
+A leading UTF-8 BOM belongs to an individual physical source file. Module merge
+replaces exactly those first three bytes with three spaces, preserving joined
+length and the original SourceId byte map. Original source snapshots retain the
+BOM bytes. Interior BOM characters remain lexical errors; this does not inherit
+the reference lexer's general behavior of skipping arbitrary error tokens.
