@@ -16,6 +16,9 @@ CASES = {
     "constant": "def main()->i64{42}",
     "call": "def add(a:i64,b:i64)->i64{a+b} def main()->i64{add(40,2)}",
     "branch": "def choose(x:bool)->i64{if x {42}else{7}} def main()->i64{choose(true)}",
+    "logical-or-false": "def main()->i64{if false or false{2}else{42}}",
+    "logical-truth-table": "def choose(a:bool,b:bool,c:bool)->i64{if (a or b) and c{1}else{0}} def main()->i64{39+choose(false,false,false)+choose(false,false,true)+choose(false,true,false)+choose(false,true,true)+choose(true,false,false)+choose(true,false,true)+choose(true,true,false)+choose(true,true,true)}",
+    "narrow-field-phi": "struct Small{a:i8,b:i16,c:i32} def choose(flag:bool)->i64{let value=Small{a:-1i8,b:1i16,c:42i32};let a=if flag{value.a}else{0i8};(a as i64)+(value.b as i64)+(value.c as i64)} def main()->i64{if choose(true)==42 and choose(false)==43{42}else{1}}",
     "while": "def main()->i64{let mut i=0;let mut sum=0;while i<10{sum=sum+i;i=i+1;}sum-3}",
     "for": "def main()->i64{let mut sum=0;for i in 0..10{sum=sum+i;}sum-3}",
     "match": "def main()->i64{let x=7;match x{0=>40,7=>42,_=>1}}",
@@ -99,28 +102,50 @@ def main():
     out = args.output.resolve()
     if not out.is_relative_to(ROOT / "target"):
         raise ValueError("outputs must stay inside target/")
-    out.mkdir(parents=True, exist_ok=True)
+    out.mkdir(parents=True, exist_ok=False)
     paths = {name: getattr(args, name).resolve() for name in ("seed", "clang", "formatter", "reference")}
     lock = json.loads((ROOT / "selfhost/bootstrap.lock").read_text())
     baseline = json.loads((ROOT / "selfhost/reference-baseline.lock").read_text())
     modules = native_modules()
-    inputs = [Path(__file__), ROOT / "selfhost/bootstrap.lock", ROOT / "selfhost/reference-baseline.lock", ROOT / "selfhost/REFERENCE_GAPS.md",
-              ROOT / "selfhost/tools/native.sg", ROOT / "selfhost/tests/native_source_probe.c", *modules]
-    inputs += sorted((ROOT / "tools/stdlib").rglob("*.sg"))
-    inputs += [ROOT / "tools/stdlib/runtime.c", ROOT / "tools/stdlib/runtime_abi.h"]
+    origins = [ROOT / "selfhost/tools/native.sg", ROOT / "selfhost/tests/native_source_probe.c", *modules]
+    origins += [path for path in (ROOT / "tools/stdlib").rglob("*")
+                if path.is_file() and path.suffix in {".sg", ".c", ".h"}
+                and not any(part in {"target", "build", "__pycache__"} for part in path.relative_to(ROOT / "tools/stdlib").parts)]
+    snapshot = out / "producer-snapshot"
+    origin_hashes, snapshots = {}, {}
+    for path in sorted(set(origins)):
+        raw = path.read_bytes()
+        relative = str(path.relative_to(ROOT))
+        origin_hashes[relative] = hashlib.sha256(raw).hexdigest()
+        saved = snapshot / path.relative_to(ROOT)
+        saved.parent.mkdir(parents=True, exist_ok=True)
+        saved.write_bytes(raw)
+        snapshots[str(saved.relative_to(ROOT))] = sha(saved)
+    if any(sha(ROOT / name) != digest for name, digest in origin_hashes.items()):
+        raise AssertionError("source changed while capturing immutable producer snapshot")
+    modules = [snapshot / path.relative_to(ROOT) for path in modules]
+    inputs = [Path(__file__), ROOT / "selfhost/bootstrap.lock", ROOT / "selfhost/reference-baseline.lock", ROOT / "selfhost/REFERENCE_GAPS.md"]
+    inputs += [ROOT / name for name in snapshots]
+    # The qualified seed discovers the development Rust runtime at its actual
+    # checkout. Guard those inputs rather than claiming it consumed our copies.
+    inputs += [ROOT / name for name in ("Cargo.toml", "Cargo.lock", "rust-toolchain.toml", ".cargo/config.toml") if (ROOT / name).is_file()]
+    inputs += [path for path in (ROOT / "runtime").rglob("*") if path.is_file()
+               and not any(part in {"target", "build", "__pycache__"} for part in path.relative_to(ROOT / "runtime").parts)]
     report = {"schema": 1, "result": "running", "stage": "sg-source-to-native-object",
               "revision": subprocess.check_output(["git", "rev-parse", "HEAD"], cwd=ROOT, text=True).strip(),
               "host": platform.platform(), "sources": {str(p.relative_to(ROOT)): sha(p) for p in inputs if p.is_file()},
               "tools": {}, "steps": [], "cases": [], "m4_complete": False, "reference_link_gaps": [], "reference_source_gaps": [],
-              "limits": ["single-source development CLI; not sgc command/module/configuration parity",
+              "producer_snapshot_root": str(snapshot.relative_to(ROOT)), "producer_source_origins": origin_hashes, "producer_snapshots": snapshots,
+              "limits": ["development CLI with physical import graphs; not complete sgc command/module/configuration parity",
                          "SG performs frontend/semantics/HIR/MIR/x64/COFF emission; external clang only links verification artifacts",
+                         "compiler SG/C/stdlib inputs are immutable snapshots; seed-discovered Rust/Cargo development runtime inputs remain guarded at their actual checkout",
                          "frozen qualified Rust reference separately emits LLVM IR for the exact same source bytes",
                          "full ownership, async, numeric, debug, module/tool compatibility and self-build gates remain open"]}
     env = dict(os.environ)
     for name in list(env):
         if name.upper().startswith(("SENGOO_", "SGPLATFORM_", "SDL2_")):
             env.pop(name)
-    env.update(SENGOO_STDLIB=str(ROOT / "tools/stdlib"), SENGOO_RUNTIME=str(ROOT / "tools/stdlib/runtime.c"),
+    env.update(SENGOO_STDLIB=str(snapshot / "tools/stdlib"), SENGOO_RUNTIME=str(snapshot / "tools/stdlib/runtime.c"),
                SENGOO_CLANG=str(paths["clang"]), SENGOO_MODULE_MAP=";".join(
                    "selfhost_" + path.stem + "=" + str(path) for path in modules))
     env["PATH"] = str(paths["clang"].parent) + os.pathsep + env.get("PATH", "")
@@ -144,11 +169,11 @@ def main():
             if digest != expected:
                 raise ValueError(f"{name} identity mismatch")
             report["tools"][name] = {"path": str(path), "sha256": digest}
-        run("format-cli", [paths["formatter"], "--check", ROOT / "selfhost/tools/native.sg"])
+        run("format-cli", [paths["formatter"], "--check", snapshot / "selfhost/tools/native.sg"])
         binary = out / "native.exe"
         binary.unlink(missing_ok=True)
         run("build-cli", [paths["seed"], "--runtime-mode", "source-development", "build",
-                          ROOT / "selfhost/tools/native.sg", "--force-rebuild", "-O", "0", "-o", binary])
+                          snapshot / "selfhost/tools/native.sg", "--force-rebuild", "-O", "0", "-o", binary])
         for name, text in CASES.items():
             source = out / (name + " 世界 &.sg")
             source.write_bytes(text.encode("utf-8"))
@@ -164,7 +189,7 @@ def main():
             run(name + "-native-repeat", [binary, source, repeat])
             if obj.read_bytes() != repeat.read_bytes():
                 raise AssertionError("source object emission is nondeterministic")
-            run(name + "-native-link", [paths["clang"], ROOT / "selfhost/tests/native_source_probe.c", obj, "-o", native_exe])
+            run(name + "-native-link", [paths["clang"], snapshot / "selfhost/tests/native_source_probe.c", obj, "-o", native_exe])
             actual = run(name + "-native-execute", [native_exe], 42)
             reference = run(name + "-reference-ir", [paths["reference"], "--runtime-mode", "source-development", "build", source,
                                          "--force-rebuild", "-O", "0", "--emit-llvm", "-o", ir],
@@ -177,7 +202,7 @@ def main():
                 row.update(object_sha256=sha(obj), result_equal=False, reference_source_gap=True, native_expected_exit_code=42)
                 report["reference_source_gaps"].append(name)
                 continue
-            linked = run(name + "-reference-link", [paths["clang"], ROOT / "selfhost/tests/native_source_probe.c", ir, "-o", reference_exe],
+            linked = run(name + "-reference-link", [paths["clang"], snapshot / "selfhost/tests/native_source_probe.c", ir, "-o", reference_exe],
                          1 if name in REFERENCE_LINK_GAPS else 0)
             if name in REFERENCE_LINK_GAPS:
                 if not all(marker in linked.stderr for marker in REFERENCE_LINK_GAPS[name]):
@@ -219,6 +244,8 @@ def main():
         changed_tools = [name for name, identity in report["tools"].items()
                          if not Path(identity["path"]).is_file() or sha(Path(identity["path"])) != identity["sha256"]]
         report.update(changed_sources=changed, changed_tools=changed_tools)
+        report["checkout_changes"] = [name for name, digest in origin_hashes.items()
+                                      if not (ROOT / name).is_file() or sha(ROOT / name) != digest]
         if changed or changed_tools:
             report.update(result="failed", error="source pipeline inputs changed during verification")
         (out / "evidence.json").write_text(json.dumps(report, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")

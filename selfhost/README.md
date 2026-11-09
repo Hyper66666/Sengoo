@@ -143,8 +143,8 @@ hosts continue to require their own evidence.
 
 ## Native development preview
 
-`source_codegen_gate.py` builds `tools/native.sg` and runs 46 exact source
-programs. Forty-three execute with exit status 42 and identical stdout/stderr
+`source_codegen_gate.py` builds `tools/native.sg` and runs 49 exact source
+programs. Forty-six execute with exit status 42 and identical stdout/stderr
 through both the SG native and frozen qualified Rust/LLVM paths. The remaining
 three fixtures execute 42 through SG and preserve the reviewed reference
 source/invalid-LLVM failures in `REFERENCE_GAPS.md`; they are not counted as equivalent.
@@ -161,13 +161,26 @@ native.exe INPUT.sg OUTPUT.obj [--wrap]
 ```
 
 The default checks integer add/subtract/multiply overflow. `--wrap` selects
-wrapping arithmetic. Output diagnostics use JSON schema version 1. This preview
-handles the qualified single-source subset and writes AMD64 COFF directly.
+wrapping arithmetic. Output diagnostics use JSON schema version 1. The driver
+loads physical import graphs, checks the combined program and writes AMD64
+COFF directly. Module failures include the original file path and byte span;
+failed compilation preserves the previous output. Module lookup uses relative
+files, `SENGOO_STDLIB` and `SENGOO_MODULE_MAP` with the qualified resolver's
+precedence and physical identity rules. Full namespaces and public module
+compatibility remain open.
 It is not yet the public `sgc` command interface. Resolved root and structural
 cleanup, stack probing and unwind records have focused execution gates; pending
 runtime glue, conditional field cleanup, async, full module/tool compatibility,
 CodeView and complete native behavior remain open. Unsupported code reports a
 failure; there is no automatic LLVM fallback.
+
+The source gate copies the compiler's complete SG import closure and C/stdlib
+inputs before building. Its seed still discovers the development Rust runtime
+in the current workspace, so the gate separately guards those Cargo/runtime
+inputs. `module_codegen_gate.py --native-evidence REPORT --output DIRECTORY`
+consumes the passed source report and its immutable snapshots to qualify
+multi-file diagnostics, deterministic objects and repeated in-process resource
+recovery. This development evidence does not establish compiler self-rebuild.
 
 `linker_gate.py` separately qualifies SG COFF/archive/PE linking, real Windows
 SDK imports and independently observed Windows execution. `native_link_gate.py`

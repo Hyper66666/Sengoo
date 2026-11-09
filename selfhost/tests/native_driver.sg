@@ -1,0 +1,57 @@
+import selfhost_native_driver;
+
+import std::assert;
+
+extern "C" {
+    fn sengoo_string_live_handle_count() -> i64;
+    fn sengoo_buffer_live_handle_count() -> i64;
+    fn sengoo_opaque_live_handle_count() -> i64;
+}
+
+struct ShNdResources {
+    strings: i64,
+    buffers: i64,
+    opaque: i64,
+    snapshots: i64,
+    snapshot_bytes: i64,
+}
+
+def sh_nd_resources() -> ShNdResources {
+    ShNdResources { strings: sengoo_string_live_handle_count(), buffers: sengoo_buffer_live_handle_count(), opaque: sengoo_opaque_live_handle_count(), snapshots: sengoo_file_snapshot_live_handle_count(), snapshot_bytes: sengoo_file_snapshot_live_bytes() };
+}
+
+def sh_nd_compare(before: &ShNdResources) {
+    assert_eq_i64(sengoo_string_live_handle_count(), before.strings, "native_driver.sg", 24);
+    assert_eq_i64(sengoo_buffer_live_handle_count(), before.buffers, "native_driver.sg", 25);
+    assert_eq_i64(sengoo_opaque_live_handle_count(), before.opaque, "native_driver.sg", 26);
+    assert_eq_i64(sengoo_file_snapshot_live_handle_count(), before.snapshots, "native_driver.sg", 27);
+    assert_eq_i64(sengoo_file_snapshot_live_bytes(), before.snapshot_bytes, "native_driver.sg", 28);
+    ();
+}
+
+def sh_nd_scope(good: &String, bad: &String, output: &String, before: &ShNdResources) -> Result<i64, i64> {
+    assert_eq_i64(sh_nc_file(good.as_str(), output.as_str(), true)?, 0, "native_driver.sg", 13);
+    sh_nd_compare(before);
+    assert_eq_i64(sh_nc_file(bad.as_str(), output.as_str(), true)?, 65, "native_driver.sg", 14);
+    sh_nd_compare(before);
+    sh_i64_ok(0);
+}
+
+def sh_nd_test(good: &String, bad: &String, output: &String) -> Result<i64, i64> {
+    let before = sh_nd_resources();
+    let mut round = 0;
+    while round < 10 { sh_nd_scope(good, bad, output, &before)?; round = round + 1; };
+    io_stdout_write("selfhost native module driver exact resources: ok\n")?;
+    sh_i64_ok(0);
+}
+
+def main() -> i64 {
+    if args_len() != 3 { return 64; };
+    let good = sh_nc_argument(0);
+    let bad = sh_nc_argument(1);
+    let output = sh_nc_argument(2);
+    if not good.is_ok() or not bad.is_ok() or not output.is_ok() { return 64; };
+    let tested = sh_nd_test(&good.value, &bad.value, &output.value);
+    if not tested.is_ok() { println(tested.error); return 1; };
+    0;
+}

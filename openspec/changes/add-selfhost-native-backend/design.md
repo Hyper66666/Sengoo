@@ -259,6 +259,23 @@ general-purpose register; later arguments use the reserved stack slots.
 Direct and indirect call paths share this classification. Variadic SG function
 definitions still fail explicitly because callee-side va_start is unimplemented.
 
+The development `native.sg` entry delegates compilation to `native_driver.sg`.
+The driver loads the existing physical module graph, runs its combined semantic
+check and passes the checked program through HIR/MIR and native emission.
+Located JSON diagnostics map expansion offsets back to the graph's original
+file and UTF-8 byte interval. The graph snapshots must still match before an
+object is written. Semantic/native rejection therefore preserves the previous
+object. This integration does not add full namespaces, the public sgc command
+interface or persistent HIR module facts.
+
+Source qualification builds from immutable compiler SG and split C/header/SG
+stdlib snapshots. The verified development seed still discovers its Rust
+runtime in the actual checkout, whose Cargo/runtime inputs remain guarded.
+The separate module gate copies the qualified native executable by one verified
+read, checks strict success/failure JSON, pins the actual development compiler
+and disables inherited wrappers. In-process tests compare resource baselines
+after the first success and first failure, then after each of ten rounds.
+
 Primary references:
 
 - Intel instruction reference: https://www.intel.com/content/www/us/en/content-details/671110/intel-64-and-ia-32-architectures-software-developer-s-manual-combined-volumes-2a-2b-2c-and-2d-instruction-set-reference-a-z.html

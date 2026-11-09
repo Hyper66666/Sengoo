@@ -1,0 +1,94 @@
+import selfhost_native;
+
+import selfhost_frontend;
+
+import selfhost_semantic_modules;
+
+import selfhost_mir_lower;
+
+import std::args;
+
+import std::io;
+
+import std::file;
+
+import std::env;
+
+def sh_nc_argument(index: i64) -> Result<String, i64> {
+    let length = arg_len(index)?;
+    let buffer = ffi_buffer_new(length)?;
+    let count = arg_copy(index, buffer)?;
+    string_from_utf8(buffer, count);
+}
+
+def sh_nc_error(code: i64, start: i64, end: i64, phase: &str) -> Result<i64, i64> {
+    let output = string_from_str("{\"schema_version\":1,\"ok\":false,\"phase\":\"")?;
+    output.push_str(phase)?;
+    output.push_str("\",\"code\":")?;
+    output.push_i64(code)?;
+    output.push_str(",\"start\":")?;
+    output.push_i64(start)?;
+    output.push_str(",\"end\":")?;
+    output.push_i64(end)?;
+    output.push_str("}\n")?;
+    io_stdout_write(output.as_str())?;
+    sh_i64_ok(65);
+}
+
+def sh_nc_environment(name: &str) -> Result<String, i64> {
+    if not env_has_var(name) { return string_result_ok(string_new()); };
+    let buffer = ffi_buffer_new(env_var_len(name)?)?;
+    let count = env_var_copy(name, buffer)?;
+    string_from_utf8(buffer, count);
+}
+
+def sh_nc_json_string(output: &String, value: &String) -> Result<i64, i64> {
+    let bytes = sh_lex_bytes(value)?;
+    output.push_str("\"")?;
+    let mut index = 0;
+    let mut begin = 0;
+    while index < value.len() { let byte = sh_lex_byte(&bytes, index); if byte == 34 or byte == 92 or byte < 32 { let prefix = value.get(begin, index)?; if not sh_module_append(output, &prefix) { return sh_i64_error(5204); }; if byte == 34 { output.push_str("\\\"")?; (); } else if byte == 92 { output.push_str("\\\\")?; (); } else { output.push_str("\\u00")?; let digits = string_from_str("0123456789abcdef")?; let high = digits.get(byte / 16, byte / 16 + 1)?; let low = digits.get(byte % 16, byte % 16 + 1)?; if not sh_module_append(output, &high) or not sh_module_append(output, &low) { return sh_i64_error(5204); }; }; begin = index + 1; }; index = index + 1; };
+    let suffix = value.get(begin, value.len())?;
+    if not sh_module_append(output, &suffix) { return sh_i64_error(5204); };
+    output.push_str("\"")?;
+    sh_i64_ok(0);
+}
+
+def sh_nc_module_error(graph: &ShModules, code: i64, span: ShSpan, phase: &str) -> Result<i64, i64> {
+    let output = string_from_str("{\"schema_version\":1,\"ok\":false,\"phase\":\"")?;
+    output.push_str(phase)?;
+    output.push_str("\",\"code\":")?;
+    output.push_i64(code)?;
+    output.push_str(",\"source\":")?;
+    output.push_i64(span.source)?;
+    output.push_str(",\"path\":")?;
+    if span.source >= 0 and span.source < sh_module_count(graph) { sh_nc_json_string(&output, &graph.units.get(span.source).path)?; (); } else { output.push_str("\"\"")?; (); };
+    output.push_str(",\"start\":")?;
+    output.push_i64(span.start)?;
+    output.push_str(",\"end\":")?;
+    output.push_i64(span.end)?;
+    output.push_str("}\n")?;
+    io_stdout_write(output.as_str())?;
+    sh_i64_ok(65);
+}
+
+def sh_nc_file(input: &str, output: &str, checked_arithmetic: bool) -> Result<i64, i64> {
+    let library = sh_nc_environment("SENGOO_STDLIB")?;
+    if library.len() == 0 { library.push_str("tools/stdlib")?; (); };
+    let map = sh_nc_environment("SENGOO_MODULE_MAP")?;
+    let graph = sh_modules_load(input, library.as_str(), &map, 1024, 16777216);
+    if graph.error != 0 { return sh_nc_module_error(&graph, graph.error, ShSpan { source: graph.source, start: graph.start, end: graph.end }, if graph.error >= 5201 and graph.error <= 5207 { "modules"; } else { "frontend"; }); };
+    let analyzed = sh_modules_check(&graph, 1000000, 1000);
+    if analyzed.error != 0 { return sh_nc_module_error(&graph, analyzed.error, ShSpan { source: analyzed.source, start: analyzed.start, end: analyzed.end }, if analyzed.front.error != 0 { "frontend"; } else { "semantics"; }); };
+    let front = &analyzed.front;
+    let checked = &analyzed.checked;
+    let lowered = sh_lower(&front.expanded.text, &front.parsed.ast, checked, 100000);
+    if lowered.error != 0 { let span = sh_module_expanded_span(&graph, front, lowered.start, lowered.end); return sh_nc_module_error(&graph, lowered.error, span, "lowering"); };
+    let object = sh_native_object(&lowered.mir, 67108864, checked_arithmetic);
+    if not object.is_ok() { return sh_nc_module_error(&graph, object.error, ShSpan { source: graph.root, start: 0, end: 0 }, "native"); };
+    if not sh_modules_unchanged(&graph) { return sh_nc_module_error(&graph, 5206, ShSpan { source: graph.root, start: 0, end: 0 }, "modules"); };
+    let bytes = sh_binary_buffer(&object.value)?;
+    file_write_str_raw(sengoo_stdlib_str_ptr(output), bytes.ptr(), bytes.used_len())?;
+    io_stdout_write("{\"schema_version\":1,\"ok\":true,\"phase\":\"object\"}\n")?;
+    sh_i64_ok(0);
+}

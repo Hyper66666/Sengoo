@@ -49,6 +49,12 @@ SHALL not call an external compiler or assembler or silently fall back to LLVM.
 - **THEN** the resulting object is independently inspectable and linkable with its declared target/ABI
 - **AND** final SG self-build process evidence contains no external compiler or assembler
 
+#### Scenario: The development native driver compiles a physical import graph
+- **WHEN** the supported module loader resolves a multi-file program for native compilation
+- **THEN** the driver passes the combined checked program through the SG native pipeline with deterministic object bytes
+- **AND** failed module, semantic or native compilation preserves the previous object and reports the original file and bounded UTF-8 byte interval
+- **AND** the first and repeated successful and rejected in-process compilations restore all tracked resources
+
 #### Scenario: An adapter requests native address facts before serialization
 - **WHEN** a fresh native builder optionally collects debug addresses into an empty object
 - **THEN** each emitted instruction, terminator, prologue and return epilogue has a bounded machine-code range

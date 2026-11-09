@@ -22,6 +22,8 @@
 - [x] Replay HIR schema 3 through the native source CLI for 46 programs, including arrays, string literal ABI, impl discarded contexts and aggregate operator calls; retain 43 actual frozen-reference equal executions and three explicitly unequal reference gaps (`target/selfhost/m4-source-hir3-qualified/evidence.json`). Full parity remains open.
 - [x] Separate validated native object construction from serialization and optionally collect instruction/terminator/prologue/epilogue addresses for an external debug adapter; verify all ranges, fresh-state rejection and byte-identical objects (`target/selfhost/m4-native-object-debug-api/evidence.json`). Automatic source/local/PDB integration is a separate M5 gate.
 - [x] Load scalar SSA storage at its real width with signed/unsigned extension, including values copied by CFG edges and field extraction; prove dirty-stack bool/integer correctness and reject a restored old qword-load negative control (`target/selfhost/m4-narrow-scalar-checked/evidence.json`). Complete scalar and language coverage remains open.
+- [x] Replay the module-aware native driver from immutable SG/C/stdlib input snapshots for 49 source programs and five output-preserving rejections (`target/selfhost/m4-native-module-driver-snapshot/evidence.json`). Forty-six reference-equal executions and three named reference failures remain distinct; physical multi-file and resource integration has a separate gate.
+- [x] Execute five physical module graphs against the frozen reference and reject four located module/dependency failures; verify strict JSON, copied binary identity, fixed development Rust tools and first-call/repeated resource recovery (`target/selfhost/m4-native-module-graph-hardened/evidence.json`). Full module/tool/HIR and self-build parity remain open.
 
 ## Supported target behavior
 
@@ -339,3 +341,45 @@ unpromoted f32 extra and insufficient outgoing capacity. A disassembly-bound
 negative control replaces the second floating argument's GP duplicate with
 zero while leaving XMM intact; the C consumer fails with the required exit 84.
 No SG va_start/body implementation is claimed by these caller-side gates.
+
+Module-aware driver source replay:
+`target/selfhost/m4-native-module-driver-snapshot/evidence.json`, SHA-256
+`c25157d3beea83179085514cc6b9276b789f55a5a478bfda48cc4a06ee163663`,
+start revision `d5144a0fbce78d9d5fc01b9b72195604131fb852`, Windows 11 AMD64.
+All 346 commands passed with unchanged consumed inputs and tools. Forty-nine
+programs execute 42 and emit repeat-identical objects; forty-six match the
+frozen reference's exit/stdout/stderr. The three separately named reference
+source/LLVM failures remain unequal. New logical truth-table and narrow-field
+phi cases retain the typed-load regression coverage. Five negative programs
+preserve the existing output. The complete SG import closure, all declared
+stdlib SG sources and split C/header files are copied before building; the
+qualified seed's actual checkout Rust runtime and Cargo inputs are separately
+guarded. The prior non-snapshotted driver run is preserved as failed because
+borrow/ffi/runtime sources changed during verification, despite successful
+case execution. Neither replay closes M3, M4 or the compiler fixed-point gate.
+
+Physical module integration:
+`target/selfhost/m4-native-module-graph-hardened/evidence.json`, SHA-256
+`190902dade018f5390f3b244dcc014307b273610b94732f64198e641852b24b0`,
+full start/end revision `a433e81a929897ab34f348ff1b267d05c261b822`,
+Windows 11 AMD64. All fifty commands passed with 262 unchanged inputs and ten
+unchanged tools, plus unchanged present/absent ancestor and user Cargo
+configuration states. Five graphs cover shared diamond dependencies, Unicode
+mapped paths, physical identity aliases, relative-file precedence and a leading
+BOM. SG emits repeat-identical objects and all five executions match the frozen
+reference at exit 42. Missing imports, cycles, dependency type failures and
+invalid dependency UTF-8 retain original byte intervals and previous output.
+Both emission attempts require strict successful JSON; rejection JSON must
+report false. Ten malformed JSON controls and a wrong-binary identity control
+fail before they can be accepted as successful output or a qualified copy.
+
+The native artifact is read once, checked against its source qualification,
+copied and rechecked. Thirteen deliberately invalid inherited Rust settings
+are removed; actual Cargo/rustc identities are pinned with wrappers disabled.
+An independent offline Cargo probe confirms its build script and library use
+the selected rustc. With no warmup, each first success/failure and every later
+pair restores String, Buffer, opaque and FileSnapshot handles and retained
+snapshot bytes: ten rounds, twenty checked compilations. The earlier steady
+state report is retained with its narrower warmup scope. The new adapter is
+still a development CLI and does not establish complete namespaces, persistent
+HIR module facts, a final SDK or compiler self-rebuild.
