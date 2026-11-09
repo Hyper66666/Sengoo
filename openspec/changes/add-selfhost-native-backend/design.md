@@ -250,6 +250,15 @@ it cannot become a safe reference or reach its consumer. Positive bits retain
 their value, subject to the validated provider/receiver lifetime contract.
 This check does not prove arbitrary positive memory addresses valid.
 
+`call_abi.sg` classifies actual call operands, preserving fixed parameter types
+and requiring C default-promoted extras. It accounts for every stack argument
+and the position shift caused by a hidden aggregate result. Variadic f32 extras
+are rejected until the producer has promoted them to f64. Floating arguments
+in the first four physical positions are copied to both their XMM and matching
+general-purpose register; later arguments use the reserved stack slots.
+Direct and indirect call paths share this classification. Variadic SG function
+definitions still fail explicitly because callee-side va_start is unimplemented.
+
 Primary references:
 
 - Intel instruction reference: https://www.intel.com/content/www/us/en/content-details/671110/intel-64-and-ia-32-architectures-software-developer-s-manual-combined-volumes-2a-2b-2c-and-2d-instruction-set-reference-a-z.html

@@ -25,6 +25,8 @@
 
 ## Supported target behavior
 
+- [x] Classify actual C variadic call operands and emit float register duplication, stack arguments, direct/indirect calls and shifted hidden-result arguments (`target/selfhost/m4-variadic-calls-qualified/evidence.json`). Defining variadic SG bodies remains unsupported.
+
 - [x] Reject nonpositive runtime pointer status before constructing a borrowed view, and preserve valid pointer/resource behavior (`target/selfhost/m4-runtime-pointer-status-production/evidence.json`). Actual registered-provider tests are separately recorded; arbitrary positive-address validity is not claimed.
 
 - [ ] Implement target type layout and Windows x64 direct/indirect/C ABI calls, aggregates and SSE values.
@@ -324,3 +326,16 @@ the consumer marker; the registered positive ABI fixture and all prior native
 regressions pass. The candidate uses signed comparison followed by UD2 rather
 than converting an error status into a safe view. A separate whole-pipeline
 runtime gate retains old compiler consumer-reachability controls.
+
+C variadic call evidence: `target/selfhost/m4-variadic-calls-qualified/evidence.json`,
+SHA-256 `fd1a846f9070d4fa812110a53a357fe67c7739f74d28390f9bdc58fdb0960175`,
+revision `3e70fd54feb5ff0e6c3f4144889b6a7845000ec3`, Windows 11 AMD64.
+All 38 commands passed with unchanged inputs/tools. Independent C va_arg
+consumers verify mixed signed/unsigned integers and doubles, all four register
+positions, stack extras, indirect variadic pointers, a fixed-only call, a
+40-extra-argument call and hidden 16-byte aggregate results. Twenty dirty-stack
+rounds retain all preceding native regressions. Classification rejects an
+unpromoted f32 extra and insufficient outgoing capacity. A disassembly-bound
+negative control replaces the second floating argument's GP duplicate with
+zero while leaving XMM intact; the C consumer fails with the required exit 84.
+No SG va_start/body implementation is claimed by these caller-side gates.

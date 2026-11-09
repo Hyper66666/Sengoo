@@ -1,0 +1,27 @@
+import selfhost_abi;
+
+def sh_windows_call_abi(mir: &ShMir, id: i64, maximum: i64) -> ShWindowsAbi {
+    let mut abi = ShWindowsAbi { result_type: -1, result_mode: -1, result_size: -1, parameters: vec_new_i64(), stack_size: 32, error: 0 };
+    if id < 0 or id >= sh_mir_inst_count(mir) or sh_mir_inst(mir, id, 2) != 20 or maximum < 0 or maximum > 2147483647 { abi.error = 6701; return abi; };
+    let function = sh_mir_inst(mir, id, 6);
+    if function < -1 or function >= sh_mir_fn_count(mir) { abi.error = 6701; return abi; };
+    let prefix = if function == -1 { 1; } else { 0; };
+    let signature = if function == -1 { sh_mir_value_type(mir, sh_mir_inst_arg(mir, id, 0)); } else { sh_mir_fn(mir, function, 1); };
+    let fixed = sh_mir_type_word(mir, signature, 5) - 1;
+    let flags = sh_mir_type_word(mir, signature, 2);
+    let count = sh_mir_inst(mir, id, 5) - prefix;
+    if sh_mir_type_word(mir, signature, 0) != 11 or fixed < 0 or count < fixed or flags < 0 or flags > 1 or flags == 0 and count != fixed or sh_mir_type_word(mir, signature, 1) != sh_mir_inst(mir, id, 7) or flags == 1 and sh_mir_inst(mir, id, 7) != 1 or sh_mir_type_arg(mir, signature, fixed) != sh_mir_value_type(mir, id) { abi.error = 6701; return abi; };
+    if flags == 0 { let mut parameter = 0; while parameter < fixed { if sh_mir_value_type(mir, sh_mir_inst_arg(mir, id, parameter + prefix)) != sh_mir_type_arg(mir, signature, parameter) { abi.error = 6701; return abi; }; parameter = parameter + 1; }; return sh_windows_abi(mir, signature, maximum); };
+    abi.result_type = sh_mir_type_arg(mir, signature, fixed);
+    let result_layout = sh_target_layout(mir, abi.result_type, maximum);
+    if result_layout.error != 0 { abi.error = result_layout.error; return abi; };
+    abi.result_mode = sh_abi_mode(mir, &result_layout, abi.result_type);
+    abi.result_size = sh_layout_at(&result_layout.sizes, abi.result_type);
+    if abi.result_mode < 0 { abi.error = 6701; return abi; };
+    let mut position = if abi.result_mode == 3 { 1; } else { 0; };
+    let mut index = 0;
+    while index < count { let ty = sh_mir_value_type(mir, sh_mir_inst_arg(mir, id, index + prefix)); let kind = sh_mir_type_word(mir, ty, 0); let width = sh_mir_type_word(mir, ty, 1); if index < fixed { if ty != sh_mir_type_arg(mir, signature, index) { abi.error = 6701; return abi; }; } else { if not (kind == 2 and width >= 32 or kind == 3 and width == 64 or kind == 7 or kind == 11) { abi.error = 6701; return abi; }; }; let layout = sh_target_layout(mir, ty, maximum); if layout.error != 0 { abi.error = layout.error; return abi; }; let mode = sh_abi_mode(mir, &layout, ty); if mode < 1 { abi.error = 6701; return abi; }; let stack = if position >= 4 { 32 + (position - 4) * 8; } else { -1; }; if stack > maximum - 8 { abi.error = 6702; return abi; }; if not abi.parameters.push(ty) or not abi.parameters.push(mode) or not abi.parameters.push(position) or not abi.parameters.push(stack) or not abi.parameters.push(if mode == 3 { 16; } else { sh_layout_at(&layout.alignments, ty); }) { abi.error = 6702; return abi; }; position = position + 1; index = index + 1; };
+    if position > 4 { abi.stack_size = 32 + (position - 4) * 8; };
+    if abi.stack_size > maximum { abi.error = 6702; };
+    abi;
+}

@@ -5,6 +5,7 @@
 #include <string.h>
 #include <stdbool.h>
 #include <math.h>
+#include <stdarg.h>
 #define WIN32_LEAN_AND_MEAN
 #include <windows.h>
 typedef int64_t (*binary_fn)(int64_t,int64_t);
@@ -45,6 +46,51 @@ double sg_native_float_external6(int64_t a,double b,int64_t c,float d,double e,i
     return a+b+c+d+e+f;
 }
 struct Pair { int64_t x,y; };
+typedef int64_t (*variadic_mix_fn)(int64_t,...);
+extern int64_t sg_native_variadic_mix(int64_t,double,int64_t,double,uint64_t,double,int32_t);
+extern int64_t sg_native_variadic_indirect(variadic_mix_fn,int64_t,double,int64_t,double,uint64_t,double,int32_t);
+extern double sg_native_variadic_floats(double,double,double,double,double);
+extern struct Pair sg_native_variadic_pair(int64_t,double,int64_t,double,int64_t);
+extern int64_t sg_native_variadic_empty(int32_t), sg_native_variadic_many(void);
+
+int64_t sg_variadic_mix(int64_t marker,...) {
+    va_list args; va_start(args,marker);
+    double a=va_arg(args,double);
+    int64_t b=va_arg(args,int64_t);
+    double c=va_arg(args,double);
+    uint64_t d=va_arg(args,uint64_t);
+    double e=va_arg(args,double);
+    int f=va_arg(args,int);
+    va_end(args);
+    if (marker!=1 || a!=2 || b!=3 || c!=4 || d!=UINT64_MAX || e!=5 || f!=-6) exit(83);
+    return 42;
+}
+double sg_variadic_floats(double first,...) {
+    va_list args; va_start(args,first);
+    double a=va_arg(args,double), b=va_arg(args,double), c=va_arg(args,double), d=va_arg(args,double);
+    va_end(args);
+    if (first!=1 || a!=2 || b!=3 || c!=4 || d!=32) exit(84);
+    return first+a+b+c+d;
+}
+struct Pair sg_variadic_pair(int64_t marker,...) {
+    va_list args; va_start(args,marker);
+    double a=va_arg(args,double); int64_t b=va_arg(args,int64_t);
+    double c=va_arg(args,double); int64_t d=va_arg(args,int64_t);
+    va_end(args);
+    if (marker!=1 || a!=20 || b!=22 || c!=3 || d!=4) exit(85);
+    return (struct Pair){(int64_t)a,b};
+}
+int64_t sg_variadic_empty(int marker,...) { return marker; }
+int64_t sg_variadic_many(int64_t count,...) {
+    va_list args; va_start(args,count);
+    if (count!=40) exit(86);
+    for (int64_t index=0;index<count;++index) {
+        if (index%2==0) { if (va_arg(args,int64_t)!=index) exit(86); }
+        else { if (va_arg(args,double)!=1) exit(86); }
+    }
+    va_end(args);
+    return 42;
+}
 struct Small { int64_t x; };
 struct Odd { uint8_t a,b,c; };
 struct NativeChoice { int64_t tag; struct {int64_t x;uint8_t y;} payload; };
@@ -324,6 +370,15 @@ int main(int argc,char **argv) {
     if (test_memory_ranges()) return 79;
     if (test_string_data()) return 80;
     if (test_narrow_copies()) return 81;
+    for (unsigned round=0;round<20;++round) {
+        poison_stack();
+        if (sg_native_variadic_mix(1,2,3,4,UINT64_MAX,5,-6)!=42 ||
+            sg_native_variadic_indirect(sg_variadic_mix,1,2,3,4,UINT64_MAX,5,-6)!=42 ||
+            sg_native_variadic_floats(1,2,3,4,32)!=42 ||
+            sg_native_variadic_empty(42)!=42 || sg_native_variadic_many()!=42) return 87;
+        struct Pair variadic_pair=sg_native_variadic_pair(1,20,22,3,4);
+        if (variadic_pair.x!=20 || variadic_pair.y!=22) return 88;
+    }
     if (memcmp(sg_native_runtime_view(&(struct StringHandle){42}),"runtime view",sizeof("runtime view"))) return 82;
     if (sg_native_cleanup(false)!=42 || drop_count!=0 ||
         sg_native_cleanup(true)!=42 || drop_count!=1 ||
@@ -362,5 +417,6 @@ int main(int argc,char **argv) {
     puts("native readonly UTF-8 string data, NUL and literal relocations: ok");
     puts("native dirty-stack bool and narrow integer phi/field reads: ok");
     puts("native validated borrowed runtime pointer bridge: ok");
+    puts("native Windows variadic register, stack, indirect and sret calls: ok");
     return 0;
 }

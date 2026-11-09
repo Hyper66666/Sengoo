@@ -500,6 +500,110 @@ def sh_nt_runtime_view(mir: &ShMir, integer: i64) -> Result<bool, i64> {
     Result { is_ok: true, value: true, error: 0 };
 }
 
+def sh_nt_variadic_decl(mir: &ShMir, name: &str, fixed: &Vec<i64>, result: i64) -> Result<i64, i64> {
+    let function = sh_nt_fn(mir, name, fixed, result, 1, true)?;
+    let signature = sh_mir_fn(mir, function, 1);
+    let args = vec_new_i64();
+    let mut index = 0;
+    while index < fixed.len() { args.push(sh_native_at(fixed, index)); index = index + 1; };
+    args.push(result);
+    let variadic = sh_type_intern(&mir.types, 11, 1, 1, -1, &args)?;
+    mir.functions.set(function * 8 + 1, variadic);
+    sh_i64_ok(function);
+}
+
+def sh_nt_variadic_forward(mir: &ShMir, name: &str, provider: i64, actual_types: &Vec<i64>, result: i64, indirect: bool) -> Result<i64, i64> {
+    let types = vec_new_i64();
+    let mut index = 0;
+    if indirect { types.push(sh_mir_fn(mir, provider, 1)); (); };
+    while index < actual_types.len() { types.push(sh_native_at(actual_types, index)); index = index + 1; };
+    let function = sh_nt_fn(mir, name, &types, result, 0, false)?;
+    let scope = sh_mir_add_scope(mir, function, -1, 0)?;
+    let block = sh_nt_block(mir, function, scope)?;
+    let values = vec_new_i64();
+    let empty = vec_new_i64();
+    index = 0;
+    while index < types.len() { let value = sh_nt_inst(mir, block, 1, sh_native_at(&types, index), &empty, index, 0)?; values.push(value); index = index + 1; };
+    let call = sh_nt_inst(mir, block, 20, result, &values, if indirect { -1; } else { provider; }, 1)?;
+    let abi = sh_windows_call_abi(mir, call, 2147483647);
+    assert_eq_i64(abi.error, 0, "variadic.sg", 28);
+    assert_eq_i64(abi.parameters.len() / 5, actual_types.len(), "variadic.sg", 29);
+    sh_nt_return(mir, block, call)?;
+    sh_i64_ok(call);
+}
+
+def sh_nt_variadic(mir: &ShMir, integer: i64) -> Result<bool, i64> {
+    let double = sh_type_primitive(&mir.types, 3, 64, 0)?;
+    let word = sh_type_primitive(&mir.types, 2, 32, 1)?;
+    let unsigned = sh_type_primitive(&mir.types, 2, 64, 0)?;
+    let args = vec_new_i64();
+    args.push(integer);
+    let mix = sh_nt_variadic_decl(mir, "sg_variadic_mix", &args, integer)?;
+    args.push(double);
+    args.push(integer);
+    args.push(double);
+    args.push(unsigned);
+    args.push(double);
+    args.push(word);
+    let direct = sh_nt_variadic_forward(mir, "sg_native_variadic_mix", mix, &args, integer, false)?;
+    sh_nt_variadic_forward(mir, "sg_native_variadic_indirect", mix, &args, integer, true)?;
+    let bounded = sh_windows_call_abi(mir, direct, 32);
+    assert_eq_i64(bounded.error, 6702, "variadic.sg", 45);
+    let first = sh_mir_inst_arg(mir, direct, 1);
+    let original = sh_mir_inst(mir, first, 3);
+    let single = sh_type_primitive(&mir.types, 3, 32, 0)?;
+    mir.instructions.set(first * 12 + 3, single);
+    let unpromoted = sh_windows_call_abi(mir, direct, 2147483647);
+    assert_eq_i64(unpromoted.error, 6701, "variadic.sg", 51);
+    mir.instructions.set(first * 12 + 3, original);
+    args.clear();
+    args.push(double);
+    let floats = sh_nt_variadic_decl(mir, "sg_variadic_floats", &args, double)?;
+    args.push(double);
+    args.push(double);
+    args.push(double);
+    args.push(double);
+    sh_nt_variadic_forward(mir, "sg_native_variadic_floats", floats, &args, double, false)?;
+    let empty = vec_new_i64();
+    let label = string_from_str("VariadicPair")?;
+    let nominal = sh_intern(&mir.symbols, &label)?;
+    let pair = sh_type_intern(&mir.types, 12, 0, 0, nominal, &empty)?;
+    let fields = vec_new_i64();
+    fields.push(integer);
+    fields.push(integer);
+    let offsets = vec_new_i64();
+    offsets.push(-1);
+    offsets.push(-1);
+    sh_mir_add_layout(mir, pair, -1, &fields, &offsets, -1, -1, -1)?;
+    args.clear();
+    args.push(integer);
+    let sret = sh_nt_variadic_decl(mir, "sg_variadic_pair", &args, pair)?;
+    args.push(double);
+    args.push(integer);
+    args.push(double);
+    args.push(integer);
+    sh_nt_variadic_forward(mir, "sg_native_variadic_pair", sret, &args, pair, false)?;
+    args.clear();
+    args.push(word);
+    let no_extra = sh_nt_variadic_decl(mir, "sg_variadic_empty", &args, integer)?;
+    sh_nt_variadic_forward(mir, "sg_native_variadic_empty", no_extra, &args, integer, false)?;
+    args.clear();
+    args.push(integer);
+    let many = sh_nt_variadic_decl(mir, "sg_variadic_many", &args, integer)?;
+    let mut index = 0;
+    while index < 40 { args.push(if index % 2 == 0 { integer; } else { double; }); index = index + 1; };
+    let function = sh_nt_fn(mir, "sg_native_variadic_many", &empty, integer, 0, false)?;
+    let scope = sh_mir_add_scope(mir, function, -1, 0)?;
+    let block = sh_nt_block(mir, function, scope)?;
+    let values = vec_new_i64();
+    values.push(sh_nt_inst(mir, block, 4, integer, &empty, 40, 0)?);
+    index = 0;
+    while index < 40 { values.push(sh_nt_inst(mir, block, if index % 2 == 0 { 4; } else { 5; }, sh_native_at(&args, index + 1), &empty, if index % 2 == 0 { index; } else { 4607182418800017408; }, 0)?); index = index + 1; };
+    let called = sh_nt_inst(mir, block, 20, integer, &values, many, 1)?;
+    sh_nt_return(mir, block, called)?;
+    Result { is_ok: true, value: true, error: 0 };
+}
+
 def sh_nt_cleanup(mir: &ShMir, integer: i64, boolean: i64, unit: i64) -> Result<bool, i64> {
     let name = string_from_str("TestOwner")?;
     let symbol = sh_intern(&mir.symbols, &name)?;
@@ -774,6 +878,7 @@ def sh_nt_fixture(mir: &ShMir) -> Result<bool, i64> {
     sh_nt_strings(mir)?;
     sh_nt_narrow_copies(mir, integer, boolean)?;
     sh_nt_runtime_view(mir, integer)?;
+    sh_nt_variadic(mir, integer)?;
     Result { is_ok: true, value: true, error: 0 };
 }
 

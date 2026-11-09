@@ -31,7 +31,7 @@ def main():
     out.mkdir(parents=True, exist_ok=True)
     paths = {name: getattr(args, name).resolve() for name in ("seed", "clang", "formatter")}
     lock = json.loads((ROOT / "selfhost/bootstrap.lock").read_text())
-    names = ("core", "types", "lexer", "mir", "mir_validate", "layout", "abi", "binary", "coff", "object", "x64", "x64_scalar", "x64_memmove", "x64_sse", "float_literal", "unwind", "native")
+    names = ("core", "types", "lexer", "mir", "mir_validate", "layout", "abi", "call_abi", "binary", "coff", "object", "x64", "x64_scalar", "x64_memmove", "x64_sse", "float_literal", "unwind", "native")
     inputs = [Path(__file__), ROOT / "selfhost/bootstrap.lock", ROOT / "selfhost/tests/native.sg", ROOT / "selfhost/tests/abi.sg", ROOT / "selfhost/tests/native_probe.c"]
     inputs += [ROOT / "selfhost/src" / (name + ".sg") for name in names]
     inputs += sorted((ROOT / "tools/stdlib").rglob("*.sg"))
@@ -73,7 +73,7 @@ def main():
             if digest != lock[name]["sha256"]:
                 raise ValueError(f"{name} identity mismatch")
             report["tools"][name] = {"path": str(path), "sha256": digest}
-        for name in ("src/native.sg", "src/x64_scalar.sg", "src/x64_memmove.sg", "src/x64_sse.sg", "src/unwind.sg", "src/layout.sg", "src/abi.sg", "tests/abi.sg", "tests/native.sg"):
+        for name in ("src/native.sg", "src/call_abi.sg", "src/x64_scalar.sg", "src/x64_memmove.sg", "src/x64_sse.sg", "src/unwind.sg", "src/layout.sg", "src/abi.sg", "tests/abi.sg", "tests/native.sg"):
             run("format-" + name.replace("/", "-"), [paths["formatter"], "--check", ROOT / "selfhost" / name])
         abi_binary = out / "abi-tests.exe"
         run("build-abi", [paths["seed"], "--runtime-mode", "source-development", "build",
@@ -126,6 +126,8 @@ def main():
             raise AssertionError("dirty upper stack bytes affected scalar phi or field values")
         if b"native validated borrowed runtime pointer bridge: ok" not in executed:
             raise AssertionError("validated runtime ABI pointer bridge failed")
+        if b"native Windows variadic register, stack, indirect and sret calls: ok" not in executed:
+            raise AssertionError("variadic call ABI execution failed")
         function = re.search(rb"<sg_native_phi_bool>:\r?\n(.*?)(?=\r?\n[0-9a-f]+ <|\Z)", assembly, re.S)
         if not function:
             raise AssertionError("independent disassembly lacks the bool phi function")
@@ -149,6 +151,26 @@ def main():
         report["narrow_load_negative_control"] = {"function": "sg_native_phi_bool", "text_offset": address,
             "original_bytes": original.hex(), "replacement_bytes": replacement.hex(), "expected_exit_code": 81,
             "object_sha256": sha(dirty_object), "executable_sha256": sha(dirty_probe)}
+        function = re.search(rb"<sg_native_variadic_floats>:\r?\n(.*?)(?=\r?\n[0-9a-f]+ <|\Z)", assembly, re.S)
+        if not function:
+            raise AssertionError("independent disassembly lacks the variadic float forwarder")
+        duplicate = re.search(rb"(?m)^\s*([0-9a-f]+):\s+((?:[0-9a-f]{2}\s+){7})\s*movq\s+[^\r\n]*\(%rbp\), %rdx", function.group(1))
+        if not duplicate:
+            raise AssertionError("variadic float was not duplicated into its integer ABI register")
+        address = int(duplicate[1], 16)
+        original = bytes.fromhex(duplicate[2].decode("ascii"))
+        raw = bytearray(checked.read_bytes())
+        if raw[text_at + address:text_at + address + 7] != original or original[:3] != bytes.fromhex("48 8b 95"):
+            raise AssertionError("variadic duplicate bytes disagree with disassembly")
+        replacement = bytes.fromhex("31 d2") + bytes([0x90]) * 5
+        raw[text_at + address:text_at + address + 7] = replacement
+        missing_object, missing_probe = out / "missing-vararg-register.obj", out / "missing-vararg-register.exe"
+        missing_object.write_bytes(raw)
+        run("link-vararg-register-negative-control", [paths["clang"], ROOT / "selfhost/tests/native_probe.c", missing_object, "-Werror", "-o", missing_probe])
+        run("reject-vararg-register-negative-control", [missing_probe], code=84)
+        report["variadic_register_negative_control"] = {"function": "sg_native_variadic_floats", "text_offset": address,
+            "original_bytes": original.hex(), "replacement_bytes": replacement.hex(), "expected_exit_code": 84,
+            "object_sha256": sha(missing_object), "executable_sha256": sha(missing_probe)}
         for case in ("overflow", "overflow8", "umul-overflow", "uadd-overflow", "mul-overflow"):
             run("reject-" + case, [probe, case], b"integer overflow", 63)
         run("reject-division-zero", [probe, "division-zero"], b"division by zero", 62)
