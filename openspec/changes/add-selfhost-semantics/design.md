@@ -341,3 +341,62 @@ resolved primitive IDs. It does not intern or substitute new types while checkin
 an untrusted HIR record. The test poisons each of the six record words and
 confirms both rejection and an unchanged type-arena count after restoration.
 The ABI-one String bridge does not authorize generic or inherited-handle shapes.
+
+## Future declaration and polling contracts
+
+A `Future` trait declaration's `poll` method must use `&mut self`, including an
+abstract method that has no implementation yet. Applying this check only when
+an impl is present misses invalid shared, owning and static receiver contracts.
+The checker reports the same located 5120 family before a caller can rely on
+the malformed signature. Other Future trait methods retain their own declared
+receiver contract.
+
+Polling wake evidence remains specific to the resolved context parameter and
+the current execution path. Both branches may establish a wake; a wake in an
+optional loop, an uncalled lambda or after constructing an evident pending Poll
+cannot establish an earlier pending result's wake. This is a static protocol
+check, not proof that the native scheduler or Future lifecycle is implemented.
+
+The canonical user-Future await layout remains `is_ready: bool` followed by
+`value: T`. A declaration-only reordered Poll implementation passes the frozen
+Rust type checker, but the same program with an actual await fails the frozen
+compiler's MIR lowering with its explicit Poll-layout diagnostic. The discovery
+reports retain those two phases; the SG checker continues to reject the invalid
+canonical await layout rather than treating declaration-only acceptance as full
+program support. Similarly, the existing rejection of a newly constructed,
+shadowing AsyncContext is retained; a same-spelled local is not the caller's
+resolved context parameter.
+
+### Native getter inputs versus projected outputs
+
+The native Buffer getter has two separate ownership properties. Its scalar
+handle input is neither retained nor consumed by the synchronous C call; this
+permits repeated getter calls inside a callable that already owns the Buffer.
+Its returned pointer bits are still a projected output. Passing a Buffer by
+value through a source projector retains the conservative caller transfer
+policy unless the entire output chain reaches a proved noescape observer.
+The walk-phase input exception therefore does not add the getter to ordinary
+source-summary inference. Existing kind-nine HIR certificate validation and
+callee cleanup suppression are unchanged.
+
+Three additional destination sinks are admitted only by real external C
+binding identity, fixed arity two, signed-i64 arguments/result and position zero:
+Unicode version copy, Unicode provenance copy, and last-error copy. Their
+actual C implementations perform bounded synchronous copies and do not retain
+the destination or free a Buffer. Destination mutation is not a promise of
+read-only memory. Variadic callable flags do not satisfy these contracts.
+
+Actual registered runtime execution currently improves cleanup over four
+frozen-reference LLVM programs: the SG programs release once per scope while
+the frozen programs leak the first Buffer. Independent C counters retain this
+difference explicitly, rather than weakening candidate cleanup assertions.
+The current error-copy wrapper also evaluates getters that clear last-error;
+the regression fixture restores a known nonempty error after those arguments
+and makes no claim to fix the wrapper's error-state ordering.
+
+A separate actual invalid-handle control exposes a pending pointer-status
+boundary: runtime_string.c as_str_ptr can return negative statuses, and the
+current native opcode 26 copies them into a safe view. Valid registered-handle
+integration evidence does not cover that path. A target-only guard proposal
+must reject non-positive pointer bits before the consumer; it is not production
+implementation until separately reviewed and applied by the native owner.

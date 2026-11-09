@@ -605,3 +605,92 @@ runtime SDK, standard-library body/lowering or generic ownership obligations.
 Actual profile-nine discovery still reports nine String-entry ownership
 diagnostics and 245 core-entry diagnostics, preserved separately by phase.
 Full M3, native self-compilation and performance/cutover gates remain open.
+
+## Future declaration and polling regression checkpoint
+
+- [x] Reject shared, owning and absent receivers on Future trait poll declarations before an impl exists, preserving located contract diagnostics.
+- [x] Verify wakes on both branches, and reject optional-loop or uncalled-lambda wake evidence for a later pending Poll; retain the canonical ordered Poll await layout.
+- [x] Run the source-bound 200-case native semantic suite, exact resource scopes, structural type/module/CLI gates and fresh 49-case comparison with all five reviewed differences preserved.
+- [x] Independently compare eighteen polling cases against the current Rust type checker and frozen qualified compiler, preserving the unused-layout and shadow-context phase/contract differences rather than reporting zero mismatches.
+
+The source-bound semantic report `target/selfhost/m3-semantic/evidence.json`
+has SHA-256
+`06ac4d6e93b5f180d5160b6a1133a68ade34fe543aad32b0e3af066b431524ce`.
+It records identical start/end revision
+`ac077024a358e5f4b2fb1a12a643e96353f56b67`, Windows 11 AMD64, 200 literal
+fixtures, 100 semantic/type resource scopes, ten module scopes and empty
+source/tool changes. The preceding 193-case report remains separately preserved
+as `target/selfhost/m3-semantic/evidence-193-3ad0189.json`.
+
+The bound polling report `target/selfhost/m3-semantic/poll-contract-evidence.json`
+has SHA-256
+`763a5816c8a01c32f107b0450af698ac6357c0db2155bb021b7e7c7913987863`.
+Its eighteen cases use the exact newly built CLI artifact. The three malformed
+trait receiver declarations are rejected by both reference paths and the SG
+checker. A reordered unused Poll impl and a same-spelled replacement context
+retain documented typed differences; a real await of the reordered Poll is
+independently rejected by the frozen compiler in both check and LLVM-emission
+commands. No native async lifecycle or complete SDK capability follows from
+these static protocol regressions. Full M3 remains open.
+
+## Native Buffer input observations and real runtime cleanup
+
+- [x] Separate non-retaining native getter inputs from projected source-wrapper outputs: reading an already-owned Buffer handle through the exact C buffer_ptr declaration does not move that Buffer, while an ordinary source projector still transfers ownership outside a proved noescape context.
+- [x] Audit the exact fixed-arity, signed-i64 C prototypes and destination position of unicode_version_copy, unicode_provenance_copy and ffi_last_error_copy; reject source-name shadows, wrong arity and variadic signature facts.
+- [x] Re-run the full typed HIR/MIR/ownership gate including fifty native signature poison/restore resource rounds, and independently execute four actual runtime Buffer programs over one hundred scopes each.
+- [x] Rebuild a module-aware CLI from the same frozen source closure and require the actual std::string import to reach the ownership phase with zero diagnostics.
+- [ ] Reject zero or negative runtime pointer status before constructing a safe borrowed view; the invalid-handle reproduction and a target-only native patch are retained separately, and production native code has not yet adopted that patch.
+
+The final frontend report
+target/selfhost/m3-native-input-borrow/final-checkpoint/evidence.json
+has SHA-256
+7bc81a9059190f81b3b1bf1af95801f6a769eab74d0340d429cde3a588fdbccb.
+It records full start/end revision
+ac077024a358e5f4b2fb1a12a643e96353f56b67, Windows 11 AMD64,
+Python 3.12.14, four successful build/native commands and empty source/tool
+changes. All previous fifty ownership resource rounds, ten HIR roundtrip and
+poison rounds, and thirty raw MIR rounds remain enabled.
+
+The independent initial compiler-build/runtime report
+target/selfhost/m3-buffer-observers/final-checkpoint/evidence.json
+has SHA-256
+b6bbf73562750a4078e9561a03c7577f93370dc99cc96bda9c9eeb8e511f2bf8.
+It records 33 commands, exact immutable compiler snapshots, identical repeated
+COFF emissions and the same full start/end revision. The final harness replay
+target/selfhost/m3-buffer-observers/final-confirmed/evidence.json
+has SHA-256
+62c204d1ac8756717d8d067f586ef487095274dbab828ebefe6b8fc2f8bec33d.
+Its 31 commands explicitly reuse only the prior hash-bound compiler executables
+after checking their complete source/dependency/tool identities; runtime C is
+freshly compiled and every execution is repeated. Source, snapshot, checkout
+and tool change lists are empty. Early seed identity failure and a replaced
+compiler-reuse artifact both fail before executing the supplied unverified
+compiler and preserve failed reports in their named negative-result directories.
+
+Candidate programs use actual runtime.c and runtime_string.c Buffer allocations,
+two-byte reads, bounded Unicode version/provenance copies and a nonempty
+last-error copy. C independently verifies stored bytes and exactly one release,
+with String/Buffer/opaque live counts returning to zero on every scope.
+All four candidate executions return 42. All four frozen reference LLVM programs
+compile and link but return 2 on the first scope with the exact independent
+diagnostic "reference-resource-gap live=1 created=1 freed=0 verified=1".
+These are preserved Buffer cleanup differences: the result is
+passed-with-reference-resource-gaps, with parity_pass: false, never a
+reference-equivalence claim. The last-error fixture restores the error after
+evaluating ptr/len arguments; it does not assert that the current production
+ffi_last_error_copy wrapper preserves an earlier error, because those getters
+clear that state.
+
+The actual std::string import now has zero typed and ownership diagnostics
+(previously nine ownership diagnostics). This is a checking result for its
+five-module graph, not full standard-library native lowering or self-compilation.
+Complete core/generic/closure/async ownership, SDK admission and M3 remain open.
+
+The same qualified CLI development scan of selfhost/src/core.sg records 236
+remaining ownership diagnostics (228 code 6101 and eight code 6112), down from
+245 at the preceding profile-nine snapshot. The unchanged-input discovery is
+preserved as target/selfhost/m3-buffer-observers/actual-core-final.json, SHA-256
+62ff1a1ae93a6e8f7fce3f2ae55d487bb1ac34aa2e9df6e0c2d4ff8e366a8857.
+It is not a passing core/native compilation gate. Remaining cases concentrate
+in collections scalar/reference reads, iterator/handle state and two core
+borrowed String-field method calls; they stay open.

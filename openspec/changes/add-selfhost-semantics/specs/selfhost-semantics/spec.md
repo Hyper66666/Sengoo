@@ -29,6 +29,17 @@ Soundness corrections SHALL have named independent regressions and evidence.
 - **THEN** accepted programs retain their documented observable behavior
 - **AND** rejected programs retain the required diagnostic family and source range
 
+#### Scenario: A Future declaration exposes a poll contract
+- **WHEN** a Future trait declares poll with a shared, owning or absent self receiver
+- **THEN** semantic analysis SHALL reject the declaration with a located Future-contract diagnostic even when no impl exists
+- **AND** a mutable self receiver SHALL retain the declared output and context contract
+
+#### Scenario: Pending polling requires a wake on its execution path
+- **WHEN** a user Future constructs an evident pending Poll
+- **THEN** its current path SHALL have registered a wake on the resolved context parameter before constructing that Poll
+- **AND** optional loop bodies, uncalled lambdas and later wake calls SHALL NOT establish that prior wake
+- **AND** canonical user-Future await SHALL retain the ordered bool-readiness and output-payload layout contract
+
 ### Requirement: Typed SG lowering SHALL make control flow and cleanup explicit
 
 Checked programs SHALL lower to HIR and typed MIR with validated identities,
@@ -97,3 +108,15 @@ frontend state.
 - **WHEN** a generic body relates a declared type to an unresolved associated projection
 - **THEN** the located per-callable equality SHALL survive HIR serialization and SHALL be rechecked after concrete substitution
 - **AND** a mismatched or still-unresolved concrete obligation SHALL be rejected before native emission
+
+#### Scenario: An owned Buffer calls an audited native getter repeatedly
+- **WHEN** a callable already owns a Buffer and reads its scalar handle through the exact fixed-arity C buffer_ptr contract
+- **THEN** the non-retaining getter input SHALL NOT move that Buffer before later getter use or its required cleanup
+- **AND** projecting that output through a source wrapper SHALL retain the conservative caller transfer rule outside a proved noescape context
+- **AND** audited bounded-copy sinks SHALL require the real external fixed-arity signed-i64 prototype and observed destination position; source-name shadows, wrong arity and variadic prototypes SHALL NOT authorize the exception
+- **AND** independent native execution SHALL verify stored bytes and exactly-once cleanup against the actual registered Buffer runtime, preserving diagnosed frozen-reference cleanup failures as differences
+
+#### Scenario: A runtime pointer provider returns an error status
+- **WHEN** an authorized borrowed-view runtime call returns zero or a negative pointer status
+- **THEN** native lowering SHALL fail before passing that value to a safe borrowed-view consumer
+- **AND** a successful valid-handle runtime probe SHALL NOT count as verification of this error path
