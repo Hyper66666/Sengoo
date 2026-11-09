@@ -41,6 +41,7 @@ explicit external-toolchain procedures outside the no-external-tools gate.
 | SG lexer/parser/macro/attribute pipeline and formatter integration | `add-selfhost-syntax` |
 | SG semantic analysis, borrowing/Drop, HIR/MIR and reference comparison | `add-selfhost-semantics` |
 | Canonical iterator producer origins and conditional source obligations | `add-selfhost-iterator-origins` |
+| Selected collection providers, concrete constructors and checked optional-borrow compiler integration | `add-selfhost-collection-intrinsics` |
 | Windows x64 code generator, target ABI and optimization | `add-selfhost-native-backend` |
 | COFF/PE linker, CodeView and PDB | `add-selfhost-linker-debug` |
 | Native SDK manifests, declarations and permitted provider packaging | `add-selfhost-native-sdk` |
