@@ -826,7 +826,7 @@ experiments do not qualify a production typed bridge or reduce this formal
 `4a5d4a855f12f4a11fdd0f7a82fe77938e8fc8e18efaf9ee27f983385e66cf41`,
 records identical full start/end revision
 `a5b45bfe5fe269ab58184648314a30dadc0db5ba`, Windows 11 AMD64 and UTC
-2026-11-10 21:28:20 through 21:29:35. All fourteen commands passed with
+2026-11-09 21:28:20 through 21:29:35. All fourteen commands passed with
 190 unchanged source/snapshot inputs, seven unchanged tools, unchanged Cargo
 configuration presence/content and no producer checkout changes.
 
