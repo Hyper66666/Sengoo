@@ -41,6 +41,43 @@ source mutation/release, valid UTF-8 boundaries and preserved storage on capacit
 failure; source shadows, variadic flags and other argument positions stay
 conservative.
 
+Vector and map-key exhaustion queries have separate exact fixed C
+`i64 -> i64` input-only observation contracts. A done query does not advance
+the iterator, copy an element, construct a borrowed output or transfer/drop
+its backing storage. The contract therefore does not extend to next results,
+iterator creation or iterator release. Actual container/iterator probes use
+descriptor move/drop callbacks to distinguish an observation from a hidden
+element transfer or destruction.
+
+## Physical module source adapter
+
+The native development driver currently lowers a combined expanded module
+buffer. `mir_module_sources.sg` separately maps the resulting function/local/
+instruction/terminator/block-span metadata to the graph's physical file IDs
+and byte lengths. Paths and immutable file identities remain in the module
+graph; this adapter does not change MIR schema one or persist module facts
+through HIR schema four.
+
+The adapter validates the incoming MIR and stages every mapped triple before
+changing any table. Physical graph rows must cover each file once with its
+exact byte length and the loader's two separator newlines. Leading BOM bytes
+retain their original offsets while the joined text contains three spaces.
+Expansion rows must cover their output completely in order, stay within both
+buffers and preserve UTF-8 boundaries. Mode zero preserves byte positions and
+equal lengths; its text is either copied or the exact CR/LF-preserving space
+mask emitted by the attribute pipeline. Mode one anchors generated text to
+its original range. No missing-map identity fallback is permitted. An interval
+crossing physical files is rejected rather than truncated to the first file.
+
+Every transformed source span and the final physical source count is checked
+before table commitment. The already validated typed/control-flow fields stay
+unchanged; final MIR validation remains mandatory. Schema one cannot distinguish
+fresh combined and previously mapped metadata for a single file when expansion
+and physical lengths happen to match; that ambiguous case explicitly rejects
+with 5002 until a versioned provenance marker is available. Supported multi-file
+inputs are unambiguous because their physical source table has more than one
+entry. Complete HIR module identity and multiple-module debugging remain open.
+
 ## Reference difference ledger
 
 Semantic comparison uses the current Rust `Parser` plus a fresh `TypeChecker`

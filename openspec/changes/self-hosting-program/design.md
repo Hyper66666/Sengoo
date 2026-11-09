@@ -38,16 +38,17 @@ explicit external-toolchain procedures outside the no-external-tools gate.
 | Frozen corpus and daily performance reference qualification | `freeze-selfhost-baseline` |
 | Seed identity, stage0 driver, source/span/symbol/node arenas | `add-selfhost-foundations` |
 | Stage0 Windows synchronous Unicode process-launch correction | `fix-windows-process-utf8-launch` |
-| SG lexer/parser/macro/attribute pipeline and formatter integration | Future syntax child |
-| SG semantic analysis, borrowing/Drop, HIR/MIR and reference comparison | Future semantic child |
-| Windows x64 code generator, target ABI and optimization | Future native-backend child |
-| COFF/PE linker, CodeView and PDB | Future native-linker child |
+| SG lexer/parser/macro/attribute pipeline and formatter integration | `add-selfhost-syntax` |
+| SG semantic analysis, borrowing/Drop, HIR/MIR and reference comparison | `add-selfhost-semantics` |
+| Windows x64 code generator, target ABI and optimization | `add-selfhost-native-backend` |
+| COFF/PE linker, CodeView and PDB | `add-selfhost-linker-debug` |
 | Native SDK manifests, declarations and permitted provider packaging | `add-selfhost-native-sdk` |
 | Remaining SG runtime algorithms, package manager, LSP and compatibility ports | Future toolchain-port children |
 
-Future rows are reservations, not approved completed implementations. Each
-future child receives concrete deltas and verification before its work begins;
-the umbrella links to them rather than copying their behavioral requirements.
+Registered children own their concrete deltas and verification; their presence
+does not mark their milestones complete. Remaining future rows are ownership
+reservations and receive concrete deltas before implementation. The umbrella
+links to child requirements rather than duplicating their behavior.
 
 ## Milestones
 

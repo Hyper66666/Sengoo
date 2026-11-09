@@ -1,0 +1,251 @@
+import selfhost_mir_module_sources;
+
+import selfhost_native;
+
+import std::assert;
+
+import std::args;
+
+import std::io;
+
+extern "C" {
+    fn sengoo_string_live_handle_count() -> i64;
+    fn sengoo_buffer_live_handle_count() -> i64;
+    fn sengoo_opaque_live_handle_count() -> i64;
+}
+
+def sh_mms_test_argument(index: i64) -> Result<String, i64> {
+    let length = arg_len(index)?;
+    let buffer = ffi_buffer_new(length)?;
+    let count = arg_copy(index, buffer)?;
+    string_from_utf8(buffer, count);
+}
+
+def sh_mms_test_words(output: &Vec<i64>, words: &Vec<i64>) -> Result<i64, i64> {
+    sh_mms_test_push(output, words.handle)?;
+    sh_mms_test_push(output, words.marker)?;
+    sh_mms_test_push(output, words.len())?;
+    let mut index = 0;
+    while index < words.len() { sh_mms_test_push(output, sengoo_vec_get_or_default_i64(words.handle, index, -1))?; index = index + 1; };
+    sh_i64_ok(0);
+}
+
+def sh_mms_test_state(mir: &ShMir) -> Result<Vec<i64>, i64> {
+    let output = vec_new_i64();
+    sh_mms_test_push(&output, mir.schema)?;
+    sh_mms_test_push(&output, mir.target)?;
+    sh_mms_test_push(&output, mir.runtime_abi)?;
+    sh_mms_test_push(&output, mir.pointer_width)?;
+    sh_mms_test_push(&output, mir.limit)?;
+    sh_mms_test_push(&output, mir.types.limit)?;
+    sh_mms_test_push(&output, mir.symbols.limit)?;
+    sh_mms_test_push(&output, mir.symbols.names.handle)?;
+    sh_mms_test_push(&output, mir.symbols.names.marker)?;
+    sh_mms_test_words(&output, &mir.types.words)?;
+    sh_mms_test_words(&output, &mir.types.arguments)?;
+    sh_mms_test_words(&output, &mir.functions)?;
+    sh_mms_test_words(&output, &mir.locals)?;
+    sh_mms_test_words(&output, &mir.scopes)?;
+    sh_mms_test_words(&output, &mir.blocks)?;
+    sh_mms_test_words(&output, &mir.instructions)?;
+    sh_mms_test_words(&output, &mir.operands)?;
+    sh_mms_test_words(&output, &mir.parameters)?;
+    sh_mms_test_words(&output, &mir.terminators)?;
+    sh_mms_test_words(&output, &mir.edges)?;
+    sh_mms_test_words(&output, &mir.layouts)?;
+    sh_mms_test_words(&output, &mir.fields)?;
+    sh_mms_test_words(&output, &mir.instances)?;
+    sh_mms_test_words(&output, &mir.substitutions)?;
+    sh_mms_test_words(&output, &mir.parents)?;
+    sh_mms_test_words(&output, &mir.drop_glues)?;
+    sh_mms_test_words(&output, &mir.sources)?;
+    sh_mms_test_words(&output, &mir.spans)?;
+    sh_mms_test_push(&output, sh_symbol_count(&mir.symbols))?;
+    let mut index = 0;
+    while index < sh_symbol_count(&mir.symbols) { sh_mms_test_push(&output, mir.symbols.names.get(index).text.handle)?; let name = sh_symbol_text(&mir.symbols, index)?; let bytes = sh_lex_bytes(&name)?; sh_mms_test_push(&output, name.len())?; let mut at = 0; while at < name.len() { sh_mms_test_push(&output, sh_lex_byte(&bytes, at))?; at = at + 1; }; index = index + 1; };
+    Result { is_ok: true, value: output, error: 0 };
+}
+
+def sh_mms_test_equal(before: &Vec<i64>, after: &Vec<i64>) {
+    assert_eq_i64(before.len(), after.len(), "mir_module_sources.sg", 70);
+    let mut index = 0;
+    while index < before.len() { assert_eq_i64(sengoo_vec_get_or_default_i64(before.handle, index, -1), sengoo_vec_get_or_default_i64(after.handle, index, -2), "mir_module_sources.sg", 71); index = index + 1; };
+    ();
+}
+
+def sh_mms_test_line(kind: &str, name: &String, file: i64, start: i64, end: i64) -> Result<i64, i64> {
+    let line = string_from_str(kind)?;
+    line.push_str("|")?;
+    string_copy_result(sengoo_string_push_padded_string_status(line.handle, name.handle, 1, 0))?;
+    line.push_str("|")?;
+    line.push_i64(file)?;
+    line.push_str("|")?;
+    line.push_i64(start)?;
+    line.push_str("|")?;
+    line.push_i64(end)?;
+    line.push_str("\n")?;
+    io_stdout_write(line.as_str())?;
+    sh_i64_ok(0);
+}
+
+def sh_mms_test_count(kind: &str, count: i64) -> Result<i64, i64> {
+    let name = string_from_str(kind)?;
+    let line = string_from_str("count|")?;
+    string_copy_result(sengoo_string_push_padded_string_status(line.handle, name.handle, 1, 0))?;
+    line.push_str("|")?;
+    line.push_i64(count)?;
+    line.push_str("\n")?;
+    io_stdout_write(line.as_str())?;
+    sh_i64_ok(0);
+}
+
+def sh_mms_test_error(graph: &ShModules, front: &ShFrontend, mir: &mut ShMir, expected: i64, label: &str, describe: bool) -> Result<i64, i64> {
+    let before = sh_mms_test_state(mir)?;
+    let failed = sh_module_mir_sources(graph, front, mir);
+    assert_false(failed.is_ok(), "mir_module_sources.sg", 85);
+    assert_eq_i64(failed.error, expected, "mir_module_sources.sg", 86);
+    let after = sh_mms_test_state(mir)?;
+    sh_mms_test_equal(&before, &after);
+    if describe { sh_mms_test_count(label, expected)?; (); };
+    sh_i64_ok(0);
+}
+
+def sh_mms_test_span(mir: &ShMir, function: i64, file: i64, start: i64, end: i64, kind: &str, describe: bool) -> Result<i64, i64> {
+    assert_true(function >= 0 and function < sh_mir_fn_count(mir), "mir_module_sources.sg", 90);
+    assert_eq_i64(file, sh_mir_fn(mir, function, 4), "mir_module_sources.sg", 91);
+    assert_true(start >= sh_mir_fn(mir, function, 5) and end >= start and end <= sh_mir_fn(mir, function, 6), "mir_module_sources.sg", 92);
+    if describe { let name = sh_symbol_text(&mir.symbols, sh_mir_fn(mir, function, 0))?; sh_mms_test_line(kind, &name, file, start, end)?; (); };
+    sh_i64_ok(0);
+}
+
+def sh_mms_test_positions(mir: &ShMir, describe: bool) -> Result<i64, i64> {
+    let mut index = 0;
+    while index < sh_mir_fn_count(mir) { sh_mms_test_span(mir, index, sh_mir_fn(mir, index, 4), sh_mir_fn(mir, index, 5), sh_mir_fn(mir, index, 6), "function", describe)?; index = index + 1; };
+    index = 0;
+    while index < sh_mir_local_count(mir) { sh_mms_test_span(mir, sh_mir_local(mir, index, 0), sh_mir_local(mir, index, 7), sh_mir_local(mir, index, 8), sh_mir_local(mir, index, 9), "local", describe)?; index = index + 1; };
+    index = 0;
+    while index < sh_mir_inst_count(mir) { sh_mms_test_span(mir, sh_mir_inst(mir, index, 0), sh_mir_inst(mir, index, 9), sh_mir_inst(mir, index, 10), sh_mir_inst(mir, index, 11), "instruction", describe)?; index = index + 1; };
+    index = 0;
+    while index < sh_mir_term_count(mir) { sh_mms_test_span(mir, sh_mir_term(mir, index, 0), sh_mir_term(mir, index, 7), sh_mir_term(mir, index, 8), sh_mir_term(mir, index, 9), "terminator", describe)?; index = index + 1; };
+    let seen = vec_new_i64();
+    index = 0;
+    while index < sh_mir_count(&mir.spans, 3) { sh_mms_test_push(&seen, 0)?; index = index + 1; };
+    index = 0;
+    while index < sh_mir_block_count(mir) { let span = sh_mir_block(mir, index, 6); assert_true(span >= 0 and span < seen.len(), "mir_module_sources.sg", 104); assert_eq_i64(sengoo_vec_get_or_default_i64(seen.handle, span, -1), 0, "mir_module_sources.sg", 105); seen.set(span, 1); sh_mms_test_span(mir, sh_mir_block(mir, index, 0), sh_mir_word(&mir.spans, 3, span, 0), sh_mir_word(&mir.spans, 3, span, 1), sh_mir_word(&mir.spans, 3, span, 2), "block-span", describe)?; index = index + 1; };
+    index = 0;
+    while index < seen.len() { assert_eq_i64(sengoo_vec_get_or_default_i64(seen.handle, index, -1), 1, "mir_module_sources.sg", 108); index = index + 1; };
+    if describe { sh_mms_test_count("local", sh_mir_local_count(mir))?; sh_mms_test_count("instruction", sh_mir_inst_count(mir))?; sh_mms_test_count("terminator", sh_mir_term_count(mir))?; sh_mms_test_count("block-span", sh_mir_block_count(mir))?; (); };
+    sh_i64_ok(0);
+}
+
+def sh_mms_test_push(output: &Vec<i64>, value: i64) -> Result<i64, i64> {
+    if not output.push(value) { return sh_i64_error(5001); };
+    sh_i64_ok(0);
+}
+
+def sh_mms_test_copy(output: &Vec<i64>, input: &Vec<i64>) -> Result<i64, i64> {
+    output.clear();
+    let mut index = 0;
+    while index < input.len() { sh_mms_test_push(output, sengoo_vec_get_or_default_i64(input.handle, index, -1))?; index = index + 1; };
+    sh_i64_ok(0);
+}
+
+def sh_mms_test_has(text: &String, needle: &str) -> bool {
+    let bytes = sh_lex_bytes(text);
+    if not bytes.is_ok() { return false; };
+    let mut index = 0;
+    while index < text.len() { if sh_lex_equal(&bytes.value, index, needle) { return true; }; index = index + 1; };
+    false;
+}
+
+def sh_mms_test_scope(source: &String, output: &String, describe: bool) -> Result<i64, i64> {
+    let config = string_new();
+    let mut graph = sh_modules_load(source.as_str(), "tools/stdlib", &config, 32, 1048576);
+    assert_eq_i64(graph.error, 0, "mir_module_sources.sg", 120);
+    assert_eq_i64(sh_module_count(&graph), 3, "mir_module_sources.sg", 121);
+    let mut analyzed = sh_modules_check(&graph, 100000, 100);
+    assert_eq_i64(analyzed.error, 0, "mir_module_sources.sg", 122);
+    assert_true(sengoo_string_eq(graph.text.handle, analyzed.front.expanded.text.handle) == 0, "mir_module_sources.sg", 123);
+    assert_true(sh_mms_test_has(&graph.text, "add_two"), "mir_module_sources.sg", 124);
+    assert_true(sh_mms_test_has(&graph.text, "def removed") and not sh_mms_test_has(&analyzed.front.expanded.text, "def removed"), "mir_module_sources.sg", 125);
+    assert_true(sh_mms_test_has(&graph.text, "cfg(not(feature") and not sh_mms_test_has(&analyzed.front.expanded.text, "cfg(not(feature"), "mir_module_sources.sg", 126);
+    let mut mode1 = 0;
+    let mut row = 0;
+    while row < analyzed.front.expanded.mapping.words.len() / 5 { if sh_mir_word(&analyzed.front.expanded.mapping.words, 5, row, 4) == 1 { mode1 = mode1 + 1; }; row = row + 1; };
+    assert_true(mode1 > 0, "mir_module_sources.sg", 126);
+    if describe { sh_mms_test_count("mode1", mode1)?; sh_mms_test_count("expanded-changed", 1)?; sh_mms_test_count("cfg-removed", 1)?; sh_mms_test_count("cfg-enabled", 1)?; (); };
+    let mut lowered = sh_lower(&analyzed.front.expanded.text, &analyzed.front.parsed.ast, &analyzed.checked, 10000);
+    assert_eq_i64(lowered.error, 0, "mir_module_sources.sg", 128);
+    let before = sh_native_object(&lowered.mir, 1048576, false)?;
+    let length = sh_mir_word(&lowered.mir.sources, 2, 0, 1);
+    lowered.mir.sources.set(1, length + 1);
+    sh_mms_test_error(&graph, &analyzed.front, &mut lowered.mir, 5002, "bad-length", describe)?;
+    lowered.mir.sources.set(1, length);
+    let first_start = sh_mir_fn(&lowered.mir, 0, 5);
+    let first_end = sh_mir_fn(&lowered.mir, 0, 6);
+    lowered.mir.functions.set(5, 0);
+    lowered.mir.functions.set(6, length);
+    sh_mms_test_error(&graph, &analyzed.front, &mut lowered.mir, 5002, "cross-file", describe)?;
+    lowered.mir.functions.set(5, first_start);
+    lowered.mir.functions.set(6, first_end);
+    let expanded_map = vec_new_i64();
+    sh_mms_test_copy(&expanded_map, &analyzed.front.expanded.mapping.words)?;
+    analyzed.front.expanded.mapping.words.clear();
+    sh_mms_test_error(&graph, &analyzed.front, &mut lowered.mir, 5002, "empty-expanded-map", describe)?;
+    sh_mms_test_copy(&analyzed.front.expanded.mapping.words, &expanded_map)?;
+    analyzed.front.expanded.mapping.words.set(0, 1);
+    sh_mms_test_error(&graph, &analyzed.front, &mut lowered.mir, 5002, "map-hole", describe)?;
+    sh_mms_test_copy(&analyzed.front.expanded.mapping.words, &expanded_map)?;
+    analyzed.front.expanded.mapping.words.set(2, 9223372036854775807);
+    sh_mms_test_error(&graph, &analyzed.front, &mut lowered.mir, 5002, "map-max-origin", describe)?;
+    sh_mms_test_copy(&analyzed.front.expanded.mapping.words, &expanded_map)?;
+    let module_map = vec_new_i64();
+    sh_mms_test_copy(&module_map, &graph.mapping)?;
+    graph.mapping.clear();
+    sh_mms_test_error(&graph, &analyzed.front, &mut lowered.mir, 5002, "empty-module-map", describe)?;
+    sh_mms_test_copy(&graph.mapping, &module_map)?;
+    let original_source = analyzed.front.source;
+    analyzed.front.source = original_source + 1;
+    sh_mms_test_error(&graph, &analyzed.front, &mut lowered.mir, 5002, "wrong-front-source", describe)?;
+    analyzed.front.source = original_source;
+    let mut limited = sh_mir_new(2);
+    sh_mir_source(&limited, graph.root, length)?;
+    assert_eq_i64(sh_mir_validate(&limited).error, 0, "mir_module_sources.sg", 141);
+    sh_mms_test_error(&graph, &analyzed.front, &mut limited, 5001, "source-limit", describe)?;
+    let mapped = sh_module_mir_sources(&graph, &analyzed.front, &mut lowered.mir)?;
+    assert_true(mapped > 0, "mir_module_sources.sg", 143);
+    assert_eq_i64(sh_mir_count(&lowered.mir.sources, 2), 3, "mir_module_sources.sg", 144);
+    assert_eq_i64(sh_mir_validate(&lowered.mir).error, 0, "mir_module_sources.sg", 145);
+    sh_mms_test_error(&graph, &analyzed.front, &mut lowered.mir, 5002, "repeated", describe)?;
+    sh_mms_test_positions(&lowered.mir, describe)?;
+    let after = sh_native_object(&lowered.mir, 1048576, false)?;
+    assert_eq_i64(sh_binary_len(&before), sh_binary_len(&after), "mir_module_sources.sg", 148);
+    let mut byte = 0;
+    while byte < sh_binary_len(&before) { assert_eq_i64(sh_binary_get(&before, byte)?, sh_binary_get(&after, byte)?, "mir_module_sources.sg", 149); byte = byte + 1; };
+    let bytes = sh_binary_buffer(&after)?;
+    file_write_str_raw(sengoo_stdlib_str_ptr(output.as_str()), bytes.ptr(), bytes.used_len())?;
+    sh_i64_ok(0);
+}
+
+def sh_mms_test(source: &String, output: &String) -> Result<i64, i64> {
+    let strings = sengoo_string_live_handle_count();
+    let buffers = sengoo_buffer_live_handle_count();
+    let opaque = sengoo_opaque_live_handle_count();
+    let snapshots = sengoo_file_snapshot_live_handle_count();
+    let snapshot_bytes = sengoo_file_snapshot_live_bytes();
+    let mut round = 0;
+    while round < 10 { sh_mms_test_scope(source, output, round == 0)?; assert_eq_i64(sengoo_string_live_handle_count(), strings, "mir_module_sources.sg", 88); assert_eq_i64(sengoo_buffer_live_handle_count(), buffers, "mir_module_sources.sg", 89); assert_eq_i64(sengoo_opaque_live_handle_count(), opaque, "mir_module_sources.sg", 90); assert_eq_i64(sengoo_file_snapshot_live_handle_count(), snapshots, "mir_module_sources.sg", 91); assert_eq_i64(sengoo_file_snapshot_live_bytes(), snapshot_bytes, "mir_module_sources.sg", 92); round = round + 1; };
+    io_stdout_write("module MIR physical spans and first-call resources: ok\n")?;
+    sh_i64_ok(0);
+}
+
+def main() -> i64 {
+    if args_len() == 1 { let probe_result = sh_mms_test_argument(0); if not probe_result.is_ok() { return 64; }; let probe = probe_result.value; if probe.as_str() == "--fail-equality" { assert_eq_i64(0, 1, "mir_module_sources.sg", 170); (); }; if probe.as_str() == "--fail-truth" { assert_true(false, "mir_module_sources.sg", 171); (); }; return 99; };
+    if args_len() != 2 { return 64; };
+    let source = sh_mms_test_argument(0);
+    let output = sh_mms_test_argument(1);
+    if not source.is_ok() or not output.is_ok() { return 64; };
+    let result = sh_mms_test(&source.value, &output.value);
+    if not result.is_ok() { println(result.error); return 1; };
+    0;
+}

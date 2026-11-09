@@ -20,6 +20,12 @@
 - [ ] Record full revision/host/inputs/commands/results, validate this change and all specs strictly.
 - [ ] Close M3 only after every supported semantic/lowering gate is proven; retain native self-build gates separately.
 
+## Physical module source mapping
+
+- [x] Validate complete expansion and physical-file maps and stage original UTF-8 source spans before updating MIR metadata (`target/selfhost/m3-module-mir-expanded-final/evidence.json`).
+- [x] Prove exact function and generated/specialized provenance, all local/instruction/terminator/block spans, and byte-identical native objects with real macro and attribute transformations (same report).
+- [x] Reject malformed maps, cross-file intervals and source-count limits without changing any MIR state; verify first-call and repeated resource restoration with independent execution (same report).
+
 ## Partial MIR foundation evidence
 
 - [x] Implement MIR schema 1 with explicit function/local/scope/block/value/terminator identities, byte spans, type/layout references and SG/C call ABI, targeting Windows x86-64 and runtime ABI 1.
@@ -781,3 +787,66 @@ zero. The remaining reports are all 6101 in collections.sg at 99 distinct
 positions, with repeated CFG passes accounting for duplicates. Iterator done
 observations, borrowed next/copy results and manual handle detachment remain
 separate mechanisms. Native core compilation and complete M3 remain open.
+
+## Exact iterator exhaustion observations
+
+- [x] Preserve ownership through the exact fixed C vector/map-key iterator done input prototypes, retaining source-shadow, wrong-arity/type and variadic rejection and ordinary creation/free transfer behavior.
+- [x] Verify real container/iterator providers with descriptor move/drop callbacks, unchanged positions/live handles and exact cleanup over one hundred scopes.
+
+Frontend report:
+`target/selfhost/m3-iterator-done-inputs/frontend-checkpoint/evidence.json`, SHA-256
+`ae8bc92ef880d317e9020bc78c5644ea779dcfaa68c7798d3371ae85391fc9cf`.
+Provider report:
+`target/selfhost/m3-iterator-done-inputs/provider-checkpoint/evidence.json`, SHA-256
+`7872f3eaab743937fe1bc86947b6a330b04f6e8430ab3d6775ee057fedffbb11`.
+Current source discovery:
+`target/selfhost/m3-iterator-done-inputs/current-discovery/evidence.json`, SHA-256
+`b6d861db736f670dca33ed969d0b1c47c7cb996eb9fca5b35eb2fce2ecebc97b`.
+All three record identical full start/end revision
+`a5b45bfe5fe269ab58184648314a30dadc0db5ba`, Windows 11 AMD64 and unchanged
+input/tool hashes. Four complete frontend build/execution commands retain fifty
+ownership/resource rounds, HIR poison/roundtrip and raw MIR regressions. The
+five-command C gate queries real Vec and HashMap iterators repeatedly, observes
+unchanged indices and exact Drop callbacks, and checks exhausted, backing-freed,
+closed and zero-handle cases. It does not authorize arbitrary wrong-kind handles
+or change next/output lifetime rules.
+
+Actual core diagnostics decrease from 226 to 119; std::string imports remain
+at zero. The source-bound ledger SHA-256 is
+`dc8fbc4ac4c1ff0f2c1cf72d21477ebd39cdbfb2f46bbc0dc7eb156ae345cef7`.
+Repeated CFG paths explain duplicate reports; these counts are not counts of
+independent defects. Borrowed next/copy results, higher-level iterator wrappers
+and seven handle detachment sites remain open. Target-only scalar-copy provider
+experiments do not qualify a production typed bridge or reduce this formal
+119-diagnostic checkpoint.
+
+## Physical module MIR evidence
+
+`target/selfhost/m3-module-mir-expanded-final/evidence.json`, SHA-256
+`4a5d4a855f12f4a11fdd0f7a82fe77938e8fc8e18efaf9ee27f983385e66cf41`,
+records identical full start/end revision
+`a5b45bfe5fe269ab58184648314a30dadc0db5ba`, Windows 11 AMD64 and UTC
+2026-11-10 21:28:20 through 21:29:35. All fourteen commands passed with
+190 unchanged source/snapshot inputs, seven unchanged tools, unchanged Cargo
+configuration presence/content and no producer checkout changes.
+
+The actual three-file program contains a physical BOM and Unicode comment,
+a macro declared in one file and invoked in another, one removed cfg function,
+an enabled cfg attribute mask and a concrete generic instance. The native test
+observes all four transformations, validates two local spans, twenty-one
+instruction spans, four terminator spans and four block spans against their
+owning functions, and emits the exact macro invocation interval. Independent
+Python byte-literal expectations check all four complete function intervals,
+the specialization name and macro origin. Whole-file spans, wrong instance
+names, shifted macro positions and extra output are deliberate oracle controls.
+
+Nine rejected metadata states preserve every MIR vector, scalar, type arena,
+symbol UTF-8 bytes and original storage handle: invalid source length,
+cross-file span, absent/holey maps, maximal origin, wrong frontend source,
+ambiguous replay and source-count overflow. The latter starts with a valid
+empty MIR limited to two entries and a three-file graph. No warmup precedes the
+ten complete resource scopes. Two deliberate assertion failures exit one and
+name the fixture in stderr. Before/after mapping COFF bytes are identical; the
+mapped object and frozen reference both execute 42 with equal output. Full HIR
+module persistence, public tool integration and multiple-debug-module support
+remain open. This adapter alone does not establish M3 or compiler self-build.

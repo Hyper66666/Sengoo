@@ -52,6 +52,13 @@ frontend state.
 - **THEN** the typed representation preserves the required result and exactly-once ownership cleanup
 - **AND** malformed MIR is rejected before native emission
 
+#### Scenario: Combined module MIR is mapped to physical source files
+- **WHEN** the module source adapter receives fresh validated combined MIR and complete validated expansion and physical-file mappings
+- **THEN** function, local, instruction, terminator and block-span metadata SHALL use the original physical source IDs and bounded UTF-8 byte intervals
+- **AND** specialization and generated expansion ranges SHALL retain their original declaration or invocation provenance
+- **AND** malformed or missing mappings, cross-file intervals, source-count overflow and changed snapshots SHALL fail before committing any MIR metadata
+- **AND** source mapping SHALL preserve native object bytes and restore resources from the first and repeated scopes
+
 #### Scenario: A destructor explicitly destroys a contained owner
 - **WHEN** a resolved user destructor directly or transitively calls another destructor, or performs a projected drop, without a verified field-inactivation mask
 - **THEN** its type SHALL carry pending Drop glue kind four and SHALL NOT authorize recursive field destruction
@@ -126,6 +133,12 @@ frontend state.
 - **THEN** ownership checking SHALL preserve that input for repeated use and cleanup
 - **AND** a String slice result SHALL own independent storage rather than gain borrowed raw-output authorization
 - **AND** source-name shadows, wrong arity, variadic signatures and unaudited argument positions SHALL retain conservative transfer behavior
+
+#### Scenario: A live collection iterator is queried for exhaustion
+- **WHEN** the exact fixed C vector or map-key iterator done declaration observes its handle at input zero
+- **THEN** the query SHALL preserve ownership for later valid queries and cleanup
+- **AND** source shadows, incompatible prototypes and iterator creation/free operations SHALL NOT gain that observation contract
+- **AND** the independent provider check SHALL show unchanged iterator position, live resources and element Drop counts after repeated queries
 
 
 #### Scenario: A borrowed receiver or scalar dereference is used repeatedly

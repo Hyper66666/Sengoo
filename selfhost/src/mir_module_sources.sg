@@ -1,0 +1,91 @@
+import selfhost_semantic_modules;
+
+import selfhost_mir_lower;
+
+def sh_mms_mask_equal(expanded: &String, original: &String) -> bool {
+    if expanded.len() != original.len() { return false; };
+    let changed = sh_lex_bytes(expanded);
+    let source = sh_lex_bytes(original);
+    if not changed.is_ok() or not source.is_ok() { return false; };
+    let mut index = 0;
+    while index < original.len() { let byte = sh_lex_byte(&source.value, index); let expected = if byte == 10 or byte == 13 { byte; } else { 32; }; if sh_lex_byte(&changed.value, index) != expected { return false; }; index = index + 1; };
+    true;
+}
+
+def sh_mms_maps_valid(graph: &ShModules, front: &ShFrontend) -> bool {
+    if front.source != graph.root or sh_ast_word(&front.parsed.ast, front.parsed.ast.root, 1) != graph.root or graph.mapping.len() != graph.units.len() * 5 { return false; };
+    let seen = vec_new_i64();
+    let mut row = 0;
+    while row < graph.units.len() { if not seen.push(0) { return false; }; row = row + 1; };
+    row = 0;
+    let mut cursor = 0;
+    while row < graph.units.len() { let low = sh_mir_word(&graph.mapping, 5, row, 0); let high = sh_mir_word(&graph.mapping, 5, row, 1); let source = sh_mir_word(&graph.mapping, 5, row, 2); let length = sh_source_len(&graph.sources, source); if low != cursor or high < low or high > graph.text.len() or source < 0 or source >= seen.len() or sengoo_vec_get_or_default_i64(seen.handle, source, -1) != 0 or not length.is_ok() or high - low != length.value or sh_mir_word(&graph.mapping, 5, row, 3) != 0 or sh_mir_word(&graph.mapping, 5, row, 4) != length.value or graph.text.len() - high < 2 { return false; }; seen.set(source, 1); let joined = graph.text.get(low, high); let suffix = graph.text.get(high, high + 2); let original = sh_span_text(&graph.sources, ShSpan { source: source, start: 0, end: length.value }); if not joined.is_ok() or not suffix.is_ok() or suffix.value.as_str() != "\n\n" or not original.is_ok() { return false; }; let raw = sh_lex_bytes(&original.value); if not raw.is_ok() { return false; }; let bom = length.value >= 3 and sh_lex_byte(&raw.value, 0) == 239 and sh_lex_byte(&raw.value, 1) == 187 and sh_lex_byte(&raw.value, 2) == 191; if bom { let prefix = joined.value.get(0, 3); let tail = joined.value.get(3, length.value); let expected = original.value.get(3, length.value); if not prefix.is_ok() or prefix.value.as_str() != "   " or not tail.is_ok() or not expected.is_ok() or tail.value.as_str() != expected.value.as_str() { return false; }; } else if joined.value.as_str() != original.value.as_str() { return false; }; cursor = high + 2; row = row + 1; };
+    if cursor != graph.text.len() or front.expanded.mapping.words.len() % 5 != 0 { return false; };
+    cursor = 0;
+    row = 0;
+    while row < front.expanded.mapping.words.len() / 5 { let low = sh_mir_word(&front.expanded.mapping.words, 5, row, 0); let high = sh_mir_word(&front.expanded.mapping.words, 5, row, 1); let origin = sh_mir_word(&front.expanded.mapping.words, 5, row, 2); let limit = sh_mir_word(&front.expanded.mapping.words, 5, row, 3); let mode = sh_mir_word(&front.expanded.mapping.words, 5, row, 4); if low != cursor or high <= low or high > front.expanded.text.len() or origin < 0 or limit < origin or limit > graph.text.len() or mode < 0 or mode > 1 or mode == 0 and high - low != limit - origin { return false; }; let expanded = front.expanded.text.get(low, high); let original = graph.text.get(origin, limit); if not expanded.is_ok() or not original.is_ok() or mode == 0 and expanded.value.as_str() != original.value.as_str() and not sh_mms_mask_equal(&expanded.value, &original.value) { return false; }; cursor = high; row = row + 1; };
+    cursor == front.expanded.text.len();
+}
+
+def sh_mms_physical(graph: &ShModules, start: i64, end: i64) -> Result<ShSpan, i64> {
+    if start < 0 or end < start or end > graph.text.len() or graph.mapping.len() % 5 != 0 { return sh_span_error(5002); };
+    let mut row = 0;
+    while row < graph.mapping.len() / 5 { let low = sh_mir_word(&graph.mapping, 5, row, 0); let high = sh_mir_word(&graph.mapping, 5, row, 1); if low >= 0 and high >= low and high <= graph.text.len() and start >= low and end <= high { let physical = sh_span_make(&graph.sources, sh_mir_word(&graph.mapping, 5, row, 2), start - low, end - low); if not physical.is_ok() { return sh_span_error(5002); }; return physical; }; row = row + 1; };
+    sh_span_error(5002);
+}
+
+def sh_mms_span(graph: &ShModules, front: &ShFrontend, file: i64, start: i64, end: i64) -> Result<ShSpan, i64> {
+    if file == -1 { if start == 0 and end == 0 { return Result { is_ok: true, value: ShSpan { source: -1, start: 0, end: 0 }, error: 0 }; }; return sh_span_error(5002); };
+    if file != graph.root or front.source != graph.root or start < 0 or end < start or end > front.expanded.text.len() or front.expanded.mapping.words.len() % 5 != 0 { return sh_span_error(5002); };
+    let mut cursor = start;
+    let mut first = -1;
+    let mut last = -1;
+    let mut row = 0;
+    while row < front.expanded.mapping.words.len() / 5 { let low = sh_mir_word(&front.expanded.mapping.words, 5, row, 0); let high = sh_mir_word(&front.expanded.mapping.words, 5, row, 1); let origin = sh_mir_word(&front.expanded.mapping.words, 5, row, 2); let limit = sh_mir_word(&front.expanded.mapping.words, 5, row, 3); let mode = sh_mir_word(&front.expanded.mapping.words, 5, row, 4); if low < 0 or high <= low or high > front.expanded.text.len() or origin < 0 or limit < origin or limit > graph.text.len() or mode < 0 or mode > 1 or mode == 0 and high - low != limit - origin { return sh_span_error(5002); }; let empty = start == end and (start >= low and start < high or start == front.expanded.text.len() and start == high); if start < high and end > low or empty { let begin = if start > low { start; } else { low; }; let bound = if end < high { end; } else { high; }; if begin != cursor { return sh_span_error(5002); }; let left = if mode == 0 { origin + (begin - low); } else { origin; }; let right = if mode == 0 { limit - (high - bound); } else { limit; }; if first < 0 or left < first { first = left; }; if right > last { last = right; }; cursor = bound; if empty or cursor == end { break; }; }; row = row + 1; };
+    if first < 0 or cursor != end { return sh_span_error(5002); };
+    sh_mms_physical(graph, first, last);
+}
+
+def sh_mms_prepare(graph: &ShModules, front: &ShFrontend, words: &Vec<i64>, width: i64, offset: i64, prepared: &Vec<i64>) -> Result<i64, i64> {
+    let count = sh_mir_count(words, width);
+    if count < 0 or offset < 0 or offset > width - 3 { return sh_i64_error(5002); };
+    let mut row = 0;
+    while row < count { let mapped = sh_mms_span(graph, front, sh_mir_word(words, width, row, offset), sh_mir_word(words, width, row, offset + 1), sh_mir_word(words, width, row, offset + 2))?; if not prepared.push(mapped.source) or not prepared.push(mapped.start) or not prepared.push(mapped.end) { return sh_i64_error(5001); }; row = row + 1; };
+    sh_i64_ok(count);
+}
+
+def sh_mms_commit(words: &Vec<i64>, width: i64, offset: i64, prepared: &Vec<i64>, first: i64) {
+    let mut row = 0;
+    while row < sh_mir_count(words, width) { let mut field = 0; while field < 3 { words.set(row * width + offset + field, sengoo_vec_get_or_default_i64(prepared.handle, (first + row) * 3 + field, -1)); field = field + 1; }; row = row + 1; };
+    ();
+}
+
+def sh_module_mir_sources(graph: &ShModules, front: &ShFrontend, mir: &mut ShMir) -> Result<i64, i64> {
+    if graph.error != 0 or front.error != 0 or graph.units.len() != sh_source_count(&graph.sources) or graph.units.len() == 0 { return sh_i64_error(5002); };
+    if not sh_modules_unchanged(graph) { return sh_i64_error(5206); };
+    if not sh_mir_limit(mir) or graph.units.len() > mir.limit { return sh_i64_error(5001); };
+    if graph.units.len() == 1 and sh_source_len(&graph.sources, graph.root).unwrap_or(-1) == front.expanded.text.len() { return sh_i64_error(5002); };
+    if not sh_mms_maps_valid(graph, front) { return sh_i64_error(5002); };
+    let validation = sh_mir_validate(mir);
+    if validation.error != 0 { return sh_i64_error(validation.error); };
+    if sh_mir_count(&mir.sources, 2) != 1 or sh_mir_word(&mir.sources, 2, 0, 0) != graph.root or sh_mir_word(&mir.sources, 2, 0, 1) != front.expanded.text.len() { return sh_i64_error(5002); };
+    let prepared = vec_new_i64();
+    let functions = sh_mms_prepare(graph, front, &mir.functions, 8, 4, &prepared)?;
+    let locals = sh_mms_prepare(graph, front, &mir.locals, 10, 7, &prepared)?;
+    let instructions = sh_mms_prepare(graph, front, &mir.instructions, 12, 9, &prepared)?;
+    let terminators = sh_mms_prepare(graph, front, &mir.terminators, 10, 7, &prepared)?;
+    let spans = sh_mms_prepare(graph, front, &mir.spans, 3, 0, &prepared)?;
+    let sources = vec_new_i64();
+    let mut module = 0;
+    while module < graph.units.len() { let length = sh_source_len(&graph.sources, module)?; let physical = graph.units.get(module).snapshot.len(); if graph.units.get(module).source != module or not physical.is_ok() or physical.value != length { return sh_i64_error(5002); }; if not sources.push(module) or not sources.push(length) { return sh_i64_error(5001); }; module = module + 1; };
+    if not sh_modules_unchanged(graph) { return sh_i64_error(5206); };
+    sh_mms_commit(&mir.functions, 8, 4, &prepared, 0);
+    sh_mms_commit(&mir.locals, 10, 7, &prepared, functions);
+    sh_mms_commit(&mir.instructions, 12, 9, &prepared, functions + locals);
+    sh_mms_commit(&mir.terminators, 10, 7, &prepared, functions + locals + instructions);
+    sh_mms_commit(&mir.spans, 3, 0, &prepared, functions + locals + instructions + terminators);
+    mir.sources = sources;
+    let validated = sh_mir_validate(mir);
+    if validated.error != 0 { return sh_i64_error(validated.error); };
+    sh_i64_ok(functions + locals + instructions + terminators + spans);
+}
