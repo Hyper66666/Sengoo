@@ -101,14 +101,26 @@ def sh_hir_validate_calls(hir: &ShHir) -> i64 {
     0;
 }
 
+def sh_hir_detach_valid(hir: &ShHir, index: i64) -> bool {
+    let node = sh_ownership_action(&hir.ownership, index, 0);
+    let binding = sh_ownership_action(&hir.ownership, index, 1);
+    let path = sh_ownership_action_path(&hir.ownership, index);
+    if binding < 0 or path < 0 or sh_ownership_action(&hir.ownership, index, 4) != 0 or sh_ownership_action(&hir.ownership, index, 3) != sh_node_scope(&hir.checked, node) { return false; };
+    let parent = sh_ownership_path_word(&hir.ownership, path, 1);
+    if parent < 0 or sh_ownership_path_word(&hir.ownership, parent, 1) != -1 or sh_ownership_path_word(&hir.ownership, parent, 0) != binding { return false; };
+    let previous = sh_b_detach_previous(&hir.ownership, binding, index);
+    if previous < 0 or sh_ownership_action_path(&hir.ownership, previous) != parent or sh_ownership_action(&hir.ownership, previous, 4) != 0 { return false; };
+    sh_b_detach_shape(&hir.ownership, &hir.source, &hir.checked, &hir.ast, node, path, sh_ownership_action(&hir.ownership, previous, 0));
+}
+
 def sh_hir_validate_ownership_links(hir: &ShHir) -> i64 {
     let mut index = 0;
-    while index < sh_ownership_action_count(&hir.ownership) { let node = sh_ownership_action(&hir.ownership, index, 0); let binding = sh_ownership_action(&hir.ownership, index, 1); let kind = sh_ownership_action(&hir.ownership, index, 2); let scope = sh_ownership_action(&hir.ownership, index, 3); if kind == 7 and sh_ast_word(&hir.ast, node, 0) != 56 { return 5506; }; if kind == 8 or kind == 9 { if sh_binding_word(&hir.checked, binding, 2) != 1 or sh_binding_word(&hir.checked, binding, 4) != node or sh_binding_word(&hir.checked, binding, 1) != scope or sh_ownership_action(&hir.ownership, index, 4) != 0 or sh_ownership_action_path(&hir.ownership, index) != -1 { return 5506; }; let mut action = 0; while action < sh_ownership_action_count(&hir.ownership) { let other_kind = sh_ownership_action(&hir.ownership, action, 2); if sh_ownership_action(&hir.ownership, action, 1) == binding and (kind == 8 and other_kind == 2 or other_kind == 3 or other_kind == 6 or other_kind == 7) { return 5506; }; action = action + 1; }; }; let node_owner = sh_hir_node_owner(hir, node); let owner = if binding >= 0 { sh_binding_word(&hir.checked, binding, 6); } else { sh_hir_node_owner(hir, -binding - 1); }; if owner < 0 or node_owner != owner { return 5506; }; let scope_owner = sh_scope_word(&hir.checked, scope, 1); if scope_owner != owner { return 5506; }; if binding >= 0 { let declared_scope = sh_binding_word(&hir.checked, binding, 1); if not sh_hir_scope_contains(hir, declared_scope, sh_node_scope(&hir.checked, node)) and sh_binding_word(&hir.checked, binding, 4) != node and sh_binding_word(&hir.checked, owner, 4) != node { if sh_ast_word(&hir.ast, node, 0) != 40 or scope != declared_scope or not sh_hir_syntax_contains(&hir.ast, node, sh_binding_word(&hir.checked, binding, 4), 0) { return 5506; }; }; } else { let producer = -binding - 1; if kind == 1 or kind == 2 { if node != producer { return 5506; }; }; if kind == 1 and not sh_hir_scope_contains(hir, scope, sh_node_scope(&hir.checked, producer)) { return 5506; }; if kind == 3 or kind == 6 or kind == 7 { let mut initialized = false; let mut action = 0; while action < sh_ownership_action_count(&hir.ownership) { if sh_ownership_action(&hir.ownership, action, 1) == binding and sh_ownership_action(&hir.ownership, action, 2) == 1 { initialized = true; }; action = action + 1; }; if not initialized { return 5506; }; }; }; index = index + 1; };
+    while index < sh_ownership_action_count(&hir.ownership) { let node = sh_ownership_action(&hir.ownership, index, 0); let binding = sh_ownership_action(&hir.ownership, index, 1); let kind = sh_ownership_action(&hir.ownership, index, 2); let scope = sh_ownership_action(&hir.ownership, index, 3); if kind == 10 and not sh_hir_detach_valid(hir, index) { return 5506; }; if kind == 7 and sh_ast_word(&hir.ast, node, 0) != 56 { return 5506; }; if kind == 8 or kind == 9 { if sh_binding_word(&hir.checked, binding, 2) != 1 or sh_binding_word(&hir.checked, binding, 4) != node or sh_binding_word(&hir.checked, binding, 1) != scope or sh_ownership_action(&hir.ownership, index, 4) != 0 or sh_ownership_action_path(&hir.ownership, index) != -1 { return 5506; }; let mut action = 0; while action < sh_ownership_action_count(&hir.ownership) { let other_kind = sh_ownership_action(&hir.ownership, action, 2); if sh_ownership_action(&hir.ownership, action, 1) == binding and (kind == 8 and other_kind == 2 or other_kind == 3 or other_kind == 6 or other_kind == 7) { return 5506; }; action = action + 1; }; }; let node_owner = sh_hir_node_owner(hir, node); let owner = if binding >= 0 { sh_binding_word(&hir.checked, binding, 6); } else { sh_hir_node_owner(hir, -binding - 1); }; if owner < 0 or node_owner != owner { return 5506; }; let scope_owner = sh_scope_word(&hir.checked, scope, 1); if scope_owner != owner { return 5506; }; if binding >= 0 { let declared_scope = sh_binding_word(&hir.checked, binding, 1); if not sh_hir_scope_contains(hir, declared_scope, sh_node_scope(&hir.checked, node)) and sh_binding_word(&hir.checked, binding, 4) != node and sh_binding_word(&hir.checked, owner, 4) != node { if sh_ast_word(&hir.ast, node, 0) != 40 or scope != declared_scope or not sh_hir_syntax_contains(&hir.ast, node, sh_binding_word(&hir.checked, binding, 4), 0) { return 5506; }; }; } else { let producer = -binding - 1; if kind == 1 or kind == 2 { if node != producer { return 5506; }; }; if kind == 1 and not sh_hir_scope_contains(hir, scope, sh_node_scope(&hir.checked, producer)) { return 5506; }; if kind == 3 or kind == 6 or kind == 7 { let mut initialized = false; let mut action = 0; while action < sh_ownership_action_count(&hir.ownership) { if sh_ownership_action(&hir.ownership, action, 1) == binding and sh_ownership_action(&hir.ownership, action, 2) == 1 { initialized = true; }; action = action + 1; }; if not initialized { return 5506; }; }; }; index = index + 1; };
     0;
 }
 
 def sh_hir_validate(hir: &ShHir) -> i64 {
-    if hir.schema != 4 or hir.target != 1 or hir.runtime_abi != 1 or hir.pointer_width != 64 { return 5502; };
+    if hir.schema != 5 or hir.target != 1 or hir.runtime_abi != 1 or hir.pointer_width != 64 { return 5502; };
     if hir.limit < 0 or hir.limit > 100000 or hir.source.len() > hir.limit * 128 { return 5501; };
     if hir.error != 0 or hir.checked.error != 0 or hir.ownership.error != 0 { return 5502; };
     let count = sh_ast_count(&hir.ast);
@@ -140,7 +152,7 @@ def sh_hir_validate(hir: &ShHir) -> i64 {
     index = 0;
     while index < hir.ownership.paths.len() / 4 { let root = sh_ownership_path_word(&hir.ownership, index, 0); let parent = sh_ownership_path_word(&hir.ownership, index, 1); let field = sh_ownership_path_word(&hir.ownership, index, 2); let ty = sh_ownership_path_word(&hir.ownership, index, 3); if (root >= 0 and (not sh_hir_binding_valid(hir, root) or sh_binding_word(&hir.checked, root, 2) > 1)) or (root < 0 and (root < -count or not sh_hir_node_valid(hir, -root - 1))) or parent < -1 or parent >= index or not sh_hir_type_valid(hir, ty) { return 5506; }; if parent < 0 { if field != -1 { return 5506; }; } else { if sh_ownership_path_word(&hir.ownership, parent, 0) != root { return 5506; }; let parent_type = sh_s_resolve(&hir.checked, sh_ownership_path_word(&hir.ownership, parent, 3)); if field == -2 { if sh_s_kind(&hir.checked, parent_type) != 6 or sh_s_resolve(&hir.checked, sh_s_argument(&hir.checked, parent_type, 0)) != sh_s_resolve(&hir.checked, ty) { return 5506; }; } else { if not sh_hir_binding_valid(hir, field) or sh_binding_word(&hir.checked, field, 2) != 6 { return 5506; }; }; }; index = index + 1; };
     index = 0;
-    while index < sh_ownership_action_count(&hir.ownership) { let node = sh_ownership_action(&hir.ownership, index, 0); let binding = sh_ownership_action(&hir.ownership, index, 1); let kind = sh_ownership_action(&hir.ownership, index, 2); let scope = sh_ownership_action(&hir.ownership, index, 3); let conditional = sh_ownership_action(&hir.ownership, index, 4); let path = sh_ownership_action_path(&hir.ownership, index); if not sh_hir_node_valid(hir, node) or kind < 1 or kind > 9 or not sh_hir_scope_valid(hir, scope) or conditional < 0 or conditional > 1 or path < -1 or path >= hir.ownership.paths.len() / 4 or (binding >= 0 and (not sh_hir_binding_valid(hir, binding) or sh_binding_word(&hir.checked, binding, 2) > 1)) or (binding < 0 and (binding < -count or not sh_hir_node_valid(hir, -binding - 1))) or (path >= 0 and sh_ownership_path_word(&hir.ownership, path, 0) != binding) { return 5506; }; index = index + 1; };
+    while index < sh_ownership_action_count(&hir.ownership) { let node = sh_ownership_action(&hir.ownership, index, 0); let binding = sh_ownership_action(&hir.ownership, index, 1); let kind = sh_ownership_action(&hir.ownership, index, 2); let scope = sh_ownership_action(&hir.ownership, index, 3); let conditional = sh_ownership_action(&hir.ownership, index, 4); let path = sh_ownership_action_path(&hir.ownership, index); if not sh_hir_node_valid(hir, node) or kind < 1 or kind > 10 or not sh_hir_scope_valid(hir, scope) or conditional < 0 or conditional > 1 or path < -1 or path >= hir.ownership.paths.len() / 4 or (binding >= 0 and (not sh_hir_binding_valid(hir, binding) or sh_binding_word(&hir.checked, binding, 2) > 1)) or (binding < 0 and (binding < -count or not sh_hir_node_valid(hir, -binding - 1))) or (path >= 0 and sh_ownership_path_word(&hir.ownership, path, 0) != binding) { return 5506; }; index = index + 1; };
     if hir.checked.deferred_types.len() % 4 != 0 or hir.checked.deferred_types.len() > hir.limit * 4 { return 5503; };
     index = 0;
     while index < hir.checked.deferred_types.len() / 4 { let first = index * 4; let owner = hir.checked.deferred_types.get(first).unwrap_or(-1); let expected = hir.checked.deferred_types.get(first + 1).unwrap_or(-1); let actual = hir.checked.deferred_types.get(first + 2).unwrap_or(-1); let origin = hir.checked.deferred_types.get(first + 3).unwrap_or(-1); let owner_kind = sh_binding_word(&hir.checked, owner, 2); if not sh_hir_binding_valid(hir, owner) or (owner_kind != 2 and owner_kind != 15) or not sh_hir_node_valid(hir, sh_binding_word(&hir.checked, owner, 4)) or not sh_hir_node_valid(hir, origin) or sh_hir_node_owner(hir, origin) != owner { return 5504; }; if not sh_hir_type_valid(hir, expected) or not sh_hir_type_valid(hir, actual) { return 5503; }; if not (sh_s_pending_projection(&hir.checked, expected, 0) or sh_s_pending_projection(&hir.checked, actual, 0)) or not sh_s_defer_shape(&hir.checked, expected, actual, 0) { return 5503; }; index = index + 1; };
@@ -223,7 +235,7 @@ def sh_hir_empty_ownership(limit: i64) -> ShOwnership {
 }
 
 def sh_hir_empty(limit: i64) -> ShHir {
-    ShHir { schema: 4, target: 1, runtime_abi: 1, pointer_width: 64, limit: limit, source: string_new(), ast: ShAst { words: vec_new_i64(), edges: vec_new_i64(), root: -1 }, checked: sh_hir_empty_checked(limit), ownership: sh_hir_empty_ownership(limit), error: 0, start: 0, end: 0 };
+    ShHir { schema: 5, target: 1, runtime_abi: 1, pointer_width: 64, limit: limit, source: string_new(), ast: ShAst { words: vec_new_i64(), edges: vec_new_i64(), root: -1 }, checked: sh_hir_empty_checked(limit), ownership: sh_hir_empty_ownership(limit), error: 0, start: 0, end: 0 };
 }
 
 def sh_hir_lift(text: &String, ast: &ShAst, checked: &ShChecked, limit: i64) -> ShHir {
@@ -236,7 +248,7 @@ def sh_hir_lift(text: &String, ast: &ShAst, checked: &ShChecked, limit: i64) -> 
     let snapshot = sh_hir_snapshot_checked(checked, limit, &mut error);
     let ast_words = sh_hir_words(&ast.words, limit * 8, &mut error);
     let ast_edges = sh_hir_words(&ast.edges, limit * 8, &mut error);
-    let mut hir = ShHir { schema: 4, target: 1, runtime_abi: 1, pointer_width: 64, limit: limit, source: source.value, ast: ShAst { words: ast_words, edges: ast_edges, root: ast.root }, checked: snapshot, ownership: ownership, error: error, start: 0, end: 0 };
+    let mut hir = ShHir { schema: 5, target: 1, runtime_abi: 1, pointer_width: 64, limit: limit, source: source.value, ast: ShAst { words: ast_words, edges: ast_edges, root: ast.root }, checked: snapshot, ownership: ownership, error: error, start: 0, end: 0 };
     if checked.error != 0 { hir.error = checked.error; hir.start = checked.start; hir.end = checked.end; } else { if hir.ownership.error != 0 { hir.error = hir.ownership.error; hir.start = hir.ownership.start; hir.end = hir.ownership.end; } else { if hir.error == 0 { hir.error = sh_hir_validate(&hir); }; }; };
     hir;
 }
@@ -246,7 +258,7 @@ def sh_hir_encode(hir: &ShHir, maximum: i64) -> ShHirImage {
     if maximum < 0 or maximum > 4000000 { output.error = 5501; };
     if output.error != 0 { return output; };
     sh_hir_put(&mut output, 1397180489, maximum);
-    sh_hir_put(&mut output, 4, maximum);
+    sh_hir_put(&mut output, 5, maximum);
     sh_hir_put(&mut output, 1, maximum);
     sh_hir_put(&mut output, 1, maximum);
     sh_hir_put(&mut output, 64, maximum);
@@ -315,7 +327,7 @@ def sh_hir_decode(words: &Vec<i64>, maximum: i64) -> ShHir {
     let pointer = sh_hir_take(&mut reader);
     let limit = sh_hir_take(&mut reader);
     let root = sh_hir_take(&mut reader);
-    if magic != 1397180489 or schema != 4 or target != 1 or abi != 1 or pointer != 64 or limit < 0 or limit > 100000 or maximum < 0 or maximum > 4000000 { reader.error = 5502; };
+    if magic != 1397180489 or schema != 5 or target != 1 or abi != 1 or pointer != 64 or limit < 0 or limit > 100000 or maximum < 0 or maximum > 4000000 { reader.error = 5502; };
     if reader.error != 0 { let mut failed = sh_hir_empty(0); failed.error = reader.error; return failed; };
     let source = sh_hir_take_text(&mut reader, limit * 128);
     let ast_words = sh_hir_take_vector(&mut reader, limit * 8);

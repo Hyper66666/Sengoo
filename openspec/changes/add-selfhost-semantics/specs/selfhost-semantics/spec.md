@@ -73,7 +73,7 @@ frontend state.
 
 #### Scenario: Saved typed facts contain deferred associated type equalities
 - **WHEN** an unresolved associated projection is deferred within a generic callable
-- **THEN** HIR schema four SHALL preserve the callable, expected type, actual type and source node as owned, validated facts across serialization
+- **THEN** HIR schema five SHALL preserve the callable, expected type, actual type and source node as owned, validated facts across serialization
 - **AND** invalid owners, types, origins, table lengths, incompatible outer shapes and unsupported bridge versions SHALL be rejected without repeating semantic analysis
 - **AND** every concrete MIR callable instance SHALL substitute and normalize both sides and require exact resolved equality before lowering its body
 - **AND** unresolved or unequal concrete obligations SHALL fail with a located generic lowering diagnostic instead of treating a projection as a wildcard
@@ -100,7 +100,7 @@ frontend state.
 - **WHEN** a checked intrinsic call exposes a borrowed view through a runtime function
 - **THEN** its facts SHALL distinguish the language callable signature, real external runtime declaration and exact ABI signature, receiver type/layout and source-owner provenance
 - **AND** missing, incompatible or corrupted authorization SHALL NOT be replaced by source-name dispatch or an arbitrary integer-to-safe-reference cast
-- **AND** HIR schema four SHALL encode the six-word authorization table with unique source-call records, bounded lengths and pure validation of each language/runtime signature and receiver layout
+- **AND** HIR schema five SHALL encode the six-word authorization table with unique source-call records, bounded lengths and pure validation of each language/runtime signature and receiver layout
 - **AND** MIR opcode 26 SHALL accept only a shared String receiver, its field-zero signed-i64 handle load, the exact declared external C call returning pointer bits and a shared str result; flags SHALL be zero and auxiliary words SHALL identify kind one and that runtime function
 - **AND** the pointer bridge SHALL retain the receiver SSA operand as its lifetime origin, reject unrelated receivers and forged call results, and SHALL NOT authorize a general integer-to-reference cast
 

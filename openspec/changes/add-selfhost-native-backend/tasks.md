@@ -423,3 +423,26 @@ broken report bindings and failed/cyclic qualifications. Loading the resulting
 module report verifies the three-level chain again. This is consumption of a
 pinned historical implementation, not a rebuild of the current linker or a
 complete M5, SDK, child-process trace or compiler fixed-point qualification.
+
+HIR5 disarm integration replay:
+`target/selfhost/m4-hir5-disarm-source-integrated/evidence.json`, SHA-256
+`252e59dff12ce4eb6fcdeeeaa6aac9bdf4272990a3ae167f68bdc81c9b200129`,
+contains 346 passing commands with unchanged sources/tools/checkout. The owned
+HIR schema-five bridge and canonical handle-disarm implementation compile the
+same 49 native programs; 46 reference-equal results and the three explicitly
+unequal reference gaps are retained alongside five output-preserving failures.
+
+The corresponding complete module replay is
+`target/selfhost/m4-hir5-modules-sg-link-qualified/evidence.json`, SHA-256
+`d176f8be99a0cb36f7798812e81328f740cebbe8a809ac21230743ed5c29521d`.
+It records 83 passing commands, 819 unchanged source/snapshot/report inputs,
+nineteen unchanged tools and unchanged external/Cargo configuration guards.
+Five module graphs execute through the SG emitter/linker in each of two fresh
+directories with empty PATH; ten Windows exits 42 and equal object/PE/runtime
+bytes are required. Independent reference comparisons, four located rejections
+and first-call/repeated resource checks remain enabled. Both reports record
+full revision `3eeefa14f2ae6112053c404b753a4d2b468b3f92` on Windows 11 AMD64;
+the module report has the same end revision. The historical linker source
+qualification remains recursively bound through four report levels to its
+original 174 source hashes. Current-linker rebuilding and M3-M8 completion
+remain outside these integration replays.
