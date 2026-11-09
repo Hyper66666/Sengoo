@@ -42,5 +42,10 @@ python selfhost/sdk/update_native_inventory.py --output target/updated-native-ma
 
 Review the result before replacing the checked-in manifest and its caller pin.
 Changed physical prototypes fail this operation and require an ABI review.
+The source fingerprints cover exact checkout bytes, including line endings.
+A checkout with different source bytes must fail admission until those bytes
+have been explicitly reviewed and the development inventory regenerated. Git
+preserves the manifest itself byte for byte; the inventory is not a claim of
+cross-host source rebuilding or a clean-machine SDK qualification.
 Final SDK components, complete runtime migration, native async lifecycle and
 ordinary SG self-building remain separate open requirements.

@@ -11,6 +11,9 @@ sgpm-index.toml text eol=lf
 bench/results/**/*.json -text
 bench/frontend-memory-baseline.json text eol=lf
 
+# Native SDK manifest admission hashes the exact serialized bytes.
+selfhost/sdk/native_x64_abi1/manifest.json -text
+
 # Preserve the pinned upstream amalgamation and its checksums byte-for-byte.
 packages/sgsqlite/native/vendor/sqlite-amalgamation-3540100/** -text -whitespace
 
