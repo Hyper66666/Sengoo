@@ -215,6 +215,14 @@ count. It does not invoke a C memory routine, scale counts by pointee size,
 guess runtime bounds, or transfer an owning value. The binary helper rewinds
 all emitted bytes if its capacity is exhausted.
 
+Decoded MIR string symbols are emitted as explicit-length UTF-8 bytes followed
+by one NUL byte. Interior NULs are preserved, and empty literals still receive
+their terminator. Interned symbol identity deduplicates storage deterministically.
+Private `.sg.literal.N` symbols cannot collide with source identifiers, and
+RIP-relative references target readonly `.rdata`. The object writer accounts
+for total code/data capacity; literal emission does not authorize resource
+allocation or resolve pending owned String glue.
+
 Primary references:
 
 - Intel instruction reference: https://www.intel.com/content/www/us/en/content-details/671110/intel-64-and-ia-32-architectures-software-developer-s-manual-combined-volumes-2a-2b-2c-and-2d-instruction-set-reference-a-z.html

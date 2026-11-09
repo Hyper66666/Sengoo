@@ -59,6 +59,8 @@ extern int64_t sg_native_cleanup(bool);
 extern int64_t sg_native_nested_cleanup(void), sg_native_array_cleanup(void);
 struct DropChoice { int64_t tag,value; };
 extern int64_t sg_native_enum_cleanup(struct DropChoice);
+extern const uint8_t *sg_native_string_utf8(void), *sg_native_string_same(void);
+extern const uint8_t *sg_native_string_empty(void), *sg_native_string_nul(void);
 typedef void (*move_fn)(void *,const void *,uint64_t);
 extern void sg_native_memmove_u8(void *,const void *,uint64_t);
 extern void sg_native_memmove_u64(void *,const void *,uint64_t);
@@ -124,6 +126,20 @@ static int test_memory_ranges(void) {
     }
     *sg_native_index_array(array,2)=42;
     if (array[2]!=42) return 9;
+    return 0;
+}
+
+static int test_string_data(void) {
+    const uint8_t expected[]={0xE4,0xB8,0x96,0xE7,0x95,0x8C,0x20,0x26,
+        0x0A,0x09,0x22,0x5C,0x0D,0xF0,0x9F,0x98,0x80,0};
+    const uint8_t embedded[]={'A',0,'B',0};
+    const uint8_t *value=sg_native_string_utf8();
+    if (memcmp(value,expected,sizeof(expected)) || value!=sg_native_string_same() ||
+        sg_native_string_empty()[0]!=0 ||
+        memcmp(sg_native_string_nul(),embedded,sizeof(embedded))) return 1;
+    MEMORY_BASIC_INFORMATION information;
+    if (VirtualQuery(value,&information,sizeof(information))!=sizeof(information) ||
+        (information.Protect & (PAGE_READWRITE|PAGE_WRITECOPY|PAGE_EXECUTE_READWRITE|PAGE_EXECUTE_WRITECOPY))) return 2;
     return 0;
 }
 static int drop_count;
@@ -251,6 +267,7 @@ int main(int argc,char **argv) {
     if (virtual_unwind(sg_native_add) || virtual_unwind(sg_native_swap)) return 68;
     if (test_casts()) return 74;
     if (test_memory_ranges()) return 79;
+    if (test_string_data()) return 80;
     if (sg_native_cleanup(false)!=42 || drop_count!=0 ||
         sg_native_cleanup(true)!=42 || drop_count!=1 ||
         sg_native_cleanup(true)!=42 || drop_count!=2) return 76;
@@ -285,5 +302,6 @@ int main(int argc,char **argv) {
     puts("native nested and array reverse cleanup with cleared flags: ok");
     puts("native active enum payload cleanup: ok");
     puts("native overlapping byte memmove and typed index strides: ok");
+    puts("native readonly UTF-8 string data, NUL and literal relocations: ok");
     return 0;
 }

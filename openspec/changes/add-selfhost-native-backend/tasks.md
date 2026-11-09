@@ -18,6 +18,7 @@
 - [x] Execute initial owned-local initialization, conditional user Drop, cleared flags, nested/array reverse cleanup and active-only enum payload cleanup; reject pending resource glue and forged nested Drop calls without emitting an object (`target/selfhost/m4-cleanup-safe/evidence.json`). Runtime resource glue, conditional partial-field cleanup and full ownership support remain open.
 - [x] Run the qualified SG native emitter with the separately qualified SG linker and real SDK import archive under an empty PATH; execute 32 programs in two clean directories and compare object/PE bytes exactly (`target/selfhost/m5-native-source-link-qualified/evidence.json`). Compiler self-rebuild, full runtime and M4/M5 closure remain open.
 - [x] Emit typed array/raw-pointer index strides and unsafe opcode-22 byte memmove; independently execute 76,875 overlap cases across u8/u64/aggregate pointees, unaligned/separate ranges, zero-count null pointers, protected-page boundaries and 1/3/8/16-byte strides (`target/selfhost/m4-memory-ranges/evidence.json`). Slices, full runtime extents and supported-corpus closure remain open.
+- [x] Emit decoded string literals into readonly `.rdata` with private symbols and checked RIP-relative relocations; independently verify UTF-8, escapes, empty/interior-NUL strings, repeated storage identity and Windows page permissions (`target/selfhost/m4-string-data-checked/evidence.json`). Owned String/runtime SDK behavior remains open.
 
 ## Supported target behavior
 
@@ -226,3 +227,17 @@ boundaries. Typed array/reference and raw-pointer indices match independent
 C addresses with 1/3/8/16 strides, including valid negative raw offsets.
 The unsafe producer remains responsible for complete runtime byte extents;
 slice metadata and complete M4 support remain open.
+
+Readonly string evidence: `target/selfhost/m4-string-data-checked/evidence.json`,
+SHA-256 `ab975fe008d845113ef43bb86003c9fe666d524f2d12eee113f6d3d111ddc5c6`,
+revision `66043a401c96350bfdd5fed2a4b1326477a52f82`, Windows 11 AMD64.
+All 29 commands passed with unchanged inputs/tools, including exact resource
+scopes, repeat-identical objects and every preceding native regression.
+The C caller observes the complete UTF-8/escape/non-BMP byte sequence, terminal
+NUL, empty literal, interior NUL plus remaining bytes, and identical references
+to one interned literal. VirtualQuery verifies the loaded literal storage is
+not writable. Independent LLVM inspection accepts all data relocations and
+unwind metadata after insertion of the additional section. The earlier trial
+used an unsupported seed integer-to-char cast in its NUL fixture; the checked
+fixture constructs the explicit NUL character instead. Literal bytes do not
+implement owned String allocation, runtime glue or complete string semantics.

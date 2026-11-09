@@ -38,7 +38,7 @@ def main():
               "revision": subprocess.check_output(["git", "rev-parse", "HEAD"], cwd=ROOT, text=True).strip(),
               "host": platform.platform(), "sources": {str(p.relative_to(ROOT)): sha(p) for p in inputs if p.is_file()},
               "tools": {}, "steps": [], "m4_complete": False,
-              "limits": ["validated scalar/aggregate MIR with resolved root/structural Drop; pending runtime glue, field cleanup across SG calls, async and string data remain unsupported",
+              "limits": ["validated scalar/aggregate MIR with resolved root/structural Drop and readonly string literals; pending runtime glue, field cleanup across SG calls and async remain unsupported",
                          "stack-slot allocation; frames over 4096 bytes call __chkstk through a checked REL32 placeholder",
                          "fixed-stack unwind records; exception cleanup handlers and CodeView remain open",
                          "defined scalar division/remainder and tested ABI shapes only; shift fixtures use defined in-width counts",
@@ -118,6 +118,8 @@ def main():
             raise AssertionError("enum cleanup touched an inactive payload or repeated a drop")
         if b"native overlapping byte memmove and typed index strides: ok" not in executed:
             raise AssertionError("overlap/byte-count/alignment/index execution did not complete")
+        if b"native readonly UTF-8 string data, NUL and literal relocations: ok" not in executed:
+            raise AssertionError("readonly string data/UTF-8/NUL/relocation cases did not complete")
         for case in ("overflow", "overflow8", "umul-overflow", "uadd-overflow", "mul-overflow"):
             run("reject-" + case, [probe, case], b"integer overflow", 63)
         run("reject-division-zero", [probe, "division-zero"], b"division by zero", 62)

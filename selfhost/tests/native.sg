@@ -362,6 +362,33 @@ def sh_nt_memory_ranges(mir: &ShMir, integer: i64, unit: i64) -> Result<bool, i6
     Result { is_ok: true, value: true, error: 0 };
 }
 
+def sh_nt_string_function(mir: &ShMir, name: &str, text: &String, ty: i64) -> Result<i64, i64> {
+    let empty = vec_new_i64();
+    let function = sh_nt_fn(mir, name, &empty, ty, 0, false)?;
+    let scope = sh_mir_add_scope(mir, function, -1, 0)?;
+    let block = sh_nt_block(mir, function, scope)?;
+    let symbol = sh_intern(&mir.symbols, text)?;
+    let value = sh_nt_inst(mir, block, 8, ty, &empty, symbol, 0)?;
+    sh_nt_return(mir, block, value);
+}
+
+def sh_nt_strings(mir: &ShMir) -> Result<bool, i64> {
+    let string_type = sh_type_primitive(&mir.types, 5, 0, 0)?;
+    let args = vec_new_i64();
+    args.push(string_type);
+    let reference = sh_type_intern(&mir.types, 6, 0, 0, -1, &args)?;
+    let utf8 = string_from_str("世界 &\n\t\"\\\r😀")?;
+    let empty = string_new();
+    let nul = string_from_str("A")?;
+    nul.push_char(' ')?;
+    nul.push_str("B")?;
+    sh_nt_string_function(mir, "sg_native_string_utf8", &utf8, reference)?;
+    sh_nt_string_function(mir, "sg_native_string_same", &utf8, reference)?;
+    sh_nt_string_function(mir, "sg_native_string_empty", &empty, string_type)?;
+    sh_nt_string_function(mir, "sg_native_string_nul", &nul, reference)?;
+    Result { is_ok: true, value: true, error: 0 };
+}
+
 def sh_nt_cleanup(mir: &ShMir, integer: i64, boolean: i64, unit: i64) -> Result<bool, i64> {
     let name = string_from_str("TestOwner")?;
     let symbol = sh_intern(&mir.symbols, &name)?;
@@ -633,6 +660,7 @@ def sh_nt_fixture(mir: &ShMir) -> Result<bool, i64> {
     sh_nt_aggregates(mir, integer)?;
     sh_nt_cleanup(mir, integer, boolean, unit)?;
     sh_nt_memory_ranges(mir, integer, unit)?;
+    sh_nt_strings(mir)?;
     Result { is_ok: true, value: true, error: 0 };
 }
 
