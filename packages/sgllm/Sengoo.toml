@@ -1,0 +1,23 @@
+[package]
+name = "sgllm"
+version = "0.1.0"
+edition = "2026"
+description = "Experimental shared HTTP/SSE and three-protocol model SDK."
+
+[lib]
+path = "src/lib.sg"
+
+[[test]]
+path = "tests/protocol.sg"
+
+[[test]]
+path = "tests/http.sg"
+
+[[test]]
+path = "tests/media.sg"
+
+[[test]]
+path = "tests/config.sg"
+
+[[test]]
+path = "tests/resources.sg"

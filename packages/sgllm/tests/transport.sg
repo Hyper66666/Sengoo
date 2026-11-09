@@ -1,0 +1,46 @@
+import sgllm;
+
+import std::args;
+
+import std::time;
+
+def transport_fixture() -> Result<i64, i64> {
+    let scoped_history = json_parse("{\"messages\":[{\"role\":\"assistant\",\"content\":\"public\",\"responses_endpoint\":\"fixture-base\",\"responses_model\":\"fixture\",\"responses_connection\":\"connection-a\",\"responses_output\":[{\"type\":\"reasoning\",\"id\":\"opaque\",\"summary\":[]}]}]}")?;
+    let same_scope = provider_target_history_scoped(&scoped_history, "fixture-base", "fixture", "connection-a")?;
+    let other_connection = provider_target_history_scoped(&scoped_history, "fixture-base", "fixture", "connection-b")?;
+    let other_model = provider_target_history_scoped(&scoped_history, "fixture-base", "different", "connection-a")?;
+    if not same_scope.root().object_get("messages")?.array_get(0)?.object_has("responses_output") or other_connection.root().object_get("messages")?.array_get(0)?.object_has("responses_output") or other_model.root().object_get("messages")?.array_get(0)?.object_has("responses_output") { return llm_fail(99); };
+    if llm_json_string(other_connection.root().object_get("messages")?.array_get(0)?, "content")?.as_str() != "public" { return llm_fail(99); };
+    let buffer = ffi_buffer_new(32768)?;
+    let count = arg_copy(0, buffer)?;
+    let base = string_from_bytes_raw(buffer.ptr(), count)?;
+    let history = json_parse("{\"messages\":[{\"role\":\"user\",\"content\":\"fixture\"}]}")?;
+    let tools = json_parse("{\"tools\":[]}")?;
+    let config = llm_request_config(base.as_str(), 0, "fixture")?;
+    let mut chat = llm_request_start(&config, "fixture-key", &history, &tools)?;
+    let premature = chat.result();
+    if premature.is_ok() or premature.error != 12 { return llm_fail(99); };
+    let mut responses = provider_job_start(base.as_str(), 1, "fixture", "fixture-key", &history, &tools)?;
+    let mut messages = provider_job_start(base.as_str(), 2, "fixture", "fixture-key", &history, &tools)?;
+    let mut fourth = provider_job_start(base.as_str(), 0, "fixture", "fixture-key", &history, &tools)?;
+    let started = time_unix_ms();
+    loop { chat.poll()?; responses.poll()?; messages.poll()?; fourth.poll()?; if chat.finished and responses.finished and messages.finished and fourth.finished { break; }; if time_since_ms(started) > 30000 { return llm_fail(11); }; time_sleep_ms(1); };
+    let a = chat.result()?;
+    let b = responses.result()?;
+    let c = messages.result()?;
+    let d = fourth.result()?;
+    let mut failures = 0;
+    if not chat.completed() or chat.input_tokens() != 17 or chat.output_tokens() != 8 or not chat.usage_reported() { failures = failures + 1; };
+    if llm_json_string(a.root(), "content")?.as_str() != "世界😀" { failures = failures + 1; };
+    if llm_json_string(b.root(), "content")?.as_str() != "世界😀" { failures = failures + 1; };
+    if llm_json_string(c.root(), "content")?.as_str() != "世界😀" { failures = failures + 1; };
+    if a.root().object_get("tool_calls")?.array_len()? != 1 or b.root().object_get("tool_calls")?.array_len()? != 1 or c.root().object_get("tool_calls")?.array_len()? != 1 or d.root().object_get("tool_calls")?.array_len()? != 1 { failures = failures + 1; };
+    llm_ok(failures);
+}
+
+def main() -> i64 {
+    let result = transport_fixture();
+    if not result.is_ok() { println(result.error); return 1; };
+    if result.value == 0 { println("four concurrent provider streams passed"); };
+    result.value;
+}

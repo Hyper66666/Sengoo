@@ -1,0 +1,4 @@
+- [x] Reproduce the old local formatter's split return and compare current parser source.
+- [x] Add and pass the semantic formatter regression and rebuild sgfmt.
+- [ ] Run full formatter tests and validate formatted SDK consumers natively.
+- [ ] Record explicit binary/source evidence and OpenSpec validation.

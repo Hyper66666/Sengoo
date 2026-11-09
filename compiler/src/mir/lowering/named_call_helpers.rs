@@ -229,7 +229,17 @@ pub(super) fn lower_named_call(
     match ctx.resolve_named_call_target(name, arg_locals, expected_return_type) {
         CallTargetResolution::Builtin(local) => local,
         CallTargetResolution::Planned(plan) => {
-            ctx.mark_drop_locals_moved(arg_locals);
+            let borrowed_params = ctx.argument_borrow_policy(&plan.func_name);
+            for (index, local) in arg_locals.iter().enumerate() {
+                if !borrowed_params
+                    .as_ref()
+                    .and_then(|params| params.get(index))
+                    .copied()
+                    .unwrap_or(false)
+                {
+                    ctx.mark_drop_local_moved(*local);
+                }
+            }
             let invocation = {
                 let async_functions = ctx.options.async_functions.borrow();
                 build_call_invocation_plan(

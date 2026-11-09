@@ -10,6 +10,7 @@ import argparse
 import gzip
 import hashlib
 import json
+import re
 from pathlib import Path, PurePosixPath
 import shutil
 import subprocess
@@ -18,6 +19,51 @@ import tempfile
 import tomllib
 
 PACKAGES = ("sgcli", "sgdata", "sgsqlite")
+AGENT_PACKAGES = ("sgschema", "sgllm", "sgmcp", "sgsqlite", "sgagent")
+
+
+def profile_packages(profile: str) -> tuple[str, ...]:
+    if profile == "foundation":
+        return PACKAGES
+    if profile == "agents":
+        return AGENT_PACKAGES
+    raise ValueError("unknown ecosystem profile")
+
+
+def bundle_name(profile: str) -> str:
+    return ("sengoo-official-registry-0.1.0.tar.gz" if profile == "foundation"
+            else "sengoo-agent-preview-registry-0.1.0.tar.gz")
+
+
+def normalize_agent_dependencies(root: Path) -> bool:
+    """Translate known sibling dev paths in the *archive*, never the checkout.
+
+    Consumers resolve exact versions from their configured official registry.
+    Reject unknown dependencies instead of shipping checkout-relative paths.
+    """
+    path = root / "Sengoo.toml"
+    text = path.read_text(encoding="utf-8")
+    manifest = tomllib.loads(text)
+    dependencies = manifest.get("dependencies", {})
+    if not dependencies:
+        return False
+    normalized = []
+    for alias, dependency in dependencies.items():
+        if not isinstance(dependency, dict):
+            raise ValueError("agent preview dependencies require explicit source tables")
+        name = dependency.get("package", alias)
+        if name not in AGENT_PACKAGES or set(dependency) - {"path", "package"}:
+            raise ValueError(f"unsupported agent preview dependency: {alias}")
+        if dependency.get("path") != f"../{name}" or not re.fullmatch(r"[a-z][a-z0-9_]*", alias):
+            raise ValueError(f"unexpected development dependency path: {alias}")
+        package = f', package = "{name}"' if name != alias else ""
+        normalized.append(f'{alias} = {{ version = "=0.1.0", registry = "official"{package} }}\n')
+    section = re.compile(r"(?ms)^\[dependencies\]\s*\n.*?(?=^\[|\Z)")
+    text, count = section.subn("[dependencies]\n" + "".join(normalized) + "\n", text)
+    if count != 1:
+        raise ValueError("expected one explicit dependency section")
+    path.write_text(text, encoding="utf-8", newline="\n")
+    return True
 
 
 def sha256(path: Path) -> str:
@@ -72,7 +118,8 @@ def deterministic_archive(root: Path, output: Path) -> None:
                         tar.addfile(info, stream)
 
 
-def build(repo: Path, output: Path, sgpm: Path) -> dict:
+def build(repo: Path, output: Path, sgpm: Path, profile: str = "foundation") -> dict:
+    names = profile_packages(profile)
     repo, output, sgpm = repo.resolve(), output.resolve(), sgpm.resolve()
     output.mkdir(parents=True, exist_ok=True)
     with tempfile.TemporaryDirectory(prefix="sengoo-ecosystem-") as temporary:
@@ -82,7 +129,7 @@ def build(repo: Path, output: Path, sgpm: Path) -> dict:
         bundle = stage / "bundle"
         (bundle / "registry").mkdir(parents=True)
         records = []
-        for name in PACKAGES:
+        for name in names:
             manifest = repo / "packages" / name / "Sengoo.toml"
             package = tomllib.loads(manifest.read_text(encoding="utf-8"))["package"]
             if package["name"] != name or package["version"] != "0.1.0":
@@ -94,21 +141,28 @@ def build(repo: Path, output: Path, sgpm: Path) -> dict:
             archive = Path(metadata["archive_path"])
             if sha256(archive) != metadata["sha256"]:
                 raise ValueError(f"sgpm artifact checksum mismatch: {name}")
-            unpack(archive, bundle / "registry" / name / package["version"])
+            published = bundle / "registry" / name / package["version"]
+            unpack(archive, published)
+            source_archive_sha = metadata["sha256"]
+            normalized = profile == "agents" and normalize_agent_dependencies(published)
+            if normalized:
+                deterministic_archive(published, archive)
             records.append({"name": name, "version": package["version"],
-                "archive": archive.name, "sha256": metadata["sha256"]})
+                "archive": archive.name, "sha256": sha256(archive),
+                "source_archive_sha256": source_archive_sha,
+                "normalized_development_dependencies": bool(normalized)})
         revision = subprocess.check_output(["git", "rev-parse", "HEAD"], cwd=repo, text=True).strip()
         dirty = bool(subprocess.check_output(["git", "status", "--porcelain"], cwd=repo, text=True).strip())
         toolchain = subprocess.check_output([str(sgpm), "--version"], text=True).strip()
         inventory = {"schema_version": 1, "revision": revision, "dirty": dirty,
-            "toolchain": toolchain, "packages": records}
+            "toolchain": toolchain, "profile": profile, "packages": records}
         (bundle / "ecosystem-manifest.json").write_text(json.dumps(inventory, indent=2) + "\n", encoding="utf-8")
         (bundle / "README.txt").write_text(
             'Configure [registries.official] path = "registry" beside your Sengoo.toml.\n'
             'Select dependencies with version = "=0.1.0", registry = "official".\n'
             'Run sgpm update once; commit Sengoo.lock; use --locked afterwards.\n'
             'Check SHA256SUMS before extraction; see ecosystem-manifest.json for the build identity.\n', encoding="utf-8")
-        bundle_archive = stage / "sengoo-official-registry-0.1.0.tar.gz"
+        bundle_archive = stage / bundle_name(profile)
         deterministic_archive(bundle, bundle_archive)
         products = [*sorted(archives.glob("*.tar.gz")), bundle_archive]
         for product in products:
@@ -117,11 +171,11 @@ def build(repo: Path, output: Path, sgpm: Path) -> dict:
         products.append(output / "ecosystem-manifest.json")
         (output / "SHA256SUMS").write_text("".join(
             f"{sha256(product)}  {product.name}\n" for product in sorted(products, key=lambda p: p.name)), encoding="utf-8")
-    verify(output)
+    verify(output, profile)
     return inventory
 
 
-def verify(directory: Path) -> None:
+def verify(directory: Path, profile: str = "foundation") -> None:
     entries = {}
     for line in (directory / "SHA256SUMS").read_text(encoding="utf-8").splitlines():
         digest, name = line.split("  ", 1)
@@ -132,8 +186,8 @@ def verify(directory: Path) -> None:
         entries[name] = digest
         if sha256(directory / name) != digest:
             raise ValueError(f"checksum mismatch: {name}")
-    required = {f"{name}-0.1.0.tar.gz" for name in PACKAGES} | {
-        "ecosystem-manifest.json", "sengoo-official-registry-0.1.0.tar.gz"}
+    required = {f"{name}-0.1.0.tar.gz" for name in profile_packages(profile)} | {
+        "ecosystem-manifest.json", bundle_name(profile)}
     if entries.keys() != required:
         raise ValueError("checksum manifest must contain the exact official artifact set")
 
@@ -145,13 +199,15 @@ def main() -> None:
     build_parser.add_argument("--repo", type=Path, default=Path(__file__).resolve().parents[1])
     build_parser.add_argument("--output", type=Path, default=Path("target/ecosystem-dist"))
     build_parser.add_argument("--sgpm", type=Path, required=True)
+    build_parser.add_argument("--profile", choices=("foundation", "agents"), default="foundation")
     verify_parser = sub.add_parser("verify")
     verify_parser.add_argument("directory", type=Path)
+    verify_parser.add_argument("--profile", choices=("foundation", "agents"), default="foundation")
     args = parser.parse_args()
     if args.command == "build":
-        print(json.dumps(build(args.repo, args.output, args.sgpm), indent=2))
+        print(json.dumps(build(args.repo, args.output, args.sgpm, args.profile), indent=2))
     else:
-        verify(args.directory)
+        verify(args.directory, args.profile)
         print("official artifact checksums verified")
 
 

@@ -1,0 +1,144 @@
+import std::json;
+
+import std::hash;
+
+import std::ffi;
+
+extern "C" {
+    fn sengoo_string_live_handle_count() -> i64;
+    fn sengoo_buffer_live_handle_count() -> i64;
+}
+
+def make_text() -> Result<String, i64> {
+    string_from_str("owned discarded string");
+}
+
+def discard_direct() -> Result<bool, i64> {
+    let mut index = 0;
+    while index < 20 { make_text()?; index = index + 1; };
+    Result { is_ok: true, value: true, error: 0 };
+}
+
+def discard_projected(source: JsonValue) -> Result<bool, i64> {
+    let names = string_from_str("a,b,c,d,e")?;
+    let fields = names.split(",");
+    loop { let key = fields.next(); if not key.is_some { break; }; source.object_get(key.value.as_str())?.string_value()?; };
+    fields.free();
+    Result { is_ok: true, value: true, error: 0 };
+}
+
+def borrowed_eq() -> Result<bool, i64> {
+    let a = string_from_str("same")?;
+    let b = string_from_str("same")?;
+    let equal = a.eq(b);
+    if not equal { return Result { is_ok: false, value: false, error: 10 }; };
+    if a.as_str() != "same" or b.as_str() != "same" { return Result { is_ok: false, value: false, error: 3 }; };
+    if not a.eq(a) { return Result { is_ok: false, value: false, error: 3 }; };
+    Result { is_ok: true, value: true, error: 0 };
+}
+
+def hash_once() -> Result<bool, i64> {
+    let output = ffi_buffer_new(64)?;
+    let written = hash_sha256_str_bounded("abc", 3, output)?;
+    if written != 64 or output.len() != 64 { return Result { is_ok: false, value: false, error: 3 }; };
+    Result { is_ok: true, value: true, error: 0 };
+}
+
+def copy_utf8_once() -> Result<bool, i64> {
+    let original = string_from_str("中文 and emoji 😀")?;
+    let source = ffi_buffer_new(128)?;
+    let destination = ffi_buffer_new(128)?;
+    let length = original.copy_to_buffer(source)?;
+    let copied = source.copy_range(0, length, destination)?;
+    let rebuilt = string_from_utf8(destination, copied)?;
+    if not rebuilt.eq(original) or original.len() == 0 or source.len() != 128 or destination.used_len() != length { return Result { is_ok: false, value: false, error: 3 }; };
+    Result { is_ok: true, value: true, error: 0 };
+}
+
+def pass_owner(value: String) -> String {
+    value;
+}
+
+struct TextOwner {
+    text: String,
+}
+
+def store_owner(value: String) -> TextOwner {
+    TextOwner { text: value };
+}
+
+def transfer_owner() -> Result<bool, i64> {
+    let original = string_from_str("transferred")?;
+    let restored = pass_owner(original);
+    if restored.as_str() != "transferred" { return Result { is_ok: false, value: false, error: 3 }; };
+    let nested = store_owner(string_from_str("stored")?);
+    if nested.text.as_str() != "stored" { return Result { is_ok: false, value: false, error: 3 }; };
+    Result { is_ok: true, value: true, error: 0 };
+}
+
+def borrow_failure() -> Result<bool, i64> {
+    let a = string_from_str("failure")?;
+    let b = string_from_str("failure")?;
+    if not a.eq(b) { return Result { is_ok: false, value: false, error: 3 }; };
+    let failed: Result<i64, i64> = Result { is_ok: false, value: 0, error: 9 };
+    let unused = failed?;
+    Result { is_ok: true, value: unused == 0, error: 0 };
+}
+
+def observe_pair(first: String, second: String) -> bool {
+    first.eq(second);
+}
+
+def missing_text() -> Result<String, i64> {
+    Result { is_ok: false, value: String { handle: 0 }, error: 9 };
+}
+
+def later_argument_failure() -> Result<bool, i64> {
+    let unused = observe_pair(string_from_str("owned before later failure")?, missing_text()?);
+    Result { is_ok: true, value: unused, error: 0 };
+}
+
+def temporary_eq() -> Result<bool, i64> {
+    let a = string_from_str("same")?;
+    let equal = a.eq(string_from_str("same")?);
+    if not equal { return Result { is_ok: false, value: false, error: 10 }; };
+    Result { is_ok: true, value: true, error: 0 };
+}
+
+def main() -> i64 {
+    let before = sengoo_string_live_handle_count();
+    if not discard_direct().is_ok() { return 1; };
+    let direct = sengoo_string_live_handle_count() - before;
+    let stage = sengoo_string_live_handle_count();
+    { let document = json_parse("{\"a\":\"one\",\"b\":\"two\",\"c\":\"three\",\"d\":\"four\",\"e\":\"five\"}").unwrap_or(JsonDoc { handle: 0 }); if not discard_projected(document.root()).is_ok() { return 2; }; };
+    let projected = sengoo_string_live_handle_count() - stage;
+    let eq_before = sengoo_string_live_handle_count();
+    if not borrowed_eq().is_ok() { return 3; };
+    let borrowed = sengoo_string_live_handle_count() - eq_before;
+    let temporary_before = sengoo_string_live_handle_count();
+    if not temporary_eq().is_ok() { return 4; };
+    let temporary = sengoo_string_live_handle_count() - temporary_before;
+    let transfer_before = sengoo_string_live_handle_count();
+    if not transfer_owner().is_ok() { return 6; };
+    if borrow_failure().is_ok() { return 7; };
+    if later_argument_failure().is_ok() { return 9; };
+    let transferred = sengoo_string_live_handle_count() - transfer_before;
+    let buffers_before = sengoo_buffer_live_handle_count();
+    let mut hash_index = 0;
+    while hash_index < 20 { if not hash_once().is_ok() or not copy_utf8_once().is_ok() { return 8; }; hash_index = hash_index + 1; };
+    let buffers = sengoo_buffer_live_handle_count() - buffers_before;
+    println("direct discarded String delta:");
+    println(direct);
+    println("field-call discarded String delta:");
+    println(projected);
+    println("named String.eq argument delta:");
+    println(borrowed);
+    println("temporary String.eq argument delta:");
+    println(temporary);
+    println("owner transfer and failed propagation delta:");
+    println(transferred);
+    println("cross-module hash Buffer delta:");
+    println(buffers);
+    if direct != 0 or projected != 0 or borrowed != 0 or temporary != 0 or transferred != 0 or buffers != 0 { return 5; };
+    0;
+}

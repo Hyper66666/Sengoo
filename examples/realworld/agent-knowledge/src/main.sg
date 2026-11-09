@@ -1,0 +1,229 @@
+import sgmcp;
+
+import sgsqlite;
+
+import std::args;
+
+import std::file;
+
+import std::dir;
+
+import std::file_snapshot;
+
+import std::system;
+
+struct KnowledgeStore {
+    database: SqliteDb,
+    admission: FileLock,
+    root: String,
+    folded_root: String,
+}
+
+def knowledge_need(allowed: bool, code: i64) -> Result<bool, i64> {
+    Result { is_ok: allowed, value: allowed, error: if allowed { 0; } else { code; } };
+}
+
+def knowledge_text(text: &str) -> Result<String, i64> {
+    string_from_str(text);
+}
+
+def knowledge_arg(index: i64) -> Result<String, i64> {
+    let bytes = ffi_buffer_new(arg_len(index)?)?;
+    let count = arg_copy(index, bytes)?;
+    string_from_utf8(bytes, count);
+}
+
+def knowledge_nul_free(text: &String) -> Result<bool, i64> {
+    let bytes = text.bytes();
+    loop { let byte = bytes.next(); if not byte.is_some { break; }; if byte.value == 0 { bytes.free(); return knowledge_need(false, 2); }; };
+    bytes.free();
+    knowledge_need(true, 0);
+}
+
+def knowledge_open(root_argument: &String, database_argument: &String) -> Result<KnowledgeStore, i64> {
+    knowledge_nul_free(root_argument)?;
+    knowledge_nul_free(database_argument)?;
+    knowledge_need(file_snapshot_available() and root_argument.len() > 0 and database_argument.len() > 0, 2)?;
+    let root = canonical_path_string(root_argument.as_str())?;
+    knowledge_need(file_kind(root.as_str())? == PATH_KIND_DIR(), 2)?;
+    let folded = str_to_ascii_lower(root.as_str())?;
+    let database = sqlite_open(database_argument.as_str())?;
+    let db_path = canonical_path_string(database_argument.as_str())?;
+    db_path.push_str(".knowledge.lock")?;
+    let admission = file_lock(db_path.as_str())?;
+    database.busy_timeout(5000)?;
+    database.exec("PRAGMA synchronous=FULL")?;
+    let mut transaction = database.transaction()?;
+    let mut tables = transaction.prepare("SELECT count(*) FROM sqlite_master WHERE type='table' AND name='knowledge_meta'")?;
+    knowledge_need(tables.step()?, 12)?;
+    if tables.integer(0)? == 0 { let mut existing = transaction.prepare("SELECT count(*) FROM sqlite_master WHERE type='table' AND name NOT LIKE 'sqlite_%'")?; knowledge_need(existing.step()? and existing.integer(0)? == 0, 12)?; transaction.exec("CREATE TABLE knowledge_meta(singleton INTEGER PRIMARY KEY CHECK(singleton=1),schema_version INTEGER NOT NULL,root TEXT NOT NULL,generation INTEGER NOT NULL); CREATE TABLE knowledge_files(path TEXT PRIMARY KEY,content TEXT NOT NULL,sha256 TEXT NOT NULL,bytes INTEGER NOT NULL)")?; let mut metadata = transaction.prepare("INSERT INTO knowledge_meta VALUES(1,1,?1,0)")?; metadata.bind_text(1, folded.as_str())?; metadata.step()?; (); };
+    let mut check = transaction.prepare("SELECT schema_version,root FROM knowledge_meta WHERE singleton=1")?;
+    knowledge_need(check.step()? and check.integer(0)? == 1, 12)?;
+    let saved_root = check.text(1)?;
+    knowledge_need(saved_root.as_str() == folded.as_str(), 12)?;
+    transaction.commit()?;
+    Result { is_ok: true, value: KnowledgeStore { database: database, admission: admission, root: root, folded_root: folded }, error: 0 };
+}
+
+def knowledge_relative(path: &String) -> Result<bool, i64> {
+    knowledge_nul_free(path)?;
+    knowledge_need(path.len() > 0 and path.len() <= 4096 and not str_starts_with(path.as_str(), "/") and not str_starts_with(path.as_str(), "\\") and not str_contains(path.as_str(), ":") and not str_contains(path.as_str(), "\\"), 2)?;
+    let components = path.split("/");
+    loop { let component = components.next(); if not component.is_some { break; }; knowledge_need(component.value.len() > 0 and component.value.as_str() != "." and component.value.as_str() != "..", 2)?; };
+    components.free();
+    knowledge_need(true, 0);
+}
+
+def knowledge_full(store: &KnowledgeStore, relative: &String) -> Result<String, i64> {
+    knowledge_relative(relative)?;
+    let path = store.root.clone()?;
+    path.push_str("/")?;
+    path.push_str(relative.as_str())?;
+    Result { is_ok: true, value: path, error: 0 };
+}
+
+def knowledge_snapshot(store: &KnowledgeStore, relative: &String) -> Result<FileSnapshot, i64> {
+    let path = knowledge_full(store, relative)?;
+    let snapshot = file_snapshot_open(path.as_str(), 65536)?;
+    let final_path = snapshot.path()?;
+    let folded = str_to_ascii_lower(final_path.as_str())?;
+    let boundary = store.folded_root.clone()?;
+    if not str_ends_with(boundary.as_str(), "\\") and not str_ends_with(boundary.as_str(), "/") { boundary.push_str("\\")?; (); };
+    knowledge_need(str_starts_with(folded.as_str(), boundary.as_str()), 7)?;
+    Result { is_ok: true, value: snapshot, error: 0 };
+}
+
+def knowledge_snapshot_text(snapshot: &FileSnapshot) -> Result<String, i64> {
+    let mut bytes = ffi_buffer_new(snapshot.len()?)?;
+    let count = snapshot.copy_bytes(&mut bytes)?;
+    let text = string_from_utf8(bytes, count)?;
+    knowledge_nul_free(&text)?;
+    Result { is_ok: true, value: text, error: 0 };
+}
+
+def knowledge_allowed(path: &String) -> bool {
+    let name = str_to_ascii_lower(path.as_str()).unwrap_or(String { handle: 0 });
+    str_ends_with(name.as_str(), ".txt") or str_ends_with(name.as_str(), ".md") or str_ends_with(name.as_str(), ".rst") or str_ends_with(name.as_str(), ".sg") or str_ends_with(name.as_str(), ".json") or str_ends_with(name.as_str(), ".csv") or str_ends_with(name.as_str(), ".log");
+}
+
+def knowledge_counter(stats: &JsonDoc, name: &str, increment: i64) -> Result<bool, i64> {
+    let before = stats.root().object_get(name)?.number_i64()?;
+    sgmcp_i64(stats, stats.root(), name, before + increment);
+}
+
+def knowledge_index_file(store: &KnowledgeStore, transaction: &SqliteTransaction, relative: &String, stats: &JsonDoc) -> Result<bool, i64> {
+    let snapshot_result = knowledge_snapshot(store, relative);
+    if not snapshot_result.is_ok() { knowledge_counter(stats, "skipped", 1)?; return knowledge_need(true, 0); };
+    let snapshot = &snapshot_result.value;
+    let text_result = knowledge_snapshot_text(snapshot);
+    if not text_result.is_ok() { knowledge_counter(stats, "skipped", 1)?; return knowledge_need(true, 0); };
+    let text = &text_result.value;
+    let total = stats.root().object_get("bytes")?.number_i64()?;
+    knowledge_need(total <= 16777216 - text.len(), 13)?;
+    let digest = snapshot.sha256()?;
+    let mut insert = transaction.prepare("INSERT INTO knowledge_files(path,content,sha256,bytes) VALUES(?1,?2,?3,?4)")?;
+    insert.bind_text(1, relative.as_str())?;
+    insert.bind_text(2, text.as_str())?;
+    insert.bind_text(3, digest.as_str())?;
+    insert.bind_i64(4, text.len())?;
+    insert.step()?;
+    knowledge_counter(stats, "indexed", 1)?;
+    knowledge_counter(stats, "bytes", text.len());
+}
+
+def knowledge_scan(store: &KnowledgeStore, transaction: &SqliteTransaction, relative: &String, depth: i64, stats: &JsonDoc) -> Result<bool, i64> {
+    knowledge_need(depth <= 8, 13)?;
+    let directory = store.root.clone()?;
+    if relative.len() > 0 { directory.push_str("/")?; directory.push_str(relative.as_str())?; (); };
+    let count = dir_entry_count(directory.as_str())?;
+    knowledge_need(count <= 1024, 13)?;
+    let mut index = 0;
+    while index < count { knowledge_counter(stats, "visited", 1)?; knowledge_need(stats.root().object_get("visited")?.number_i64()? <= 4096, 13)?; let name = dir_entry_name_string(directory.as_str(), index)?; let child = relative.clone()?; if child.len() > 0 { child.push_str("/")?; (); }; child.push_str(name.as_str())?; let full = knowledge_full(store, &child)?; let kind = file_kind(full.as_str())?; if kind == PATH_KIND_DIR() { knowledge_scan(store, transaction, &child, depth + 1, stats)?; (); } else { if kind == PATH_KIND_FILE() and knowledge_allowed(&child) { knowledge_need(stats.root().object_get("indexed")?.number_i64()? < 512, 13)?; knowledge_index_file(store, transaction, &child, stats)?; (); } else { knowledge_counter(stats, "skipped", 1)?; (); }; }; index = index + 1; };
+    knowledge_need(true, 0);
+}
+
+def knowledge_status(store: &KnowledgeStore) -> Result<JsonDoc, i64> {
+    let document = sgmcp_doc()?;
+    let mut query = store.database.prepare("SELECT generation,(SELECT count(*) FROM knowledge_files),(SELECT coalesce(sum(bytes),0) FROM knowledge_files) FROM knowledge_meta WHERE singleton=1")?;
+    knowledge_need(query.step()?, 12)?;
+    sgmcp_i64(&document, document.root(), "generation", query.integer(0)?)?;
+    sgmcp_i64(&document, document.root(), "indexed", query.integer(1)?)?;
+    sgmcp_i64(&document, document.root(), "bytes", query.integer(2)?)?;
+    Result { is_ok: true, value: document, error: 0 };
+}
+
+def knowledge_reindex(store: &KnowledgeStore) -> Result<JsonDoc, i64> {
+    let stats = json_parse("{\"indexed\":0,\"skipped\":0,\"visited\":0,\"bytes\":0}")?;
+    let mut transaction = store.database.transaction()?;
+    transaction.exec("DELETE FROM knowledge_files")?;
+    let relative = string_new();
+    knowledge_scan(store, &transaction, &relative, 0, &stats)?;
+    transaction.exec("UPDATE knowledge_meta SET generation=generation+1 WHERE singleton=1 AND generation<9223372036854775807")?;
+    transaction.commit()?;
+    Result { is_ok: true, value: stats, error: 0 };
+}
+
+def knowledge_search(store: &KnowledgeStore, arguments: JsonValue) -> Result<JsonDoc, i64> {
+    let query_text = arguments.object_get("query")?.string_value()?;
+    knowledge_nul_free(&query_text)?;
+    knowledge_need(query_text.len() > 0 and query_text.len() <= 256, 2)?;
+    let document = sgmcp_doc()?;
+    let matches = document.new_array()?;
+    let mut query = store.database.prepare("SELECT path,substr(content,1,200),bytes,sha256 FROM knowledge_files WHERE instr(lower(content),lower(?1))>0 ORDER BY path LIMIT 20")?;
+    query.bind_text(1, query_text.as_str())?;
+    while query.step()? { let item = document.new_object()?; let path = query.text(0)?; let preview = query.text(1)?; let digest = query.text(3)?; sgmcp_put(&document, item, "path", path.as_str())?; sgmcp_put(&document, item, "preview", preview.as_str())?; sgmcp_put(&document, item, "sha256", digest.as_str())?; sgmcp_i64(&document, item, "bytes", query.integer(2)?)?; matches.array_push(item)?; };
+    document.root().object_set("matches", matches)?;
+    Result { is_ok: true, value: document, error: 0 };
+}
+
+def knowledge_read(store: &KnowledgeStore, arguments: JsonValue) -> Result<JsonDoc, i64> {
+    let relative = arguments.object_get("path")?.string_value()?;
+    let snapshot = knowledge_snapshot(store, &relative)?;
+    let text = knowledge_snapshot_text(&snapshot)?;
+    let digest = snapshot.sha256()?;
+    let document = sgmcp_doc()?;
+    sgmcp_put(&document, document.root(), "path", relative.as_str())?;
+    sgmcp_put(&document, document.root(), "text", text.as_str())?;
+    sgmcp_put(&document, document.root(), "sha256", digest.as_str())?;
+    Result { is_ok: true, value: document, error: 0 };
+}
+
+def knowledge_complete(server: &SgMcpServer, action: &JsonDoc, value: &JsonDoc) -> Result<bool, i64> {
+    let result = sgmcp_tool_result("", false)?;
+    let rendered = value.serialize_string()?;
+    sgmcp_put(&result, result.root().object_get("content")?.array_get(0)?, "text", rendered.as_str())?;
+    result.root().object_set("structuredContent", result.copy(value.root())?)?;
+    server.complete(action.root().object_get("id")?, result.root());
+}
+
+def knowledge_handle(store: &KnowledgeStore, server: &SgMcpServer, action: &JsonDoc) -> Result<bool, i64> {
+    let name = action.root().object_get("name")?.string_value()?;
+    let arguments = action.root().object_get("arguments")?;
+    let response = if name.as_str() == "knowledge_reindex" { knowledge_reindex(store); } else { if name.as_str() == "knowledge_search" { knowledge_search(store, arguments); } else { if name.as_str() == "knowledge_read" { knowledge_read(store, arguments); } else { knowledge_status(store); }; }; };
+    if response.is_ok() { knowledge_complete(server, action, &response.value); } else { let error = knowledge_text("Knowledge operation rejected (status ")?; error.push_i64(response.error)?; error.push_str(")")?; server.fail_tool(action.root().object_get("id")?, error.as_str()); };
+}
+
+def knowledge_run() -> Result<bool, i64> {
+    knowledge_need(args_len() == 2, 2)?;
+    let root = knowledge_arg(0)?;
+    let database = knowledge_arg(1)?;
+    let store = knowledge_open(&root, &database)?;
+    let mut server = sgmcp_server("sengoo-local-knowledge", "0.1.0", 16)?;
+    let empty = json_parse("{\"type\":\"object\",\"additionalProperties\":false}")?;
+    let output = json_parse("{\"type\":\"object\"}")?;
+    let search = json_parse("{\"type\":\"object\",\"properties\":{\"query\":{\"type\":\"string\"}},\"required\":[\"query\"],\"additionalProperties\":false}")?;
+    let read = json_parse("{\"type\":\"object\",\"properties\":{\"path\":{\"type\":\"string\"}},\"required\":[\"path\"],\"additionalProperties\":false}")?;
+    server.tool("knowledge_status", "Inspect the persistent index generation", empty.root(), output.root())?;
+    server.tool("knowledge_reindex", "Explicitly rebuild the selected root index atomically", empty.root(), output.root())?;
+    server.tool("knowledge_search", "Search the persistent UTF-8 text index", search.root(), output.root())?;
+    server.tool("knowledge_read", "Read a bounded current file under the selected root", read.root(), output.root())?;
+    let mut stdio = sgmcp_stdio()?;
+    while not stdio.eof { let request = stdio.next()?; if request.root().object_has("method") { let action = server.accept(&request)?; if sgmcp_string(action.root(), "kind").as_str() == "call" { knowledge_handle(&store, &server, &action)?; (); }; }; stdio.flush(&server)?; time_sleep_ms(1); };
+    knowledge_need(stdio.finish(&server, 30000)?, 11);
+}
+
+def main() -> i64 {
+    let result = knowledge_run();
+    if not result.is_ok() { io_stderr_write("Knowledge server failed\n"); return 1; };
+    0;
+}

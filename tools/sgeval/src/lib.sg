@@ -1,0 +1,220 @@
+import std::args;
+
+import std::file;
+
+import std::ffi;
+
+import std::string;
+
+import std::json;
+
+import std::io;
+
+def eval_error(code: i64) -> Result<bool, i64> {
+    Result { is_ok: false, value: false, error: code };
+}
+
+def eval_put(document: &JsonDoc, object: JsonValue, key: &str, text: &str) -> Result<bool, i64> {
+    object.object_set(key, document.new_string(text)?);
+}
+
+def eval_int(document: &JsonDoc, object: JsonValue, key: &str, number: i64) -> Result<bool, i64> {
+    object.object_set(key, document.new_i64(number)?);
+}
+
+def eval_read(path: &str) -> Result<String, i64> {
+    let size = file_len(path)?;
+    if size < 1 or size > 16777216 { return string_result_err(13); };
+    let bytes = ffi_buffer_new(size)?;
+    let count = file_read_into(path, bytes)?;
+    if count != size { return string_result_err(12); };
+    let text = string_from_utf8(bytes, count)?;
+    eval_nul_free_owned(&text)?;
+    Result { is_ok: true, value: text, error: 0 };
+}
+
+def eval_nul_free_owned(value: &String) -> Result<bool, i64> {
+    let bytes = value.bytes();
+    loop { let next = bytes.next(); if not next.is_some { break; }; if next.value == 0 { bytes.free(); return eval_error(10); }; };
+    bytes.free();
+    Result { is_ok: true, value: true, error: 0 };
+}
+
+def eval_nul_free_json(value: JsonValue, depth: i64) -> Result<bool, i64> {
+    if depth > 48 { return eval_error(13); };
+    let kind = value.kind()?;
+    if kind == JSON_KIND_STRING() { let text = value.string_value()?; return eval_nul_free_owned(&text); };
+    let mut index = 0;
+    if kind == JSON_KIND_OBJECT() { while index < value.object_len()? { let key = value.object_key(index)?; eval_nul_free_owned(&key)?; eval_nul_free_json(value.object_get(key.as_str())?, depth + 1)?; index = index + 1; }; };
+    if kind == JSON_KIND_ARRAY() { while index < value.array_len()? { eval_nul_free_json(value.array_get(index)?, depth + 1)?; index = index + 1; }; };
+    Result { is_ok: true, value: true, error: 0 };
+}
+
+def eval_secret_key(key: &str) -> Result<bool, i64> {
+    let folded = str_to_ascii_lower(key)?;
+    let value = folded.as_str();
+    Result { is_ok: true, value: value == "authorization" or value == "proxy-authorization" or value == "api_key" or value == "apikey" or value == "x-api-key" or value == "password" or value == "secret" or value == "access_token" or value == "refresh_token" or value == "credential" or value == "credentialref" or value == "cookie" or value == "set-cookie", error: 0 };
+}
+
+def eval_replace(text: &str, needle: &str) -> Result<String, i64> {
+    if needle.len() == 0 { return string_result_err(2); };
+    let output = string_new();
+    let mut offset = 0;
+    while offset < text.len() { let tail = str_get(text, offset, text.len())?; let found = str_index_of(tail.as_str(), needle); if found < 0 { output.push_str(tail.as_str())?; break; }; let prefix = str_get(tail.as_str(), 0, found)?; output.push_str(prefix.as_str())?; output.push_str("[REDACTED]")?; offset = offset + found + needle.len(); };
+    Result { is_ok: true, value: output, error: 0 };
+}
+
+def eval_secrets_valid(secrets: &JsonDoc) -> Result<bool, i64> {
+    eval_nul_free_json(secrets.root(), 0)?;
+    if secrets.root().object_len()? != 1 { return eval_error(10); };
+    let values = secrets.root().object_get("secrets")?;
+    if values.array_len()? > 128 { return eval_error(13); };
+    let mut index = 0;
+    while index < values.array_len()? { let value = values.array_get(index)?.string_value()?; if value.len() == 0 or value.len() > 4096 or value.len() != value.as_str().len() { return eval_error(2); }; index = index + 1; };
+    Result { is_ok: true, value: true, error: 0 };
+}
+
+def eval_redact_text(text: &str, secrets: &JsonDoc) -> Result<String, i64> {
+    let values = secrets.root().object_get("secrets")?;
+    let mut output = string_from_str(text)?;
+    let mut index = 0;
+    while index < values.array_len()? { let secret = values.array_get(index)?.string_value()?; output = eval_replace(output.as_str(), secret.as_str())?; index = index + 1; };
+    Result { is_ok: true, value: output, error: 0 };
+}
+
+def eval_redact_value(document: &JsonDoc, source: JsonValue, secrets: &JsonDoc, depth: i64) -> Result<JsonValue, i64> {
+    if depth > 48 { return Result { is_ok: false, value: JsonValue { doc_handle: 0, node_id: 0 }, error: 13 }; };
+    let kind = source.kind()?;
+    if kind == JSON_KIND_STRING() { let value = source.string_value()?; let redacted = eval_redact_text(value.as_str(), secrets)?; return document.new_string(redacted.as_str()); };
+    if kind == JSON_KIND_OBJECT() { let object = document.new_object()?; let mut index = 0; while index < source.object_len()? { let key = source.object_key(index)?; let redacted_key = eval_redact_text(key.as_str(), secrets)?; if object.object_has(redacted_key.as_str()) { return Result { is_ok: false, value: object, error: 10 }; }; let item = if eval_secret_key(key.as_str())? { document.new_string("[REDACTED]")?; } else { eval_redact_value(document, source.object_get(key.as_str())?, secrets, depth + 1)?; }; object.object_set(redacted_key.as_str(), item)?; index = index + 1; }; return Result { is_ok: true, value: object, error: 0 }; };
+    if kind == JSON_KIND_ARRAY() { let array = document.new_array()?; let mut index = 0; while index < source.array_len()? { array.array_push(eval_redact_value(document, source.array_get(index)?, secrets, depth + 1)?)?; index = index + 1; }; return Result { is_ok: true, value: array, error: 0 }; };
+    document.copy(source);
+}
+
+def eval_line_document(line: &str) -> Result<JsonDoc, i64> {
+    if line.len() > 2097152 { return Result { is_ok: false, value: JsonDoc { handle: 0 }, error: 13 }; };
+    let document = json_parse_limits(line, 2097152, 65536)?;
+    if document.root().kind()? != JSON_KIND_OBJECT() { return Result { is_ok: false, value: JsonDoc { handle: 0 }, error: 10 }; };
+    eval_nul_free_json(document.root(), 0)?;
+    Result { is_ok: true, value: document, error: 0 };
+}
+
+def eval_event_valid(event: JsonValue) -> Result<bool, i64> {
+    eval_nul_free_json(event, 0)?;
+    let kind = event.object_get("type")?.string_value()?;
+    if kind.len() < 1 or kind.len() > 128 or kind.len() != kind.as_str().len() { return eval_error(10); };
+    Result { is_ok: true, value: true, error: 0 };
+}
+
+def eval_record_text(input: &str, secrets: &JsonDoc) -> Result<String, i64> {
+    eval_secrets_valid(secrets)?;
+    if input.len() > 8388608 { return string_result_err(13); };
+    let text = string_from_str(input)?;
+    let lines = text.split("\n");
+    let output = string_new();
+    let mut sequence = 0;
+    loop { let item = lines.next(); if not item.is_some { break; }; let line = str_trim(item.value.as_str())?; if line.len() == 0 { continue; }; if line.len() > 1048576 { lines.free(); return string_result_err(13); }; let source = eval_line_document(line.as_str())?; eval_event_valid(source.root())?; if sequence >= 4096 { lines.free(); return string_result_err(13); }; let record = json_doc_object_limits(2097152, 65536)?; eval_int(&record, record.root(), "schema", 1)?; eval_int(&record, record.root(), "sequence", sequence)?; record.root().object_set("event", eval_redact_value(&record, source.root(), secrets, 0)?)?; let encoded = record.serialize_string()?; if output.len() + encoded.len() + 1 > 16777216 { lines.free(); return string_result_err(13); }; output.push_str(encoded.as_str())?; output.push_str("\n")?; sequence = sequence + 1; };
+    lines.free();
+    if sequence == 0 { return string_result_err(10); };
+    Result { is_ok: true, value: output, error: 0 };
+}
+
+def eval_equal(left: JsonValue, right: JsonValue, depth: i64) -> Result<bool, i64> {
+    if depth > 48 { return eval_error(13); };
+    let kind = left.kind()?;
+    if kind != right.kind()? { return Result { is_ok: true, value: false, error: 0 }; };
+    if kind == JSON_KIND_STRING() { let a = left.string_value()?; let b = right.string_value()?; return Result { is_ok: true, value: a.as_str() == b.as_str(), error: 0 }; };
+    if kind == JSON_KIND_OBJECT() { if left.object_len()? != right.object_len()? { return Result { is_ok: true, value: false, error: 0 }; }; let mut index = 0; while index < left.object_len()? { let key = left.object_key(index)?; if not right.object_has(key.as_str()) or not eval_equal(left.object_get(key.as_str())?, right.object_get(key.as_str())?, depth + 1)? { return Result { is_ok: true, value: false, error: 0 }; }; index = index + 1; }; return Result { is_ok: true, value: true, error: 0 }; };
+    if kind == JSON_KIND_ARRAY() { if left.array_len()? != right.array_len()? { return Result { is_ok: true, value: false, error: 0 }; }; let mut index = 0; while index < left.array_len()? { if not eval_equal(left.array_get(index)?, right.array_get(index)?, depth + 1)? { return Result { is_ok: true, value: false, error: 0 }; }; index = index + 1; }; return Result { is_ok: true, value: true, error: 0 }; };
+    let a = json_doc_object()?;
+    a.root().object_set("value", a.copy(left)?)?;
+    let b = json_doc_object()?;
+    b.root().object_set("value", b.copy(right)?)?;
+    let x = a.serialize_string()?;
+    let y = b.serialize_string()?;
+    Result { is_ok: true, value: x.as_str() == y.as_str(), error: 0 };
+}
+
+def eval_recording(input: &str) -> Result<JsonDoc, i64> {
+    if input.len() > 16777216 { return Result { is_ok: false, value: JsonDoc { handle: 0 }, error: 13 }; };
+    let document = json_doc_object_limits(16777216, 65536)?;
+    let events = document.new_array()?;
+    document.root().object_set("events", events)?;
+    let text = string_from_str(input)?;
+    let lines = text.split("\n");
+    let mut sequence = 0;
+    loop { let next = lines.next(); if not next.is_some { break; }; let line = str_trim(next.value.as_str())?; if line.len() == 0 { continue; }; let record = eval_line_document(line.as_str())?; if record.root().object_get("schema")?.number_i64()? != 1 or record.root().object_get("sequence")?.number_i64()? != sequence or record.root().object_len()? != 3 { lines.free(); return Result { is_ok: false, value: JsonDoc { handle: 0 }, error: 10 }; }; let event = record.root().object_get("event")?; eval_event_valid(event)?; events.array_push(document.copy(event)?)?; sequence = sequence + 1; if sequence > 4096 { lines.free(); return Result { is_ok: false, value: JsonDoc { handle: 0 }, error: 13 }; }; };
+    lines.free();
+    if sequence == 0 { return Result { is_ok: false, value: JsonDoc { handle: 0 }, error: 10 }; };
+    Result { is_ok: true, value: document, error: 0 };
+}
+
+def eval_check_keys(specification: &JsonDoc) -> Result<bool, i64> {
+    eval_nul_free_json(specification.root(), 0)?;
+    if specification.root().object_get("schema")?.number_i64()? != 1 { return eval_error(10); };
+    let mut index = 0;
+    while index < specification.root().object_len()? { let key = specification.root().object_key(index)?; if key.as_str() != "schema" and key.as_str() != "event_count" and key.as_str() != "types" and key.as_str() != "checks" and key.as_str() != "absent_strings" { return eval_error(10); }; index = index + 1; };
+    if not specification.root().object_has("event_count") or not specification.root().object_has("types") or not specification.root().object_has("checks") { return eval_error(10); };
+    Result { is_ok: true, value: true, error: 0 };
+}
+
+def eval_check_result(report: &JsonDoc, name: &str, passed: bool) -> Result<bool, i64> {
+    let check = report.new_object()?;
+    eval_put(report, check, "name", name)?;
+    check.object_set("passed", report.new_bool(passed)?)?;
+    report.root().object_get("checks")?.array_push(check)?;
+    if not passed { report.root().object_set("passed", report.new_bool(false)?)?; (); };
+    Result { is_ok: true, value: passed, error: 0 };
+}
+
+def eval_contains(value: JsonValue, needle: &str, depth: i64) -> Result<bool, i64> {
+    if depth > 48 { return eval_error(13); };
+    let kind = value.kind()?;
+    if kind == JSON_KIND_STRING() { let text = value.string_value()?; return Result { is_ok: true, value: str_contains(text.as_str(), needle), error: 0 }; };
+    let mut index = 0;
+    if kind == JSON_KIND_OBJECT() { while index < value.object_len()? { let key = value.object_key(index)?; if str_contains(key.as_str(), needle) or eval_contains(value.object_get(key.as_str())?, needle, depth + 1)? { return Result { is_ok: true, value: true, error: 0 }; }; index = index + 1; }; };
+    if kind == JSON_KIND_ARRAY() { while index < value.array_len()? { if eval_contains(value.array_get(index)?, needle, depth + 1)? { return Result { is_ok: true, value: true, error: 0 }; }; index = index + 1; }; };
+    Result { is_ok: true, value: false, error: 0 };
+}
+
+def eval_replay_text(input: &str, specification: &JsonDoc) -> Result<JsonDoc, i64> {
+    eval_check_keys(specification)?;
+    let recording = eval_recording(input)?;
+    let events = recording.root().object_get("events")?;
+    let report = json_doc_object_limits(1048576, 32768)?;
+    eval_int(&report, report.root(), "schema", 1)?;
+    eval_put(&report, report.root(), "mode", "offline-data-only")?;
+    report.root().object_set("passed", report.new_bool(true)?)?;
+    eval_int(&report, report.root(), "event_count", events.array_len()?)?;
+    report.root().object_set("checks", report.new_array()?)?;
+    eval_check_result(&report, "event_count", events.array_len()? == specification.root().object_get("event_count")?.number_i64()?)?;
+    let types = specification.root().object_get("types")?;
+    let mut correct = types.array_len()? == events.array_len()?;
+    let mut index = 0;
+    while index < types.array_len()? { let expected = types.array_get(index)?.string_value()?; if index < events.array_len()? { let actual = events.array_get(index)?.object_get("type")?.string_value()?; if actual.as_str() != expected.as_str() { correct = false; }; }; index = index + 1; };
+    eval_check_result(&report, "event_order", correct)?;
+    let checks = specification.root().object_get("checks")?;
+    if checks.array_len()? > 1024 { return Result { is_ok: false, value: JsonDoc { handle: 0 }, error: 13 }; };
+    index = 0;
+    while index < checks.array_len()? { let check = checks.array_get(index)?; if check.object_len()? != 3 { return Result { is_ok: false, value: JsonDoc { handle: 0 }, error: 10 }; }; let ordinal = check.object_get("event")?.number_i64()?; let path = check.object_get("path")?; if ordinal < 0 or ordinal >= events.array_len()? or path.array_len()? > 48 { return Result { is_ok: false, value: JsonDoc { handle: 0 }, error: 10 }; }; let mut value = events.array_get(ordinal)?; let mut cursor = 0; while cursor < path.array_len()? { let key = path.array_get(cursor)?.string_value()?; value = value.object_get(key.as_str())?; cursor = cursor + 1; }; let label = string_from_str("value-")?; label.push_i64(index)?; eval_check_result(&report, label.as_str(), eval_equal(value, check.object_get("equals")?, 0)?)?; index = index + 1; };
+    if specification.root().object_has("absent_strings") { let absent = specification.root().object_get("absent_strings")?; if absent.array_len()? > 128 { return Result { is_ok: false, value: JsonDoc { handle: 0 }, error: 13 }; }; index = 0; while index < absent.array_len()? { let secret = absent.array_get(index)?.string_value()?; if secret.len() == 0 { return Result { is_ok: false, value: JsonDoc { handle: 0 }, error: 10 }; }; let label = string_from_str("absent-")?; label.push_i64(index)?; eval_check_result(&report, label.as_str(), not eval_contains(recording.root(), secret.as_str(), 0)?)?; index = index + 1; }; };
+    Result { is_ok: true, value: report, error: 0 };
+}
+
+def eval_argument(index: i64) -> Result<String, i64> {
+    let size = arg_len(index)?;
+    let bytes = ffi_buffer_new(size + 1)?;
+    let count = arg_copy(index, bytes)?;
+    string_from_utf8(bytes, count);
+}
+
+def eval_main() -> Result<i64, i64> {
+    if args_len() == 1 { let argument = eval_argument(0)?; if argument.as_str() == "--version" { io_stdout_write("sgeval 0.1.0\n")?; return Result { is_ok: true, value: 0, error: 0 }; }; if argument.as_str() == "--help" { io_stdout_write("sgeval record INPUT.jsonl OUTPUT.jsonl [REDACTIONS.json]\nsgeval replay RECORDING.jsonl ASSERTIONS.json REPORT.json\nOffline replay never executes recorded tools.\n")?; return Result { is_ok: true, value: 0, error: 0 }; }; };
+    if args_len() < 3 or args_len() > 4 { return Result { is_ok: false, value: 2, error: 2 }; };
+    let command = eval_argument(0)?;
+    let input_path = eval_argument(1)?;
+    let input = eval_read(input_path.as_str())?;
+    if command.as_str() == "record" { let output_path = eval_argument(2)?; if file_exists(output_path.as_str()) { return Result { is_ok: false, value: 2, error: 12 }; }; let secrets = if args_len() == 4 { let path = eval_argument(3)?; let content = eval_read(path.as_str())?; json_parse(content.as_str())?; } else { json_parse("{\"secrets\":[]}")?; }; let output = eval_record_text(input.as_str(), &secrets)?; file_write_str(output_path.as_str(), output.as_str())?; io_stdout_write("{\"schema\":1,\"recorded\":true,\"redacted\":true}\n")?; return Result { is_ok: true, value: 0, error: 0 }; };
+    if command.as_str() == "replay" and args_len() == 4 { let checks_path = eval_argument(2)?; let report_path = eval_argument(3)?; if file_exists(report_path.as_str()) { return Result { is_ok: false, value: 2, error: 12 }; }; let text = eval_read(checks_path.as_str())?; let checks = json_parse_limits(text.as_str(), 1048576, 32768)?; let report = eval_replay_text(input.as_str(), &checks)?; let encoded = report.serialize_string()?; file_write_str(report_path.as_str(), encoded.as_str())?; io_stdout_write(encoded.as_str())?; io_stdout_write("\n")?; return Result { is_ok: true, value: if report.root().object_get("passed")?.bool_value()? { 0; } else { 1; }, error: 0 }; };
+    Result { is_ok: false, value: 2, error: 2 };
+}

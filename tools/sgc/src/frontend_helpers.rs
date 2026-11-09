@@ -27,12 +27,11 @@ pub(crate) fn frontend_probe_module_full(
     let async_functions = checker.async_function_names().clone();
     let type_env = checker.into_env();
     let hir = lower_ast(&parsed, &type_env);
+    let options = MirLowerOptions::new(false, true, async_functions)
+        .with_checked_parameter_borrows(&type_env);
     drop(type_env);
-    let _ = lower_hir_with_options(
-        &hir.items,
-        MirLowerOptions::new(false, true, async_functions),
-    )
-    .map_err(|e| format!("lower failed: {}", e))?;
+    let _ =
+        lower_hir_with_options(&hir.items, options).map_err(|e| format!("lower failed: {}", e))?;
 
     Ok((
         interface_fingerprint(source),

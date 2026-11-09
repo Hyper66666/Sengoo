@@ -1,0 +1,103 @@
+import sgagent;
+
+def expect(value: bool, label: &str) -> Result<bool, i64> {
+    if not value { println(label); return Result { is_ok: false, value: false, error: 99 }; };
+    Result { is_ok: true, value: true, error: 0 };
+}
+
+def fixture(policy: &AgentPolicy, maximum: i64, tokens: i64) -> Result<AgentKernel, i64> {
+    let target = json_parse("{\"connection\":\"fixture\",\"model\":\"fixture-model\",\"effort\":\"medium\"}")?;
+    let history = json_parse("{\"messages\":[{\"role\":\"user\",\"content\":\"Read, patch, test and report\"}]}")?;
+    let tools = json_parse("{\"tools\":[{\"name\":\"read\",\"description\":\"Read fixture\",\"read_only\":true,\"parameters\":{\"type\":\"object\",\"properties\":{\"path\":{\"type\":\"string\"}},\"required\":[\"path\"],\"additionalProperties\":false}},{\"name\":\"patch\",\"description\":\"Patch fixture\",\"parameters\":{\"type\":\"object\",\"properties\":{\"path\":{\"type\":\"string\"}},\"required\":[\"path\"],\"additionalProperties\":false}},{\"name\":\"test\",\"description\":\"Run verification\",\"process\":true,\"parameters\":{\"type\":\"object\",\"additionalProperties\":false}}]}")?;
+    agent_kernel_new("run-fixture", 1, &target, &history, &tools, policy, maximum, tokens);
+}
+
+def advance(kernel: &mut AgentKernel, ledger: &mut AgentMemoryLedger) -> Result<JsonDoc, i64> {
+    let mut steps = 0;
+    loop { let action = agent_kernel_next(kernel)?; if agent_json_optional_string(action.root(), "type").as_str() != "persist" { return Result { is_ok: true, value: action, error: 0 }; }; let receipt = agent_memory_commit(ledger, &action)?; agent_kernel_commit(kernel, &receipt)?; steps = steps + 1; if steps > 4 { return agent_document_error(99); }; };
+    agent_document_error(99);
+}
+
+def accept(kernel: &mut AgentKernel, request: &JsonDoc, payload: &str) -> Result<bool, i64> {
+    let result = json_parse(payload)?;
+    let id = agent_json_string(request.root(), "request_id")?;
+    agent_kernel_accept_model(kernel, id.as_str(), &result, true);
+}
+
+def flow() -> Result<bool, i64> {
+    let policy = policy_default();
+    let mut kernel = fixture(&policy, 0, 0)?;
+    let mut ledger = agent_memory_ledger("run-fixture", 1)?;
+    let initial = agent_kernel_next(&mut kernel)?;
+    expect(agent_json_string(initial.root(), "type")?.as_str() == "persist", "initial user intent must be committed before dispatch")?;
+    let initial_copy = agent_kernel_next(&mut kernel)?;
+    expect(initial.serialize_string()?.as_str() == initial_copy.serialize_string()?.as_str(), "polling an unacknowledged action is idempotent")?;
+    let stale = AgentCommitReceipt { run_id: agent_text("run-fixture"), fence: 2, revision: 1 };
+    expect(not agent_kernel_commit(&mut kernel, &stale).is_ok() and kernel.dirty, "stale fencing receipt cannot authorize I/O")?;
+    let mut action = advance(&mut kernel, &mut ledger)?;
+    expect(agent_json_string(action.root(), "type")?.as_str() == "model_request", "committed request becomes dispatchable")?;
+    expect(kernel.checkpoint.root().object_get("requests")?.number_i64()? == 1, "request accounting is reserved before dispatch")?;
+    accept(&mut kernel, &action, "{\"role\":\"assistant\",\"content\":\"Inspecting\",\"tool_calls\":[{\"id\":\"call-read\",\"name\":\"read\",\"arguments\":\"{\\\"path\\\":\\\"fixture.txt\\\"}\"}],\"input_tokens\":10,\"output_tokens\":2,\"usage_reported\":true}")?;
+    action = advance(&mut kernel, &mut ledger)?;
+    expect(agent_json_string(action.root(), "type")?.as_str() == "tool_request", "declared reads dispatch after durable claim")?;
+    expect(agent_flag(kernel.checkpoint.root(), "cleanup_required"), "claimed tools retain cleanup authority")?;
+    agent_kernel_tool_result(&mut kernel, "call-read", "before", false, true, true)?;
+    action = advance(&mut kernel, &mut ledger)?;
+    accept(&mut kernel, &action, "{\"role\":\"assistant\",\"content\":\"Patching\",\"tool_calls\":[{\"id\":\"call-patch\",\"name\":\"patch\",\"arguments\":\"{\\\"path\\\":\\\"fixture.txt\\\"}\"}],\"input_tokens\":12,\"output_tokens\":3,\"usage_reported\":true}")?;
+    action = advance(&mut kernel, &mut ledger)?;
+    expect(agent_json_string(action.root(), "type")?.as_str() == "approval", "manual writes require independent approval")?;
+    expect(not agent_kernel_approval(&mut kernel, "stale-call", true).is_ok(), "approval matches current stable tool ID")?;
+    agent_kernel_approval(&mut kernel, "call-patch", true)?;
+    action = advance(&mut kernel, &mut ledger)?;
+    expect(agent_json_string(action.root(), "type")?.as_str() == "tool_request", "approved edit still needs a durable claim")?;
+    agent_kernel_tool_result(&mut kernel, "call-patch", "after", false, true, true)?;
+    action = advance(&mut kernel, &mut ledger)?;
+    accept(&mut kernel, &action, "{\"role\":\"assistant\",\"content\":\"Testing\",\"tool_calls\":[{\"id\":\"call-test\",\"name\":\"test\",\"arguments\":\"{}\"}],\"input_tokens\":15,\"output_tokens\":3,\"usage_reported\":true}")?;
+    action = advance(&mut kernel, &mut ledger)?;
+    expect(agent_json_string(action.root(), "type")?.as_str() == "approval", "process tools require approval under manual policy")?;
+    agent_kernel_approval(&mut kernel, "call-test", true)?;
+    action = advance(&mut kernel, &mut ledger)?;
+    agent_kernel_tool_result(&mut kernel, "call-test", "PASS", false, true, true)?;
+    action = advance(&mut kernel, &mut ledger)?;
+    let final_id = agent_json_string(action.root(), "request_id")?;
+    let final_result = json_parse("{\"role\":\"assistant\",\"content\":\"Done\",\"tool_calls\":[],\"input_tokens\":16,\"output_tokens\":4,\"usage_reported\":true}")?;
+    agent_kernel_accept_model(&mut kernel, final_id.as_str(), &final_result, true)?;
+    expect(not agent_kernel_accept_model(&mut kernel, final_id.as_str(), &final_result, true)?, "a repeated completion ID cannot append history twice")?;
+    action = advance(&mut kernel, &mut ledger)?;
+    expect(agent_json_string(action.root(), "type")?.as_str() == "complete" and agent_json_string(action.root(), "content")?.as_str() == "Done", "complete action follows committed final checkpoint")?;
+    expect(kernel.checkpoint.root().object_get("requests")?.number_i64()? == 4 and kernel.checkpoint.root().object_get("tokens")?.number_i64()? == 65, "all model calls and usage share cumulative accounting")?;
+    expect(kernel.checkpoint.root().object_get("ledger")?.array_len()? == 3, "exactly three completed tools are recorded")?;
+    let snapshot = agent_memory_snapshot(&ledger)?;
+    let mut restored = agent_kernel_resume(&snapshot, "run-fixture", 2)?;
+    let first = agent_kernel_next(&mut restored)?;
+    expect(agent_json_string(first.root(), "type")?.as_str() == "persist", "a higher fence is committed before resumed dispatch")?;
+    expect(restored.checkpoint.root().object_get("requests")?.number_i64()? == 4, "resume cannot reset cumulative accounting");
+}
+
+def guards() -> Result<bool, i64> {
+    let mut policy = policy_default();
+    policy.plan = true;
+    let mut kernel = fixture(&policy, 0, 0)?;
+    let mut ledger = agent_memory_ledger("run-fixture", 1)?;
+    let mut action = advance(&mut kernel, &mut ledger)?;
+    accept(&mut kernel, &action, "{\"role\":\"assistant\",\"content\":\"Unsafe write\",\"tool_calls\":[{\"id\":\"blocked\",\"name\":\"patch\",\"arguments\":\"{\\\"path\\\":\\\"fixture.txt\\\"}\"}],\"input_tokens\":1,\"output_tokens\":1}")?;
+    action = advance(&mut kernel, &mut ledger)?;
+    expect(agent_json_string(action.root(), "type")?.as_str() == "model_request", "Plan denied edit becomes a tool error without dispatch or approval")?;
+    agent_kernel_pause(&mut kernel, "cancelled")?;
+    action = advance(&mut kernel, &mut ledger)?;
+    expect(agent_json_string(action.root(), "type")?.as_str() == "paused" and not agent_policy_read(&kernel.checkpoint)?.plan, "cancellation ends the Plan overlay")?;
+    Result { is_ok: true, value: true, error: 0 };
+}
+
+def tests() -> Result<bool, i64> {
+    flow()?;
+    guards()?;
+    println("Agent kernel: committed read/patch/test, manual approval, exact IDs/accounting, fencing and Plan cancellation passed");
+    Result { is_ok: true, value: true, error: 0 };
+}
+
+def main() -> i64 {
+    let result = tests();
+    if not result.is_ok() { println(result.error); return 1; };
+    0;
+}

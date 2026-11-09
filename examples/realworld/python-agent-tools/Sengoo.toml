@@ -1,0 +1,9 @@
+[package]
+name = "python-agent-tools"
+version = "0.1.0"
+edition = "2026"
+description = "Typed Python wheel for Sengoo JSON-schema Agent tool validation."
+[lib]
+path = "src/lib.sg"
+[dependencies]
+sgschema = { path = "../../../packages/sgschema" }

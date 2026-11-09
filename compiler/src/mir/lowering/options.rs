@@ -62,6 +62,12 @@ pub struct MirLowerOptions {
     pub lazy_generic_mono: bool,
     pub async_functions: Rc<RefCell<HashSet<String>>>,
     pub(crate) generic_function_templates: Rc<HashMap<String, hir::HIRFunction>>,
+    /// Parameters proven to preserve the caller's established handle owner.
+    pub(crate) borrowed_legacy_params: Rc<HashMap<String, Vec<bool>>>,
+    pub(crate) checked_parameter_borrows: Option<Rc<HashMap<String, Vec<bool>>>>,
+    pub(crate) projected_legacy_params: Rc<HashMap<String, Vec<bool>>>,
+    pub(crate) checked_projected_params: Option<Rc<HashMap<String, Vec<bool>>>>,
+    pub(crate) native_borrow_observers: Rc<HashSet<String>>,
     pub(crate) enum_defs: Rc<EnumDefMap>,
     pub(crate) assert_callsite: Rc<AssertCallsiteContext>,
     pub(crate) coverage: Option<CoverageContext>,
@@ -88,6 +94,11 @@ impl Default for MirLowerOptions {
             lazy_generic_mono: true,
             async_functions: Rc::new(RefCell::new(HashSet::new())),
             generic_function_templates: Rc::new(HashMap::new()),
+            borrowed_legacy_params: Rc::new(HashMap::new()),
+            checked_parameter_borrows: None,
+            projected_legacy_params: Rc::new(HashMap::new()),
+            checked_projected_params: None,
+            native_borrow_observers: Rc::new(HashSet::new()),
             enum_defs: Rc::new(EnumDefMap::new()),
             assert_callsite: Rc::new(AssertCallsiteContext::default()),
             coverage: None,
@@ -118,6 +129,11 @@ impl MirLowerOptions {
             lazy_generic_mono,
             async_functions: Rc::new(RefCell::new(async_functions)),
             generic_function_templates: Rc::new(HashMap::new()),
+            borrowed_legacy_params: Rc::new(HashMap::new()),
+            checked_parameter_borrows: None,
+            projected_legacy_params: Rc::new(HashMap::new()),
+            checked_projected_params: None,
+            native_borrow_observers: Rc::new(HashSet::new()),
             enum_defs: Rc::new(EnumDefMap::new()),
             assert_callsite: Rc::new(AssertCallsiteContext::default()),
             coverage: None,
@@ -151,6 +167,15 @@ impl MirLowerOptions {
 
     pub fn with_async_functions(mut self, async_functions: HashSet<String>) -> Self {
         self.async_functions = Rc::new(RefCell::new(async_functions));
+        self
+    }
+
+    /// Pin the parameter contract used by semantic borrow checking. A direct
+    /// HIR embedder which omits this retains conservative transfer semantics.
+    pub fn with_checked_parameter_borrows(mut self, env: &crate::typeck::TypeEnv) -> Self {
+        self.checked_parameter_borrows = Some(env.borrowed_legacy_params.clone());
+        self.checked_projected_params = Some(env.projected_legacy_params.clone());
+        self.native_borrow_observers = env.native_borrow_observers.clone();
         self
     }
 

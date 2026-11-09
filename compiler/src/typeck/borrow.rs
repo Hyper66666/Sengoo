@@ -114,6 +114,7 @@ pub enum BorrowError {
 
 /// Borrow checker.
 pub struct BorrowChecker {
+    borrowed_output_context: bool,
     /// Type environment snapshot used by this pass.
     _env: TypeEnv,
     /// Active borrows for current scope.
@@ -149,6 +150,7 @@ impl BorrowChecker {
     pub fn new(env: TypeEnv) -> Self {
         Self {
             _env: env,
+            borrowed_output_context: false,
             borrows: HashMap::new(),
             borrow_stack: Vec::new(),
             lifetime_counter: 0,
@@ -364,9 +366,27 @@ impl BorrowChecker {
             }
             ExprKind::Call { func, args } => {
                 self.check_expr(func);
-                for arg in args {
+                let function = Self::expr_move_path(func)
+                    .filter(|path| path.fields.is_empty())
+                    .filter(|path| {
+                        self._env.lookup(&path.root).is_some_and(|symbol| {
+                            matches!(symbol.kind, crate::typeck::env::SymbolKind::Function { .. })
+                        })
+                    })
+                    .map(|path| path.root);
+                for (index, arg) in args.iter().enumerate() {
+                    let observes = function
+                        .as_deref()
+                        .is_some_and(|name| self.parameter_observed(name, index));
+                    let previous = self.borrowed_output_context;
+                    self.borrowed_output_context = function.as_deref().is_some_and(|name| {
+                        self.parameter_output_noescape(name, index, args.len())
+                    });
                     self.check_expr(arg);
-                    self.maybe_move_string_arg(arg);
+                    self.borrowed_output_context = previous;
+                    if !observes {
+                        self.maybe_move_string_arg(arg);
+                    }
                 }
             }
             ExprKind::MethodCall {
@@ -390,9 +410,20 @@ impl BorrowChecker {
                 self.check_expr(receiver);
                 self.check_owned_string_invalidation(receiver, &method.name);
                 self.check_vec_borrow_invalidation(receiver, &method.name);
-                for arg in args {
+                let target = self.legacy_method_target(receiver, &method.name);
+                for (index, arg) in args.iter().enumerate() {
+                    let observes = target
+                        .as_deref()
+                        .is_some_and(|name| self.parameter_observed(name, index + 1));
+                    let previous = self.borrowed_output_context;
+                    self.borrowed_output_context = target.as_deref().is_some_and(|name| {
+                        self.parameter_output_noescape(name, index + 1, args.len() + 1)
+                    });
                     self.check_expr(arg);
-                    self.maybe_move_string_arg(arg);
+                    self.borrowed_output_context = previous;
+                    if !observes {
+                        self.maybe_move_string_arg(arg);
+                    }
                 }
             }
             ExprKind::Block(block) => self.check_block(block),
@@ -513,9 +544,9 @@ impl BorrowChecker {
                 self.check_expr(body);
                 self.maybe_move_string_arg(body);
             }
-            ExprKind::Lambda { body, .. }
-            | ExprKind::Await(body)
-            | ExprKind::Paren(body) => self.check_expr(body),
+            ExprKind::Lambda { body, .. } | ExprKind::Await(body) | ExprKind::Paren(body) => {
+                self.check_expr(body)
+            }
             ExprKind::TryBlock(block) => self.check_block(block),
             ExprKind::Cast { expr, .. } | ExprKind::Is { expr, .. } => self.check_expr(expr),
             ExprKind::Return(value) => {
@@ -1223,6 +1254,72 @@ impl BorrowChecker {
                 self.track_borrow_alias(name, expr);
             }
             _ => {}
+        }
+    }
+
+    fn parameter_observed(&self, function: &str, index: usize) -> bool {
+        let policy = if self.borrowed_output_context {
+            &self._env.projected_legacy_params
+        } else {
+            &self._env.borrowed_legacy_params
+        };
+        policy
+            .get(function)
+            .and_then(|params| params.get(index))
+            .copied()
+            .unwrap_or(false)
+    }
+
+    fn parameter_output_noescape(&self, function: &str, index: usize, arity: usize) -> bool {
+        self.parameter_observed(function, index)
+            || self._env.native_borrow_observers.contains(function)
+                && crate::mir::native_argument_noescape(function, index, arity)
+    }
+
+    fn legacy_method_target(&self, receiver: &Expr, method: &str) -> Option<String> {
+        let ty = self.observed_receiver_type(receiver)?;
+        let mut ty = &ty;
+        while let TyKind::Ref(_, elem) | TyKind::Ptr(elem) = &ty.kind {
+            ty = elem;
+        }
+        let TyKind::Adt { name, .. } = &ty.kind else {
+            return None;
+        };
+        Some(format!("{name}_{method}"))
+    }
+
+    fn observed_receiver_type(&self, receiver: &Expr) -> Option<Ty> {
+        if let Some(path) = Self::expr_move_path(receiver) {
+            if let Some(ty) = self.move_path_ty(&path) {
+                return Some(ty);
+            }
+        }
+        if let Some(ty) = self._env.resolved_method_return_type(receiver.span) {
+            return Some(ty.clone());
+        }
+        if let Some(ty) = self._env.resolved_call_return_type(receiver.span.lo) {
+            return Some(ty.clone());
+        }
+        match &receiver.kind {
+            ExprKind::Call { func, .. } => {
+                let path = Self::expr_move_path(func)?;
+                let symbol = self._env.lookup(&path.root)?;
+                let TyKind::Fn { ret, .. } = &symbol.get_ty()?.kind else {
+                    return None;
+                };
+                Some(ret.as_ref().clone())
+            }
+            ExprKind::Try(value) => {
+                let ty = self.observed_receiver_type(value)?;
+                let TyKind::Adt { name, args, .. } = &ty.kind else {
+                    return None;
+                };
+                matches!(name.as_str(), "Result" | "Option")
+                    .then(|| args.first().cloned())
+                    .flatten()
+            }
+            ExprKind::Paren(value) => self.observed_receiver_type(value),
+            _ => None,
         }
     }
 

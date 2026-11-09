@@ -1,0 +1,287 @@
+import sgagent;
+
+import sgsqlite;
+
+import std::args;
+
+import std::file;
+
+import std::ffi;
+
+import std::time;
+
+extern "C" {
+    fn sgsqlite_live_connections() -> i64;
+    fn sgsqlite_live_statements() -> i64;
+    fn sgsqlite_live_transactions() -> i64;
+    fn sengoo_string_live_handle_count() -> i64;
+    fn sengoo_buffer_live_handle_count() -> i64;
+}
+
+def ledger_expect(value: bool, label: &str) -> Result<bool, i64> {
+    if not value { println(label); return agent_condition(false, 99); };
+    agent_condition(true, 0);
+}
+
+def ledger_arg(index: i64) -> Result<String, i64> {
+    let bytes = ffi_buffer_new(arg_len(index)?)?;
+    let copied = arg_copy(index, bytes)?;
+    string_from_utf8(bytes, copied);
+}
+
+def ledger_kernel(run: &String, fence: i64) -> Result<AgentKernel, i64> {
+    let target = json_parse("{\"connection\":\"fixture\",\"model\":\"fixture-model\"}")?;
+    let history = json_parse("{\"messages\":[]}")?;
+    let tools = json_parse("{\"tools\":[{\"name\":\"write_fixture\",\"parameters\":{\"type\":\"object\"},\"read_only\":false,\"process\":true}]}")?;
+    let mut policy = policy_default();
+    policy.full_access = true;
+    agent_kernel_new(run.as_str(), fence, &target, &history, &tools, &policy, 0, 0);
+}
+
+def ledger_commit(store: &mut AgentSqliteStore, kernel: &mut AgentKernel) -> Result<bool, i64> {
+    let action = agent_kernel_next(kernel)?;
+    let receipt = agent_sqlite_commit(store, &action)?;
+    agent_kernel_commit(kernel, &receipt);
+}
+
+def ledger_invalid_action(store: &mut AgentSqliteStore, original: &JsonDoc, choice: i64) -> Result<bool, i64> {
+    let changed = agent_copy_document(original)?;
+    let checkpoint = changed.root().object_get("checkpoint")?;
+    if choice == 0 { agent_put_string(&changed, checkpoint, "reason", "conflict")?; (); };
+    if choice == 1 or choice == 5 { agent_put_i64(&changed, changed.root(), "revision", 3)?; agent_put_string(&changed, changed.root(), "id", "ledger-中文😀:commit:3")?; agent_put_i64(&changed, checkpoint, "revision", 3)?; (); };
+    if choice == 2 { agent_put_i64(&changed, changed.root(), "schema", 2)?; (); };
+    if choice == 3 { agent_put_i64(&changed, checkpoint, "fence", 9)?; (); };
+    if choice == 4 { agent_put_string(&changed, changed.root(), "id", "another:commit:1")?; (); };
+    if choice == 5 { agent_put_i64(&changed, checkpoint, "tokens", 0)?; (); };
+    if choice == 6 or choice == 7 { let nul = json_parse("{\"type\":\"persist\\u0000suffix\",\"run_id\\u0000suffix\":\"hidden\"}")?; if choice == 6 { changed.root().object_set("type", changed.copy(nul.root().object_get("type")?)?)?; (); }; if choice == 7 { changed.root().object_set("nested", changed.copy(nul.root())?)?; (); }; };
+    ledger_expect(agent_sqlite_commit(store, &changed).error == if choice >= 6 { 2; } else { 12; }, "conflicting/skipped/identity/schema/counter-reset/NUL action rejected");
+}
+
+def ledger_compare_snapshot(store: &AgentSqliteStore, action: &JsonDoc) -> Result<bool, i64> {
+    let loaded = agent_sqlite_load(store)?;
+    let original = agent_persist_snapshot(action)?;
+    ledger_expect(loaded.serialize_string()?.as_str() == original.serialize_string()?.as_str(), "load exact snapshot");
+}
+
+def ledger_basic(path: &String) -> Result<bool, i64> {
+    let run = agent_text("ledger-中文😀");
+    let mut store = agent_sqlite_open(path, &run, 4194304)?;
+    ledger_expect(store.fence == 1 and agent_sqlite_load(&store).error == 5, "new store starts with no checkpoint")?;
+    ledger_expect(not agent_sqlite_open(path, &run, 4194304).is_ok(), "same-process second execution lock refused")?;
+    let mut kernel = ledger_kernel(&run, store.fence)?;
+    let first = agent_kernel_next(&mut kernel)?;
+    let receipt = agent_sqlite_commit(&mut store, &first)?;
+    agent_kernel_commit(&mut kernel, &receipt)?;
+    ledger_expect(agent_sqlite_commit(&mut store, &first)?.revision == 1, "same bytes duplicate idempotent")?;
+    let mut invalid_index = 0;
+    while invalid_index < 8 { if invalid_index != 5 { ledger_invalid_action(&mut store, &first, invalid_index)?; (); }; invalid_index = invalid_index + 1; };
+    ledger_compare_snapshot(&store, &first)?;
+    store.database.exec("CREATE TRIGGER fail_receipt BEFORE UPDATE ON sgagent_receipts BEGIN SELECT RAISE(ABORT,'synthetic receipt failure'); END")?;
+    agent_put_i64(&kernel.checkpoint, kernel.checkpoint.root(), "requests", 2)?;
+    agent_put_i64(&kernel.checkpoint, kernel.checkpoint.root(), "tokens", 17)?;
+    agent_kernel_pause(&mut kernel, "fixture pause")?;
+    let second = agent_kernel_next(&mut kernel)?;
+    ledger_expect(not agent_sqlite_commit(&mut store, &second).is_ok(), "injected receipt failure returned error")?;
+    ledger_expect(agent_sqlite_load(&store)?.root().object_get("revision")?.number_i64()? == 1, "failed transaction did not save head")?;
+    store.database.exec("DROP TRIGGER fail_receipt")?;
+    let second_receipt = agent_sqlite_commit(&mut store, &second)?;
+    agent_kernel_commit(&mut kernel, &second_receipt)?;
+    ledger_expect(second_receipt.revision == 2 and agent_sqlite_commit(&mut store, &first).error == 12, "stale revision refused")?;
+    ledger_invalid_action(&mut store, &second, 5)?;
+    store.close()?;
+    ledger_expect(agent_sqlite_load(&store).error == 12, "closed owner cannot read as executor")?;
+    agent_condition(true, 0);
+}
+
+def ledger_reopen(path: &String) -> Result<bool, i64> {
+    let run = agent_text("ledger-中文😀");
+    let mut reopened = agent_sqlite_open(path, &run, 4194304)?;
+    ledger_expect(reopened.fence == 2, "reopen increments fence")?;
+    let saved = agent_sqlite_load(&reopened)?;
+    ledger_expect(saved.root().object_get("tokens")?.number_i64()? == 17 and saved.root().object_get("revision")?.number_i64()? == 2, "reopen preserves budget and revision")?;
+    let mut old_kernel = ledger_kernel(&run, 1)?;
+    let old_action = agent_kernel_next(&mut old_kernel)?;
+    ledger_expect(agent_sqlite_commit(&mut reopened, &old_action).error == 12, "delayed old fence refused")?;
+    let mut restored = agent_kernel_resume(&saved, run.as_str(), reopened.fence)?;
+    ledger_commit(&mut reopened, &mut restored)?;
+    ledger_expect(agent_sqlite_load(&reopened)?.root().object_get("revision")?.number_i64()? == 3, "handoff must commit next revision")?;
+    reopened.database.exec("UPDATE sgagent_heads SET fence=fence+1 WHERE run_id='ledger-中文😀'")?;
+    agent_kernel_pause(&mut restored, "stale writer")?;
+    let delayed = agent_kernel_next(&mut restored)?;
+    ledger_expect(agent_sqlite_commit(&mut reopened, &delayed).error == 12 and agent_sqlite_load(&reopened).error == 12, "durable fence checked per transaction")?;
+    agent_condition(true, 0);
+}
+
+def ledger_first_receipt_failure(path: &String) -> Result<bool, i64> {
+    let run = agent_text("first-receipt-failure");
+    let mut store = agent_sqlite_open(path, &run, 4096)?;
+    let mut kernel = ledger_kernel(&run, store.fence)?;
+    store.database.exec("CREATE TRIGGER fail_first_receipt BEFORE INSERT ON sgagent_receipts WHEN NEW.run_id='first-receipt-failure' BEGIN SELECT RAISE(ABORT,'synthetic initial receipt failure'); END")?;
+    let action = agent_kernel_next(&mut kernel)?;
+    ledger_expect(not agent_sqlite_commit(&mut store, &action).is_ok() and agent_sqlite_load(&store).error == 5, "failed initial receipt rolls back first head write")?;
+    store.database.exec("DROP TRIGGER fail_first_receipt")?;
+    let receipt = agent_sqlite_commit(&mut store, &action)?;
+    agent_kernel_commit(&mut kernel, &receipt)?;
+    ledger_expect(receipt.revision == 1, "failed initial commit can retry same revision")?;
+    store.close();
+}
+
+def ledger_corruption(path: &String) -> Result<bool, i64> {
+    let run = agent_text("corruption");
+    let mut store = agent_sqlite_open(path, &run, 4096)?;
+    let mut kernel = ledger_kernel(&run, store.fence)?;
+    ledger_commit(&mut store, &mut kernel)?;
+    store.database.exec("UPDATE sgagent_heads SET snapshot='{}' WHERE run_id='corruption'")?;
+    ledger_expect(agent_sqlite_load(&store).error == 12, "digest corruption fails closed")?;
+    agent_condition(true, 0);
+}
+
+def ledger_receipt_corruption(path: &String) -> Result<bool, i64> {
+    let run = agent_text("receipt-corruption");
+    let mut store = agent_sqlite_open(path, &run, 4096)?;
+    let mut kernel = ledger_kernel(&run, store.fence)?;
+    ledger_commit(&mut store, &mut kernel)?;
+    store.database.exec("UPDATE sgagent_receipts SET fence=1.5 WHERE run_id='receipt-corruption'")?;
+    ledger_expect(agent_sqlite_load(&store).error == 12, "receipt integer identity cannot be approximated from real");
+}
+
+def ledger_bounds(path: &String) -> Result<bool, i64> {
+    let run = agent_text("capacity");
+    let mut store = agent_sqlite_open(path, &run, 128)?;
+    let mut kernel = ledger_kernel(&run, store.fence)?;
+    let action = agent_kernel_next(&mut kernel)?;
+    ledger_expect(agent_sqlite_commit(&mut store, &action).error == 13 and agent_sqlite_load(&store).error == 5, "oversize snapshot refused without partial commit")?;
+    let invalid = json_parse("{\"path\":\"prefix\\u0000suffix\"}")?;
+    let nul = agent_json_string(invalid.root(), "path")?;
+    ledger_expect(agent_sqlite_open(&nul, &run, 1024).error == 2 and agent_sqlite_open(path, &nul, 1024).error == 2, "owned path and run reject NUL")?;
+    agent_condition(true, 0);
+}
+
+def ledger_version(path: &String) -> Result<bool, i64> {
+    let run = agent_text("version");
+    let mut store = agent_sqlite_open(path, &run, 4096)?;
+    store.close()?;
+    store.database.exec("UPDATE sgagent_meta SET schema_version=2")?;
+    ledger_expect(agent_sqlite_open(path, &run, 4096).error == 12, "newer metadata version refused")?;
+    store.database.exec("UPDATE sgagent_meta SET schema_version=1")?;
+    agent_condition(true, 0);
+}
+
+def ledger_unknown_claim(path: &String, hold: bool, ready: &String) -> Result<bool, i64> {
+    let run = agent_text("unknown-tool");
+    let mut store = agent_sqlite_open(path, &run, 4194304)?;
+    let mut kernel = ledger_kernel(&run, store.fence)?;
+    ledger_commit(&mut store, &mut kernel)?;
+    let request_commit = agent_kernel_next(&mut kernel)?;
+    let receipt = agent_sqlite_commit(&mut store, &request_commit)?;
+    agent_kernel_commit(&mut kernel, &receipt)?;
+    let request = agent_kernel_next(&mut kernel)?;
+    let id = agent_json_string(request.root(), "request_id")?;
+    let response = json_parse("{\"role\":\"assistant\",\"content\":\"\",\"input_tokens\":2,\"output_tokens\":1,\"usage_reported\":true,\"tool_calls\":[{\"id\":\"side-effect-1\",\"name\":\"write_fixture\",\"arguments\":\"{}\"}]}")?;
+    agent_kernel_accept_model(&mut kernel, id.as_str(), &response, true)?;
+    ledger_commit(&mut store, &mut kernel)?;
+    let claim = agent_kernel_next(&mut kernel)?;
+    let claim_receipt = agent_sqlite_commit(&mut store, &claim)?;
+    agent_kernel_commit(&mut kernel, &claim_receipt)?;
+    let dispatched = agent_kernel_next(&mut kernel)?;
+    ledger_expect(agent_json_string(dispatched.root(), "type")?.as_str() == "tool_request", "claim precedes side effect")?;
+    ledger_expect(store.close().error == 12, "pending cleanup cannot close execution lock")?;
+    if hold { file_write_str(ready.as_str(), "ready")?; loop { time_sleep_ms(50); }; };
+    agent_condition(true, 0);
+}
+
+def ledger_recover_unknown(path: &String) -> Result<bool, i64> {
+    let run = agent_text("unknown-tool");
+    ledger_expect(agent_sqlite_open(path, &run, 4194304).error == 12, "OS unlock alone cannot authorize takeover")?;
+    let mut store = agent_sqlite_open_after_quiescence(path, &run, 4194304, true)?;
+    let saved = agent_sqlite_load(&store)?;
+    let mut restored = agent_kernel_resume(&saved, run.as_str(), store.fence)?;
+    let action = agent_kernel_next(&mut restored)?;
+    let checkpoint = agent_persist_snapshot(&action)?;
+    ledger_expect(checkpoint.root().object_get("phase")?.number_i64()? == 10 and agent_json_string(checkpoint.root(), "reason")?.as_str() == "tool_outcome_unknown", "claimed unknown effect restores paused")?;
+    let receipt = agent_sqlite_commit(&mut store, &action)?;
+    agent_kernel_commit(&mut restored, &receipt)?;
+    let next = agent_kernel_next(&mut restored)?;
+    ledger_expect(agent_json_string(next.root(), "type")?.as_str() == "paused", "unknown effect never re-dispatched")?;
+    agent_condition(true, 0);
+}
+
+def ledger_confirm_unknown(path: &String) -> Result<bool, i64> {
+    let run = agent_text("unknown-tool");
+    let mut store = agent_sqlite_open_after_quiescence(path, &run, 4194304, true)?;
+    let saved = agent_sqlite_load(&store)?;
+    let mut kernel = agent_kernel_resume(&saved, run.as_str(), store.fence)?;
+    ledger_commit(&mut store, &mut kernel)?;
+    ledger_expect(agent_kernel_confirm_quiescence(&mut kernel, run.as_str(), store.fence, false, "unverified fixture proof").error == 12, "quiescence proof cannot be absent")?;
+    agent_kernel_confirm_quiescence(&mut kernel, run.as_str(), store.fence, true, "owned fixture holder was reaped; no tool process was launched")?;
+    ledger_commit(&mut store, &mut kernel)?;
+    let paused = agent_kernel_next(&mut kernel)?;
+    ledger_expect(agent_json_string(paused.root(), "type")?.as_str() == "paused" and not paused.root().object_get("cleanup_required")?.bool_value()?, "confirmed cleanup still paused until outcome resolution")?;
+    store.close();
+}
+
+def ledger_resolve_unknown(path: &String) -> Result<bool, i64> {
+    let run = agent_text("unknown-tool");
+    let mut store = agent_sqlite_open(path, &run, 4194304)?;
+    let saved = agent_sqlite_load(&store)?;
+    let mut kernel = agent_kernel_resume(&saved, run.as_str(), store.fence)?;
+    ledger_commit(&mut store, &mut kernel)?;
+    ledger_expect(agent_json_string(kernel.checkpoint.root(), "unresolved_call")?.as_str() == "side-effect-1", "unresolved tool identity survives confirmation and reopening")?;
+    ledger_expect(agent_kernel_resolve_tool(&mut kernel, run.as_str(), store.fence, "wrong-call", "verified result", false, true, true, "fixture evidence").error == 12, "proof cannot resolve a different tool")?;
+    agent_kernel_resolve_tool(&mut kernel, run.as_str(), store.fence, "side-effect-1", "verified no-side-effect fixture result", false, true, true, "fixture tool was never launched; host inspected own disposable workspace")?;
+    ledger_commit(&mut store, &mut kernel)?;
+    let after = agent_sqlite_load(&store)?;
+    ledger_expect(agent_json_string(after.root(), "unresolved_call")?.len() == 0 and not after.root().object_get("cleanup_required")?.bool_value()? and after.root().object_get("tokens")?.number_i64()? == 3, "resolution preserves accounting and clears exact unknown claim")?;
+    store.close();
+}
+
+def ledger_resource_round(path: &String, index: i64) -> Result<bool, i64> {
+    let run = agent_text("resources-");
+    run.push_i64(index)?;
+    let mut store = agent_sqlite_open(path, &run, 4096)?;
+    ledger_expect(not agent_sqlite_open(path, &run, 4096).is_ok() and agent_sqlite_load(&store).error == 5, "failed duplicate construction and empty load retain no resources")?;
+    let mut kernel = ledger_kernel(&run, store.fence)?;
+    let invalid_action = agent_kernel_next(&mut kernel)?;
+    agent_put_i64(&invalid_action, invalid_action.root(), "schema", 9)?;
+    ledger_expect(agent_sqlite_commit(&mut store, &invalid_action).error == 12, "failed action releases temporary validation state")?;
+    ledger_commit(&mut store, &mut kernel)?;
+    let saved = agent_sqlite_load(&store)?;
+    store.close()?;
+    agent_condition(saved.root().object_get("revision")?.number_i64()? == 1, 99);
+}
+
+def ledger_suite(path: &String) -> Result<bool, i64> {
+    ledger_basic(path)?;
+    ledger_reopen(path)?;
+    ledger_first_receipt_failure(path)?;
+    ledger_corruption(path)?;
+    ledger_receipt_corruption(path)?;
+    ledger_bounds(path)?;
+    ledger_version(path)?;
+    let ready = string_new();
+    ledger_unknown_claim(path, false, &ready)?;
+    ledger_recover_unknown(path)?;
+    ledger_confirm_unknown(path)?;
+    ledger_resolve_unknown(path)?;
+    let documents = sengoo_json_bounded_live_documents();
+    let bytes = sengoo_json_bounded_reserved_bytes();
+    let locks = sengoo_file_lock_live_count();
+    let strings = sengoo_string_live_handle_count();
+    let buffers = sengoo_buffer_live_handle_count();
+    let mut index = 0;
+    while index < 20 { ledger_resource_round(path, index)?; if sengoo_string_live_handle_count() != strings or sengoo_buffer_live_handle_count() != buffers or sgsqlite_live_connections() != 0 or sgsqlite_live_statements() != 0 or sgsqlite_live_transactions() != 0 or sengoo_file_lock_live_count() != locks or sengoo_json_bounded_live_documents() != documents or sengoo_json_bounded_reserved_bytes() != bytes { println("resource diagnostic: strings expected/actual, buffers expected/actual, DB/stmt/tx, locks expected/actual, JSON expected/actual, reserved expected/actual"); println(strings); println(sengoo_string_live_handle_count()); println(buffers); println(sengoo_buffer_live_handle_count()); println(sgsqlite_live_connections()); println(sgsqlite_live_statements()); println(sgsqlite_live_transactions()); println(locks); println(sengoo_file_lock_live_count()); println(documents); println(sengoo_json_bounded_live_documents()); println(bytes); println(sengoo_json_bounded_reserved_bytes()); return agent_condition(false, 99); }; index = index + 1; };
+    println("SQLite atomic ledger, revisions, fencing, OS locks, budgets, corruption and unknown-effect recovery passed");
+    agent_condition(true, 0);
+}
+
+def main() -> i64 {
+    if args_len() < 2 { return 2; };
+    let mode = ledger_arg(0).unwrap_or(string_new());
+    let path = ledger_arg(1).unwrap_or(string_new());
+    if mode.as_str() == "suite" { let result = ledger_suite(&path); if not result.is_ok() { println(result.error); return result.error; }; return 0; };
+    if mode.as_str() == "hold" { let ready = ledger_arg(2).unwrap_or(string_new()); let result = ledger_unknown_claim(&path, true, &ready); return if result.is_ok() { 0; } else { result.error; }; };
+    if mode.as_str() == "recover" { let result = ledger_recover_unknown(&path); return if result.is_ok() { 0; } else { result.error; }; };
+    if mode.as_str() == "other" { let run = agent_text("independent-run"); let opened = agent_sqlite_open(&path, &run, 4096); return if opened.is_ok() { 0; } else { opened.error; }; };
+    if mode.as_str() == "probe" { let run = agent_text("unknown-tool"); let opened = agent_sqlite_open(&path, &run, 4194304); return if opened.is_ok() { 0; } else { opened.error; }; };
+    2;
+}

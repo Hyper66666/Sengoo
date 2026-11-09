@@ -18,6 +18,25 @@ define their exact supported API. This set does not add GUI, a hosted registry,
 an ORM, a connection pool, asynchronous SQLite, shell completion, YAML or a
 general serialization derive mechanism.
 
+The Agent development preview adds four experimental `0.1.0` packages:
+`sgllm` (shared native model protocols/HTTP/SSE), `sgmcp` (stdio client/server),
+`sgschema` (explicit parsed tool-schema subset), and `sgagent` (durable action
+kernel and host policies). Its five-package registry also carries the existing
+`sgsqlite`, required by the Agent ledger. Their platform evidence is
+currently Windows x64; they do not inherit the foundation set's planned host
+matrix. See [Agent SDK quickstart](agent-sdk-quickstart.md) and the
+[implementation ledger](agent-ecosystem-progress.md) for exact APIs and gates.
+Use the explicit `--profile agents` on both ecosystem build and verify commands
+to produce the independent preview artifact set. The default foundation profile
+and its three-package bundle remain compatible.
+
+The server protocol core and MCP client are pollable. The stdio adapter uses
+the generic bounded `StdWriter` for Windows local byte pipes and keeps polling
+input and cancellation under output backpressure. Other output endpoints and
+platform backends remain explicitly unsupported by this adapter. The CLI consumes
+shared model/MCP implementations; policy and standalone Agent gates are recorded
+individually.
+
 Build the offline artifacts from a verified candidate:
 
 ```text

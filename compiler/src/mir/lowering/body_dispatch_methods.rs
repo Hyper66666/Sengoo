@@ -49,6 +49,10 @@ impl<'a> LoweringContext<'a> {
             if self.current_block_is_terminated() {
                 return;
             }
+            if !add_return {
+                self.lower_discarded_expr(expr);
+                return;
+            }
             let result_local = self.lower_expr(expr);
             if add_return {
                 // Only add return if the current block doesn't already have a
@@ -106,10 +110,34 @@ impl<'a> LoweringContext<'a> {
                 is_mut,
             } => lower_let_stmt(self, name, *symbol, ty, value.as_ref(), *is_mut),
             HIRStmt::Expr(expr) => {
-                self.lower_expr(expr);
+                self.lower_discarded_expr(expr);
             }
             HIRStmt::Item => {}
         }
+    }
+
+    fn lower_discarded_expr(&mut self, expr: &HIRExpr) {
+        // Body tails in loops are discarded just like explicit expression
+        // statements. Both paths need one complete-expression cleanup scope.
+        // A projected local remains an alias, not a second owning producer.
+        self.push_drop_scope();
+        let result = self.lower_expr(expr);
+        if !self.current_block_is_terminated()
+            && matches!(
+                expr,
+                HIRExpr::Call { .. }
+                    | HIRExpr::MethodCall { .. }
+                    | HIRExpr::Try(_)
+                    | HIRExpr::TryBlock(_)
+                    | HIRExpr::Struct { .. }
+                    | HIRExpr::Block(_)
+                    | HIRExpr::If { .. }
+                    | HIRExpr::Match { .. }
+            )
+        {
+            self.retain_temporary_receiver(result);
+        }
+        self.pop_drop_scope(None);
     }
 
     pub(super) fn lower_expr(&mut self, expr: &HIRExpr) -> Local {

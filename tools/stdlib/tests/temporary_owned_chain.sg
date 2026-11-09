@@ -1,0 +1,71 @@
+import std::json;
+
+import std::collections;
+
+extern "C" {
+    fn sengoo_opaque_live_handle_count() -> i64;
+}
+
+def temporary_document() -> Result<JsonDoc, i64> {
+    json_parse_limits("{\"answer\":42}", 1024, 32);
+}
+
+def named_document_value() -> Result<i64, i64> {
+    let document = temporary_document()?;
+    let value = document.root().object_get("answer")?.number_i64()?;
+    Result { is_ok: true, value: value, error: 0 };
+}
+
+def temporary_document_value() -> Result<i64, i64> {
+    let value = temporary_document()?.root().object_get("answer")?.number_i64()?;
+    Result { is_ok: true, value: value, error: 0 };
+}
+
+def temporary_document_failure() -> Result<i64, i64> {
+    let value = temporary_document()?.root().object_get("missing")?.number_i64()?;
+    Result { is_ok: true, value: value, error: 0 };
+}
+
+def temporary_optional_document() -> Option<JsonDoc> {
+    let document = json_parse_limits("{\"answer\":42}", 1024, 32).unwrap_or(JsonDoc { handle: 0 });
+    Option { is_some: true, value: document };
+}
+
+def optional_document_value() -> i64 {
+    temporary_optional_document().unwrap_or(JsonDoc { handle: 0 }).root().object_get("answer").unwrap_or(JsonValue { doc_handle: 0, node_id: 0 }).number_i64().unwrap_or(-1);
+}
+
+def temporary_documents() -> Vec<JsonDoc> {
+    let values: Vec<JsonDoc> = vec_new();
+    values.push(json_parse_limits("{\"answer\":1}", 1024, 32).unwrap_or(JsonDoc { handle: 0 }));
+    values.push(json_parse_limits("{\"answer\":2}", 1024, 32).unwrap_or(JsonDoc { handle: 0 }));
+    values;
+}
+
+def temporary_collection_value() -> i64 {
+    temporary_documents().len();
+}
+
+def consumed_collection_value() -> i64 {
+    temporary_documents().into_iter().count();
+}
+
+def discarded_document_value() -> Result<bool, i64> {
+    let before = sengoo_json_bounded_live_documents();
+    let mut index = 0;
+    while index < 20 { temporary_document()?; temporary_document(); temporary_optional_document(); temporary_documents(); if sengoo_json_bounded_live_documents() != before { return Result { is_ok: false, value: false, error: 10 }; }; index = index + 1; };
+    Result { is_ok: true, value: true, error: 0 };
+}
+
+def main() -> i64 {
+    let baseline = sengoo_json_bounded_live_documents();
+    let reserved = sengoo_json_bounded_reserved_bytes();
+    let collections = sengoo_opaque_live_handle_count();
+    let named = named_document_value();
+    if not named.is_ok() or named.value != 42 { return 1; };
+    if sengoo_json_bounded_live_documents() != baseline { println("named owner leaked"); return 2; };
+    let mut iteration = 0;
+    while iteration < 20 { let discarded = discarded_document_value(); if not discarded.is_ok() or not discarded.value { println("discarded owning expression retained JSON capacity"); return 10; }; let temporary = temporary_document_value(); if not temporary.is_ok() or temporary.value != 42 { println("temporary owner released before its borrowed chain ended"); return 3; }; if sengoo_json_bounded_live_documents() != baseline or sengoo_json_bounded_reserved_bytes() != reserved { println("temporary owned result chain leaked"); return 4; }; let failed = temporary_document_failure(); if failed.is_ok() { return 5; }; if sengoo_json_bounded_live_documents() != baseline or sengoo_json_bounded_reserved_bytes() != reserved { println("temporary owner leaked through propagation"); return 6; }; if optional_document_value() != 42 { return 7; }; if temporary_collection_value() != 2 or consumed_collection_value() != 2 { return 8; }; if sengoo_json_bounded_live_documents() != baseline or sengoo_json_bounded_reserved_bytes() != reserved or sengoo_opaque_live_handle_count() != collections { println("Option/Vec borrowed or consuming chain leaked or released twice"); return 9; }; iteration = iteration + 1; };
+    println("temporary owned receiver survives the borrowed chain and releases on success and propagation");
+    0;
+}

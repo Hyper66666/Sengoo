@@ -12,6 +12,42 @@ maintenance = "official, development"
 example = "../examples/realworld/file-csv-index"
 
 [[package]]
+name = "sgschema"
+version = "0.1.0"
+purpose = "Explicit parsed JSON Schema subset for Agent tool inputs and outputs"
+source = "sgschema"
+maintenance = "official, experimental preview"
+platforms = ["windows-x64"]
+example = "sgschema/tests/schema.sg"
+
+[[package]]
+name = "sgllm"
+version = "0.1.0"
+purpose = "Shared native three-protocol model requests, HTTP/SSE streams, usage and classified failures"
+source = "sgllm"
+maintenance = "official, experimental preview; integration gates tracked separately"
+platforms = ["windows-x64"]
+example = "sgllm/examples/stream.sg"
+
+[[package]]
+name = "sgmcp"
+version = "0.1.0"
+purpose = "Polling MCP core/client, version negotiation and tools; bounded Windows byte-pipe stdout host"
+source = "sgmcp"
+maintenance = "official, experimental preview; integration gates tracked separately"
+platforms = ["windows-x64"]
+example = "sgmcp/examples/echo-server.sg"
+
+[[package]]
+name = "sgagent"
+version = "0.1.0"
+purpose = "Embeddable action kernel, permission and scheduling policy, SQLite receipts and safe recovery"
+source = "sgagent"
+maintenance = "official, experimental preview; integration gates tracked separately"
+platforms = ["windows-x64"]
+example = "sgagent/examples/maintenance.sg"
+
+[[package]]
 name = "sgdata"
 version = "0.1.0"
 purpose = "Bounded UTF-8 files, exact JSON integers and CSV"

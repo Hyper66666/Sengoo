@@ -197,7 +197,17 @@ pub(super) fn emit_resolved_method_call(
     arg_locals: &[Local],
     resolved_func_name: &str,
 ) -> Local {
-    ctx.mark_drop_locals_moved(arg_locals);
+    let borrowed_params = ctx.argument_borrow_policy(resolved_func_name);
+    for (index, local) in arg_locals.iter().enumerate() {
+        if !borrowed_params
+            .as_ref()
+            .and_then(|params| params.get(index + 1))
+            .copied()
+            .unwrap_or(false)
+        {
+            ctx.mark_drop_local_moved(*local);
+        }
+    }
 
     let mut ret_type = ctx
         .function_sig(resolved_func_name)
@@ -249,7 +259,7 @@ pub(super) fn lower_method_call_from_locals_with_expected(
     expected_return_type: Option<&MIRType>,
     expected_return_name: Option<&str>,
 ) -> Local {
-    if is_explicit_release_method(method) {
+    if method_explicitly_releases_receiver(ctx.get_local_type(receiver_local), method) {
         ctx.mark_drop_local_moved(receiver_local);
     }
 
@@ -291,10 +301,14 @@ pub(super) fn lower_method_call_from_locals_with_expected(
             return ctx.add_local(None, LocalKind::Temp, MIR_UNIT);
         }
     };
-    let receiver_is_ref = ctx.function_sig(&resolved_func_name)
+    let receiver_is_ref = ctx
+        .function_sig(&resolved_func_name)
         .is_some_and(|sig| sig.receiver_is_ref);
     let receiver_local = if receiver_is_ref {
-        if matches!(ctx.get_local_type(receiver_local), MIRType::Ptr(_) | MIRType::Ref(_)) {
+        if matches!(
+            ctx.get_local_type(receiver_local),
+            MIRType::Ptr(_) | MIRType::Ref(_)
+        ) {
             receiver_local
         } else {
             super::pointer_expr_helpers::borrow_local(ctx, receiver_local)
@@ -307,8 +321,21 @@ pub(super) fn lower_method_call_from_locals_with_expected(
     emit_resolved_method_call(ctx, receiver_local, arg_locals, &resolved_func_name)
 }
 
-fn is_explicit_release_method(method: &str) -> bool {
-    matches!(method, "drop" | "free" | "close")
+// Legacy handle wrappers expose real release operations as borrowed-looking
+// methods. Preserve that compatibility rule only for those known wrappers;
+// a user-defined `close(&mut self)` is not an ownership transfer.
+pub(super) fn method_explicitly_releases_receiver(receiver: &MIRType, method: &str) -> bool {
+    if method == "drop" {
+        return true;
+    }
+    if !matches!(method, "close" | "free") {
+        return false;
+    }
+    let ty = match receiver {
+        MIRType::Ref(inner) | MIRType::Ptr(inner) => inner.as_ref(),
+        _ => receiver,
+    };
+    LoweringContext::is_legacy_idempotent_handle_mir_type(ty)
 }
 
 /// Lower an explicit `value.drop()` on an owned `dyn Trait` value: dispatch

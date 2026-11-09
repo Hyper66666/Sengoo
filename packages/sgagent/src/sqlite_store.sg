@@ -1,0 +1,232 @@
+import std::string;
+
+import std::json;
+
+import std::ffi;
+
+import std::hash;
+
+import std::system;
+
+import sgsqlite;
+
+struct AgentSqliteStore {
+    database: SqliteDb,
+    execution_lock: FileLock,
+    run_id: String,
+    fence: i64,
+    maximum_snapshot_bytes: i64,
+    closed: bool,
+}
+
+struct AgentSqliteHead {
+    revision: i64,
+    snapshot: String,
+    digest: String,
+}
+
+impl !Send for AgentSqliteStore {
+}
+
+impl !Sync for AgentSqliteStore {
+}
+
+def agent_sqlite_empty() -> AgentSqliteStore {
+    AgentSqliteStore { database: SqliteDb { handle: 0 }, execution_lock: FileLock { handle: 0 }, run_id: String { handle: 0 }, fence: 0, maximum_snapshot_bytes: 0, closed: true };
+}
+
+def agent_sqlite_nul_free(text: &String) -> Result<bool, i64> {
+    let bytes = text.bytes();
+    loop { let byte = bytes.next(); if not byte.is_some { break; }; if byte.value == 0 { bytes.free(); return agent_condition(false, 2); }; };
+    bytes.free();
+    agent_condition(true, 0);
+}
+
+def agent_sqlite_json_valid(value: JsonValue, depth: i64) -> Result<bool, i64> {
+    agent_condition(depth <= 48, 13)?;
+    let kind = value.kind()?;
+    if kind == JSON_KIND_STRING() { let text = value.string_value()?; return agent_sqlite_nul_free(&text); };
+    let mut index = 0;
+    if kind == JSON_KIND_OBJECT() { while index < value.object_len()? { let key = value.object_key(index)?; agent_sqlite_nul_free(&key)?; agent_sqlite_json_valid(value.object_get(key.as_str())?, depth + 1)?; index = index + 1; }; };
+    if kind == JSON_KIND_ARRAY() { while index < value.array_len()? { agent_sqlite_json_valid(value.array_get(index)?, depth + 1)?; index = index + 1; }; };
+    agent_condition(true, 0);
+}
+
+def agent_sqlite_digest(text: &String, maximum: i64) -> Result<String, i64> {
+    let output = ffi_buffer_new(64)?;
+    agent_condition(hash_sha256_str_bounded(text.as_str(), maximum, output)? == 64, 12)?;
+    string_from_bytes_raw(output.ptr(), 64);
+}
+
+def agent_sqlite_version(transaction: &SqliteTransaction) -> Result<bool, i64> {
+    let mut metadata = transaction.prepare("SELECT schema_version, typeof(schema_version), (SELECT count(*) FROM sgagent_meta) FROM sgagent_meta WHERE singleton=1")?;
+    agent_condition(metadata.step()?, 12)?;
+    let representation = metadata.text(1)?;
+    agent_condition(metadata.integer(0)? == 1 and representation.as_str() == "integer" and metadata.integer(2)? == 1, 12)?;
+    agent_condition(not metadata.step()?, 12);
+}
+
+def agent_sqlite_schema(transaction: &SqliteTransaction) -> Result<bool, i64> {
+    let mut present = transaction.prepare("SELECT count(*) FROM sqlite_master WHERE type='table' AND name='sgagent_meta'")?;
+    agent_condition(present.step()?, 12)?;
+    let exists = present.integer(0)?;
+    if exists == 0 { let mut tables = transaction.prepare("SELECT count(*) FROM sqlite_master WHERE type='table' AND name NOT LIKE 'sqlite_%'")?; agent_condition(tables.step()? and tables.integer(0)? == 0, 12)?; transaction.exec("CREATE TABLE sgagent_meta(singleton INTEGER PRIMARY KEY CHECK(singleton=1),schema_version INTEGER NOT NULL); INSERT INTO sgagent_meta VALUES(1,1); CREATE TABLE sgagent_heads(run_id TEXT PRIMARY KEY,fence INTEGER NOT NULL,revision INTEGER NOT NULL,snapshot TEXT NOT NULL,digest TEXT NOT NULL); CREATE TABLE sgagent_receipts(run_id TEXT PRIMARY KEY,fence INTEGER NOT NULL,revision INTEGER NOT NULL,digest TEXT NOT NULL)")?; (); };
+    agent_sqlite_version(transaction);
+}
+
+def agent_sqlite_open(path: &String, run_id: &String, maximum_snapshot_bytes: i64) -> Result<AgentSqliteStore, i64> {
+    agent_sqlite_open_after_quiescence(path, run_id, maximum_snapshot_bytes, false);
+}
+
+def agent_sqlite_open_after_quiescence(path: &String, run_id: &String, maximum_snapshot_bytes: i64, confirmed_previous_quiescent: bool) -> Result<AgentSqliteStore, i64> {
+    agent_sqlite_nul_free(path)?;
+    agent_sqlite_nul_free(run_id)?;
+    agent_condition(path.len() > 0 and path.len() <= 32600 and path.as_str() != ":memory:" and not str_starts_with(path.as_str(), "file:") and run_id.len() > 0 and run_id.len() <= 128 and maximum_snapshot_bytes >= 1 and maximum_snapshot_bytes <= 4194304, 2)?;
+    let database = sqlite_open(path.as_str())?;
+    let canonical = canonical_path_string(path.as_str())?;
+    let suffix = agent_sqlite_digest(run_id, 128)?;
+    let lock_path = canonical.clone()?;
+    lock_path.push_str(".sgagent-")?;
+    lock_path.push_str(suffix.as_str())?;
+    lock_path.push_str(".lock")?;
+    let execution_lock = file_lock(lock_path.as_str())?;
+    database.busy_timeout(5000)?;
+    database.exec("PRAGMA synchronous=FULL")?;
+    let mut transaction = database.transaction()?;
+    agent_sqlite_schema(&transaction)?;
+    let mut create = transaction.prepare("INSERT OR IGNORE INTO sgagent_heads(run_id,fence,revision,snapshot,digest) VALUES(?1,0,0,'','')")?;
+    create.bind_text(1, run_id.as_str())?;
+    create.step()?;
+    let mut previous = transaction.prepare("SELECT fence,revision,snapshot,typeof(fence),length(CAST(snapshot AS BLOB)) FROM sgagent_heads WHERE run_id=?1")?;
+    previous.bind_text(1, run_id.as_str())?;
+    agent_condition(previous.step()?, 12)?;
+    let old_fence_kind = previous.text(3)?;
+    agent_condition(previous.integer(0)? >= 0 and previous.integer(0)? < 9223372036854775807 and old_fence_kind.as_str() == "integer", 12)?;
+    if previous.integer(1)? > 0 { agent_condition(previous.integer(4)? <= maximum_snapshot_bytes, 13)?; let prior_bytes = previous.text(2)?; agent_sqlite_nul_free(&prior_bytes)?; let prior = json_parse_limits(prior_bytes.as_str(), maximum_snapshot_bytes, 65536)?; agent_sqlite_json_valid(prior.root(), 0)?; let requires_cleanup = agent_flag(prior.root(), "cleanup_required") or prior.root().object_get("phase")?.number_i64()? == 5; agent_condition(not requires_cleanup or confirmed_previous_quiescent, 12)?; (); };
+    let mut acquire = transaction.prepare("UPDATE sgagent_heads SET fence=fence+1 WHERE run_id=?1")?;
+    acquire.bind_text(1, run_id.as_str())?;
+    acquire.step()?;
+    let mut query = transaction.prepare("SELECT fence,typeof(fence) FROM sgagent_heads WHERE run_id=?1")?;
+    query.bind_text(1, run_id.as_str())?;
+    agent_condition(query.step()?, 12)?;
+    let fence = query.integer(0)?;
+    let representation = query.text(1)?;
+    agent_condition(fence > 0 and representation.as_str() == "integer", 12)?;
+    let captured = run_id.clone()?;
+    transaction.commit()?;
+    Result { is_ok: true, value: AgentSqliteStore { database: database, execution_lock: execution_lock, run_id: captured, fence: fence, maximum_snapshot_bytes: maximum_snapshot_bytes, closed: false }, error: 0 };
+}
+
+impl AgentSqliteStore {
+    def close(&mut self) -> Result<bool, i64> {
+        if self.closed { return agent_condition(true, 0); };
+        let saved = agent_sqlite_load(self);
+        if saved.is_ok() { let phase = saved.value.root().object_get("phase")?.number_i64()?; agent_condition(not agent_flag(saved.value.root(), "cleanup_required") and phase != 5, 12)?; } else { agent_condition(saved.error == 5, saved.error)?; };
+        self.closed = true;
+        self.execution_lock.close();
+    }
+}
+
+def agent_sqlite_head(transaction: &SqliteTransaction, store: &AgentSqliteStore) -> Result<AgentSqliteHead, i64> {
+    agent_condition(not store.closed and store.fence > 0 and store.execution_lock.handle != 0, 12)?;
+    agent_sqlite_version(transaction)?;
+    let mut query = transaction.prepare("SELECT fence,revision,snapshot,digest,typeof(fence),typeof(revision),length(CAST(snapshot AS BLOB)),length(CAST(digest AS BLOB)) FROM sgagent_heads WHERE run_id=?1")?;
+    query.bind_text(1, store.run_id.as_str())?;
+    agent_condition(query.step()?, 12)?;
+    let fence_kind = query.text(4)?;
+    let revision_kind = query.text(5)?;
+    let revision = query.integer(1)?;
+    agent_condition(query.integer(0)? == store.fence and revision >= 0 and fence_kind.as_str() == "integer" and revision_kind.as_str() == "integer", 12)?;
+    agent_condition(query.integer(6)? <= store.maximum_snapshot_bytes and query.integer(7)? <= 64, 13)?;
+    let snapshot = query.text(2)?;
+    let digest = query.text(3)?;
+    agent_sqlite_nul_free(&snapshot)?;
+    agent_sqlite_nul_free(&digest)?;
+    Result { is_ok: true, value: AgentSqliteHead { revision: revision, snapshot: snapshot, digest: digest }, error: 0 };
+}
+
+def agent_sqlite_checkpoint_valid(snapshot: &JsonDoc, run_id: &String, fence: i64, revision: i64) -> Result<bool, i64> {
+    let root = snapshot.root();
+    agent_sqlite_json_valid(root, 0)?;
+    let saved_run = agent_json_string(root, "run_id")?;
+    agent_condition(root.object_get("schema")?.number_i64()? == 1 and saved_run.as_str() == run_id.as_str() and root.object_get("fence")?.number_i64()? == fence and root.object_get("revision")?.number_i64()? == revision and fence > 0 and revision > 0, 12)?;
+    root.object_get("cleanup_required")?.bool_value()?;
+    let phase = root.object_get("phase")?.number_i64()?;
+    agent_condition(phase == 1 or phase == 2 or phase == 3 or phase == 4 or phase == 5 or phase == 6 or phase == 9 or phase == 10, 12)?;
+    let fields = agent_text("sequence,requests,tokens,maximum_requests,token_budget,call_index,retry_due,retry_waited");
+    let names = fields.split(",");
+    loop { let name = names.next(); if not name.is_some { break; }; agent_condition(root.object_get(name.value.as_str())?.number_i64()? >= 0, 12)?; };
+    names.free();
+    agent_condition(root.object_get("attempt")?.number_i64()? >= 1, 12)?;
+    root.object_get("messages")?.array_len()?;
+    root.object_get("tools")?.array_len()?;
+    root.object_get("calls")?.array_len()?;
+    root.object_get("ledger")?.array_len()?;
+    root.object_get("target")?.object_len()?;
+    root.object_get("policy")?.object_len()?;
+    root.object_get("initial_policy")?.object_len()?;
+    let strings = agent_text("reason,pending_request,last_request,last_output,unresolved_call");
+    let keys = strings.split(",");
+    loop { let key = keys.next(); if not key.is_some { break; }; let text = agent_json_string(root, key.value.as_str())?; };
+    keys.free();
+    agent_condition(true, 0);
+}
+
+def agent_sqlite_read_snapshot(transaction: &SqliteTransaction, store: &AgentSqliteStore, head: &AgentSqliteHead) -> Result<JsonDoc, i64> {
+    let revision = head.revision;
+    agent_condition(revision > 0, 5)?;
+    let encoded = &head.snapshot;
+    let digest = &head.digest;
+    let calculated = agent_sqlite_digest(encoded, store.maximum_snapshot_bytes)?;
+    agent_condition(digest.as_str() == calculated.as_str(), 12)?;
+    let snapshot = json_parse_limits(encoded.as_str(), store.maximum_snapshot_bytes, 65536)?;
+    let fence = snapshot.root().object_get("fence")?.number_i64()?;
+    agent_condition(fence > 0 and fence <= store.fence, 12)?;
+    agent_sqlite_checkpoint_valid(&snapshot, &store.run_id, fence, revision)?;
+    let mut receipt = transaction.prepare("SELECT fence,revision,digest,typeof(fence),typeof(revision),length(CAST(digest AS BLOB)) FROM sgagent_receipts WHERE run_id=?1")?;
+    receipt.bind_text(1, store.run_id.as_str())?;
+    agent_condition(receipt.step()?, 12)?;
+    let fence_kind = receipt.text(3)?;
+    let revision_kind = receipt.text(4)?;
+    agent_condition(fence_kind.as_str() == "integer" and revision_kind.as_str() == "integer" and receipt.integer(5)? == 64, 12)?;
+    let receipt_digest = receipt.text(2)?;
+    agent_condition(receipt.integer(0)? == fence and receipt.integer(1)? == revision and receipt_digest.as_str() == digest.as_str(), 12)?;
+    Result { is_ok: true, value: snapshot, error: 0 };
+}
+
+def agent_sqlite_load(store: &AgentSqliteStore) -> Result<JsonDoc, i64> {
+    let mut transaction = store.database.transaction()?;
+    let head = agent_sqlite_head(&transaction, store)?;
+    let snapshot = agent_sqlite_read_snapshot(&transaction, store, &head)?;
+    transaction.commit()?;
+    Result { is_ok: true, value: snapshot, error: 0 };
+}
+
+def agent_sqlite_commit(store: &mut AgentSqliteStore, action: &JsonDoc) -> Result<AgentCommitReceipt, i64> {
+    let root = action.root();
+    agent_sqlite_json_valid(root, 0)?;
+    let kind = agent_json_string(root, "type")?;
+    let run_id = agent_json_string(root, "run_id")?;
+    let revision = root.object_get("revision")?.number_i64()?;
+    let fence = root.object_get("fence")?.number_i64()?;
+    agent_condition(not store.closed and root.object_get("schema")?.number_i64()? == 1 and kind.as_str() == "persist" and run_id.as_str() == store.run_id.as_str() and fence == store.fence and revision > 0, 12)?;
+    let expected_id = run_id.clone()?;
+    expected_id.push_str(":commit:")?;
+    expected_id.push_i64(revision)?;
+    let id = agent_json_string(root, "id")?;
+    agent_condition(id.as_str() == expected_id.as_str(), 12)?;
+    let snapshot = agent_persist_snapshot(action)?;
+    agent_sqlite_checkpoint_valid(&snapshot, &store.run_id, store.fence, revision)?;
+    let encoded = snapshot.serialize_string()?;
+    agent_condition(encoded.len() <= store.maximum_snapshot_bytes, 13)?;
+    let digest = agent_sqlite_digest(&encoded, store.maximum_snapshot_bytes)?;
+    let receipt_run = store.run_id.clone()?;
+    let mut transaction = store.database.transaction()?;
+    let head = agent_sqlite_head(&transaction, store)?;
+    let previous_revision = head.revision;
+    agent_condition(revision == previous_revision or previous_revision < 9223372036854775807 and revision == previous_revision + 1, 12)?;
+    if previous_revision > 0 { let previous = agent_sqlite_read_snapshot(&transaction, store, &head)?; if revision == previous_revision { let prior = &head.snapshot; agent_condition(prior.as_str() == encoded.as_str(), 12)?; } else { agent_condition(snapshot.root().object_get("requests")?.number_i64()? >= previous.root().object_get("requests")?.number_i64()? and snapshot.root().object_get("tokens")?.number_i64()? >= previous.root().object_get("tokens")?.number_i64()? and snapshot.root().object_get("sequence")?.number_i64()? >= previous.root().object_get("sequence")?.number_i64()?, 12)?; }; (); };
+    if revision != previous_revision { let mut save = transaction.prepare("UPDATE sgagent_heads SET revision=?1,snapshot=?2,digest=?3 WHERE run_id=?4 AND fence=?5")?; save.bind_i64(1, revision)?; save.bind_text(2, encoded.as_str())?; save.bind_text(3, digest.as_str())?; save.bind_text(4, store.run_id.as_str())?; save.bind_i64(5, store.fence)?; save.step()?; let mut acknowledge = transaction.prepare("INSERT INTO sgagent_receipts(run_id,fence,revision,digest) VALUES(?1,?2,?3,?4) ON CONFLICT(run_id) DO UPDATE SET fence=excluded.fence,revision=excluded.revision,digest=excluded.digest")?; acknowledge.bind_text(1, store.run_id.as_str())?; acknowledge.bind_i64(2, store.fence)?; acknowledge.bind_i64(3, revision)?; acknowledge.bind_text(4, digest.as_str())?; acknowledge.step()?; (); };
+    transaction.commit()?;
+    Result { is_ok: true, value: AgentCommitReceipt { run_id: receipt_run, fence: store.fence, revision: revision }, error: 0 };
+}

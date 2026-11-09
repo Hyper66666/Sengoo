@@ -1,0 +1,81 @@
+import sgschema;
+
+import std::json;
+
+import std::string;
+
+extern "C" {
+    fn sengoo_string_live_handle_count() -> i64;
+    fn sengoo_buffer_live_handle_count() -> i64;
+}
+
+def tool_need(valid: bool, code: i64) -> Result<bool, i64> {
+    Result { is_ok: valid, value: valid, error: if valid { 0; } else { code; } };
+}
+
+def tool_nul_free(text: &String) -> Result<bool, i64> {
+    let bytes = text.bytes();
+    loop { let next = bytes.next(); if not next.is_some { break; }; if next.value == 0 { bytes.free(); return tool_need(false, 2); }; };
+    bytes.free();
+    tool_need(true, 0);
+}
+
+def tool_json_strings(value: JsonValue, depth: i64) -> Result<bool, i64> {
+    tool_need(depth <= 32, 13)?;
+    let kind = value.kind()?;
+    if kind == JSON_KIND_STRING() { let text = value.string_value()?; return tool_nul_free(&text); };
+    let mut index = 0;
+    if kind == JSON_KIND_OBJECT() { while index < value.object_len()? { let key = value.object_key(index)?; tool_nul_free(&key)?; tool_json_strings(value.object_get(key.as_str())?, depth + 1)?; index = index + 1; }; };
+    if kind == JSON_KIND_ARRAY() { while index < value.array_len()? { tool_json_strings(value.array_get(index)?, depth + 1)?; index = index + 1; }; };
+    tool_need(true, 0);
+}
+
+def tool_parse(text: &str) -> Result<JsonDoc, i64> {
+    tool_need(text.len() > 0 and text.len() <= 32768, 13)?;
+    let document = json_parse_limits(text, 32768, 4096)?;
+    tool_json_strings(document.root(), 0)?;
+    Result { is_ok: true, value: document, error: 0 };
+}
+
+def tool_put(document: &JsonDoc, key: &str, value: &str) -> Result<bool, i64> {
+    document.root().object_set(key, document.new_string(value)?);
+}
+
+pub def validation_report(schema_json: &str, arguments_json: &str) -> Result<String, i64> {
+    let schema = tool_parse(schema_json)?;
+    let arguments = tool_parse(arguments_json)?;
+    let verdict = schema_validate(schema.root(), arguments.root())?;
+    let document = json_doc_object_limits(4096, 32)?;
+    document.root().object_set("valid", document.new_bool(verdict.valid)?)?;
+    tool_put(&document, "stage", verdict.stage.as_str())?;
+    tool_put(&document, "pointer", verdict.pointer.as_str())?;
+    tool_put(&document, "keyword", verdict.keyword.as_str())?;
+    document.serialize_string();
+}
+
+pub def require_valid_tool(schema_json: &str, arguments_json: &str) -> Result<bool, i64> {
+    let schema = tool_parse(schema_json)?;
+    let arguments = tool_parse(arguments_json)?;
+    let verdict = schema_validate(schema.root(), arguments.root())?;
+    tool_need(verdict.valid, if verdict.stage.as_str() == "schema" { 10; } else { 2; });
+}
+
+pub def canonical_arguments(schema_json: &str, arguments_json: &str) -> Result<String, i64> {
+    let schema = tool_parse(schema_json)?;
+    let arguments = tool_parse(arguments_json)?;
+    let verdict = schema_validate(schema.root(), arguments.root())?;
+    tool_need(verdict.valid, if verdict.stage.as_str() == "schema" { 10; } else { 2; })?;
+    arguments.serialize_string();
+}
+
+pub def native_live_strings() -> i64 {
+    sengoo_string_live_handle_count();
+}
+
+pub def native_live_buffers() -> i64 {
+    sengoo_buffer_live_handle_count();
+}
+
+pub def native_live_documents() -> i64 {
+    sengoo_json_bounded_live_documents();
+}

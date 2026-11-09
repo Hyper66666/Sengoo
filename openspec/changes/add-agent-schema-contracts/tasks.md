@@ -1,0 +1,5 @@
+- [x] Implement parsed schema and instance validation with structured failures.
+- [x] Pass Unicode, exact-integer, pointer, unsupported schema and capacity tests.
+- [x] Close the additional repeated owned-string enum comparison resource regression.
+- [x] Integrate an SDK tool consumer and an external locked package consumer.
+- [x] Record toolchain, sources, platform and execution evidence; validate OpenSpec.

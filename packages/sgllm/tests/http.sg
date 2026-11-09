@@ -1,0 +1,38 @@
+import sgllm;
+
+def http_tests() -> Result<i64, i64> {
+    let mut failures = 0;
+    let sample = "HTTP/1.1 200 OK\r\nTransfer-Encoding: chunked\r\nContent-Type: text/event-stream\r\n\r\n5\r\nhello\r\n7;x=y\r\n 世界\r\n0\r\nX-Trailer: ok\r\n\r\n";
+    let sample_bytes = ffi_buffer_from_bytes(sample)?;
+    let mut split = 0;
+    while split <= sample.len() { let mut decoder = http_decoder(); let a = decoder.feed_bytes(&sample_bytes, 0, split)?; let b = decoder.feed_bytes(&sample_bytes, split, sample.len() - split)?; let joined = ffi_buffer_new(64)?; llm_bytes_append(&joined, &a, 0, a.used_len())?; llm_bytes_append(&joined, &b, 0, b.used_len())?; let content = llm_bytes_text(&joined, 0, joined.used_len())?; if content.as_str() != "hello 世界" or decoder.status != 200 { failures = failures + 1; }; decoder.finish()?; split = split + 1; };
+    let mut fixed = http_decoder();
+    fixed.feed("HTTP/1.1 200 OK\r\nContent-Length: 5\r\n\r\nhello")?;
+    if not fixed.finish().is_ok() { failures = failures + 1; };
+    let mut incomplete = http_decoder();
+    incomplete.feed("HTTP/1.1 200 OK\r\nContent-Length: 5\r\n\r\nhi")?;
+    if incomplete.finish().is_ok() { failures = failures + 1; };
+    let mut confused = http_decoder();
+    if confused.feed("HTTP/1.1 200 OK\r\nContent-Length: 5\r\nTransfer-Encoding: chunked\r\n\r\n").is_ok() { failures = failures + 1; };
+    let mut conflict = http_decoder();
+    if conflict.feed("HTTP/1.1 200 OK\r\nContent-Length: 5\r\nContent-Length: 6\r\n\r\n").is_ok() { failures = failures + 1; };
+    let mut delayed = http_decoder();
+    delayed.feed("HTTP/1.1 429 Too Many Requests\r\nRetry-After: Wed, 21 Oct 2015 07:28:02 GMT\r\nContent-Length: 0\r\n\r\n")?;
+    if delayed.retry_after.as_str() != "Wed, 21 Oct 2015 07:28:02 GMT" { failures = failures + 1; };
+    let mut duplicate_delay = http_decoder();
+    if duplicate_delay.feed("HTTP/1.1 429 Too Many Requests\r\nRetry-After: 1\r\nretry-after: 2\r\nContent-Length: 0\r\n\r\n").is_ok() { failures = failures + 1; };
+    if http_endpoint("http://provider.example/v1", "/responses").is_ok() { failures = failures + 1; };
+    if http_endpoint("https://user@provider.example", "/responses").is_ok() { failures = failures + 1; };
+    let endpoint = http_endpoint("http://127.0.0.1:8123/v1/", "/responses")?;
+    let request = http_request(&endpoint, 1, "secret-test-key", "{}")?;
+    if not str_contains(request.as_str(), "POST /v1/responses HTTP/1.1\r\n") or not str_contains(request.as_str(), "Authorization: Bearer secret-test-key\r\n") { failures = failures + 1; };
+    if http_request(&endpoint, 0, "key\r\nInjected: 1", "{}").is_ok() { failures = failures + 1; };
+    llm_ok(failures);
+}
+
+def main() -> i64 {
+    let result = http_tests();
+    if not result.is_ok() { println(result.error); return 1; };
+    if result.value == 0 { println("HTTP framing acceptance passed"); };
+    result.value;
+}

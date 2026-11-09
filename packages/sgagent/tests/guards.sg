@@ -1,0 +1,180 @@
+import sgagent;
+
+extern "C" {
+    fn sengoo_string_live_handle_count() -> i64;
+    fn sengoo_buffer_live_handle_count() -> i64;
+    fn sengoo_opaque_live_handle_count() -> i64;
+}
+
+def guard(value: bool, label: &str) -> Result<bool, i64> {
+    if not value { println(label); return agent_condition(false, 99); };
+    agent_condition(true, 0);
+}
+
+def make_kernel() -> Result<AgentKernel, i64> {
+    let target = json_parse("{\"connection\":\"fixture\",\"model\":\"fixture\"}")?;
+    let history = json_parse("{\"messages\":[]}")?;
+    let tools = json_parse("{\"tools\":[{\"name\":\"write\",\"parameters\":{\"type\":\"object\",\"additionalProperties\":false},\"read_only\":false}]}")?;
+    let mut policy = policy_default();
+    policy.full_access = true;
+    agent_kernel_new("guard-run", 1, &target, &history, &tools, &policy, 0, 0);
+}
+
+def commit_next(kernel: &mut AgentKernel, ledger: &mut AgentMemoryLedger) -> Result<JsonDoc, i64> {
+    let mut index = 0;
+    loop { let action = agent_kernel_next(kernel)?; if agent_control_string(action.root(), "type")?.as_str() != "persist" { return Result { is_ok: true, value: action, error: 0 }; }; let receipt = agent_memory_commit(ledger, &action)?; agent_kernel_commit(kernel, &receipt)?; index = index + 1; if index > 5 { return agent_document_error(99); }; };
+    agent_document_error(99);
+}
+
+def controls() -> Result<bool, i64> {
+    let mut kernel = make_kernel()?;
+    let initial = agent_kernel_next(&mut kernel)?;
+    let mut ledger = agent_memory_ledger("guard-run", 1)?;
+    let nul = json_parse("{\"type\":\"persist\\u0000ignored\",\"run_id\":\"guard-run\\u0000ignored\"}")?;
+    let bad_type = agent_copy_document(&initial)?;
+    bad_type.root().object_set("type", bad_type.copy(nul.root().object_get("type")?)?)?;
+    guard(not agent_memory_commit(&mut ledger, &bad_type).is_ok(), "NUL type cannot become persist by prefix")?;
+    let bad_receipt = AgentCommitReceipt { run_id: nul.root().object_get("run_id")?.string_value()?, fence: 1, revision: 1 };
+    guard(not agent_kernel_commit(&mut kernel, &bad_receipt).is_ok(), "NUL run identity cannot acknowledge a checkpoint")?;
+    let receipt = agent_memory_commit(&mut ledger, &initial)?;
+    agent_kernel_commit(&mut kernel, &receipt)?;
+    let clean = agent_kernel_snapshot(&kernel)?;
+    let bad_policy = agent_copy_document(&clean)?;
+    agent_put_string(&bad_policy, bad_policy.root().object_get("policy")?, "full_access", "true")?;
+    guard(not agent_kernel_resume(&bad_policy, "guard-run", 1).is_ok(), "policy shape cannot silently grant privileges")?;
+    let encoded = clean.serialize_string()?;
+    let needle = agent_text("\"full_access\":true");
+    let replacement = agent_text("\"full_access\\u0000suffix\":true");
+    let chunks = encoded.split(needle.as_str());
+    let modified = string_new();
+    let mut chunk_index = 0;
+    loop { let next = chunks.next(); if not next.is_some { break; }; if chunk_index > 0 { modified.push_str(replacement.as_str())?; (); }; modified.push_str(next.value.as_str())?; chunk_index = chunk_index + 1; };
+    chunks.free();
+    guard(chunk_index > 1, "policy test replaced an actual field")?;
+    let parsed = json_parse_limits(modified.as_str(), 4194304, 65536)?;
+    guard(not agent_kernel_resume(&parsed, "guard-run", 1).is_ok(), "snapshot policy keys with NUL are rejected")?;
+    agent_condition(true, 0);
+}
+
+def claim_unknown(kernel: &mut AgentKernel, ledger: &mut AgentMemoryLedger) -> Result<bool, i64> {
+    let request = commit_next(kernel, ledger)?;
+    let id = agent_control_string(request.root(), "request_id")?;
+    let answer = json_parse("{\"role\":\"assistant\",\"content\":\"write once\",\"tool_calls\":[{\"id\":\"once\",\"name\":\"write\",\"arguments\":\"{}\"}],\"input_tokens\":1,\"output_tokens\":1}")?;
+    agent_kernel_accept_model(kernel, id.as_str(), &answer, true)?;
+    let action = commit_next(kernel, ledger)?;
+    guard(agent_control_string(action.root(), "type")?.as_str() == "tool_request", "tool claim committed");
+}
+
+def restore_claim(ledger: &AgentMemoryLedger) -> Result<AgentKernel, i64> {
+    let saved = agent_memory_snapshot(ledger)?;
+    agent_kernel_resume(&saved, "guard-run", 2);
+}
+
+def acknowledge_restored(kernel: &mut AgentKernel) -> Result<bool, i64> {
+    let action = agent_kernel_next(kernel)?;
+    guard(agent_control_string(action.root(), "type")?.as_str() == "persist", "recovery and cleanup facts are committed before dispatch")?;
+    let receipt = AgentCommitReceipt { run_id: agent_text("guard-run"), fence: 2, revision: kernel.checkpoint.root().object_get("revision")?.number_i64()? };
+    agent_kernel_commit(kernel, &receipt);
+}
+
+def unknown_is_paused(kernel: &mut AgentKernel) -> Result<bool, i64> {
+    let action = agent_kernel_next(kernel)?;
+    guard(agent_control_string(action.root(), "type")?.as_str() == "paused" and agent_flag(action.root(), "cleanup_required"), "claim without result pauses and retains cleanup ownership");
+}
+
+def restart_after_cleanup(kernel: &AgentKernel) -> Result<AgentKernel, i64> {
+    let saved = agent_kernel_snapshot(kernel)?;
+    agent_kernel_resume(&saved, "guard-run", 2);
+}
+
+def unknown() -> Result<bool, i64> {
+    let mut kernel = make_kernel()?;
+    let mut ledger = agent_memory_ledger("guard-run", 1)?;
+    claim_unknown(&mut kernel, &mut ledger)?;
+    let mut restored = restore_claim(&ledger)?;
+    acknowledge_restored(&mut restored)?;
+    unknown_is_paused(&mut restored)?;
+    guard(not agent_kernel_confirm_quiescence(&mut restored, "guard-run", 1, true, "old owner").is_ok(), "old fence cannot confirm cleanup")?;
+    guard(not agent_kernel_resolve_tool(&mut restored, "guard-run", 2, "once", "verified", false, true, false, "model says yes").is_ok(), "model/unverified assertion cannot resolve unknown outcome")?;
+    agent_kernel_confirm_quiescence(&mut restored, "guard-run", 2, true, "host observed process tree exit")?;
+    acknowledge_restored(&mut restored)?;
+    restored = restart_after_cleanup(&restored)?;
+    guard(agent_control_string(restored.checkpoint.root(), "unresolved_call")?.as_str() == "once", "unknown identity survives cleanup confirmation and another restart")?;
+    agent_kernel_resolve_tool(&mut restored, "guard-run", 2, "once", "verified once", false, true, true, "host inspected durable output and process exit")?;
+    guard(restored.dirty and not agent_flag(restored.checkpoint.root(), "cleanup_required"), "verified resolution must be committed before continuation")?;
+    guard(restored.checkpoint.root().object_get("ledger")?.array_len()? == 1, "resolution records one confirmed result without executing tool")?;
+    agent_condition(true, 0);
+}
+
+def model_controls() -> Result<bool, i64> {
+    let mut kernel = make_kernel()?;
+    let mut ledger = agent_memory_ledger("guard-run", 1)?;
+    let action = commit_next(&mut kernel, &mut ledger)?;
+    let id = agent_control_string(action.root(), "request_id")?;
+    let before = kernel.checkpoint.serialize_string()?;
+    let malformed = json_parse("{\"role\":\"assistant\",\"content\":\"unsafe\",\"tool_calls\":[{\"id\":\"once\\u0000ignored\",\"name\":\"write\",\"arguments\":\"{}\"}]}")?;
+    guard(not agent_kernel_accept_model(&mut kernel, id.as_str(), &malformed, true).is_ok(), "NUL call identity rejected")?;
+    guard(before.as_str() == kernel.checkpoint.serialize_string()?.as_str(), "invalid model control cannot partially mutate checkpoint")?;
+    let valid = json_parse("{\"role\":\"assistant\",\"content\":\"valid\",\"tool_calls\":[]}")?;
+    guard(not agent_kernel_accept_model(&mut kernel, "old-request", &valid, true).is_ok(), "stale provider completion cannot enter current task")?;
+    guard(not agent_kernel_accept_model(&mut kernel, id.as_str(), &valid, false).is_ok(), "incomplete provider result cannot authorize tools")?;
+    let invalid_usage = json_parse("{\"role\":\"assistant\",\"content\":\"invalid usage\",\"tool_calls\":[],\"input_tokens\":\"zero\",\"output_tokens\":0,\"usage_reported\":true}")?;
+    guard(not agent_kernel_accept_model(&mut kernel, id.as_str(), &invalid_usage, true).is_ok(), "malformed usage cannot silently become zero")?;
+    guard(before.as_str() == kernel.checkpoint.serialize_string()?.as_str(), "malformed usage cannot mutate accepted state")?;
+    let unknown_schema = json_parse("{\"tools\":[{\"name\":\"tool\",\"parameters\":{\"type\":\"object\",\"unknownKeyword\":true}}]}")?;
+    guard(not agent_registry_validate(&unknown_schema).is_ok(), "unknown schema keywords are refused")?;
+    let false_read = json_parse("{\"tools\":[{\"name\":\"tool\",\"parameters\":{\"type\":\"object\"},\"read_only\":\"yes\"}]}")?;
+    guard(not agent_registry_validate(&false_read).is_ok(), "malformed read-only flag cannot grant permission")?;
+    let hidden_field = json_parse("{\"tools\":[{\"name\":\"tool\",\"parameters\":{\"type\":\"object\"},\"read_only,process\":true}]}")?;
+    guard(not agent_registry_validate(&hidden_field).is_ok(), "registry keys cannot match multiple whitelist tokens")?;
+    agent_condition(true, 0);
+}
+
+def restore_case(clean: &JsonDoc, kind: i64) -> Result<bool, i64> {
+    let invalid = agent_copy_document(clean)?;
+    let root = invalid.root();
+    if kind == 0 { agent_put_string(&invalid, root.object_get("initial_policy")?, "full_access", "true")?; (); };
+    if kind == 1 { agent_put_bool(&invalid, root.object_get("initial_policy")?, "full_access", false)?; (); };
+    if kind == 2 { agent_put_bool(&invalid, root, "cleanup_required", true)?; (); };
+    if kind == 3 { agent_put_i64(&invalid, root, "phase", 5)?; (); };
+    if kind == 4 { agent_put_i64(&invalid, root, "attempt", 7)?; (); };
+    if kind == 5 { agent_put_bool(&invalid, root.object_get("initial_policy")?, "full_access", false)?; agent_put_bool(&invalid, root.object_get("policy")?, "full_access", false)?; agent_put_bool(&invalid, root.object_get("policy")?, "auto_edit", true)?; (); };
+    if kind == 6 { agent_put_bool(&invalid, root.object_get("initial_policy")?, "interactive", false)?; (); };
+    if kind == 7 { agent_put_i64(&invalid, root.object_get("policy")?, "maximum_depth", 2)?; (); };
+    guard(not agent_kernel_resume(&invalid, "guard-run", 1).is_ok(), "corrupt restore policy, cleanup phase or retry state is refused")?;
+    agent_condition(true, 0);
+}
+
+def restore_guards() -> Result<bool, i64> {
+    let mut kernel = make_kernel()?;
+    let mut ledger = agent_memory_ledger("guard-run", 1)?;
+    let initial = agent_kernel_next(&mut kernel)?;
+    let receipt = agent_memory_commit(&mut ledger, &initial)?;
+    agent_kernel_commit(&mut kernel, &receipt)?;
+    let clean = agent_kernel_snapshot(&kernel)?;
+    let mut kind = 0;
+    while kind < 8 { restore_case(&clean, kind)?; kind = kind + 1; };
+    agent_condition(true, 0);
+}
+
+def resource_round() -> Result<bool, i64> {
+    let invalid_scheduler = scheduler_with_limits(0, 0);
+    guard(not invalid_scheduler.is_ok(), "invalid scheduler refused")?;
+    let invalid_tools = tool_schedule_new(0);
+    guard(not invalid_tools.is_ok(), "invalid tool scheduler refused")?;
+    controls()?;
+    unknown()?;
+    model_controls()?;
+    restore_guards()?;
+    agent_condition(true, 0);
+}
+
+def main() -> i64 {
+    let strings = sengoo_string_live_handle_count();
+    let buffers = sengoo_buffer_live_handle_count();
+    let opaque = sengoo_opaque_live_handle_count();
+    let mut index = 0;
+    while index < 20 { let tested = resource_round(); if not tested.is_ok() { println(tested.error); return 1; }; if strings != sengoo_string_live_handle_count() or buffers != sengoo_buffer_live_handle_count() or opaque != sengoo_opaque_live_handle_count() { println("Agent guard resources did not return to baseline"); println(strings); println(sengoo_string_live_handle_count()); println(opaque); println(sengoo_opaque_live_handle_count()); return 1; }; index = index + 1; };
+    println("Agent strict identities, policy shapes, unknown side effects, host-only resolution and twenty-round resources passed");
+    0;
+}

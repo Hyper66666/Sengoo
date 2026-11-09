@@ -1,0 +1,69 @@
+import sgschema;
+
+import std::assert;
+
+extern "C" {
+    fn sengoo_json_bounded_live_documents() -> i64;
+    fn sengoo_string_live_handle_count() -> i64;
+}
+
+def reject(schema: &str, value: &str, stage: &str, keyword: &str, pointer: &str) -> Result<bool, i64> {
+    let contract = json_parse(schema)?;
+    let input = json_parse(value)?;
+    let result = schema_validate(contract.root(), input.root())?;
+    assert_true(not result.valid, "schema.sg", 7);
+    assert_eq_str(result.stage.as_str(), stage, "schema.sg", 8);
+    assert_eq_str(result.keyword.as_str(), keyword, "schema.sg", 9);
+    assert_eq_str(result.pointer.as_str(), pointer, "schema.sg", 10);
+    Result { is_ok: true, value: true, error: 0 };
+}
+
+def tests() -> Result<bool, i64> {
+    let contract = json_parse("{\"type\":\"object\",\"properties\":{\"name\":{\"type\":\"string\",\"minLength\":2,\"maxLength\":3},\"values\":{\"type\":\"array\",\"items\":{\"type\":\"integer\",\"minimum\":-3},\"maxItems\":2}},\"required\":[\"name\"],\"additionalProperties\":false}")?;
+    let input = json_parse("{\"name\":\"中😀\",\"values\":[-3,9223372036854775807]}")?;
+    assert_true(schema_validate(contract.root(), input.root())?.valid, "schema.sg", 18);
+    reject("{\"required\":[\"a/b~c\"]}", "{}", "instance", "required", "/a~1b~0c")?;
+    reject("{\"type\":\"integer\"}", "1.5", "instance", "type", "")?;
+    reject("{\"enum\":[9223372036854775807]}", "9223372036854775806", "instance", "enum", "")?;
+    reject("{\"enum\":[\"\\u0000a\"]}", "\"\\u0000b\"", "instance", "enum", "")?;
+    reject("{\"type\":\"integer\\u0000suffix\"}", "1", "schema", "type", "")?;
+    let embedded_schema = json_parse("{\"enum\":[\"a\\u0000b\"]}")?;
+    let embedded_input = json_parse("\"a\\u0000b\"")?;
+    assert_true(schema_validate(embedded_schema.root(), embedded_input.root())?.valid, "schema.sg", 34);
+    reject("{\"type\":\"string\",\"minLength\":2}", "\"😀\"", "instance", "minLength", "")?;
+    reject("{\"properties\":{\"missing\":{\"$ref\":\"remote\"}}}", "{}", "schema", "$ref", "/missing")?;
+    reject("{\"additionalProperties\":false}", "{\"unknown\":true}", "instance", "additionalProperties", "/unknown")?;
+    reject("{\"items\":{\"type\":\"boolean\"}}", "[true,0]", "instance", "type", "/1")?;
+    reject("{\"maximum\":4}", "5", "instance", "maximum", "")?;
+    reject("{\"minimum\":0.5}", "1", "schema", "minimum", "")?;
+    reject("{\"enum\":[{}]}", "{}", "schema", "enum", "")?;
+    reject("{\"pattern\":\".*\"}", "\"text\"", "schema", "pattern", "")?;
+    reject("{\"properties\":{\"x\\u0000suffix\":{}}}", "{}", "schema", "NUL-key", "")?;
+    let bounded = schema_validate_with_limit(contract.root(), input.root(), 1)?;
+    assert_true(not bounded.valid and bounded.keyword.as_str() == "capacity", "schema.sg", 32);
+    assert_true(not schema_validate_with_limit(contract.root(), input.root(), 0).is_ok(), "schema.sg", 33);
+    Result { is_ok: true, value: true, error: 0 };
+}
+
+def repeated_failures() -> Result<bool, i64> {
+    let contract = json_parse_bounded("{\"type\":\"integer\"}", 4096)?;
+    let input = json_parse_bounded("\"bad\"", 4096)?;
+    let enum_schema = json_parse("{\"enum\":[\"a\\u0000b\"]}")?;
+    let enum_input = json_parse("\"a\\u0000c\"")?;
+    let strings = sengoo_string_live_handle_count();
+    let docs = sengoo_json_bounded_live_documents();
+    let mut index = 0;
+    while index < 20 { let mismatch = schema_validate(contract.root(), input.root())?; assert_true(not mismatch.valid, "schema.sg", 46); let enum_mismatch = schema_validate(enum_schema.root(), enum_input.root())?; assert_true(not enum_mismatch.valid, "schema.sg", 47); let invalid = schema_validate_with_limit(contract.root(), input.root(), 0); assert_true(not invalid.is_ok(), "schema.sg", 48); index = index + 1; };
+    assert_eq_i64(sengoo_string_live_handle_count(), strings, "schema.sg", 51);
+    assert_eq_i64(sengoo_json_bounded_live_documents(), docs, "schema.sg", 52);
+    Result { is_ok: true, value: true, error: 0 };
+}
+
+def main() -> i64 {
+    let result = tests();
+    if not result.is_ok() { println(result.error); return 1; };
+    let repeated = repeated_failures();
+    if not repeated.is_ok() { println(repeated.error); return 1; };
+    println("schema: Unicode, exact integers, nested pointers, unsupported definitions, capacity and failure resource baseline passed");
+    0;
+}

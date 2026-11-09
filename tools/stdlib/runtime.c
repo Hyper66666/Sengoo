@@ -3589,6 +3589,338 @@ long long sengoo_io_stdout_flush(void) {
     return fflush(stdout) == 0 ? 0 : -SENGOO_STATUS_IO;
 }
 
+/* Pollable standard byte-pipe output. All public operations belong to one
+ * state owner; the dedicated worker touches only this native ring and counters.
+ * In-flight bytes remain in the ring and charged until WriteFile completes. */
+#ifdef _WIN32
+enum { SENGOO_WRITER_SLOTS = 8, SENGOO_WRITER_MAX_BYTES = 8 * 1024 * 1024 };
+typedef struct {
+    CRITICAL_SECTION lock;
+    HANDLE endpoint, wake, changed, thread;
+    unsigned char* bytes;
+    size_t capacity, head, used, inflight;
+    long long accepted, written;
+    DWORD os_error;
+    int state, cancel, finish, failed, unknown, joined;
+} SengooStdWriter;
+typedef struct { SengooStdWriter* value; uint32_t generation; int endpoint; } SengooStdWriterSlot;
+static SengooStdWriterSlot sengoo_std_writers[SENGOO_WRITER_SLOTS];
+static size_t sengoo_std_writer_reserved;
+/* Independent single-owner writers can be constructed on different threads.
+ * Serialize only registry/admission changes, never a native write or wait. */
+static SRWLOCK sengoo_std_writer_registry_lock = SRWLOCK_INIT;
+#ifdef SENGOO_STD_WRITER_TEST
+static int sengoo_std_writer_fail_stage;
+static HANDLE sengoo_std_writer_before_write, sengoo_std_writer_continue_write;
+#endif
+static SengooStdWriter* sengoo_std_writer_resolve(long long token) {
+    uint64_t value = (uint64_t)token;
+    unsigned index = (unsigned)(value & 255u);
+    if (token <= 0 || index == 0 || index > SENGOO_WRITER_SLOTS || (value >> 8) > 0x7fffffffu) return NULL;
+    AcquireSRWLockShared(&sengoo_std_writer_registry_lock);
+    SengooStdWriterSlot* slot = &sengoo_std_writers[index - 1];
+    SengooStdWriter* result = slot->generation == (uint32_t)(value >> 8) ? slot->value : NULL;
+    ReleaseSRWLockShared(&sengoo_std_writer_registry_lock);
+    return result;
+}
+static DWORD WINAPI sengoo_std_writer_worker(void* argument) {
+    SengooStdWriter* writer = argument;
+    for (;;) {
+        EnterCriticalSection(&writer->lock);
+        if (writer->cancel || writer->failed || (writer->finish && writer->used == 0)) {
+            writer->used = writer->inflight = 0;
+            LeaveCriticalSection(&writer->lock);
+            SetEvent(writer->changed);
+            return 0;
+        }
+        size_t count = writer->used;
+        if (count > writer->capacity - writer->head) count = writer->capacity - writer->head;
+        if (count > 65536) count = 65536;
+        writer->inflight = count;
+        size_t head = writer->head;
+        LeaveCriticalSection(&writer->lock);
+        if (count == 0) { WaitForSingleObject(writer->wake, INFINITE); continue; }
+#ifdef SENGOO_STD_WRITER_TEST
+        if (sengoo_std_writer_before_write) {
+            SetEvent(sengoo_std_writer_before_write);
+            WaitForSingleObject(sengoo_std_writer_continue_write, INFINITE);
+        }
+#endif
+        DWORD wrote = 0;
+        BOOL success = WriteFile(writer->endpoint, writer->bytes + head, (DWORD)count, &wrote, NULL);
+        DWORD error = success ? 0 : GetLastError();
+        EnterCriticalSection(&writer->lock);
+        if (success && wrote > 0 && wrote <= count) {
+            writer->head = (writer->head + wrote) % writer->capacity;
+            writer->used -= wrote;
+            writer->written += wrote; /* accepted checked before enqueue */
+        } else {
+            writer->os_error = error ? error : ERROR_WRITE_FAULT;
+            writer->unknown = !success;
+            if (!writer->cancel) writer->failed = 1;
+        }
+        writer->inflight = 0;
+        LeaveCriticalSection(&writer->lock);
+        SetEvent(writer->changed);
+    }
+}
+static long long sengoo_std_writer_flags(SengooStdWriter* writer) {
+    long long bits = 0;
+    if (!writer->cancel && !writer->finish && !writer->failed && writer->used < writer->capacity) bits |= 1;
+    if (writer->used == 0) bits |= 2;
+    if (writer->failed) bits |= 4;
+    if (writer->cancel) bits |= 8;
+    if (writer->joined) bits |= 16;
+    return bits;
+}
+#endif
+
+static long long sengoo_io_writer_new_unlocked(long long endpoint, long long capacity) {
+    if ((endpoint != 1 && endpoint != 2) || capacity < 1024 || capacity > 1048576)
+        return -SENGOO_STATUS_INVALID_ARGUMENT;
+#ifdef _WIN32
+    HANDLE original = GetStdHandle(endpoint == 1 ? STD_OUTPUT_HANDLE : STD_ERROR_HANDLE);
+    DWORD flags = 0;
+    if (!original || original == INVALID_HANDLE_VALUE || GetFileType(original) != FILE_TYPE_PIPE ||
+        !GetNamedPipeInfo(original, &flags, NULL, NULL, NULL) || (flags & PIPE_TYPE_MESSAGE))
+        return -SENGOO_STATUS_UNSUPPORTED;
+    /* GetNamedPipeServerProcessId succeeds only for local named/anonymous pipes;
+     * a remote redirector is outside the verified cancellation backend. */
+    ULONG server_pid = 0;
+    if (!GetNamedPipeServerProcessId(original, &server_pid)) return -SENGOO_STATUS_UNSUPPORTED;
+    FILE_REMOTE_PROTOCOL_INFO remote = {0};
+    if (GetFileInformationByHandleEx(original, FileRemoteProtocolInfo, &remote, sizeof(remote)))
+        return -SENGOO_STATUS_UNSUPPORTED;
+    unsigned index;
+    for (index = 0; index < SENGOO_WRITER_SLOTS; index++)
+        if (sengoo_std_writers[index].value && sengoo_std_writers[index].endpoint == endpoint)
+            return -SENGOO_STATUS_ALREADY_EXISTS;
+    for (index = 0; index < SENGOO_WRITER_SLOTS; index++)
+        if (!sengoo_std_writers[index].value && sengoo_std_writers[index].generation < 0x7fffffffu) break;
+    if (index == SENGOO_WRITER_SLOTS || (size_t)capacity > SENGOO_WRITER_MAX_BYTES - sengoo_std_writer_reserved)
+        return -SENGOO_STATUS_OVERFLOW;
+    sengoo_std_writer_reserved += (size_t)capacity;
+    SengooStdWriter* writer = calloc(1, sizeof(*writer));
+    if (!writer) { sengoo_std_writer_reserved -= (size_t)capacity; return -SENGOO_STATUS_OUT_OF_MEMORY; }
+    writer->capacity = (size_t)capacity; writer->state = 1;
+    InitializeCriticalSection(&writer->lock);
+    long long status = -SENGOO_STATUS_IO;
+#ifdef SENGOO_STD_WRITER_TEST
+    if (sengoo_std_writer_fail_stage == 1) goto failure;
+#endif
+    writer->bytes = malloc((size_t)capacity);
+    if (!writer->bytes) { status = -SENGOO_STATUS_OUT_OF_MEMORY; goto failure; }
+    if (!DuplicateHandle(GetCurrentProcess(), original, GetCurrentProcess(), &writer->endpoint, 0, FALSE, DUPLICATE_SAME_ACCESS)) goto failure;
+#ifdef SENGOO_STD_WRITER_TEST
+    if (sengoo_std_writer_fail_stage == 2) goto failure;
+#endif
+    writer->wake = CreateEventW(NULL, FALSE, FALSE, NULL);
+    writer->changed = CreateEventW(NULL, FALSE, FALSE, NULL);
+    if (!writer->wake || !writer->changed) goto failure;
+#ifdef SENGOO_STD_WRITER_TEST
+    if (sengoo_std_writer_fail_stage == 3) goto failure;
+#endif
+    writer->thread = CreateThread(NULL, 0, sengoo_std_writer_worker, writer, 0, NULL);
+    if (!writer->thread) goto failure;
+    SengooStdWriterSlot* slot = &sengoo_std_writers[index];
+    ++slot->generation; /* exhausted generations retire a slot rather than alias */
+    slot->value = writer; slot->endpoint = (int)endpoint;
+    return ((long long)slot->generation << 8) | (index + 1);
+failure:
+    if (writer->changed) CloseHandle(writer->changed);
+    if (writer->wake) CloseHandle(writer->wake);
+    if (writer->endpoint) CloseHandle(writer->endpoint);
+    free(writer->bytes); DeleteCriticalSection(&writer->lock); free(writer);
+    sengoo_std_writer_reserved -= (size_t)capacity;
+    return status;
+#else
+    return -SENGOO_STATUS_UNSUPPORTED;
+#endif
+}
+
+long long sengoo_io_writer_new(long long endpoint, long long capacity) {
+#ifdef _WIN32
+    AcquireSRWLockExclusive(&sengoo_std_writer_registry_lock);
+#endif
+    long long result = sengoo_io_writer_new_unlocked(endpoint, capacity);
+#ifdef _WIN32
+    ReleaseSRWLockExclusive(&sengoo_std_writer_registry_lock);
+#endif
+    return result;
+}
+
+long long sengoo_io_writer_try_write(long long token, long long buffer, long long length) {
+    /* Reject impossible sizes before resolving or touching caller storage. */
+    if (length < 0 || length > 65536) return -SENGOO_STATUS_INVALID_ARGUMENT;
+#ifdef _WIN32
+    SengooStdWriter* writer = sengoo_std_writer_resolve(token);
+    if (!writer) return -SENGOO_STATUS_INVALID_HANDLE;
+    EnterCriticalSection(&writer->lock);
+    long long status = writer->cancel || writer->finish || writer->joined ? -SENGOO_STATUS_CANCELED :
+        writer->failed ? -SENGOO_STATUS_IO : 0;
+    if (status) { LeaveCriticalSection(&writer->lock); return status; }
+    SengooFfiBuffer* source = sengoo_ffi_buffer_from_handle(buffer);
+    if (!source || (size_t)length > source->used_len) { LeaveCriticalSection(&writer->lock); return -SENGOO_STATUS_INVALID_ARGUMENT; }
+    size_t count = (size_t)length;
+    if (count > writer->capacity - writer->used) count = writer->capacity - writer->used;
+    if (writer->accepted > LLONG_MAX - (long long)count) { LeaveCriticalSection(&writer->lock); return -SENGOO_STATUS_OVERFLOW; }
+    size_t tail = (writer->head + writer->used) % writer->capacity;
+    size_t first = count;
+    if (first > writer->capacity - tail) first = writer->capacity - tail;
+    if (first) memcpy(writer->bytes + tail, source->bytes, first);
+    if (count > first) memcpy(writer->bytes, source->bytes + first, count - first);
+    writer->used += count; writer->accepted += (long long)count;
+    LeaveCriticalSection(&writer->lock);
+    if (count) SetEvent(writer->wake);
+    return (long long)count;
+#else
+    (void)token; (void)buffer; return -SENGOO_STATUS_UNSUPPORTED;
+#endif
+}
+
+long long sengoo_io_writer_poll(long long token, long long timeout_ms) {
+    if (timeout_ms < 0 || timeout_ms > 60000) return -SENGOO_STATUS_INVALID_ARGUMENT;
+#ifdef _WIN32
+    SengooStdWriter* writer = sengoo_std_writer_resolve(token);
+    if (!writer) return -SENGOO_STATUS_INVALID_HANDLE;
+    EnterCriticalSection(&writer->lock);
+    long long bits = sengoo_std_writer_flags(writer);
+    int joined = writer->joined;
+    LeaveCriticalSection(&writer->lock);
+    if (timeout_ms && !bits && !joined) WaitForSingleObject(writer->changed, (DWORD)timeout_ms);
+    EnterCriticalSection(&writer->lock); bits = sengoo_std_writer_flags(writer); LeaveCriticalSection(&writer->lock);
+    return bits;
+#else
+    (void)token; return -SENGOO_STATUS_UNSUPPORTED;
+#endif
+}
+
+long long sengoo_io_writer_stop(long long token, long long cancel) {
+    if (cancel != 0 && cancel != 1) return -SENGOO_STATUS_INVALID_ARGUMENT;
+#ifdef _WIN32
+    SengooStdWriter* writer = sengoo_std_writer_resolve(token);
+    if (!writer) return -SENGOO_STATUS_INVALID_HANDLE;
+    EnterCriticalSection(&writer->lock);
+    if (cancel) writer->cancel = 1; else writer->finish = 1;
+    HANDLE thread = writer->thread;
+    if (!writer->joined) SetEvent(writer->wake);
+    LeaveCriticalSection(&writer->lock);
+    if (cancel && thread) CancelSynchronousIo(thread);
+    return 0;
+#else
+    (void)token; return -SENGOO_STATUS_UNSUPPORTED;
+#endif
+}
+
+long long sengoo_io_writer_wait(long long token, long long timeout_ms) {
+    if (timeout_ms < 0 || timeout_ms > 60000) return -SENGOO_STATUS_INVALID_ARGUMENT;
+#ifdef _WIN32
+    SengooStdWriter* writer = sengoo_std_writer_resolve(token);
+    if (!writer) return -SENGOO_STATUS_INVALID_HANDLE;
+    if (writer->joined) return 1;
+    ULONGLONG deadline = GetTickCount64() + (ULONGLONG)timeout_ms;
+    for (;;) {
+        EnterCriticalSection(&writer->lock); int cancel = writer->cancel; LeaveCriticalSection(&writer->lock);
+        /* Repeat across the intent -> WriteFile gap. ERROR_NOT_FOUND is never
+         * interpreted as completion. Only the thread's signaled state is. */
+        if (cancel) CancelSynchronousIo(writer->thread);
+        DWORD result = WaitForSingleObject(writer->thread, 0);
+        if (result == WAIT_OBJECT_0) break;
+        if (result == WAIT_FAILED) return -SENGOO_STATUS_IO;
+        ULONGLONG now = GetTickCount64();
+        if (now >= deadline) return 0;
+        DWORD delay = (DWORD)(deadline - now); if (delay > 2) delay = 2;
+        WaitForSingleObject(writer->thread, delay);
+    }
+    /* Joining precedes every resource release, including the cancellation
+     * handle. The public owner remains resolvable for terminal inspection. */
+    AcquireSRWLockExclusive(&sengoo_std_writer_registry_lock);
+    EnterCriticalSection(&writer->lock);
+    CloseHandle(writer->thread); writer->thread = NULL;
+    CloseHandle(writer->endpoint); writer->endpoint = NULL;
+    CloseHandle(writer->wake); writer->wake = NULL;
+    CloseHandle(writer->changed); writer->changed = NULL;
+    free(writer->bytes); writer->bytes = NULL;
+    sengoo_std_writer_reserved -= writer->capacity;
+    writer->joined = 1;
+    LeaveCriticalSection(&writer->lock);
+    ReleaseSRWLockExclusive(&sengoo_std_writer_registry_lock);
+    return 1;
+#else
+    (void)token; return -SENGOO_STATUS_UNSUPPORTED;
+#endif
+}
+
+long long sengoo_io_writer_snapshot(long long token, long long buffer) {
+#ifdef _WIN32
+    SengooStdWriter* writer = sengoo_std_writer_resolve(token);
+    if (!writer) return -SENGOO_STATUS_INVALID_HANDLE;
+    SengooFfiBuffer* output = sengoo_ffi_buffer_from_handle(buffer);
+    if (!output || output->capacity < 64) return -SENGOO_STATUS_BUFFER_TOO_SMALL;
+    EnterCriticalSection(&writer->lock);
+    long long values[8] = { writer->joined ? 5 : writer->failed ? 4 : writer->cancel ? 2 : writer->finish ? 3 : 1,
+        writer->accepted, writer->written, (long long)(writer->used - writer->inflight),
+        (long long)writer->inflight, writer->os_error, writer->unknown, (long long)writer->capacity };
+    memcpy(output->bytes, values, sizeof(values)); output->used_len = sizeof(values);
+    LeaveCriticalSection(&writer->lock);
+    return 0;
+#else
+    (void)token; (void)buffer; return -SENGOO_STATUS_UNSUPPORTED;
+#endif
+}
+
+long long sengoo_io_writer_snapshot_get(long long buffer, long long index) {
+    if (index < 0 || index >= 8) return -SENGOO_STATUS_INVALID_ARGUMENT;
+    SengooFfiBuffer* source = sengoo_ffi_buffer_from_handle(buffer);
+    if (!source || source->used_len != 64) return -SENGOO_STATUS_INVALID_ARGUMENT;
+    long long value; memcpy(&value, source->bytes + (size_t)index * 8, 8); return value;
+}
+
+long long sengoo_io_writer_close(long long token) {
+#ifdef _WIN32
+    SengooStdWriter* writer = sengoo_std_writer_resolve(token);
+    if (!writer) return token == 0 ? 0 : -SENGOO_STATUS_INVALID_HANDLE;
+    sengoo_io_writer_stop(token, 1);
+    while (sengoo_io_writer_wait(token, 60000) != 1) { /* retain ownership until actual join */ }
+    unsigned index = (unsigned)((uint64_t)token & 255u) - 1;
+    AcquireSRWLockExclusive(&sengoo_std_writer_registry_lock);
+    sengoo_std_writers[index].value = NULL;
+    DeleteCriticalSection(&writer->lock); free(writer);
+    ReleaseSRWLockExclusive(&sengoo_std_writer_registry_lock);
+    return 0;
+#else
+    return token == 0 ? 0 : -SENGOO_STATUS_UNSUPPORTED;
+#endif
+}
+
+/* Test/debug fields: live owners, unjoined workers, live native handles,
+ * queued bytes, in-flight bytes and reserved byte capacity. */
+long long sengoo_io_writer_resource_count(long long field) {
+    if (field < 0 || field > 5) return -SENGOO_STATUS_INVALID_ARGUMENT;
+    long long total = 0;
+#ifdef _WIN32
+    AcquireSRWLockShared(&sengoo_std_writer_registry_lock);
+    if (field == 5) {
+        total = (long long)sengoo_std_writer_reserved;
+        ReleaseSRWLockShared(&sengoo_std_writer_registry_lock);
+        return total;
+    }
+    for (unsigned index = 0; index < SENGOO_WRITER_SLOTS; index++) {
+        SengooStdWriter* writer = sengoo_std_writers[index].value;
+        if (!writer) continue;
+        EnterCriticalSection(&writer->lock);
+        if (field == 0) total++;
+        if (field == 1) total += !writer->joined;
+        if (field == 2) total += !!writer->thread + !!writer->endpoint + !!writer->wake + !!writer->changed;
+        if (field == 3) total += (long long)(writer->used - writer->inflight);
+        if (field == 4) total += (long long)writer->inflight;
+        LeaveCriticalSection(&writer->lock);
+    }
+    ReleaseSRWLockShared(&sengoo_std_writer_registry_lock);
+#endif
+    return total;
+}
+
 long long sengoo_io_stderr_flush(void) {
     return fflush(stderr) == 0 ? 0 : -SENGOO_STATUS_IO;
 }

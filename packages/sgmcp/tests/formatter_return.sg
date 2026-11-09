@@ -1,0 +1,18 @@
+struct FormatterReturn {
+    number: i64,
+}
+
+impl FormatterReturn {
+    def value(&self) -> i64 {
+        self.number;
+    }
+    def returned(&self) -> i64 {
+        return self.value();
+    }
+}
+
+def main() -> i64 {
+    let example = FormatterReturn { number: 42 };
+    if example.returned() != 42 { return 1; };
+    0;
+}

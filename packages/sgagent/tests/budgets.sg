@@ -1,0 +1,91 @@
+import sgagent;
+
+def budget_expect(value: bool, label: &str) -> Result<bool, i64> {
+    if not value { println(label); return agent_condition(false, 99); };
+    agent_condition(true, 0);
+}
+
+def budget_kernel(maximum: i64, tokens: i64) -> Result<AgentKernel, i64> {
+    let target = json_parse("{\"connection\":\"fixture\",\"model\":\"fixture\"}")?;
+    let history = json_parse("{\"messages\":[]}")?;
+    let tools = json_parse("{\"tools\":[]}")?;
+    let policy = policy_default();
+    agent_kernel_new("budget-run", 1, &target, &history, &tools, &policy, maximum, tokens);
+}
+
+def next(kernel: &mut AgentKernel, ledger: &mut AgentMemoryLedger) -> Result<JsonDoc, i64> {
+    let mut count = 0;
+    loop { let action = agent_kernel_next(kernel)?; if agent_control_string(action.root(), "type")?.as_str() != "persist" { return Result { is_ok: true, value: action, error: 0 }; }; let receipt = agent_memory_commit(ledger, &action)?; agent_kernel_commit(kernel, &receipt)?; count = count + 1; if count > 3 { return agent_document_error(99); }; };
+    agent_document_error(99);
+}
+
+def exact_budget() -> Result<bool, i64> {
+    let mut kernel = budget_kernel(0, 100)?;
+    let mut ledger = agent_memory_ledger("budget-run", 1)?;
+    let request = next(&mut kernel, &mut ledger)?;
+    let id = agent_control_string(request.root(), "request_id")?;
+    let missing = json_parse("{\"role\":\"assistant\",\"content\":\"No exact usage\",\"tool_calls\":[]}")?;
+    agent_kernel_accept_model(&mut kernel, id.as_str(), &missing, true)?;
+    let action = next(&mut kernel, &mut ledger)?;
+    budget_expect(agent_control_string(action.root(), "type")?.as_str() == "paused" and agent_control_string(action.root(), "reason")?.as_str() == "exact_usage_unavailable", "explicit token guarantee refuses missing usage")?;
+    budget_expect(kernel.checkpoint.root().object_get("requests")?.number_i64()? == 1, "missing usage does not uncharge request");
+}
+
+def retry_budget() -> Result<bool, i64> {
+    let mut kernel = budget_kernel(2, 0)?;
+    let mut ledger = agent_memory_ledger("budget-run", 1)?;
+    let request = next(&mut kernel, &mut ledger)?;
+    let id = agent_control_string(request.root(), "request_id")?;
+    agent_kernel_model_failed(&mut kernel, id.as_str(), 500, 500, "1", 1000, true, false)?;
+    let wait = next(&mut kernel, &mut ledger)?;
+    budget_expect(agent_control_string(wait.root(), "type")?.as_str() == "retry_wait", "retry is a pollable host action")?;
+    budget_expect(not agent_kernel_retry_ready(&mut kernel, 1500)?, "retry cannot run before deadline")?;
+    agent_kernel_retry_ready(&mut kernel, 2000)?;
+    let second = next(&mut kernel, &mut ledger)?;
+    let second_id = agent_control_string(second.root(), "request_id")?;
+    budget_expect(second_id.as_str() != id.as_str(), "each network attempt has independent identity")?;
+    agent_kernel_model_failed(&mut kernel, second_id.as_str(), 500, 500, "", 2000, true, false)?;
+    let delayed = next(&mut kernel, &mut ledger)?;
+    agent_kernel_retry_ready(&mut kernel, 3000)?;
+    let stopped = next(&mut kernel, &mut ledger)?;
+    budget_expect(agent_control_string(stopped.root(), "type")?.as_str() == "paused" and agent_control_string(stopped.root(), "reason")?.as_str() == "budget", "explicit request limit includes retries")?;
+    budget_expect(kernel.checkpoint.root().object_get("requests")?.number_i64()? == 2, "budget exhaustion does not dispatch a third request");
+}
+
+def no_hidden_limit() -> Result<bool, i64> {
+    let mut kernel = budget_kernel(0, 0)?;
+    let mut ledger = agent_memory_ledger("budget-run", 1)?;
+    let mut request = next(&mut kernel, &mut ledger)?;
+    let mut attempt = 1;
+    let mut now = 0;
+    while attempt <= 6 { let id = agent_control_string(request.root(), "request_id")?; agent_kernel_model_failed(&mut kernel, id.as_str(), 502, 502, "", now, true, false)?; let action = next(&mut kernel, &mut ledger)?; if attempt == 6 { budget_expect(agent_control_string(action.root(), "type")?.as_str() == "paused" and agent_control_string(action.root(), "reason")?.as_str() == "model_request_failed", "five retries stop with original task retained")?; (); } else { budget_expect(agent_control_string(action.root(), "type")?.as_str() == "retry_wait", "network failures get bounded retry wait")?; now = now + 10000; agent_kernel_retry_ready(&mut kernel, now)?; request = next(&mut kernel, &mut ledger)?; }; attempt = attempt + 1; };
+    budget_expect(kernel.checkpoint.root().object_get("maximum_requests")?.number_i64()? == 0 and kernel.checkpoint.root().object_get("requests")?.number_i64()? == 6, "unlimited requests and bounded retries are separate policies");
+}
+
+def provider_continuation() -> Result<bool, i64> {
+    let mut kernel = budget_kernel(0, 0)?;
+    let mut ledger = agent_memory_ledger("budget-run", 1)?;
+    let first = next(&mut kernel, &mut ledger)?;
+    let id = agent_control_string(first.root(), "request_id")?;
+    let response = json_parse("{\"role\":\"assistant\",\"content\":\"Intermediate\",\"tool_calls\":[],\"requires_continuation\":true,\"input_tokens\":1,\"output_tokens\":1}")?;
+    agent_kernel_accept_model(&mut kernel, id.as_str(), &response, true)?;
+    let following = next(&mut kernel, &mut ledger)?;
+    budget_expect(agent_control_string(following.root(), "type")?.as_str() == "model_request" and kernel.checkpoint.root().object_get("requests")?.number_i64()? == 2, "explicit provider continuation keeps same task and cumulative accounting")?;
+    let messages = kernel.checkpoint.root().object_get("messages")?;
+    budget_expect(messages.array_len()? == 1, "provider continuation does not invent another user message");
+}
+
+def tests() -> Result<bool, i64> {
+    exact_budget()?;
+    retry_budget()?;
+    no_hidden_limit()?;
+    provider_continuation()?;
+    println("Agent exact usage, explicit budgets, pollable retries and unlimited default passed");
+    agent_condition(true, 0);
+}
+
+def main() -> i64 {
+    let result = tests();
+    if not result.is_ok() { println(result.error); return 1; };
+    0;
+}

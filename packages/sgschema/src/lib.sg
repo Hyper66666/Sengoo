@@ -1,0 +1,90 @@
+import std::json;
+
+import std::string;
+
+struct SchemaValidation {
+    valid: bool,
+    stage: String,
+    pointer: String,
+    keyword: String,
+}
+
+struct SchemaWork {
+    remaining: i64,
+}
+
+def schema_verdict(valid: bool, stage: &str, path: &str, keyword: &str) -> SchemaValidation {
+    SchemaValidation { valid: valid, stage: string_from_str(stage).unwrap_or(string_new()), pointer: string_from_str(path).unwrap_or(string_new()), keyword: string_from_str(keyword).unwrap_or(string_new()) };
+}
+
+def schema_ok() -> Result<SchemaValidation, i64> {
+    Result { is_ok: true, value: schema_verdict(true, "", "", ""), error: 0 };
+}
+
+def schema_reject(stage: &str, path: &str, keyword: &str) -> Result<SchemaValidation, i64> {
+    Result { is_ok: true, value: schema_verdict(false, stage, path, keyword), error: 0 };
+}
+
+def schema_pointer(parent: &str, key: &str) -> Result<String, i64> {
+    let out = string_from_str(parent)?;
+    out.push_str("/")?;
+    let source = string_from_str(key)?;
+    let chars = source.chars();
+    loop { let next = chars.next(); if not next.is_some { break; }; if next.value == '~' { out.push_str("~0")?; (); } else { if next.value == '/' { out.push_str("~1")?; (); } else { out.push_char(next.value)?; (); }; }; };
+    chars.free();
+    Result { is_ok: true, value: out, error: 0 };
+}
+
+def schema_type_known(name: &str) -> bool {
+    name == "object" or name == "array" or name == "string" or name == "integer" or name == "number" or name == "boolean" or name == "null";
+}
+
+def schema_type_matches(name: &str, value: JsonValue) -> Result<bool, i64> {
+    let kind = value.kind()?;
+    let valid = if name == "object" { kind == JSON_KIND_OBJECT(); } else { if name == "array" { kind == JSON_KIND_ARRAY(); } else { if name == "string" { kind == JSON_KIND_STRING(); } else { if name == "boolean" { kind == JSON_KIND_BOOL(); } else { if name == "null" { kind == JSON_KIND_NULL(); } else { if name == "integer" { kind == JSON_KIND_NUMBER() and value.number_i64().is_ok(); } else { name == "number" and kind == JSON_KIND_NUMBER(); }; }; }; }; }; };
+    Result { is_ok: true, value: valid, error: 0 };
+}
+
+def schema_scalar_equal(left: JsonValue, right: JsonValue) -> Result<bool, i64> {
+    let kind = left.kind()?;
+    if kind != right.kind()? { return Result { is_ok: true, value: false, error: 0 }; };
+    if kind == JSON_KIND_NULL() { return Result { is_ok: true, value: true, error: 0 }; };
+    if kind == JSON_KIND_STRING() { let a = left.string_value()?; let b = right.string_value()?; return Result { is_ok: true, value: a.eq(b), error: 0 }; };
+    if kind == JSON_KIND_BOOL() { return Result { is_ok: true, value: left.bool_value()? == right.bool_value()?, error: 0 }; };
+    if kind == JSON_KIND_NUMBER() { let a = left.number_i64(); let b = right.number_i64(); if a.is_ok() or b.is_ok() { return Result { is_ok: true, value: a.is_ok() and b.is_ok() and a.value == b.value, error: 0 }; }; return Result { is_ok: true, value: left.number_f64()? == right.number_f64()?, error: 0 }; };
+    Result { is_ok: true, value: false, error: 0 };
+}
+
+def schema_definition(node: JsonValue, path: &str, depth: i64, work: &mut SchemaWork) -> Result<SchemaValidation, i64> {
+    work.remaining = work.remaining - 1;
+    if depth > 32 or work.remaining < 0 { return schema_reject("schema", path, "capacity"); };
+    if node.kind()? != JSON_KIND_OBJECT() { return schema_reject("schema", path, "object"); };
+    let mut index = 0;
+    while index < node.object_len()? { let key = node.object_key(index)?; if key.len() != key.as_str().len() { return schema_reject("schema", path, "NUL-key"); }; let name = key.as_str(); let item = node.object_get(name)?; if name == "type" { let parsed = item.string_value(); if not parsed.is_ok() or parsed.value.len() != parsed.value.as_str().len() or not schema_type_known(parsed.value.as_str()) { return schema_reject("schema", path, name); }; } else { if name == "properties" { if item.kind()? != JSON_KIND_OBJECT() { return schema_reject("schema", path, name); }; let mut child_index = 0; while child_index < item.object_len()? { let child_name = item.object_key(child_index)?; if child_name.len() != child_name.as_str().len() { return schema_reject("schema", path, "NUL-key"); }; let child_path = schema_pointer(path, child_name.as_str())?; let checked = schema_definition(item.object_get(child_name.as_str())?, child_path.as_str(), depth + 1, work)?; if not checked.valid { return Result { is_ok: true, value: checked, error: 0 }; }; child_index = child_index + 1; }; } else { if name == "items" { let checked = schema_definition(item, path, depth + 1, work)?; if not checked.valid { return Result { is_ok: true, value: checked, error: 0 }; }; } else { if name == "additionalProperties" { if not item.bool_value().is_ok() { return schema_reject("schema", path, name); }; } else { if name == "required" or name == "enum" { if item.kind()? != JSON_KIND_ARRAY() or item.array_len()? > 1024 or (name == "enum" and item.array_len()? == 0) { return schema_reject("schema", path, name); }; let mut entry = 0; while entry < item.array_len()? { let value = item.array_get(entry)?; if name == "required" { let text = value.string_value(); if not text.is_ok() or text.value.len() != text.value.as_str().len() { return schema_reject("schema", path, name); }; } else { if value.kind()? == JSON_KIND_OBJECT() or value.kind()? == JSON_KIND_ARRAY() { return schema_reject("schema", path, name); }; }; entry = entry + 1; }; } else { if name == "minLength" or name == "maxLength" or name == "minItems" or name == "maxItems" { let number = item.number_i64(); if not number.is_ok() or number.value < 0 { return schema_reject("schema", path, name); }; } else { if name == "minimum" or name == "maximum" { if not item.number_i64().is_ok() { return schema_reject("schema", path, name); }; } else { if name == "title" or name == "description" { if not item.string_value().is_ok() { return schema_reject("schema", path, name); }; } else { return schema_reject("schema", path, name); }; }; }; }; }; }; }; }; index = index + 1; };
+    schema_ok();
+}
+
+def schema_instance(node: JsonValue, value: JsonValue, path: &str, depth: i64, work: &mut SchemaWork) -> Result<SchemaValidation, i64> {
+    work.remaining = work.remaining - 1;
+    if depth > 32 or work.remaining < 0 { return schema_reject("instance", path, "capacity"); };
+    if node.object_has("type") { let name = node.object_get("type")?.string_value()?; if not schema_type_matches(name.as_str(), value)? { return schema_reject("instance", path, "type"); }; };
+    if node.object_has("enum") { let entries = node.object_get("enum")?; let mut index = 0; let mut found = false; while index < entries.array_len()? { if schema_scalar_equal(value, entries.array_get(index)?)? { found = true; break; }; index = index + 1; }; if not found { return schema_reject("instance", path, "enum"); }; };
+    let kind = value.kind()?;
+    if kind == JSON_KIND_OBJECT() { if node.object_has("required") { let required = node.object_get("required")?; let mut index = 0; while index < required.array_len()? { let key = required.array_get(index)?.string_value()?; if not value.object_has(key.as_str()) { let pointer = schema_pointer(path, key.as_str())?; return schema_reject("instance", pointer.as_str(), "required"); }; index = index + 1; }; }; let mut index = 0; while index < value.object_len()? { let key = value.object_key(index)?; let pointer = schema_pointer(path, key.as_str())?; if key.len() != key.as_str().len() { return schema_reject("instance", pointer.as_str(), "NUL-key"); }; let declared = node.object_has("properties") and node.object_get("properties")?.object_has(key.as_str()); if declared { let checked = schema_instance(node.object_get("properties")?.object_get(key.as_str())?, value.object_get(key.as_str())?, pointer.as_str(), depth + 1, work)?; if not checked.valid { return Result { is_ok: true, value: checked, error: 0 }; }; } else { if node.object_has("additionalProperties") and not node.object_get("additionalProperties")?.bool_value()? { return schema_reject("instance", pointer.as_str(), "additionalProperties"); }; }; index = index + 1; }; };
+    if kind == JSON_KIND_ARRAY() { let count = value.array_len()?; if node.object_has("minItems") and count < node.object_get("minItems")?.number_i64()? { return schema_reject("instance", path, "minItems"); }; if node.object_has("maxItems") and count > node.object_get("maxItems")?.number_i64()? { return schema_reject("instance", path, "maxItems"); }; if node.object_has("items") { let mut index = 0; while index < count { let label = string_new(); label.push_i64(index)?; let pointer = schema_pointer(path, label.as_str())?; let checked = schema_instance(node.object_get("items")?, value.array_get(index)?, pointer.as_str(), depth + 1, work)?; if not checked.valid { return Result { is_ok: true, value: checked, error: 0 }; }; index = index + 1; }; }; };
+    if kind == JSON_KIND_STRING() and (node.object_has("minLength") or node.object_has("maxLength")) { let text = value.string_value()?; let chars = text.chars(); let mut count = 0; loop { let next = chars.next(); if not next.is_some { break; }; count = count + 1; }; chars.free(); if node.object_has("minLength") and count < node.object_get("minLength")?.number_i64()? { return schema_reject("instance", path, "minLength"); }; if node.object_has("maxLength") and count > node.object_get("maxLength")?.number_i64()? { return schema_reject("instance", path, "maxLength"); }; };
+    if kind == JSON_KIND_NUMBER() and (node.object_has("minimum") or node.object_has("maximum")) { let number = value.number_i64(); if not number.is_ok() { return schema_reject("instance", path, "integer-bounds"); }; if node.object_has("minimum") and number.value < node.object_get("minimum")?.number_i64()? { return schema_reject("instance", path, "minimum"); }; if node.object_has("maximum") and number.value > node.object_get("maximum")?.number_i64()? { return schema_reject("instance", path, "maximum"); }; };
+    schema_ok();
+}
+
+def schema_validate_with_limit(schema: JsonValue, value: JsonValue, visits: i64) -> Result<SchemaValidation, i64> {
+    if visits < 1 or visits > 1048576 { return Result { is_ok: false, value: SchemaValidation { valid: false, stage: String { handle: 0 }, pointer: String { handle: 0 }, keyword: String { handle: 0 } }, error: 2 }; };
+    let mut work = SchemaWork { remaining: visits };
+    let definition = schema_definition(schema, "", 0, &mut work)?;
+    if not definition.valid { return Result { is_ok: true, value: definition, error: 0 }; };
+    schema_instance(schema, value, "", 0, &mut work);
+}
+
+def schema_validate(schema: JsonValue, value: JsonValue) -> Result<SchemaValidation, i64> {
+    schema_validate_with_limit(schema, value, 65536);
+}

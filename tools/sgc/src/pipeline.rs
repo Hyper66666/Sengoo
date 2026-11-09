@@ -362,6 +362,12 @@ fn compile_frontend_to_mir_with_phase_timings<S: AsRef<str>>(
             hir_prune_ms = hir_prune_start.elapsed().as_secs_f64() * 1000.0;
             hir_prune_applied = true;
         }
+        let mut mir_options =
+            MirLowerOptions::new(runtime_contract_checks, true, async_functions.clone())
+                .with_target_pointer_width(target_pointer_width);
+        if let Some(env) = type_env.as_ref() {
+            mir_options = mir_options.with_checked_parameter_borrows(env);
+        }
         if low_memory_mode {
             drop(type_env.take());
             drop(program.take());
@@ -375,9 +381,6 @@ fn compile_frontend_to_mir_with_phase_timings<S: AsRef<str>>(
         };
         let ffi_codegen = collect_ffi_codegen_config_for_pointer_width(&hir_module, pointer_width);
         let mir_lower_start = Instant::now();
-        let mut mir_options =
-            MirLowerOptions::new(runtime_contract_checks, true, async_functions.clone())
-                .with_target_pointer_width(target_pointer_width);
         if let Some(context) = assert_callsite {
             mir_options = mir_options.with_assert_callsite_context(context);
         }

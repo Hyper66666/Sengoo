@@ -1,0 +1,100 @@
+import sgmcp;
+
+import std::args;
+
+extern "C" {
+    fn sengoo_process_live_handle_count() -> i64;
+    fn sengoo_process_live_resource_count() -> i64;
+}
+
+def expect(ok: bool, message: &str) -> Result<bool, i64> {
+    if not ok { println(message); return sgmcp_error(99); };
+    sgmcp_ok();
+}
+
+def argument(index: i64) -> Result<String, i64> {
+    let buffer = ffi_buffer_new(arg_len(index)? + 1)?;
+    let count = arg_copy(index, buffer)?;
+    sgmcp_bytes_text(&buffer, count);
+}
+
+def wait(client: &mut SgMcpClient) -> Result<JsonDoc, i64> {
+    loop { if client.poll()? { break; }; time_sleep_ms(1); };
+    client.result();
+}
+
+def connect(executable: &str, arguments: JsonValue) -> Result<SgMcpClient, i64> {
+    let mut client = sgmcp_start(executable, arguments, ".")?;
+    client.begin_initialize("2025-11-25", "sgmcp-test", 5000)?;
+    let accepted = wait(&mut client)?;
+    client.finish_initialize()?;
+    Result { is_ok: true, value: client, error: 0 };
+}
+
+def real_pair(server: &str) -> Result<bool, i64> {
+    let arguments = json_parse("[]")?;
+    let mut client = connect(server, arguments.root())?;
+    let params = json_doc_object()?;
+    client.begin("tools/list", params.root(), 5000)?;
+    let first = wait(&mut client)?;
+    let result = first.root().object_get("result")?;
+    expect(result.object_get("tools")?.array_len()? == 1 and sgmcp_string(result, "nextCursor").as_str() == "1", "real server did not paginate")?;
+    sgmcp_put(&params, params.root(), "cursor", "1")?;
+    client.begin("tools/list", params.root(), 5000)?;
+    let second = wait(&mut client)?;
+    expect(sgmcp_string(second.root().object_get("result")?.object_get("tools")?.array_get(0)?, "name").as_str() == "slow", "second tool page lost")?;
+    let call = json_parse("{\"name\":\"echo\",\"arguments\":{\"message\":\"中文😀\"},\"_meta\":{\"progressToken\":\"opaque\"}}")?;
+    client.begin("tools/call", call.root(), 5000)?;
+    let output = wait(&mut client)?;
+    expect(sgmcp_string(output.root().object_get("result")?.object_get("structuredContent")?, "message").as_str() == "中文😀", "real structured result lost")?;
+    let notice = client.next_notification()?;
+    expect(sgmcp_string(notice.root(), "method").as_str() == "notifications/progress", "real progress notification lost")?;
+    let invalid = json_parse("{\"name\":\"echo\",\"arguments\":{\"message\":42}}")?;
+    client.begin("tools/call", invalid.root(), 5000)?;
+    let rejected = wait(&mut client);
+    expect(not rejected.is_ok() and rejected.error == 9 and client.rpc_response()?.root().object_has("error"), "schema mismatch did not preserve JSON-RPC error")?;
+    let slow = json_parse("{\"name\":\"slow\",\"arguments\":{\"message\":\"wait\"}}")?;
+    client.begin("tools/call", slow.root(), 50)?;
+    let timed = wait(&mut client);
+    expect(not timed.is_ok() and timed.error == 11 and client.closed and client.process.tree_quiescent()?, "deadline did not stop and reap server tree");
+}
+
+def hostile(python: &str, script: &str, mode: &str) -> Result<bool, i64> {
+    let arguments = json_doc_object()?;
+    let args = arguments.new_array()?;
+    args.array_push(arguments.new_string("-u")?)?;
+    args.array_push(arguments.new_string(script)?)?;
+    args.array_push(arguments.new_string(mode)?)?;
+    let mut client = sgmcp_start(python, args, ".")?;
+    client.begin_initialize("2024-11-05", "sgmcp-test", 500)?;
+    let initialization = wait(&mut client);
+    if mode == "init-timeout" { return expect(not initialization.is_ok() and initialization.error == 11 and client.closed, "initialize timeout was not bounded"); };
+    if mode == "bad-version" or mode == "nul-version" or mode == "nul-peer" { let initialized = initialization?; return expect(not client.finish_initialize().is_ok(), "unsupported or NUL protocol identity accepted"); };
+    let initialized = initialization?;
+    client.finish_initialize()?;
+    let params = json_doc_object()?;
+    client.begin(if mode == "nul-tool" or mode == "nul-cursor" { "tools/list"; } else { "tools/call"; }, params.root(), if mode == "oversize" { 10000; } else { 2000; })?;
+    if mode == "progress-burst" { let mut prefilled = 0; while prefilled < 64 { client.notifications.push(SgMcpNotification { encoded: sgmcp_text("{\"jsonrpc\":\"2.0\",\"method\":\"notifications/progress\",\"params\":{}}") }); prefilled = prefilled + 1; }; let outgoing = client.outgoing.used_len(); expect(not client.poll()? and client.notifications.len() == 64 and client.outgoing.used_len() == outgoing, "full notification queue failed instead of applying backpressure")?; while prefilled > 0 { let discarded = client.next_notification()?; prefilled = prefilled - 1; }; let mut count = 0; loop { let finished = client.poll()?; expect(client.notifications.len() <= 64, "progress notification queue grew without bound")?; loop { let notice = client.next_notification()?; if not notice.root().object_has("method") { break; }; count = count + 1; }; if finished { break; }; time_sleep_ms(1); }; let final_response = client.result()?; expect(count == 160, "progress burst was dropped or failed instead of applying backpressure")?; client.close()?; return sgmcp_ok(); };
+    let result = wait(&mut client);
+    if mode == "stderr" { let completed = result?; let report = client.diagnostic_report()?; expect(report.root().object_get("stderr_truncated")?.bool_value()? and sgmcp_number(report.root(), "stderr_bytes", 0) == 65536, "stderr was not drained and bounded")?; (); } else { if mode == "rpc-error" { expect(not result.is_ok() and result.error == 9 and sgmcp_number(client.rpc_response()?.root().object_get("error")?, "code", 0) == -32602, "server RPC error was discarded")?; let baseline = sengoo_json_bounded_live_documents(); let mut scan = 0; while scan < 20 { let failed = client.result(); expect(not failed.is_ok() and failed.value.handle == 0, "failed result owns a hidden JSON document")?; let detail = client.rpc_response()?; expect(detail.root().object_has("error"), "failed response unavailable")?; scan = scan + 1; }; expect(sengoo_json_bounded_live_documents() == baseline, "repeated failed result leaked JSON documents")?; (); } else { if mode == "cancel" { let completed = result?; client.begin("tools/call", params.root(), 5000)?; client.poll()?; client.cancel()?; expect(client.result().error == 19 and client.process.tree_quiescent()?, "explicit cancellation did not reclaim process tree")?; (); } else { expect(not result.is_ok(), "hostile wire data unexpectedly succeeded")?; if mode == "oversize" { if result.error != 13 { println("oversize error code"); println(result.error); }; expect(result.error == 13, "oversized output was not a capacity failure")?; (); }; (); }; }; };
+    client.close()?;
+    sgmcp_ok();
+}
+
+def run() -> Result<bool, i64> {
+    let server = argument(0)?;
+    let python = argument(1)?;
+    let fixture = argument(2)?;
+    real_pair(server.as_str())?;
+    let modes = json_parse("[\"progress-burst\",\"stderr\",\"rpc-error\",\"oversize\",\"wrong-id\",\"empty-object\",\"invalid-utf8\",\"crash\",\"cancel\",\"bad-version\",\"nul-version\",\"nul-peer\",\"nul-envelope\",\"nul-key\",\"nul-tool\",\"nul-cursor\",\"init-timeout\"]")?;
+    let mut index = 0;
+    while index < modes.root().array_len()? { let mode = modes.root().array_get(index)?.string_value()?; hostile(python.as_str(), fixture.as_str(), mode.as_str())?; expect(sengoo_process_live_handle_count() == 0 and sengoo_process_live_resource_count() == 0, "client leaked process handles or resources")?; index = index + 1; };
+    println("sgmcp real process client/server, paging, schema, Unicode, progress, stderr, timeout, cancel, crash and hostile wire checks passed");
+    sgmcp_ok();
+}
+
+def main() -> i64 {
+    let result = run();
+    if not result.is_ok() { println(result.error); return 1; };
+    0;
+}

@@ -1,0 +1,612 @@
+import std::string;
+
+import std::json;
+
+import std::collections;
+
+import std::ffi;
+
+import std::process;
+
+import std::time;
+
+import std::io;
+
+import std::terminal;
+
+import sgschema;
+
+def sgmcp_ok() -> Result<bool, i64> {
+    Result { is_ok: true, value: true, error: 0 };
+}
+
+def sgmcp_error(code: i64) -> Result<bool, i64> {
+    Result { is_ok: false, value: false, error: code };
+}
+
+def sgmcp_text(text: &str) -> String {
+    string_from_str(text).unwrap_or(string_new());
+}
+
+def sgmcp_doc() -> Result<JsonDoc, i64> {
+    json_doc_object_limits(1048576, 32768);
+}
+
+def sgmcp_put(doc: &JsonDoc, object: JsonValue, key: &str, value: &str) -> Result<bool, i64> {
+    object.object_set(key, doc.new_string(value)?);
+}
+
+def sgmcp_i64(doc: &JsonDoc, object: JsonValue, key: &str, value: i64) -> Result<bool, i64> {
+    object.object_set(key, doc.new_i64(value)?);
+}
+
+def sgmcp_bool(doc: &JsonDoc, object: JsonValue, key: &str, value: bool) -> Result<bool, i64> {
+    object.object_set(key, doc.new_bool(value)?);
+}
+
+def sgmcp_string(object: JsonValue, key: &str) -> String {
+    if not object.object_has(key) { return string_new(); };
+    let value = object.object_get(key).value.string_value().unwrap_or(string_new());
+    if value.len() != value.as_str().len() { return string_new(); };
+    value;
+}
+
+def sgmcp_control_string(object: JsonValue, key: &str) -> Result<String, i64> {
+    let value = object.object_get(key)?.string_value()?;
+    if value.len() != value.as_str().len() { return string_result_err(10); };
+    Result { is_ok: true, value: value, error: 0 };
+}
+
+struct SgMcpKeyBudget {
+    remaining: i64,
+}
+
+def sgmcp_keys_valid(node: JsonValue, depth: i64, work: &mut SgMcpKeyBudget) -> Result<bool, i64> {
+    if depth > 64 or work.remaining <= 0 { return sgmcp_error(13); };
+    work.remaining = work.remaining - 1;
+    let kind = node.kind()?;
+    if kind == JSON_KIND_OBJECT() { let mut index = 0; while index < node.object_len()? { let key = node.object_key(index)?; if key.len() != key.as_str().len() { return Result { is_ok: true, value: false, error: 0 }; }; if not sgmcp_keys_valid(node.object_get(key.as_str())?, depth + 1, work)? { return Result { is_ok: true, value: false, error: 0 }; }; index = index + 1; }; } else { if kind == JSON_KIND_ARRAY() { let mut index = 0; while index < node.array_len()? { if not sgmcp_keys_valid(node.array_get(index)?, depth + 1, work)? { return Result { is_ok: true, value: false, error: 0 }; }; index = index + 1; }; }; };
+    sgmcp_ok();
+}
+
+def sgmcp_document_keys_valid(document: &JsonDoc) -> Result<bool, i64> {
+    let mut work = SgMcpKeyBudget { remaining: 65536 };
+    sgmcp_keys_valid(document.root(), 0, &mut work);
+}
+
+def sgmcp_peer_info_valid(info: JsonValue) -> Result<bool, i64> {
+    if info.kind()? != JSON_KIND_OBJECT() { return Result { is_ok: true, value: false, error: 0 }; };
+    let name = sgmcp_control_string(info, "name");
+    let version = sgmcp_control_string(info, "version");
+    Result { is_ok: true, value: name.is_ok() and version.is_ok() and name.value.len() > 0 and version.value.len() > 0, error: 0 };
+}
+
+def sgmcp_owned_control_valid(value: &String) -> bool {
+    value.len() == value.as_str().len();
+}
+
+def sgmcp_control_guard(value: &String) -> Result<bool, i64> {
+    if not sgmcp_owned_control_valid(value) { return sgmcp_error(2); };
+    sgmcp_ok();
+}
+
+def sgmcp_start_owned(command: &String, arguments: JsonValue, cwd: &String) -> Result<SgMcpClient, i64> {
+    sgmcp_control_guard(command)?;
+    sgmcp_control_guard(cwd)?;
+    sgmcp_start(command.as_str(), arguments, cwd.as_str());
+}
+
+def sgmcp_number(object: JsonValue, key: &str, fallback: i64) -> i64 {
+    if not object.object_has(key) { return fallback; };
+    object.object_get(key).value.number_i64().unwrap_or(fallback);
+}
+
+def sgmcp_version_supported(version: &str) -> bool {
+    version == "2025-11-25" or version == "2024-11-05";
+}
+
+def sgmcp_bytes_text(buffer: &Buffer, count: i64) -> Result<String, i64> {
+    if count < 0 or count > buffer.used_len() { return string_result_err(2); };
+    string_from_bytes_raw(buffer.ptr(), count);
+}
+
+struct SgMcpFramer {
+    pending: Buffer,
+    maximum: i64,
+}
+
+def sgmcp_framer(maximum: i64) -> Result<SgMcpFramer, i64> {
+    if maximum < 128 or maximum > 16777216 { return Result { is_ok: false, value: SgMcpFramer { pending: Buffer { handle: 0 }, maximum: 0 }, error: 2 }; };
+    Result { is_ok: true, value: SgMcpFramer { pending: ffi_buffer_new(maximum)?, maximum: maximum }, error: 0 };
+}
+
+impl SgMcpFramer {
+    def ready(&self) -> Result<bool, i64> {
+        let needle = ffi_buffer_from_bytes("\n")?;
+        let newline = self.pending.index_of_bytes(needle, 0)?;
+        Result { is_ok: true, value: newline >= 0, error: 0 };
+    }
+    def feed(&self, bytes: &Buffer, count: i64) -> Result<bool, i64> {
+        if count < 0 or count > bytes.used_len() { return sgmcp_error(2); };
+        if count > self.maximum - self.pending.used_len() { return sgmcp_error(13); };
+        self.pending.append_copy(bytes, 0, count)?;
+        sgmcp_ok();
+    }
+    def next(&self) -> Result<JsonDoc, i64> {
+        let needle = ffi_buffer_from_bytes("\n")?;
+        let newline = self.pending.index_of_bytes(needle, 0)?;
+        if newline < 0 { return json_doc_object(); };
+        let line = sgmcp_bytes_text(&self.pending, newline)?;
+        self.pending.consume(newline + 1)?;
+        if line.len() == 0 { return Result { is_ok: false, value: JsonDoc { handle: 0 }, error: 10 }; };
+        let document = json_parse_limits(line.as_str(), self.maximum, 32768)?;
+        if document.root().kind()? != JSON_KIND_OBJECT() { return Result { is_ok: false, value: JsonDoc { handle: 0 }, error: 10 }; };
+        Result { is_ok: true, value: document, error: 0 };
+    }
+    def complete(&self) -> bool {
+        self.pending.used_len() == 0;
+    }
+}
+
+struct SgMcpNotification {
+    encoded: String,
+}
+
+struct SgMcpClient {
+    process: ProcessHandle,
+    frame: SgMcpFramer,
+    outgoing: Buffer,
+    diagnostics: Buffer,
+    stderr_truncated: bool,
+    next_id: i64,
+    active_id: i64,
+    deadline: i64,
+    active_method: String,
+    initialized: bool,
+    version: String,
+    response: String,
+    finished: bool,
+    error_code: i64,
+    closed: bool,
+    notifications: Vec<SgMcpNotification>,
+}
+
+impl !Send for SgMcpClient {
+}
+
+impl !Sync for SgMcpClient {
+}
+
+def sgmcp_start(command: &str, arguments: JsonValue, cwd: &str) -> Result<SgMcpClient, i64> {
+    let builder = process_command(command)?;
+    builder.cwd(cwd)?;
+    let mut index = 0;
+    while index < arguments.array_len()? { let argument = arguments.array_get(index)?.string_value()?; sgmcp_control_guard(&argument)?; builder.arg(argument.as_str())?; index = index + 1; };
+    let child = builder.spawn_piped()?;
+    let notifications: Vec<SgMcpNotification> = vec_new();
+    Result { is_ok: true, value: SgMcpClient { process: child, frame: sgmcp_framer(1048576)?, outgoing: ffi_buffer_new(1048576)?, diagnostics: ffi_buffer_new(65536)?, stderr_truncated: false, next_id: 1, active_id: 0, deadline: 0, active_method: string_new(), initialized: false, version: string_new(), response: string_new(), finished: false, error_code: 0, closed: false, notifications: notifications }, error: 0 };
+}
+
+def sgmcp_request(id: i64, method: &str, params: JsonValue) -> Result<JsonDoc, i64> {
+    let doc = sgmcp_doc()?;
+    sgmcp_put(&doc, doc.root(), "jsonrpc", "2.0")?;
+    if id > 0 { sgmcp_i64(&doc, doc.root(), "id", id)?; (); };
+    sgmcp_put(&doc, doc.root(), "method", method)?;
+    doc.root().object_set("params", doc.copy(params)?)?;
+    if not sgmcp_document_keys_valid(&doc)? { return Result { is_ok: false, value: JsonDoc { handle: 0 }, error: 2 }; };
+    Result { is_ok: true, value: doc, error: 0 };
+}
+
+impl SgMcpClient {
+    def begin_owned(&mut self, method: &String, params: JsonValue, timeout_ms: i64) -> Result<i64, i64> {
+        sgmcp_control_guard(method)?;
+        self.begin(method.as_str(), params, timeout_ms);
+    }
+    def enqueue(&self, document: &JsonDoc) -> Result<bool, i64> {
+        let encoded = document.serialize_string()?;
+        if encoded.len() + 1 > self.outgoing.capacity() - self.outgoing.used_len() { return sgmcp_error(13); };
+        self.outgoing.append_str(encoded.as_str())?;
+        self.outgoing.append_str("\n")?;
+        sgmcp_ok();
+    }
+    def flush(&self) -> Result<bool, i64> {
+        if self.outgoing.used_len() == 0 { return sgmcp_ok(); };
+        let amount = if self.outgoing.used_len() > 8192 { 8192; } else { self.outgoing.used_len(); };
+        let count = self.process.try_write_stdin(&self.outgoing, amount)?;
+        self.outgoing.consume(count)?;
+        sgmcp_ok();
+    }
+    def notify(&self, method: &str, params: JsonValue) -> Result<bool, i64> {
+        if self.closed { return sgmcp_error(3); };
+        let document = sgmcp_request(0, method, params)?;
+        self.enqueue(&document);
+    }
+    def begin(&mut self, method: &str, params: JsonValue, timeout_ms: i64) -> Result<i64, i64> {
+        if self.closed or self.active_id != 0 and not self.finished { return Result { is_ok: false, value: 0, error: 3 }; };
+        if method.len() == 0 or timeout_ms < 1 or timeout_ms > 3600000 { return Result { is_ok: false, value: 0, error: 2 }; };
+        if not self.initialized and method != "initialize" and method != "ping" { return Result { is_ok: false, value: 0, error: 3 }; };
+        if self.initialized and method == "initialize" { return Result { is_ok: false, value: 0, error: 3 }; };
+        let id = self.next_id;
+        let request = sgmcp_request(id, method, params)?;
+        self.enqueue(&request)?;
+        self.next_id = self.next_id + 1;
+        self.active_id = id;
+        self.active_method = string_from_str(method)?;
+        self.deadline = time_monotonic_ms() + timeout_ms;
+        self.finished = false;
+        self.error_code = 0;
+        self.response.clear();
+        Result { is_ok: true, value: id, error: 0 };
+    }
+    def begin_initialize(&mut self, version: &str, name: &str, timeout_ms: i64) -> Result<i64, i64> {
+        if not sgmcp_version_supported(version) { return Result { is_ok: false, value: 0, error: 2 }; };
+        let params = json_parse("{\"capabilities\":{},\"clientInfo\":{\"version\":\"0.1.0\"}}")?;
+        sgmcp_put(&params, params.root(), "protocolVersion", version)?;
+        sgmcp_put(&params, params.root().object_get("clientInfo")?, "name", name)?;
+        self.begin("initialize", params.root(), timeout_ms);
+    }
+    def finish_initialize(&mut self) -> Result<bool, i64> {
+        if self.active_method.as_str() != "initialize" { return sgmcp_error(3); };
+        let response = self.result()?;
+        let result = response.root().object_get("result")?;
+        let version = sgmcp_string(result, "protocolVersion");
+        if not sgmcp_version_supported(version.as_str()) or not result.object_has("capabilities") or result.object_get("capabilities")?.kind()? != JSON_KIND_OBJECT() or not result.object_has("serverInfo") or not sgmcp_peer_info_valid(result.object_get("serverInfo")?)? { return sgmcp_error(10); };
+        let params = json_doc_object()?;
+        self.notify("notifications/initialized", params.root())?;
+        self.version = version;
+        self.initialized = true;
+        sgmcp_ok();
+    }
+    def fail(&mut self, code: i64) -> Result<bool, i64> {
+        self.finished = true;
+        self.error_code = code;
+        self.close()?;
+        Result { is_ok: true, value: true, error: 0 };
+    }
+    def poll(&mut self) -> Result<bool, i64> {
+        if self.finished { return Result { is_ok: true, value: true, error: 0 }; };
+        if self.closed or self.active_id == 0 { return sgmcp_error(3); };
+        if time_monotonic_ms() >= self.deadline { self.cancel_with_code(11)?; return Result { is_ok: true, value: true, error: 0 }; };
+        if self.notifications.len() >= 64 { return Result { is_ok: true, value: false, error: 0 }; };
+        let flushed = self.flush();
+        if not flushed.is_ok() { return self.fail(flushed.error); };
+        let mut bytes = ffi_buffer_new(8192)?;
+        let count = if self.frame.ready()? { 0; } else { self.process.read_stdout(&mut bytes)?; };
+        if count > 0 { let fed = self.frame.feed(&bytes, count); if not fed.is_ok() { return self.fail(fed.error); }; };
+        let error_count = self.process.read_stderr(&mut bytes)?;
+        if error_count > 0 { let capacity = self.diagnostics.capacity() - self.diagnostics.used_len(); let keep = if capacity < error_count { capacity; } else { error_count; }; self.diagnostics.append_copy(&bytes, 0, keep)?; if keep < error_count { self.stderr_truncated = true; }; };
+        let mut lines = 0;
+        while lines < 64 { if self.notifications.len() >= 64 { return Result { is_ok: true, value: false, error: 0 }; }; if not self.frame.ready()? { break; }; let parsed = self.frame.next(); if not parsed.is_ok() { return self.fail(parsed.error); }; let response = parsed.value; let root = response.root(); if not sgmcp_document_keys_valid(&response)? { return self.fail(10); }; if sgmcp_string(root, "jsonrpc").as_str() != "2.0" { return self.fail(10); }; if root.object_has("id") and not root.object_has("method") { if sgmcp_number(root, "id", -1) != self.active_id { return self.fail(10); }; if root.object_has("result") == root.object_has("error") { return self.fail(10); }; if self.active_method.as_str() == "tools/list" and root.object_has("result") { let result = root.object_get("result")?; if not result.object_has("tools") or result.object_get("tools")?.kind()? != JSON_KIND_ARRAY() { return self.fail(10); }; if result.object_has("nextCursor") and not sgmcp_control_string(result, "nextCursor").is_ok() { return self.fail(10); }; let tools = result.object_get("tools")?; let mut index = 0; while index < tools.array_len()? { let name = sgmcp_control_string(tools.array_get(index)?, "name"); if not name.is_ok() or name.value.len() == 0 { return self.fail(10); }; index = index + 1; }; }; if root.object_has("error") { let error = root.object_get("error")?; if error.kind()? != JSON_KIND_OBJECT() or not error.object_has("code") or not error.object_get("code")?.number_i64().is_ok() or not error.object_has("message") or not error.object_get("message")?.string_value().is_ok() { return self.fail(10); }; }; self.response = response.serialize_string()?; self.finished = true; self.error_code = if root.object_has("error") { 9; } else { 0; }; return Result { is_ok: true, value: true, error: 0 }; }; if root.object_has("method") and root.object_has("id") { let rejected = sgmcp_doc()?; sgmcp_put(&rejected, rejected.root(), "jsonrpc", "2.0")?; rejected.root().object_set("id", rejected.copy(root.object_get("id")?)?)?; let error = rejected.new_object()?; sgmcp_i64(&rejected, error, "code", -32601)?; sgmcp_put(&rejected, error, "message", "Server initiated requests are unsupported")?; rejected.root().object_set("error", error)?; self.enqueue(&rejected)?; } else { if not root.object_has("method") { return self.fail(10); }; self.notifications.push(SgMcpNotification { encoded: response.serialize_string()? }); }; lines = lines + 1; };
+        if self.frame.ready()? { return Result { is_ok: true, value: false, error: 0 }; };
+        if self.process.stdout_eof()? or self.process.try_wait()? { return self.fail(if self.frame.complete() { 9; } else { 10; }); };
+        Result { is_ok: true, value: false, error: 0 };
+    }
+    def result(&self) -> Result<JsonDoc, i64> {
+        if not self.finished { return Result { is_ok: false, value: JsonDoc { handle: 0 }, error: 3 }; };
+        if self.error_code != 0 { return Result { is_ok: false, value: JsonDoc { handle: 0 }, error: self.error_code }; };
+        self.rpc_response();
+    }
+    def rpc_response(&self) -> Result<JsonDoc, i64> {
+        if self.response.len() > 0 { return json_parse_limits(self.response.as_str(), 1048576, 32768); };
+        json_doc_object();
+    }
+    def next_notification(&self) -> Result<JsonDoc, i64> {
+        let next = self.notifications.remove(0);
+        if not next.is_some { return json_doc_object(); };
+        json_parse_limits(next.value.encoded.as_str(), 1048576, 32768);
+    }
+    def diagnostic_report(&self) -> Result<JsonDoc, i64> {
+        let document = json_doc_object()?;
+        let text = string_from_utf8_lossy(self.diagnostics, self.diagnostics.used_len())?;
+        sgmcp_put(&document, document.root(), "stderr", text.as_str())?;
+        sgmcp_i64(&document, document.root(), "stderr_bytes", self.diagnostics.used_len())?;
+        sgmcp_bool(&document, document.root(), "stderr_truncated", self.stderr_truncated)?;
+        sgmcp_i64(&document, document.root(), "error_code", self.error_code)?;
+        Result { is_ok: true, value: document, error: 0 };
+    }
+    def cancel_with_code(&mut self, code: i64) -> Result<bool, i64> {
+        if not self.closed and self.active_id > 0 and not self.finished and self.active_method.as_str() != "initialize" and self.outgoing.used_len() == 0 { let params = json_doc_object()?; sgmcp_i64(&params, params.root(), "requestId", self.active_id)?; let notification = sgmcp_request(0, "notifications/cancelled", params.root())?; self.outgoing.clear(); self.enqueue(&notification)?; let stop = time_monotonic_ms() + 50; while self.outgoing.used_len() > 0 and time_monotonic_ms() < stop { let attempt = self.flush(); if not attempt.is_ok() { break; }; time_sleep_ms(1); }; };
+        self.finished = true;
+        self.error_code = code;
+        self.close();
+    }
+    def cancel(&mut self) -> Result<bool, i64> {
+        self.cancel_with_code(19);
+    }
+    def close(&mut self) -> Result<bool, i64> {
+        if self.closed { return sgmcp_ok(); };
+        self.process.terminate_tree()?;
+        self.process.reap(5000)?;
+        if not self.process.tree_quiescent()? { return sgmcp_error(12); };
+        self.initialized = false;
+        self.closed = true;
+        sgmcp_ok();
+    }
+}
+
+impl Drop for SgMcpClient {
+    def drop(&mut self) {
+        if not self.closed { self.process.terminate_tree(); self.process.reap(5000); };
+    }
+}
+
+struct SgMcpActiveCall {
+    id: String,
+    name: String,
+    token: String,
+    cancelled: bool,
+}
+
+struct SgMcpServer {
+    name: String,
+    version: String,
+    protocol: String,
+    initialized: bool,
+    negotiated: bool,
+    page_size: i64,
+    catalogue: JsonDoc,
+    calls: Vec<SgMcpActiveCall>,
+    outgoing: Vec<SgMcpNotification>,
+}
+
+impl !Send for SgMcpServer {
+}
+
+impl !Sync for SgMcpServer {
+}
+
+def sgmcp_server(name: &str, version: &str, page_size: i64) -> Result<SgMcpServer, i64> {
+    if name.len() == 0 or version.len() == 0 or page_size < 1 or page_size > 256 { let calls: Vec<SgMcpActiveCall> = Vec { handle: 0, marker: 0 }; let outgoing: Vec<SgMcpNotification> = Vec { handle: 0, marker: 0 }; return Result { is_ok: false, value: SgMcpServer { name: String { handle: 0 }, version: String { handle: 0 }, protocol: String { handle: 0 }, initialized: false, negotiated: false, page_size: 1, catalogue: JsonDoc { handle: 0 }, calls: calls, outgoing: outgoing }, error: 2 }; };
+    let calls: Vec<SgMcpActiveCall> = vec_new();
+    let outgoing: Vec<SgMcpNotification> = vec_new();
+    let catalogue = sgmcp_doc()?;
+    catalogue.root().object_set("tools", catalogue.new_array()?)?;
+    Result { is_ok: true, value: SgMcpServer { name: string_from_str(name)?, version: string_from_str(version)?, protocol: string_new(), initialized: false, negotiated: false, page_size: page_size, catalogue: catalogue, calls: calls, outgoing: outgoing }, error: 0 };
+}
+
+def sgmcp_server_owned(name: &String, version: &String, page_size: i64) -> Result<SgMcpServer, i64> {
+    sgmcp_control_guard(name)?;
+    sgmcp_control_guard(version)?;
+    sgmcp_server(name.as_str(), version.as_str(), page_size);
+}
+
+def sgmcp_id_json(value: JsonValue) -> Result<String, i64> {
+    let kind = value.kind()?;
+    if kind != JSON_KIND_STRING() and kind != JSON_KIND_NUMBER() { return string_result_err(10); };
+    let holder = json_doc_object()?;
+    holder.root().object_set("id", holder.copy(value)?)?;
+    holder.serialize_string();
+}
+
+def sgmcp_response(id: JsonValue, result: JsonValue) -> Result<JsonDoc, i64> {
+    let document = sgmcp_doc()?;
+    sgmcp_put(&document, document.root(), "jsonrpc", "2.0")?;
+    document.root().object_set("id", document.copy(id)?)?;
+    document.root().object_set("result", document.copy(result)?)?;
+    if not sgmcp_document_keys_valid(&document)? { return Result { is_ok: false, value: JsonDoc { handle: 0 }, error: 2 }; };
+    Result { is_ok: true, value: document, error: 0 };
+}
+
+def sgmcp_rpc_error(id: JsonValue, code: i64, message: &str) -> Result<JsonDoc, i64> {
+    let document = sgmcp_doc()?;
+    sgmcp_put(&document, document.root(), "jsonrpc", "2.0")?;
+    document.root().object_set("id", document.copy(id)?)?;
+    let error = document.new_object()?;
+    sgmcp_i64(&document, error, "code", code)?;
+    sgmcp_put(&document, error, "message", message)?;
+    document.root().object_set("error", error)?;
+    Result { is_ok: true, value: document, error: 0 };
+}
+
+def sgmcp_unsigned(text: &str) -> Result<i64, i64> {
+    if text.len() == 0 { return Result { is_ok: false, value: 0, error: 2 }; };
+    let source = string_from_str(text)?;
+    let bytes = source.bytes();
+    let mut number = 0;
+    loop { let next = bytes.next(); if not next.is_some { break; }; if next.value < 48 or next.value > 57 or number > 1000000 { bytes.free(); return Result { is_ok: false, value: 0, error: 2 }; }; number = number * 10 + next.value - 48; };
+    bytes.free();
+    Result { is_ok: true, value: number, error: 0 };
+}
+
+impl SgMcpServer {
+    def tool_owned(&self, name: &String, description: &String, input_schema: JsonValue, output_schema: JsonValue) -> Result<bool, i64> {
+        sgmcp_control_guard(name)?;
+        sgmcp_control_guard(description)?;
+        self.tool(name.as_str(), description.as_str(), input_schema, output_schema);
+    }
+    def tool(&self, name: &str, description: &str, input_schema: JsonValue, output_schema: JsonValue) -> Result<bool, i64> {
+        if self.negotiated { return sgmcp_error(3); };
+        if name.len() == 0 or name.len() > 128 or description.len() > 8192 or input_schema.kind()? != JSON_KIND_OBJECT() or output_schema.kind()? != JSON_KIND_OBJECT() { return sgmcp_error(2); };
+        let mut keys = SgMcpKeyBudget { remaining: 65536 };
+        if not sgmcp_keys_valid(input_schema, 0, &mut keys)? or not sgmcp_keys_valid(output_schema, 0, &mut keys)? { return sgmcp_error(2); };
+        let input_check = schema_validate(input_schema, input_schema)?;
+        let output_check = schema_validate(output_schema, output_schema)?;
+        if input_check.stage.as_str() == "schema" or output_check.stage.as_str() == "schema" { return sgmcp_error(2); };
+        let tools = self.catalogue.root().object_get("tools")?;
+        let mut index = 0;
+        while index < tools.array_len()? { if sgmcp_string(tools.array_get(index)?, "name").as_str() == name { return sgmcp_error(2); }; index = index + 1; };
+        if tools.array_len()? >= 256 { return sgmcp_error(13); };
+        let item = self.catalogue.new_object()?;
+        sgmcp_put(&self.catalogue, item, "name", name)?;
+        sgmcp_put(&self.catalogue, item, "description", description)?;
+        item.object_set("inputSchema", self.catalogue.copy(input_schema)?)?;
+        item.object_set("outputSchema", self.catalogue.copy(output_schema)?)?;
+        tools.array_push(item);
+    }
+    def queue(&self, document: &JsonDoc) -> Result<bool, i64> {
+        if self.outgoing.len() >= 64 { return sgmcp_error(13); };
+        self.outgoing.push(SgMcpNotification { encoded: document.serialize_string()? });
+        sgmcp_ok();
+    }
+    def next_output(&self) -> Result<JsonDoc, i64> {
+        let item = self.outgoing.remove(0);
+        if not item.is_some { return json_doc_object(); };
+        json_parse_limits(item.value.encoded.as_str(), 1048576, 32768);
+    }
+    def reject(&self, id: JsonValue, code: i64, message: &str) -> Result<bool, i64> {
+        let response = sgmcp_rpc_error(id, code, message)?;
+        self.queue(&response);
+    }
+    def call_slot(&self, id: JsonValue) -> Result<i64, i64> {
+        let encoded = sgmcp_id_json(id)?;
+        let mut index = 0;
+        while index < self.calls.len() { if self.calls.get(index).id.as_str() == encoded.as_str() { return Result { is_ok: true, value: index, error: 0 }; }; index = index + 1; };
+        Result { is_ok: true, value: -1, error: 0 };
+    }
+    def accept(&mut self, request: &JsonDoc) -> Result<JsonDoc, i64> {
+        let action = json_parse("{\"kind\":\"handled\"}")?;
+        let root = request.root();
+        if not sgmcp_document_keys_valid(request)? { return Result { is_ok: false, value: JsonDoc { handle: 0 }, error: 10 }; };
+        if root.kind()? != JSON_KIND_OBJECT() or sgmcp_string(root, "jsonrpc").as_str() != "2.0" or not root.object_has("method") { return Result { is_ok: false, value: JsonDoc { handle: 0 }, error: 10 }; };
+        let method = sgmcp_control_string(root, "method")?;
+        let empty = json_doc_object()?;
+        let params = if root.object_has("params") { root.object_get("params")?; } else { empty.root(); };
+        if not root.object_has("id") { if method.as_str() == "notifications/initialized" and self.negotiated { self.initialized = true; }; if method.as_str() == "notifications/cancelled" and params.object_has("requestId") { let slot = self.call_slot(params.object_get("requestId")?); if slot.is_ok() and slot.value >= 0 { let call: &SgMcpActiveCall = self.calls.get(slot.value); call.cancelled = true; }; }; return Result { is_ok: true, value: action, error: 0 }; };
+        let id = root.object_get("id")?;
+        sgmcp_id_json(id)?;
+        if method.as_str() == "ping" { let response = sgmcp_response(id, empty.root())?; self.queue(&response)?; return Result { is_ok: true, value: action, error: 0 }; };
+        if method.as_str() == "initialize" { if self.negotiated { self.reject(id, -32600, "Connection is already initialized")?; return Result { is_ok: true, value: action, error: 0 }; }; let requested = sgmcp_string(params, "protocolVersion"); if requested.len() == 0 or not params.object_has("clientInfo") or not sgmcp_peer_info_valid(params.object_get("clientInfo")?)? or not params.object_has("capabilities") or params.object_get("capabilities")?.kind()? != JSON_KIND_OBJECT() { self.reject(id, -32602, "Invalid initialization parameters")?; return Result { is_ok: true, value: action, error: 0 }; }; self.protocol = string_from_str(if sgmcp_version_supported(requested.as_str()) { requested.as_str(); } else { "2025-11-25"; })?; let result = json_parse("{\"capabilities\":{\"tools\":{}},\"serverInfo\":{}}")?; sgmcp_put(&result, result.root(), "protocolVersion", self.protocol.as_str())?; sgmcp_put(&result, result.root().object_get("serverInfo")?, "name", self.name.as_str())?; sgmcp_put(&result, result.root().object_get("serverInfo")?, "version", self.version.as_str())?; let response = sgmcp_response(id, result.root())?; self.queue(&response)?; self.negotiated = true; return Result { is_ok: true, value: action, error: 0 }; };
+        if not self.initialized { self.reject(id, -32002, "Initialize and send notifications/initialized first")?; return Result { is_ok: true, value: action, error: 0 }; };
+        if method.as_str() == "tools/list" { if params.object_has("cursor") and not sgmcp_control_string(params, "cursor").is_ok() { self.reject(id, -32602, "Invalid pagination cursor")?; return Result { is_ok: true, value: action, error: 0 }; }; let cursor = sgmcp_string(params, "cursor"); let start = if cursor.len() == 0 { Result { is_ok: true, value: 0, error: 0 }; } else { sgmcp_unsigned(cursor.as_str()); }; let tools = self.catalogue.root().object_get("tools")?; if not start.is_ok() or start.value < 0 or start.value > tools.array_len()? { self.reject(id, -32602, "Invalid pagination cursor")?; return Result { is_ok: true, value: action, error: 0 }; }; let result = sgmcp_doc()?; let items = result.new_array()?; let mut index = start.value; while index < tools.array_len()? and index < start.value + self.page_size { items.array_push(result.copy(tools.array_get(index)?)?)?; index = index + 1; }; result.root().object_set("tools", items)?; if index < tools.array_len()? { let next = string_new(); next.push_i64(index)?; sgmcp_put(&result, result.root(), "nextCursor", next.as_str())?; (); }; let response = sgmcp_response(id, result.root())?; self.queue(&response)?; return Result { is_ok: true, value: action, error: 0 }; };
+        if method.as_str() != "tools/call" { self.reject(id, -32601, "Method not supported")?; return Result { is_ok: true, value: action, error: 0 }; };
+        let name = sgmcp_string(params, "name");
+        let tools = self.catalogue.root().object_get("tools")?;
+        let mut found = false;
+        let mut index = 0;
+        while index < tools.array_len()? { if sgmcp_string(tools.array_get(index)?, "name").as_str() == name.as_str() { found = true; break; }; index = index + 1; };
+        if not found or not params.object_has("arguments") or params.object_get("arguments")?.kind()? != JSON_KIND_OBJECT() { self.reject(id, -32602, "Unknown tool or invalid arguments")?; return Result { is_ok: true, value: action, error: 0 }; };
+        let validation = schema_validate(tools.array_get(index)?.object_get("inputSchema")?, params.object_get("arguments")?)?;
+        if not validation.valid { self.reject(id, -32602, "Tool arguments do not match inputSchema")?; return Result { is_ok: true, value: action, error: 0 }; };
+        if self.call_slot(id)? >= 0 { self.reject(id, -32600, "Duplicate active request id")?; return Result { is_ok: true, value: action, error: 0 }; };
+        if self.calls.len() >= 64 { self.reject(id, -32000, "Too many active requests")?; return Result { is_ok: true, value: action, error: 0 }; };
+        let mut token = string_new();
+        if params.object_has("_meta") { let meta = params.object_get("_meta")?; if meta.object_has("progressToken") { token = sgmcp_id_json(meta.object_get("progressToken")?)?; }; };
+        self.calls.push(SgMcpActiveCall { id: sgmcp_id_json(id)?, name: name, token: token, cancelled: false });
+        sgmcp_put(&action, action.root(), "kind", "call")?;
+        sgmcp_put(&action, action.root(), "name", name.as_str())?;
+        action.root().object_set("id", action.copy(id)?)?;
+        action.root().object_set("arguments", action.copy(params.object_get("arguments")?)?)?;
+        Result { is_ok: true, value: action, error: 0 };
+    }
+    def cancelled(&self, id: JsonValue) -> Result<bool, i64> {
+        let slot = self.call_slot(id)?;
+        Result { is_ok: true, value: slot >= 0 and self.calls.get(slot).cancelled, error: 0 };
+    }
+    def progress(&self, id: JsonValue, progress: i64, total: i64, message: &str) -> Result<bool, i64> {
+        let slot = self.call_slot(id)?;
+        if slot < 0 or self.calls.get(slot).cancelled { return sgmcp_error(3); };
+        let call: &SgMcpActiveCall = self.calls.get(slot);
+        if progress < 0 or total < progress { return sgmcp_error(2); };
+        if call.token.len() == 0 { return sgmcp_ok(); };
+        let token = json_parse(call.token.as_str())?;
+        let params = json_doc_object()?;
+        params.root().object_set("progressToken", params.copy(token.root().object_get("id")?)?)?;
+        sgmcp_i64(&params, params.root(), "progress", progress)?;
+        sgmcp_i64(&params, params.root(), "total", total)?;
+        sgmcp_put(&params, params.root(), "message", message)?;
+        let notification = sgmcp_request(0, "notifications/progress", params.root())?;
+        self.queue(&notification);
+    }
+    def complete(&self, id: JsonValue, result: JsonValue) -> Result<bool, i64> {
+        let slot = self.call_slot(id)?;
+        if slot < 0 { return sgmcp_error(3); };
+        if self.calls.get(slot).cancelled { self.calls.remove(slot); return sgmcp_ok(); };
+        if result.kind()? != JSON_KIND_OBJECT() or not result.object_has("content") or result.object_get("content")?.kind()? != JSON_KIND_ARRAY() { return sgmcp_error(2); };
+        let is_error = result.object_has("isError") and result.object_get("isError")?.bool_value()?;
+        if not is_error { if not result.object_has("structuredContent") { return sgmcp_error(2); }; let tools = self.catalogue.root().object_get("tools")?; let mut index = 0; while index < tools.array_len()? { let tool = tools.array_get(index)?; if sgmcp_string(tool, "name").as_str() == self.calls.get(slot).name.as_str() { let validation = schema_validate(tool.object_get("outputSchema")?, result.object_get("structuredContent")?)?; if not validation.valid { return sgmcp_error(2); }; break; }; index = index + 1; }; };
+        let response = sgmcp_response(id, result)?;
+        self.queue(&response)?;
+        self.calls.remove(slot);
+        sgmcp_ok();
+    }
+    def fail_tool(&self, id: JsonValue, text: &str) -> Result<bool, i64> {
+        let result = sgmcp_tool_result(text, true)?;
+        self.complete(id, result.root());
+    }
+}
+
+def sgmcp_tool_result(text: &str, error: bool) -> Result<JsonDoc, i64> {
+    let result = sgmcp_doc()?;
+    let content = result.new_array()?;
+    let item = result.new_object()?;
+    sgmcp_put(&result, item, "type", "text")?;
+    sgmcp_put(&result, item, "text", text)?;
+    content.array_push(item)?;
+    result.root().object_set("content", content)?;
+    sgmcp_bool(&result, result.root(), "isError", error)?;
+    Result { is_ok: true, value: result, error: 0 };
+}
+
+struct SgMcpStdio {
+    terminal: Terminal,
+    pending: String,
+    eof: bool,
+    writer: StdWriter,
+    outgoing: Buffer,
+    output_deadline: i64,
+    output_timeout_ms: i64,
+}
+
+def sgmcp_stdio() -> Result<SgMcpStdio, i64> {
+    sgmcp_stdio_with_timeout(30000);
+}
+
+def sgmcp_stdio_error(code: i64) -> Result<SgMcpStdio, i64> {
+    Result { is_ok: false, value: SgMcpStdio { terminal: Terminal { handle: 0 }, pending: String { handle: 0 }, eof: false, writer: StdWriter { handle: 0 }, outgoing: Buffer { handle: 0 }, output_deadline: 0, output_timeout_ms: 0 }, error: code };
+}
+
+def sgmcp_stdio_with_timeout(timeout_ms: i64) -> Result<SgMcpStdio, i64> {
+    if timeout_ms < 1 or timeout_ms > 600000 { return sgmcp_stdio_error(2); };
+    let terminal = terminal_open()?;
+    if terminal.is_tty() { return sgmcp_stdio_error(2); };
+    let writer = io_stdout_writer(65536)?;
+    let outgoing = ffi_buffer_new(1048577)?;
+    Result { is_ok: true, value: SgMcpStdio { terminal: terminal, pending: string_new(), eof: false, writer: writer, outgoing: outgoing, output_deadline: 0, output_timeout_ms: timeout_ms }, error: 0 };
+}
+
+impl SgMcpStdio {
+    def next(&mut self) -> Result<JsonDoc, i64> {
+        let mut observed = 0;
+        while observed < 8192 { let event = self.terminal.read_event(0)?; if event.kind == 0 { break; }; if event.kind == 4 or event.kind == 5 { self.eof = true; if self.pending.len() > 0 { return Result { is_ok: false, value: JsonDoc { handle: 0 }, error: 10 }; }; break; }; if event.kind == 1 { if event.code == 10 { let parsed = json_parse_limits(self.pending.as_str(), 1048576, 32768); self.pending.clear(); return parsed; }; if event.code != 13 { if event.code < 32 { return Result { is_ok: false, value: JsonDoc { handle: 0 }, error: 10 }; }; if self.pending.len() + event.data.len() > 1048576 { return Result { is_ok: false, value: JsonDoc { handle: 0 }, error: 13 }; }; self.pending.push_str(event.data.as_str())?; (); }; }; observed = observed + 1; };
+        json_doc_object();
+    }
+    def send(&mut self, document: &JsonDoc) -> Result<bool, i64> {
+        if self.outgoing.used_len() > 0 { return sgmcp_error(13); };
+        let encoded = document.serialize_string()?;
+        if encoded.len() > 1048576 { return sgmcp_error(13); };
+        encoded.copy_to_buffer(self.outgoing)?;
+        self.outgoing.push_u8(10)?;
+        if self.output_deadline == 0 { self.output_deadline = time_monotonic_ms() + self.output_timeout_ms; };
+        sgmcp_ok();
+    }
+    def output_pending(&self) -> Result<bool, i64> {
+        let status = self.writer.snapshot()?;
+        Result { is_ok: true, value: self.outgoing.used_len() > 0 or status.queued_bytes > 0 or status.in_flight_bytes > 0, error: 0 };
+    }
+    def flush(&mut self, server: &SgMcpServer) -> Result<bool, i64> {
+        self.writer.poll(0)?;
+        let status = self.writer.snapshot()?;
+        if status.state == 4 { return sgmcp_error(9); };
+        if status.state == 2 or status.state == 5 { return sgmcp_error(19); };
+        if self.outgoing.used_len() == 0 and status.queued_bytes == 0 and status.in_flight_bytes == 0 { self.output_deadline = 0; };
+        if self.output_deadline > 0 and time_monotonic_ms() >= self.output_deadline { self.writer.cancel()?; return sgmcp_error(11); };
+        let mut submitted = 0;
+        while submitted < 65536 { if self.outgoing.used_len() == 0 { let document = server.next_output()?; if not document.root().object_has("jsonrpc") { break; }; self.send(&document)?; (); }; let remaining = self.outgoing.used_len(); let amount = if remaining < 65536 - submitted { remaining; } else { 65536 - submitted; }; let accepted = self.writer.try_write(&self.outgoing, amount)?; if accepted == 0 { break; }; self.outgoing.consume(accepted)?; submitted = submitted + accepted; };
+        let pending = self.output_pending()?;
+        if not pending and server.outgoing.len() == 0 { self.output_deadline = 0; };
+        Result { is_ok: true, value: not pending and server.outgoing.len() == 0, error: 0 };
+    }
+    def cancel(&mut self, timeout_ms: i64) -> Result<bool, i64> {
+        self.writer.cancel()?;
+        self.outgoing.clear();
+        self.writer.wait_quiescent(timeout_ms);
+    }
+    def finish(&mut self, server: &SgMcpServer, timeout_ms: i64) -> Result<bool, i64> {
+        if timeout_ms < 0 or timeout_ms > 600000 { return sgmcp_error(2); };
+        let deadline = time_monotonic_ms() + timeout_ms;
+        loop { if self.flush(server)? { break; }; if time_monotonic_ms() >= deadline { return Result { is_ok: true, value: false, error: 0 }; }; time_sleep_ms(1); };
+        self.writer.finish()?;
+        let remaining = deadline - time_monotonic_ms();
+        self.writer.wait_quiescent(if remaining > 0 { remaining; } else { 0; });
+    }
+}

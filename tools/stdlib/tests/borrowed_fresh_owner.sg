@@ -1,0 +1,86 @@
+import std::ffi;
+
+import std::string;
+
+import std::json;
+
+import std::collections;
+
+extern "C" {
+    fn sengoo_string_live_handle_count() -> i64;
+    fn sengoo_buffer_live_handle_count() -> i64;
+    fn sengoo_opaque_live_handle_count() -> i64;
+}
+
+def observe_string(value: &String) -> bool {
+    value.as_str() == "fresh";
+}
+
+def observe_empty(value: &String) -> bool {
+    value.len() == 0;
+}
+
+struct Inspector {
+    marker: i64,
+}
+
+impl Inspector {
+    def observe_empty(&self, value: &String) -> bool {
+        value.len() == 0 and self.marker == 1;
+    }
+}
+
+def observe_buffer(value: &Buffer) -> bool {
+    value.len() == 64;
+}
+
+def observe_document(value: &JsonDoc) -> bool {
+    value.root().kind().unwrap_or(-1) == JSON_KIND_OBJECT();
+}
+
+def observe_vector(value: &Vec<i64>) -> bool {
+    value.len() == 0;
+}
+
+def new_vector() -> Vec<i64> {
+    vec_new();
+}
+
+def observe_pair(first: &String, second: i64) -> bool {
+    first.as_str() == "fresh" and second == 0;
+}
+
+def missing() -> Result<i64, i64> {
+    Result { is_ok: false, value: 0, error: 9 };
+}
+
+def failure() -> Result<bool, i64> {
+    let value = observe_pair(&string_from_str("fresh")?, missing()?);
+    Result { is_ok: true, value: value, error: 0 };
+}
+
+def exercise() -> Result<bool, i64> {
+    let mut index = 0;
+    let inspector = Inspector { marker: 1 };
+    while index < 20 { if not observe_empty(&string_new()) or not inspector.observe_empty(&string_new()) { return Result { is_ok: false, value: false, error: 3 }; }; if not observe_string(&string_from_str("fresh")?) or not observe_buffer(&ffi_buffer_new(64)?) or not observe_document(&json_doc_object_limits(4096, 128)?) or not observe_vector(&new_vector()) { return Result { is_ok: false, value: false, error: 3 }; }; if failure().is_ok() { return Result { is_ok: false, value: false, error: 3 }; }; index = index + 1; };
+    Result { is_ok: true, value: true, error: 0 };
+}
+
+def main() -> i64 {
+    let strings = sengoo_string_live_handle_count();
+    let buffers = sengoo_buffer_live_handle_count();
+    let documents = sengoo_json_bounded_live_documents();
+    let opaque = sengoo_opaque_live_handle_count();
+    let result = exercise();
+    if not result.is_ok() { return 2; };
+    println("fresh reference String delta:");
+    println(sengoo_string_live_handle_count() - strings);
+    println("fresh reference Buffer delta:");
+    println(sengoo_buffer_live_handle_count() - buffers);
+    println("fresh reference JsonDoc delta:");
+    println(sengoo_json_bounded_live_documents() - documents);
+    println("fresh reference Vec opaque delta:");
+    println(sengoo_opaque_live_handle_count() - opaque);
+    if sengoo_string_live_handle_count() != strings or sengoo_buffer_live_handle_count() != buffers or sengoo_json_bounded_live_documents() != documents or sengoo_opaque_live_handle_count() != opaque { return 1; };
+    0;
+}

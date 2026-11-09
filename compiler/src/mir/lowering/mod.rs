@@ -72,6 +72,7 @@ mod format_methods;
 mod function_lowering;
 mod if_expr_helpers;
 mod lambda_expr_helpers;
+mod legacy_param_ownership;
 mod let_stmt_helpers;
 mod literal_op_methods;
 mod loop_control_helpers;
@@ -81,6 +82,7 @@ mod method_builtin_helpers;
 mod method_call_helpers;
 mod method_expr_helpers;
 mod named_call_helpers;
+mod native_borrow_contracts;
 mod non_named_call_helpers;
 mod op_expr_helpers;
 mod options;
@@ -118,6 +120,10 @@ use self::return_expr_helpers::lower_return_expr;
 use self::try_expr_helpers::{lower_try_block_expr, lower_try_expr};
 use self::while_expr_helpers::lower_while_expr;
 pub use entry::{lower_hir, lower_hir_with_options};
+pub(crate) use legacy_param_ownership::infer_contracts_from_items as infer_legacy_parameter_contracts;
+#[cfg(test)]
+pub(crate) use legacy_param_ownership::infer_from_items as infer_legacy_parameter_borrows;
+pub(crate) use native_borrow_contracts::observes_argument as native_argument_noescape;
 pub use options::{AssertCallsiteContext, CoverageContext, MirLowerOptions};
 
 /// 循环上下文，记录 `break/continue` 目标基本块。
@@ -191,6 +197,7 @@ struct LambdaEnv {
 
 /// MIR lowering 上下文。
 struct LoweringContext<'a> {
+    borrowed_output_context: bool,
     mir_fn: &'a mut MirFunction,
     /// 当前正在降级的MIR函数的可变引用。
     local_names: HashMap<String, Local>,
@@ -239,6 +246,8 @@ struct LoweringContext<'a> {
     future_origins: HashMap<Local, String>,
     try_scope_stack: Vec<try_expr_helpers::TryScope>,
     drop_bindings: Vec<DropBinding>,
+    /// Anonymous owning producers may back a borrowed block-tail result.
+    temporary_drop_owners: HashSet<Local>,
     drop_scope_markers: Vec<usize>,
     moved_drop_locals: HashSet<Local>,
     moved_drop_fields: HashSet<(Local, Vec<u32>)>,

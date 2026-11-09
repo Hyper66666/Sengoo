@@ -1,0 +1,50 @@
+import sgllm;
+
+def media_assert(value: bool, label: &str) -> Result<bool, i64> {
+    if not value { llm_diagnostic(label); return Result { is_ok: false, value: false, error: 99 }; };
+    Result { is_ok: true, value: true, error: 0 };
+}
+
+def media_history() -> Result<JsonDoc, i64> {
+    json_parse("{\"messages\":[{\"role\":\"system\",\"content\":\"Be precise\"},{\"role\":\"user\",\"content\":\"\",\"content_parts\":[{\"type\":\"text\",\"text\":\"before 世界😀\"},{\"type\":\"image\",\"mime\":\"image/png\",\"data\":\"iVBORw0KGgo=\",\"byte_length\":8},{\"type\":\"text\",\"text\":\"after\"}]},{\"role\":\"assistant\",\"content\":\"checking\",\"tool_calls\":[{\"id\":\"stable-1\",\"name\":\"read_file\",\"arguments\":\"{}\"}]},{\"role\":\"tool\",\"tool_call_id\":\"stable-1\",\"content\":\"done\"},{\"role\":\"user\",\"content\":\"continue\"}]}");
+}
+
+def media_tests() -> Result<bool, i64> {
+    let history = media_history()?;
+    let tools = json_parse("{\"tools\":[]}")?;
+    let mut protocol = 0;
+    while protocol < 3 { let unqualified = provider_build_request(protocol, "model", &history, &tools); media_assert(not unqualified.is_ok and unqualified.error == 7, "legacy builder refuses media instead of silently dropping it")?; media_assert(not provider_build_request_with_media(protocol, "model", &history, &tools, false, 1048576).is_ok, "explicit unknown vision target is refused")?; let body = provider_build_request_with_media(protocol, "model", &history, &tools, true, 1048576)?; let wire = json_parse(body.as_str())?; let rows = wire.root().object_get(if protocol == 1 { "input"; } else { "messages"; })?; let offset = if protocol == 2 { 0; } else { 1; }; let content = rows.array_get(offset)?.object_get("content")?; media_assert(content.array_len()? == 3 and llm_json_string(content.array_get(0)?, "text")?.as_str() == "before 世界😀" and llm_json_string(content.array_get(2)?, "text")?.as_str() == "after", "ordered text around image preserved")?; let image = content.array_get(1)?; if protocol == 0 { media_assert(llm_json_string(image, "type")?.as_str() == "image_url" and llm_json_string(image.object_get("image_url")?, "url")?.as_str() == "data:image/png;base64,iVBORw0KGgo=", "Chat data URL exact bytes")?; media_assert(llm_json_string(rows.array_get(3)?, "tool_call_id")?.as_str() == "stable-1", "Chat tool pairing preserved")?; (); }; if protocol == 1 { media_assert(llm_json_string(image, "type")?.as_str() == "input_image" and llm_json_string(image, "image_url")?.as_str() == "data:image/png;base64,iVBORw0KGgo=", "Responses data URL exact bytes")?; media_assert(llm_json_string(rows.array_get(3)?, "call_id")?.as_str() == "stable-1" and llm_json_string(rows.array_get(4)?, "output")?.as_str() == "done", "Responses tool pairing preserved")?; (); }; if protocol == 2 { let source = image.object_get("source")?; media_assert(llm_json_string(image, "type")?.as_str() == "image" and llm_json_string(source, "type")?.as_str() == "base64" and llm_json_string(source, "media_type")?.as_str() == "image/png" and llm_json_string(source, "data")?.as_str() == "iVBORw0KGgo=", "Messages inline source exact bytes")?; media_assert(llm_json_string(rows.array_get(2)?.object_get("content")?.array_get(0)?, "tool_use_id")?.as_str() == "stable-1", "Messages tool pairing preserved")?; (); }; media_assert(not str_contains(body.as_str(), "byte_length") and not str_contains(body.as_str(), "content_parts"), "internal asset metadata never leaks into wire")?; media_assert(provider_build_request_with_media(protocol, "model", &history, &tools, true, body.len()).is_ok, "exact body byte boundary accepted")?; let too_large = provider_build_request_with_media(protocol, "model", &history, &tools, true, body.len() - 1); media_assert(not too_large.is_ok and too_large.error == 13, "one-byte-over body refused")?; let endpoint = http_endpoint("http://127.0.0.1:1/v1", provider_route(protocol))?; let request = http_request(&endpoint, protocol, "fixture-only", body.as_str())?; media_assert(http_request_bounded(&endpoint, protocol, "fixture-only", body.as_str(), request.len()).is_ok, "exact full HTTP boundary accepted")?; media_assert(not http_request_bounded(&endpoint, protocol, "fixture-only", body.as_str(), request.len() - 1).is_ok, "headers included in complete request limit")?; let legacy = json_parse("{\"messages\":[{\"role\":\"system\",\"content\":\"system\"},{\"role\":\"user\",\"content\":\"hello 世界😀\"}]}")?; let original = provider_build_request(protocol, "model", &legacy, &tools)?; media_assert(provider_build_request_with_media(protocol, "model", &legacy, &tools, true, 1048576)?.as_str() == original.as_str(), "legacy text-only output byte compatible")?; protocol = protocol + 1; };
+    let valid1 = llm_text("AA==");
+    let valid2 = llm_text("AAA=");
+    let valid3 = llm_text("AAAA");
+    media_assert(provider_media_base64(&valid1, 1).is_ok and provider_media_base64(&valid2, 2).is_ok and provider_media_base64(&valid3, 3).is_ok, "canonical base64 padding accepted")?;
+    let bad1 = llm_text("AB==");
+    let bad2 = llm_text("AAB=");
+    let bad3 = llm_text("AA A");
+    let bad4 = llm_text("AA-_");
+    media_assert(not provider_media_base64(&bad1, 1).is_ok and not provider_media_base64(&bad2, 2).is_ok and not provider_media_base64(&bad3, 3).is_ok and not provider_media_base64(&bad4, 3).is_ok, "noncanonical bits whitespace and url alphabet refused")?;
+    let bad_roles = json_parse("{\"messages\":[{\"role\":\"assistant\",\"content_parts\":[{\"type\":\"text\",\"text\":\"bad\"}]}]}")?;
+    media_assert(not provider_build_request_with_media(0, "model", &bad_roles, &tools, true, 1048576).is_ok, "only user content may contain explicit input media")?;
+    let bad_kind = json_parse("{\"messages\":[{\"role\":\"user\",\"content_parts\":[{\"type\":\"document\",\"path\":\"secret.pdf\"}]}]}")?;
+    media_assert(not provider_build_request_with_media(0, "model", &bad_kind, &tools, true, 1048576).is_ok, "unqualified PDF and remote sources refused")?;
+    let ambiguous = json_parse("{\"messages\":[{\"role\":\"user\",\"content\":\"hidden\",\"content_parts\":[{\"type\":\"text\",\"text\":\"other\"}]}]}")?;
+    media_assert(not provider_build_request_with_media(0, "model", &ambiguous, &tools, true, 1048576).is_ok, "ambiguous flat and ordered text refused")?;
+    let unknown = json_parse("{\"messages\":[{\"role\":\"user\",\"content_parts\":[{\"type\":\"text\",\"text\":\"hello\",\"url\":\"http://remote\"}]}]}")?;
+    media_assert(not provider_build_request_with_media(0, "model", &unknown, &tools, true, 1048576).is_ok, "unknown part fields refused")?;
+    let nul_text = json_parse("{\"messages\":[{\"role\":\"user\",\"content_parts\":[{\"type\":\"text\",\"text\":\"before\\u0000after\"}]}]}")?;
+    let nul_role = json_parse("{\"messages\":[{\"role\":\"user\\u0000assistant\",\"content_parts\":[{\"type\":\"text\",\"text\":\"safe\"}]}]}")?;
+    let bad_content = json_parse("{\"messages\":[{\"role\":\"user\",\"content\":42,\"content_parts\":[{\"type\":\"text\",\"text\":\"safe\"}]}]}")?;
+    let nul_mime = json_parse("{\"messages\":[{\"role\":\"user\",\"content_parts\":[{\"type\":\"image\",\"mime\":\"image/png\\u0000bad\",\"data\":\"AA==\",\"byte_length\":1}]}]}")?;
+    let nul_kind = json_parse("{\"messages\":[{\"role\":\"user\",\"content_parts\":[{\"type\":\"text\\u0000bad\",\"text\":\"safe\"}]}]}")?;
+    let nul_key = json_parse("{\"messages\":[{\"role\":\"user\",\"content_parts\":[{\"type\":\"text\",\"text\":\"safe\",\"text\\u0000bad\":\"hidden\"}]}]}")?;
+    let mut check_protocol = 0;
+    while check_protocol < 3 { media_assert(not provider_build_request_with_media(check_protocol, "model", &nul_text, &tools, true, 1048576).is_ok, "NUL body is refused instead of truncated")?; media_assert(not provider_build_request_with_media(check_protocol, "model", &nul_role, &tools, true, 1048576).is_ok, "NUL role cannot select an allowed discriminator")?; media_assert(not provider_build_request_with_media(check_protocol, "model", &bad_content, &tools, true, 1048576).is_ok, "nonstring flat content is refused")?; media_assert(not provider_build_request_with_media(check_protocol, "model", &nul_mime, &tools, true, 1048576).is_ok, "NUL MIME is refused")?; media_assert(not provider_build_request_with_media(check_protocol, "model", &nul_kind, &tools, true, 1048576).is_ok, "NUL content kind is refused")?; media_assert(not provider_build_request_with_media(check_protocol, "model", &nul_key, &tools, true, 1048576).is_ok, "NUL key is refused")?; check_protocol = check_protocol + 1; };
+    println("provider media: three ordered image encoders, tool pairs, legacy bytes, canonical base64, capability refusal and exact request bounds passed");
+    Result { is_ok: true, value: true, error: 0 };
+}
+
+def main() -> i64 {
+    let result = media_tests();
+    if not result.is_ok { println(result.error); return 1; };
+    0;
+}

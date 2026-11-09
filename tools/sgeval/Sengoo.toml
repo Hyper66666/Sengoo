@@ -1,0 +1,14 @@
+[package]
+name = "sgeval"
+version = "0.1.0"
+edition = "2026"
+description = "Offline redacted Agent event recording and deterministic evaluation."
+
+[lib]
+path = "src/lib.sg"
+
+[bin]
+path = "src/main.sg"
+
+[[test]]
+path = "tests/evaluation.sg"

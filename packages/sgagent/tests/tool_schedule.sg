@@ -1,0 +1,105 @@
+import sgagent;
+
+def expect_tool_schedule(value: bool, message: &str) -> i64 {
+    if value { return 0; };
+    agent_diagnostic(message);
+    1;
+}
+
+def check_tool_schedule() -> Result<i64, i64> {
+    let mut failures = 0;
+    let read = json_parse("{\"path\":\"README.md\"}")?;
+    let empty = json_parse("{}")?;
+    let write = json_parse("{\"path\":\"out.txt\",\"content\":\"data\"}")?;
+    let shell = json_parse("{\"command\":\"echo test\"}")?;
+    println("tool schedule: validation and dedup");
+    let invalid_limit = tool_schedule_new(9);
+    failures = failures + expect_tool_schedule(not invalid_limit.is_ok(), "Invalid parallel limits are rejected");
+    let schedule = tool_schedule_new(2)?;
+    failures = failures + expect_tool_schedule(not tool_schedule_next(&schedule).is_ok(), "Unsealed preview cannot execute");
+    let malformed = tool_schedule_add(&schedule, "bad", "read_file", &empty, false, -1);
+    let unknown = tool_schedule_add(&schedule, "unknown", "unknown", &empty, false, -1);
+    let forward = tool_schedule_add(&schedule, "forward", "read_file", &read, false, 0);
+    failures = failures + expect_tool_schedule(not malformed.is_ok() and not unknown.is_ok() and not forward.is_ok() and schedule.calls.len() == 0, "Invalid complete inputs unknown tools and forward dependencies do not mutate queue");
+    tool_schedule_add(&schedule, "read-one", "read_file", &read, false, -1)?;
+    let duplicate = tool_schedule_add(&schedule, "read-one", "write_file", &write, false, -1);
+    failures = failures + expect_tool_schedule(not duplicate.is_ok() and duplicate.error == 6 and schedule.calls.len() == 1, "Duplicate call id is rejected even when arguments and tool differ");
+    tool_schedule_add(&schedule, "read-two", "git_status", &empty, false, -1)?;
+    tool_schedule_add(&schedule, "write-three", "write_file", &write, false, -1)?;
+    tool_schedule_add(&schedule, "read-four", "read_file", &read, false, -1)?;
+    tool_schedule_add(&schedule, "command-five", "run_command", &shell, false, 2)?;
+    failures = failures + expect_tool_schedule(tool_schedule_seal(&schedule), "Complete batch can seal");
+    let after_seal = tool_schedule_add(&schedule, "late", "read_file", &read, false, -1);
+    failures = failures + expect_tool_schedule(not after_seal.is_ok(), "Sealed batch cannot accept late streaming arguments");
+    println("tool schedule: parallel read block and exclusive barriers");
+    failures = failures + expect_tool_schedule(tool_schedule_next(&schedule)? == 0 and tool_schedule_next(&schedule)? == 1 and tool_schedule_active(&schedule) == 2, "Two validated safe reads acquire independent slots");
+    failures = failures + expect_tool_schedule(tool_schedule_next(&schedule)? == -1, "Bounded reads cannot overrun configured concurrency");
+    tool_schedule_complete(&schedule, 1, true, true)?;
+    failures = failures + expect_tool_schedule(tool_schedule_publish_next(&schedule) == -1 and tool_schedule_next(&schedule)? == -1, "Fast later read cannot publish first or let writer cross an earlier read");
+    tool_schedule_complete(&schedule, 0, true, true)?;
+    failures = failures + expect_tool_schedule(tool_schedule_publish_next(&schedule) == 0 and tool_schedule_publish_next(&schedule) == 1 and tool_schedule_publish_next(&schedule) == -1, "Final results publish exactly once in declared order");
+    failures = failures + expect_tool_schedule(tool_schedule_next(&schedule)? == 2 and tool_schedule_active(&schedule) == 1 and tool_schedule_next(&schedule)? == -1, "Exclusive tool starts alone and blocks following reads");
+    let not_quiet = tool_schedule_complete(&schedule, 2, true, false);
+    failures = failures + expect_tool_schedule(not not_quiet.is_ok() and tool_schedule_active(&schedule) == 1 and tool_schedule_next(&schedule)? == -1, "Unknown process cleanup cannot release exclusive barrier");
+    tool_schedule_complete(&schedule, 2, true, true)?;
+    failures = failures + expect_tool_schedule(not tool_schedule_complete(&schedule, 2, true, true)? and tool_schedule_active(&schedule) == 0, "Duplicate completion never decrements capacity twice");
+    failures = failures + expect_tool_schedule(tool_schedule_next(&schedule)? == 3 and tool_schedule_next(&schedule)? == -1, "Read after write observes completed write before subsequent command");
+    tool_schedule_complete(&schedule, 3, true, true)?;
+    failures = failures + expect_tool_schedule(tool_schedule_next(&schedule)? == 4 and tool_schedule_next(&schedule)? == -1, "Command remains an exclusive barrier");
+    tool_schedule_complete(&schedule, 4, true, true)?;
+    failures = failures + expect_tool_schedule(tool_schedule_quiescent(&schedule) and tool_schedule_publish_next(&schedule) == 2 and tool_schedule_publish_next(&schedule) == 3 and tool_schedule_publish_next(&schedule) == 4 and tool_schedule_publish_next(&schedule) == -1, "All results settle once and queue becomes quiescent");
+    println("tool schedule: explicit dependencies");
+    let dependencies = tool_schedule_new(3)?;
+    tool_schedule_add(&dependencies, "source", "read_file", &read, false, -1)?;
+    tool_schedule_add(&dependencies, "dependent", "read_file", &read, false, 0)?;
+    tool_schedule_add(&dependencies, "unrelated", "git_diff", &empty, false, -1)?;
+    tool_schedule_add(&dependencies, "effect", "run_command", &shell, false, 1)?;
+    tool_schedule_add(&dependencies, "after", "read_file", &read, false, -1)?;
+    tool_schedule_seal(&dependencies);
+    failures = failures + expect_tool_schedule(tool_schedule_next(&dependencies)? == 0 and tool_schedule_next(&dependencies)? == 2, "Independent read can progress beside a waiting dependent read");
+    failures = failures + expect_tool_schedule(tool_schedule_next(&dependencies)? == -1, "Dependency waits for predecessor result");
+    tool_schedule_complete(&dependencies, 0, false, true)?;
+    failures = failures + expect_tool_schedule(tool_schedule_next(&dependencies)? == -1 and tool_schedule_state(&dependencies, 1) == 5, "Failed dependency is skipped before any effectful successor");
+    tool_schedule_complete(&dependencies, 2, true, true)?;
+    failures = failures + expect_tool_schedule(tool_schedule_next(&dependencies)? == 4 and tool_schedule_state(&dependencies, 3) == 5, "Transitive failed predecessor prevents command execution without canceling independent work");
+    tool_schedule_complete(&dependencies, 4, true, true)?;
+    failures = failures + expect_tool_schedule(tool_schedule_quiescent(&dependencies), "Skipped dependency chains reach a stable terminal state");
+    println("tool schedule: conservative hook classification");
+    let hooked = tool_schedule_new(4)?;
+    tool_schedule_add(&hooked, "plain", "git_status", &empty, false, -1)?;
+    tool_schedule_add(&hooked, "hooked", "read_file", &read, true, -1)?;
+    tool_schedule_add(&hooked, "following", "git_diff", &empty, false, -1)?;
+    tool_schedule_seal(&hooked);
+    failures = failures + expect_tool_schedule(not tool_schedule_safe_read("wait_agents", &empty, false) and not tool_schedule_safe_read("read_file", &empty, false) and not tool_schedule_safe_read("run_command", &shell, false), "Coordinator malformed and command tools cannot opt into parallel reads");
+    failures = failures + expect_tool_schedule(tool_schedule_next(&hooked)? == 0 and tool_schedule_next(&hooked)? == -1, "Executable hooks turn read tool into a source-order barrier");
+    tool_schedule_complete(&hooked, 0, true, true)?;
+    failures = failures + expect_tool_schedule(tool_schedule_next(&hooked)? == 1 and tool_schedule_next(&hooked)? == -1, "Hooked read executes alone");
+    println("tool schedule: cancellation waits for jobs");
+    tool_schedule_cancel(&hooked);
+    failures = failures + expect_tool_schedule(tool_schedule_state(&hooked, 1) == 2 and tool_schedule_state(&hooked, 2) == 4 and tool_schedule_active(&hooked) == 1, "Cancellation stops queued work while retaining live jobs");
+    failures = failures + expect_tool_schedule(tool_schedule_next(&hooked)? == -1 and not tool_schedule_quiescent(&hooked), "Canceled jobs must be polled until confirmed quiet");
+    let cancel_unproven = tool_schedule_complete(&hooked, 1, false, false);
+    failures = failures + expect_tool_schedule(not cancel_unproven.is_ok() and not tool_schedule_quiescent(&hooked), "Timeout alone does not certify cancellation cleanup");
+    tool_schedule_complete(&hooked, 1, false, true)?;
+    failures = failures + expect_tool_schedule(tool_schedule_quiescent(&hooked) and tool_schedule_publish_next(&hooked) == 0 and tool_schedule_publish_next(&hooked) == 1 and tool_schedule_publish_next(&hooked) == 2, "Canceled and completed results each retain their original ordinal");
+    let never_started = tool_schedule_new(1)?;
+    tool_schedule_add(&never_started, "queued", "read_file", &read, false, -1)?;
+    failures = failures + expect_tool_schedule(not tool_schedule_complete(&never_started, 0, true, true).is_ok(), "Completion cannot fabricate an unstarted tool result");
+    tool_schedule_cancel(&never_started);
+    tool_schedule_cancel(&never_started);
+    failures = failures + expect_tool_schedule(not tool_schedule_seal(&never_started) and tool_schedule_quiescent(&never_started), "Repeated pre-dispatch cancellation is terminal without launching jobs");
+    println("tool schedule: bounded batch");
+    let bounded = tool_schedule_new(1)?;
+    let mut count = 0;
+    while count < 128 { let id = string_from_str("bounded-")?; id.push_i64(count)?; tool_schedule_add(&bounded, id.as_str(), "git_status", &empty, false, -1)?; count = count + 1; };
+    let overflow = tool_schedule_add(&bounded, "too-many", "git_status", &empty, false, -1);
+    failures = failures + expect_tool_schedule(not overflow.is_ok() and overflow.error == 13 and bounded.calls.len() == 128, "Batch memory has a strict entry bound");
+    agent_ok(failures);
+}
+
+def main() -> i64 {
+    let result = check_tool_schedule();
+    if not result.is_ok() { println(result.error); return 1; };
+    if result.value == 0 { println("tool schedule acceptance passed"); };
+    result.value;
+}

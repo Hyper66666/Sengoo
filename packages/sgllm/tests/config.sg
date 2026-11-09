@@ -1,0 +1,35 @@
+import sgllm;
+
+def check(value: bool, message: &str) -> Result<bool, i64> {
+    if not value { println(message); return Result { is_ok: false, value: false, error: 99 }; };
+    Result { is_ok: true, value: true, error: 0 };
+}
+
+def tests() -> Result<bool, i64> {
+    check(not llm_request_config("ftp://example.invalid", 0, "model").is_ok(), "unsupported URL must fail before network")?;
+    check(not llm_request_config("https://example.invalid", 3, "model").is_ok(), "unknown protocol must fail before network")?;
+    check(not llm_request_config("https://example.invalid", 0, "").is_ok(), "empty model must fail before network")?;
+    let mut config = llm_request_config("https://example.invalid/v1", 0, "model")?;
+    check(not config.images_allowed and config.effort.len() == 0 and config.scope.len() == 0, "capabilities and opaque scope must be opt-in")?;
+    let history = json_parse("{\"messages\":[{\"role\":\"user\",\"content\":\"test\"}]}")?;
+    let tools = json_parse("{\"tools\":[]}")?;
+    config.limits.queue_bytes = 1;
+    let invalid = llm_request_start(&config, "fixture-key", &history, &tools);
+    check(not invalid.is_ok() and invalid.error == 2, "queue bounds are checked before network")?;
+    config.limits = llm_default_limits();
+    config.limits.body_bytes = 2;
+    let too_large = llm_request_start(&config, "fixture-key", &history, &tools);
+    check(not too_large.is_ok() and too_large.error == 13, "serialized request byte limit is enforced before sending")?;
+    config.limits = llm_default_limits();
+    let injected = llm_request_start(&config, "fixture-key\r\nx-evil: true", &history, &tools);
+    check(not injected.is_ok() and injected.error == 2, "credential CRLF is rejected")?;
+    check(llm_limits_validate(&config.limits)?, "default limits are valid")?;
+    println("SDK configuration, capabilities, request admission and credential validation passed");
+    Result { is_ok: true, value: true, error: 0 };
+}
+
+def main() -> i64 {
+    let result = tests();
+    if not result.is_ok() { println(result.error); return 1; };
+    0;
+}

@@ -1,0 +1,6 @@
+- [x] Trace custom borrowed close suppression in both MIR method-call paths.
+- [x] Narrow compatibility release detection to explicit drop and known runtime handles.
+- [x] Add compiler regression for custom borrowed close/free and consuming receivers.
+- [x] Verify actual MCP borrowed-close resource counts with the fixed compiler.
+- [x] Verify legacy explicit handle release and retain old field-destructor comparison.
+- [x] Record candidate/source evidence and strict validation.

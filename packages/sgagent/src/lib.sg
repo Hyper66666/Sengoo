@@ -1,0 +1,1277 @@
+import sqlite_store;
+
+import std::string;
+
+import std::json;
+
+import std::collections;
+
+import std::ffi;
+
+import std::system;
+
+import sgschema;
+
+def agent_ok(value: i64) -> Result<i64, i64> {
+    Result { is_ok: true, value: value, error: 0 };
+}
+
+def agent_fail(code: i64) -> Result<i64, i64> {
+    Result { is_ok: false, value: 0, error: code };
+}
+
+def agent_text(text: &str) -> String {
+    string_from_str(text).unwrap_or(string_new());
+}
+
+def agent_join(a: &str, b: &str) -> Result<String, i64> {
+    let out = string_from_str(a)?;
+    out.push_str(b)?;
+    Result { is_ok: true, value: out, error: 0 };
+}
+
+def agent_byte_slice(text: &str, start: i64, end: i64) -> Result<String, i64> {
+    if start < 0 or end < start or end > text.len() { return string_result_err(2); };
+    string_from_bytes_raw(sengoo_stdlib_str_ptr(text) + start, end - start);
+}
+
+def agent_bytes(capacity: i64) -> Buffer {
+    ffi_buffer_new(capacity).unwrap_or(Buffer { handle: 0 });
+}
+
+def agent_bytes_error(code: i64) -> Result<Buffer, i64> {
+    Result { is_ok: false, value: Buffer { handle: 0 }, error: code };
+}
+
+def agent_bytes_index(buffer: &Buffer, pattern: &str) -> Result<i64, i64> {
+    let needle = ffi_buffer_from_bytes(pattern)?;
+    buffer.index_of_bytes(needle, 0);
+}
+
+def agent_bytes_append(destination: &Buffer, source: &Buffer, start: i64, count: i64) -> Result<i64, i64> {
+    if start < 0 or count < 0 or start > source.used_len() or count > source.used_len() - start { return agent_fail(2); };
+    ffi_byte_count_result(sengoo_ffi_buffer_append(destination.raw_handle(), source.ptr() + start, count));
+}
+
+def agent_bytes_text(buffer: &Buffer, start: i64, count: i64) -> Result<String, i64> {
+    if start < 0 or count < 0 or start > buffer.used_len() or count > buffer.used_len() - start { return string_result_err(2); };
+    string_from_bytes_raw(buffer.ptr() + start, count);
+}
+
+def agent_parse_unsigned(text: &str, radix: i64) -> Result<i64, i64> {
+    if text.len() == 0 { return agent_fail(2); };
+    let source = agent_text(text);
+    let iter = source.bytes();
+    let mut result = 0;
+    loop { let byte = iter.next(); if not byte.is_some { break; }; let mut digit = byte.value - 48; if byte.value >= 65 and byte.value <= 70 { digit = byte.value - 55; }; if byte.value >= 97 and byte.value <= 102 { digit = byte.value - 87; }; if digit < 0 or digit >= radix { iter.free(); return agent_fail(2); }; if result > (9223372036854775807 - digit) / radix { iter.free(); return agent_fail(13); }; result = result * radix + digit; };
+    iter.free();
+    agent_ok(result);
+}
+
+def agent_json_string(object: JsonValue, key: &str) -> Result<String, i64> {
+    object.object_get(key)?.string_value();
+}
+
+def agent_json_optional_string(object: JsonValue, key: &str) -> String {
+    if not object.object_has(key) { return string_new(); };
+    object.object_get(key).value.string_value().unwrap_or(string_new());
+}
+
+def agent_json_optional_i64(object: JsonValue, key: &str, fallback: i64) -> i64 {
+    if not object.object_has(key) { return fallback; };
+    let field = object.object_get(key);
+    if not field.is_ok() { return fallback; };
+    field.value.number_i64().unwrap_or(fallback);
+}
+
+def agent_put_string(document: &JsonDoc, object: JsonValue, key: &str, text: &str) -> Result<bool, i64> {
+    object.object_set(key, document.new_string(text)?);
+}
+
+def agent_put_i64(document: &JsonDoc, object: JsonValue, key: &str, value: i64) -> Result<bool, i64> {
+    object.object_set(key, document.new_i64(value)?);
+}
+
+def agent_put_bool(document: &JsonDoc, object: JsonValue, key: &str, value: bool) -> Result<bool, i64> {
+    object.object_set(key, document.new_bool(value)?);
+}
+
+def agent_diagnostic(text: &str) {
+    ();
+}
+
+def question_text_bounded(value: JsonValue, minimum: i64, maximum: i64) -> bool {
+    let parsed = value.string_value();
+    if not parsed.is_ok() { return false; };
+    let text = parsed.value;
+    if text.len() != text.as_str().len() { return false; };
+    let count = text.char_count();
+    count.is_ok() and count.value >= minimum and count.value <= maximum;
+}
+
+def question_display_text_valid(text: &String, multiline: bool) -> bool {
+    let iter = text.chars();
+    loop { let item = iter.next_codepoint(); if not item.is_some { break; }; if item.value < 32 or item.value >= 127 and item.value <= 159 { if not multiline or item.value != 9 and item.value != 10 and item.value != 13 { iter.free(); return false; }; }; };
+    iter.free();
+    true;
+}
+
+def question_options_checked(options: JsonValue) -> Result<bool, i64> {
+    if options.kind()? != JSON_KIND_ARRAY() { return Result { is_ok: true, value: false, error: 0 }; };
+    let count = options.array_len()?;
+    if count < 2 or count > 6 { return Result { is_ok: true, value: false, error: 0 }; };
+    let mut index = 0;
+    while index < count { let item = options.array_get(index)?; if item.kind()? != JSON_KIND_OBJECT() or not item.object_has("label") { return Result { is_ok: true, value: false, error: 0 }; }; let keys = item.object_keys()?; let mut key_index = 0; while key_index < keys.root().array_len()? { let key = keys.root().array_get(key_index)?.string_value()?; if key.len() != key.as_str().len() or key.as_str() != "label" and key.as_str() != "description" { return Result { is_ok: true, value: false, error: 0 }; }; key_index = key_index + 1; }; if not question_text_bounded(item.object_get("label")?, 1, 120) { return Result { is_ok: true, value: false, error: 0 }; }; let label = agent_json_string(item, "label")?; let trimmed = str_trim(label.as_str())?; if trimmed.len() == 0 or not question_display_text_valid(&label, false) { return Result { is_ok: true, value: false, error: 0 }; }; if item.object_has("description") and not question_text_bounded(item.object_get("description")?, 0, 400) { return Result { is_ok: true, value: false, error: 0 }; }; if item.object_has("description") { let description = agent_json_string(item, "description")?; if not question_display_text_valid(&description, true) { return Result { is_ok: true, value: false, error: 0 }; }; }; let mut previous = 0; while previous < index { let old = agent_json_string(options.array_get(previous)?, "label")?; if str_trim(old.as_str())?.as_str() == trimmed.as_str() { return Result { is_ok: true, value: false, error: 0 }; }; previous = previous + 1; }; index = index + 1; };
+    Result { is_ok: true, value: true, error: 0 };
+}
+
+def question_options_valid(options: JsonValue) -> bool {
+    let valid = question_options_checked(options);
+    valid.is_ok() and valid.value;
+}
+
+def question_arguments_valid(arguments: &JsonDoc) -> bool {
+    let root = arguments.root();
+    if not root.object_has("question") { return false; };
+    let text = root.object_get("question");
+    if not text.is_ok() or not question_text_bounded(text.value, 1, 8192) { return false; };
+    if root.object_has("options") { let options = root.object_get("options"); if not options.is_ok() or not question_options_valid(options.value) { return false; }; };
+    true;
+}
+
+struct AgentPolicy {
+    plan: bool,
+    auto_edit: bool,
+    full_access: bool,
+    interactive: bool,
+    depth: i64,
+    maximum_depth: i64,
+}
+
+def policy_default() -> AgentPolicy {
+    AgentPolicy { plan: false, auto_edit: false, full_access: false, interactive: true, depth: 0, maximum_depth: 1 };
+}
+
+def policy_finish_plan(policy: &mut AgentPolicy) {
+    policy.plan = false;
+}
+
+def policy_decision(policy: &AgentPolicy, tool: &str, exact_plan_file: bool) -> i64 {
+    if tool == "read_file" or tool == "list_directory" or tool == "search" or tool == "find_files" or tool == "git_status" or tool == "git_diff" or tool == "ask_user" or tool == "read_evidence" { return 0; };
+    if tool == "spawn_agent" { if policy.depth >= policy.maximum_depth { return 2; }; return 0; };
+    if tool == "list_agents" or tool == "wait_agents" or tool == "cancel_agent" or tool == "list_models" { return if policy.depth == 0 { 0; } else { 2; }; };
+    if policy.plan { if tool == "write_plan" and exact_plan_file { return 0; }; return 2; };
+    if tool == "write_file" or tool == "apply_patch" or tool == "write_plan" { if policy.auto_edit or policy.full_access { return 0; }; return 1; };
+    if tool == "run_command" or tool == "mcp__list_tools" or tool == "mcp__call" { return if policy.full_access { 0; } else { 1; }; };
+    2;
+}
+
+def policy_child(parent: &AgentPolicy, role: &str) -> AgentPolicy {
+    let read_only = parent.plan or role == "explore" or role == "plan";
+    AgentPolicy { plan: read_only, auto_edit: parent.auto_edit and not read_only, full_access: parent.full_access and not read_only, interactive: parent.interactive, depth: parent.depth + 1, maximum_depth: parent.maximum_depth };
+}
+
+struct GoalState {
+    status: i64,
+    requests: i64,
+    max_requests: i64,
+    tokens: i64,
+    token_budget: i64,
+    same_failure_count: i64,
+    last_failure: String,
+}
+
+def goal_new(max_requests: i64, token_budget: i64) -> GoalState {
+    GoalState { status: 1, requests: 0, max_requests: max_requests, tokens: 0, token_budget: token_budget, same_failure_count: 0, last_failure: string_new() };
+}
+
+def goal_accept_request(goal: &mut GoalState) -> bool {
+    if goal.status != 1 { return false; };
+    if goal.max_requests > 0 and goal.requests >= goal.max_requests or goal.token_budget > 0 and goal.tokens >= goal.token_budget { goal.status = 3; return false; };
+    if goal.requests < 9223372036854775807 { goal.requests = goal.requests + 1; };
+    true;
+}
+
+def goal_usage(goal: &mut GoalState, tokens: i64) {
+    if tokens > 0 { if goal.tokens > 9223372036854775807 - tokens { goal.tokens = 9223372036854775807; goal.status = 3; } else { goal.tokens = goal.tokens + tokens; }; };
+    if goal.token_budget > 0 and goal.tokens >= goal.token_budget { goal.status = 3; };
+    ();
+}
+
+def goal_verify(goal: &mut GoalState, checks_passed: bool, verifier_available: bool, failure: &str) {
+    if not verifier_available { goal.status = 2; goal.last_failure = agent_text(failure); return; };
+    if checks_passed { goal.status = 4; goal.last_failure.clear(); goal.same_failure_count = 0; return; };
+    if goal.last_failure.as_str() == failure { goal.same_failure_count = goal.same_failure_count + 1; } else { goal.last_failure = agent_text(failure); goal.same_failure_count = 1; };
+    if goal.same_failure_count >= 2 { goal.status = 2; };
+    ();
+}
+
+def goal_restore(goal: &mut GoalState) {
+    if goal.status == 1 { goal.status = 2; };
+    ();
+}
+
+struct SchedulerTask {
+    id: i64,
+    parent: i64,
+    connection: String,
+    cwd: String,
+    write_capable: bool,
+    state: Vec<i64>,
+    jobs: Vec<i64>,
+}
+
+struct Scheduler {
+    tasks: Vec<SchedulerTask>,
+    control: Vec<i64>,
+}
+
+def scheduler_make(global_limit: i64, connection_limit: i64) -> Scheduler {
+    let control: Vec<i64> = vec_new();
+    control.push(global_limit);
+    control.push(connection_limit);
+    control.push(1);
+    control.push(1);
+    control.push(1);
+    let tasks: Vec<SchedulerTask> = vec_new();
+    Scheduler { tasks: tasks, control: control };
+}
+
+def scheduler_new() -> Scheduler {
+    scheduler_make(4, 2);
+}
+
+def scheduler_with_limits(global_limit: i64, connection_limit: i64) -> Result<Scheduler, i64> {
+    let valid = global_limit >= 1 and global_limit <= 8 and connection_limit >= 1 and connection_limit <= global_limit;
+    if not valid { let tasks: Vec<SchedulerTask> = Vec { handle: 0, marker: 0 }; let control: Vec<i64> = Vec { handle: 0, marker: 0 }; return Result { is_ok: false, value: Scheduler { tasks: tasks, control: control }, error: 2 }; };
+    Result { is_ok: true, value: scheduler_make(global_limit, connection_limit), error: 0 };
+}
+
+def scheduler_bool(value: bool, error: i64) -> Result<bool, i64> {
+    Result { is_ok: error == 0, value: value, error: error };
+}
+
+def scheduler_slot(scheduler: &Scheduler, id: i64) -> i64 {
+    let mut index = 0;
+    while index < scheduler.tasks.len() { let task: &SchedulerTask = scheduler.tasks.get(index); if task.id == id { return index; }; index = index + 1; };
+    -1;
+}
+
+def scheduler_flag(task: &SchedulerTask, flag: i64) -> i64 {
+    task.state.get(flag).unwrap_or(0);
+}
+
+def scheduler_state(scheduler: &Scheduler, id: i64) -> i64 {
+    let index = scheduler_slot(scheduler, id);
+    if index < 0 { return -3; };
+    let task: &SchedulerTask = scheduler.tasks.get(index);
+    scheduler_flag(task, 0);
+}
+
+def scheduler_error(scheduler: &Scheduler, id: i64) -> i64 {
+    let index = scheduler_slot(scheduler, id);
+    if index < 0 { return 3; };
+    let task: &SchedulerTask = scheduler.tasks.get(index);
+    scheduler_flag(task, 4);
+}
+
+def scheduler_children_pending(scheduler: &Scheduler, parent: i64) -> bool {
+    let mut index = 0;
+    while index < scheduler.tasks.len() { let child: &SchedulerTask = scheduler.tasks.get(index); if child.parent == parent and (scheduler_flag(child, 0) < 2 or scheduler_resources_pending(child)) { return true; }; index = index + 1; };
+    false;
+}
+
+def scheduler_resources_pending(task: &SchedulerTask) -> bool {
+    scheduler_flag(task, 1) != 0 or scheduler_flag(task, 2) != 0 or scheduler_flag(task, 5) != 0 or task.jobs.len() != 0;
+}
+
+def scheduler_reap(scheduler: &Scheduler) -> i64 {
+    let mut removed = 0;
+    let mut changed = true;
+    while changed { changed = false; let mut index = scheduler.tasks.len() - 1; while index >= 0 { let task: &SchedulerTask = scheduler.tasks.get(index); let id = task.id; let terminal = scheduler_flag(task, 0) >= 2 and not scheduler_resources_pending(task); let mut has_child = false; let mut other_index = 0; while other_index < scheduler.tasks.len() { let other: &SchedulerTask = scheduler.tasks.get(other_index); if other.parent == id { has_child = true; }; other_index = other_index + 1; }; if terminal and not has_child { scheduler.tasks.remove(index); removed = removed + 1; changed = true; }; index = index - 1; }; };
+    removed;
+}
+
+def scheduler_add(scheduler: &Scheduler, parent: i64, connection: &str, cwd: &str, write_capable: bool) -> Result<i64, i64> {
+    if connection.len() == 0 or connection.len() > 256 or cwd.len() == 0 or cwd.len() > 32768 { return agent_fail(2); };
+    if parent != 0 { let parent_index = scheduler_slot(scheduler, parent); if parent_index < 0 { return agent_fail(3); }; let parent_task: &SchedulerTask = scheduler.tasks.get(parent_index); if scheduler_flag(parent_task, 0) >= 2 { return agent_fail(19); }; if parent_task.parent != 0 or write_capable and not parent_task.write_capable { return agent_fail(7); }; };
+    if scheduler.tasks.len() >= 128 { scheduler_reap(scheduler); (); };
+    if scheduler.tasks.len() >= 128 { return agent_fail(13); };
+    let id = scheduler.control.get(2).unwrap_or(0);
+    if id <= 0 or id >= 9223372036854775807 { return agent_fail(13); };
+    let directory = canonical_path_string(cwd)?;
+    let captured_connection = string_from_str(connection)?;
+    let state: Vec<i64> = vec_new();
+    let mut field = 0;
+    while field < 7 { if not state.push(0) { return agent_fail(8); }; field = field + 1; };
+    let jobs: Vec<i64> = vec_new();
+    let task = SchedulerTask { id: id, parent: parent, connection: captured_connection, cwd: directory, write_capable: write_capable, state: state, jobs: jobs };
+    if not scheduler.tasks.push(task) { return agent_fail(8); };
+    scheduler.control.set(2, id + 1);
+    agent_ok(id);
+}
+
+def scheduler_model_count(scheduler: &Scheduler, connection: &str) -> i64 {
+    let mut count = 0;
+    let mut index = 0;
+    while index < scheduler.tasks.len() { let task: &SchedulerTask = scheduler.tasks.get(index); if scheduler_flag(task, 1) != 0 and (connection.len() == 0 or task.connection.as_str() == connection) { count = count + 1; }; index = index + 1; };
+    count;
+}
+
+def scheduler_acquire_model(scheduler: &Scheduler, id: i64) -> Result<bool, i64> {
+    let index = scheduler_slot(scheduler, id);
+    if index < 0 { return scheduler_bool(false, 3); };
+    let task: &SchedulerTask = scheduler.tasks.get(index);
+    let phase = scheduler_flag(task, 0);
+    if phase >= 2 { return scheduler_bool(false, if phase == 3 { 19; } else { 3; }); };
+    if phase == 1 { if scheduler_children_pending(scheduler, id) { return scheduler_bool(false, 0); }; task.state.set(0, 0); (); };
+    if scheduler_flag(task, 1) != 0 { return scheduler_bool(true, 0); };
+    if scheduler_model_count(scheduler, "") >= scheduler.control.get(0).unwrap_or(4) or scheduler_model_count(scheduler, task.connection.as_str()) >= scheduler.control.get(1).unwrap_or(2) { return scheduler_bool(false, 0); };
+    task.state.set(1, 1);
+    scheduler_bool(true, 0);
+}
+
+def scheduler_release_model(scheduler: &Scheduler, id: i64) -> Result<bool, i64> {
+    let index = scheduler_slot(scheduler, id);
+    if index < 0 { return scheduler_bool(false, 3); };
+    let task: &SchedulerTask = scheduler.tasks.get(index);
+    if scheduler_flag(task, 5) != 0 { return scheduler_bool(false, 6); };
+    let held = scheduler_flag(task, 1) != 0;
+    task.state.set(1, 0);
+    scheduler_bool(held, 0);
+}
+
+def scheduler_acquire_write(scheduler: &Scheduler, id: i64) -> Result<bool, i64> {
+    let index = scheduler_slot(scheduler, id);
+    if index < 0 { return scheduler_bool(false, 3); };
+    let task: &SchedulerTask = scheduler.tasks.get(index);
+    let phase = scheduler_flag(task, 0);
+    if phase >= 2 { return scheduler_bool(false, if phase == 3 { 19; } else { 3; }); };
+    if not task.write_capable { return scheduler_bool(false, 7); };
+    if phase == 1 and scheduler_children_pending(scheduler, id) { return scheduler_bool(false, 0); };
+    if scheduler_flag(task, 2) != 0 { return scheduler_bool(true, 0); };
+    if scheduler_flag(task, 3) == 0 { let ticket = scheduler.control.get(3).unwrap_or(0); if ticket <= 0 or ticket >= 9223372036854775807 { return scheduler_bool(false, 13); }; task.state.set(3, 1); task.state.set(6, ticket); scheduler.control.set(3, ticket + 1); (); };
+    let mut other_index = 0;
+    while other_index < scheduler.tasks.len() { let other: &SchedulerTask = scheduler.tasks.get(other_index); if other.id != id and other.cwd.as_str() == task.cwd.as_str() { if scheduler_flag(other, 2) != 0 or scheduler_flag(other, 0) == 0 and scheduler_flag(other, 3) != 0 and scheduler_flag(other, 6) < scheduler_flag(task, 6) { return scheduler_bool(false, 0); }; }; other_index = other_index + 1; };
+    task.state.set(0, 0);
+    task.state.set(2, 1);
+    scheduler_bool(true, 0);
+}
+
+def scheduler_release_write(scheduler: &Scheduler, id: i64) -> Result<bool, i64> {
+    let index = scheduler_slot(scheduler, id);
+    if index < 0 { return scheduler_bool(false, 3); };
+    let task: &SchedulerTask = scheduler.tasks.get(index);
+    if task.jobs.len() != 0 or scheduler_flag(task, 0) == 3 and scheduler_flag(task, 2) != 0 { return scheduler_bool(false, 6); };
+    let held = scheduler_flag(task, 2) != 0;
+    task.state.set(2, 0);
+    task.state.set(3, 0);
+    task.state.set(6, 0);
+    scheduler_bool(held, 0);
+}
+
+def scheduler_begin_tool(scheduler: &Scheduler, id: i64) -> Result<i64, i64> {
+    let index = scheduler_slot(scheduler, id);
+    if index < 0 { return agent_fail(3); };
+    let task: &SchedulerTask = scheduler.tasks.get(index);
+    if scheduler_flag(task, 0) != 0 { return agent_fail(19); };
+    let token = scheduler.control.get(4).unwrap_or(0);
+    if token <= 0 or token >= 9223372036854775807 { return agent_fail(13); };
+    if task.jobs.len() >= 128 { return agent_fail(13); };
+    if not task.jobs.push(token) { return agent_fail(8); };
+    scheduler.control.set(4, token + 1);
+    agent_ok(token);
+}
+
+def scheduler_end_tool(scheduler: &Scheduler, id: i64, token: i64, quiescent: bool) -> Result<bool, i64> {
+    let index = scheduler_slot(scheduler, id);
+    if index < 0 { return scheduler_bool(false, 3); };
+    let task: &SchedulerTask = scheduler.tasks.get(index);
+    let mut job_index = 0;
+    while job_index < task.jobs.len() { if task.jobs.get(job_index).unwrap_or(0) == token { if not quiescent { return scheduler_bool(false, 6); }; task.jobs.remove(job_index); return scheduler_bool(true, 0); }; job_index = job_index + 1; };
+    scheduler_bool(false, 0);
+}
+
+def scheduler_confirm_quiescent(scheduler: &Scheduler, id: i64) -> Result<bool, i64> {
+    let index = scheduler_slot(scheduler, id);
+    if index < 0 { return scheduler_bool(false, 3); };
+    let task: &SchedulerTask = scheduler.tasks.get(index);
+    if scheduler_flag(task, 0) != 3 { return scheduler_bool(false, 2); };
+    if task.jobs.len() != 0 or scheduler_flag(task, 5) != 0 or scheduler_children_pending(scheduler, id) { return scheduler_bool(false, 6); };
+    task.state.set(1, 0);
+    task.state.set(2, 0);
+    task.state.set(3, 0);
+    task.state.set(6, 0);
+    scheduler_bool(true, 0);
+}
+
+def scheduler_wait_children(scheduler: &Scheduler, id: i64) -> Result<bool, i64> {
+    let index = scheduler_slot(scheduler, id);
+    if index < 0 { return scheduler_bool(false, 3); };
+    let task: &SchedulerTask = scheduler.tasks.get(index);
+    if scheduler_flag(task, 0) >= 2 { return scheduler_bool(false, 19); };
+    if scheduler_flag(task, 5) != 0 or task.jobs.len() != 0 { return scheduler_bool(false, 6); };
+    scheduler_release_model(scheduler, id)?;
+    scheduler_release_write(scheduler, id)?;
+    let pending = scheduler_children_pending(scheduler, id);
+    task.state.set(0, if pending { 1; } else { 0; });
+    scheduler_bool(not pending, 0);
+}
+
+def scheduler_resume_wait(scheduler: &Scheduler, id: i64) -> Result<bool, i64> {
+    let index = scheduler_slot(scheduler, id);
+    if index < 0 { return scheduler_bool(false, 3); };
+    let task: &SchedulerTask = scheduler.tasks.get(index);
+    if scheduler_flag(task, 0) >= 2 { return scheduler_bool(false, 19); };
+    if scheduler_flag(task, 0) == 1 { task.state.set(0, 0); (); };
+    scheduler_bool(true, 0);
+}
+
+def scheduler_finish(scheduler: &Scheduler, id: i64, error: i64) -> Result<bool, i64> {
+    let index = scheduler_slot(scheduler, id);
+    if index < 0 { return scheduler_bool(false, 3); };
+    let task: &SchedulerTask = scheduler.tasks.get(index);
+    if scheduler_children_pending(scheduler, id) or scheduler_flag(task, 5) != 0 or task.jobs.len() != 0 { return scheduler_bool(false, 6); };
+    scheduler_release_model(scheduler, id)?;
+    scheduler_release_write(scheduler, id)?;
+    if scheduler_flag(task, 0) != 3 { task.state.set(0, 2); task.state.set(4, error); (); };
+    scheduler_bool(true, 0);
+}
+
+def scheduler_cancel_tree(scheduler: &Scheduler, id: i64) -> bool {
+    if scheduler_slot(scheduler, id) < 0 { return false; };
+    let mut index = 0;
+    while index < scheduler.tasks.len() { let task: &SchedulerTask = scheduler.tasks.get(index); if (task.id == id or task.parent == id) and scheduler_flag(task, 0) < 2 { task.state.set(0, 3); if scheduler_flag(task, 5) == 0 { task.state.set(1, 0); (); }; task.state.set(3, 0); task.state.set(4, 19); task.state.set(6, 0); (); }; index = index + 1; };
+    true;
+}
+
+def scheduler_cancel_all(scheduler: &Scheduler) {
+    let mut index = 0;
+    while index < scheduler.tasks.len() { let task: &SchedulerTask = scheduler.tasks.get(index); scheduler_cancel_tree(scheduler, task.id); index = index + 1; };
+    ();
+}
+
+def scheduler_is_cancelled(scheduler: &Scheduler, id: i64) -> bool {
+    let phase = scheduler_state(scheduler, id);
+    phase == 3 or phase == -3;
+}
+
+def scheduler_take_request(scheduler: &Scheduler, id: i64, goal: &mut GoalState) -> bool {
+    let index = scheduler_slot(scheduler, id);
+    if index < 0 { return false; };
+    let task: &SchedulerTask = scheduler.tasks.get(index);
+    if scheduler_flag(task, 0) != 0 or scheduler_flag(task, 1) == 0 or scheduler_flag(task, 5) != 0 { return false; };
+    if not goal_accept_request(goal) { scheduler_cancel_all(scheduler); return false; };
+    task.state.set(5, 1);
+    true;
+}
+
+def scheduler_report_usage(scheduler: &Scheduler, id: i64, goal: &mut GoalState, tokens: i64) -> bool {
+    let index = scheduler_slot(scheduler, id);
+    if index < 0 or tokens < 0 { return false; };
+    let task: &SchedulerTask = scheduler.tasks.get(index);
+    if scheduler_flag(task, 5) == 0 { return false; };
+    task.state.set(5, 0);
+    if scheduler_flag(task, 0) == 3 { task.state.set(1, 0); (); };
+    if tokens > 9223372036854775807 - goal.tokens { goal.tokens = 9223372036854775807; goal.status = 3; scheduler_cancel_all(scheduler); return true; };
+    goal_usage(goal, tokens);
+    if goal.status == 3 { scheduler_cancel_all(scheduler); };
+    true;
+}
+
+struct ToolSpec {
+    known: bool,
+    read_only: bool,
+    exclusive: bool,
+    process: bool,
+    coordinator: bool,
+    interruptible: bool,
+    max_result_bytes: i64,
+}
+
+def tool_spec(name: &str) -> ToolSpec {
+    let read = name == "read_file" or name == "list_directory" or name == "search" or name == "find_files" or name == "git_status" or name == "git_diff" or name == "list_models" or name == "read_evidence";
+    let write = name == "write_file" or name == "apply_patch" or name == "write_plan";
+    let process = name == "run_command" or name == "mcp__list_tools" or name == "mcp__call";
+    let coordinator = name == "spawn_agent" or name == "list_agents" or name == "wait_agents" or name == "cancel_agent" or name == "finish_goal" or name == "ask_user";
+    ToolSpec { known: read or write or process or coordinator, read_only: read or name == "list_agents" or name == "wait_agents", exclusive: write or process or name == "finish_goal", process: process, coordinator: coordinator, interruptible: true, max_result_bytes: 2097152 };
+}
+
+def tool_spec_decision(policy: &AgentPolicy, name: &str, exact_plan_file: bool) -> i64 {
+    let spec = tool_spec(name);
+    if not spec.known { return 2; };
+    policy_decision(policy, name, exact_plan_file);
+}
+
+def tool_spec_string(arguments: &JsonDoc, name: &str) -> bool {
+    if not arguments.root().object_has(name) { return false; };
+    let value = arguments.root().object_get(name);
+    if not value.is_ok() { return false; };
+    let text = value.value.string_value();
+    text.is_ok() and text.value.len() == text.value.as_str().len();
+}
+
+def tool_spec_integer(arguments: &JsonDoc, name: &str, minimum: i64, maximum: i64) -> bool {
+    if not arguments.root().object_has(name) { return true; };
+    let node = arguments.root().object_get(name);
+    if not node.is_ok() { return false; };
+    let value = node.value.number_i64();
+    value.is_ok() and value.value >= minimum and value.value <= maximum;
+}
+
+def tool_spec_goal_checks(arguments: &JsonDoc) -> bool {
+    if arguments.root().object_has("shell") { let shell = agent_json_optional_string(arguments.root(), "shell"); if shell.as_str() != "bash" and shell.as_str() != "powershell" and shell.as_str() != "cmd" { return false; }; };
+    if not arguments.root().object_has("checks") { return true; };
+    let checks = arguments.root().object_get("checks");
+    if not checks.is_ok() { return false; };
+    let count = checks.value.array_len();
+    if not count.is_ok() or count.value < 1 or count.value > 32 { return false; };
+    let mut index = 0;
+    let mut bytes = 0;
+    while index < count.value { let item = checks.value.array_get(index); if not item.is_ok() { return false; }; let command = item.value.string_value(); if not command.is_ok() { return false; }; let trimmed = str_trim(command.value.as_str()); if not trimmed.is_ok() or trimmed.value.len() == 0 or command.value.len() > 8192 or command.value.len() != command.value.as_str().len() { return false; }; bytes = bytes + command.value.len(); if bytes > 65536 { return false; }; index = index + 1; };
+    true;
+}
+
+def tool_spec_valid(name: &str, arguments: &JsonDoc) -> bool {
+    let spec = tool_spec(name);
+    if not spec.known { return false; };
+    let kind = arguments.root().kind();
+    if not kind.is_ok() or kind.value != JSON_KIND_OBJECT() { return false; };
+    if name == "read_file" or name == "list_directory" or name == "write_file" or name == "apply_patch" { if not tool_spec_string(arguments, "path") { return false; }; };
+    if name == "write_file" or name == "write_plan" { if not tool_spec_string(arguments, "content") { return false; }; };
+    if name == "write_file" and arguments.root().object_has("expected_content") { if not tool_spec_string(arguments, "expected_content") { return false; }; };
+    if name == "apply_patch" { return tool_spec_string(arguments, "old") and tool_spec_string(arguments, "new"); };
+    if name == "search" or name == "find_files" { return tool_spec_string(arguments, "query"); };
+    if name == "run_command" { if not tool_spec_string(arguments, "command") or not tool_spec_integer(arguments, "timeout_ms", 1, 600000) { return false; }; if arguments.root().object_has("shell") { if not tool_spec_string(arguments, "shell") { return false; }; let shell = agent_json_optional_string(arguments.root(), "shell"); if shell.as_str() != "bash" and shell.as_str() != "powershell" and shell.as_str() != "cmd" { return false; }; }; return true; };
+    if name == "wait_agents" { return tool_spec_integer(arguments, "timeout_ms", 0, 1000); };
+    if name == "list_models" { if arguments.root().object_has("query") and (not tool_spec_string(arguments, "query") or agent_json_optional_string(arguments.root(), "query").len() > 256) { return false; }; return tool_spec_integer(arguments, "offset", 0, 131072) and tool_spec_integer(arguments, "limit", 1, 64); };
+    if name == "read_evidence" { if not tool_spec_string(arguments, "session_id") or not tool_spec_string(arguments, "source_id") or not tool_spec_string(arguments, "kind") or not tool_spec_string(arguments, "sha256") { return false; }; let session = agent_json_optional_string(arguments.root(), "session_id"); let source = agent_json_optional_string(arguments.root(), "source_id"); let kind = agent_json_optional_string(arguments.root(), "kind"); let hash = agent_json_optional_string(arguments.root(), "sha256"); if session.len() < 1 or session.len() > 256 or source.len() < 1 or source.len() > 256 or hash.len() != 64 or (kind.as_str() != "tool_result" and kind.as_str() != "assistant_text") { return false; }; let bytes = hash.bytes(); let mut valid = true; loop { let next = bytes.next(); if not next.is_some { break; }; if not (next.value >= 48 and next.value <= 57 or next.value >= 97 and next.value <= 102) { valid = false; }; }; bytes.free(); let keys = arguments.root().object_keys(); if not keys.is_ok() { return false; }; let mut index = 0; while index < keys.value.root().array_len().unwrap_or(0) { let key = keys.value.root().array_get(index).value.string_value().unwrap_or(string_new()); if key.as_str() != "session_id" and key.as_str() != "source_id" and key.as_str() != "kind" and key.as_str() != "sha256" and key.as_str() != "offset" and key.as_str() != "limit" { return false; }; index = index + 1; }; return valid and tool_spec_integer(arguments, "offset", 0, 16777216) and tool_spec_integer(arguments, "limit", 4, 16384); };
+    if name == "spawn_agent" { if not tool_spec_string(arguments, "prompt") or not tool_spec_string(arguments, "role") { return false; }; let role = agent_json_optional_string(arguments.root(), "role"); let prompt = agent_json_optional_string(arguments.root(), "prompt"); if prompt.len() == 0 or prompt.len() > 131072 { return false; }; if role.as_str() != "explore" and role.as_str() != "plan" and role.as_str() != "general" { return false; }; if arguments.root().object_has("connection_id") and not tool_spec_string(arguments, "connection_id") { return false; }; if arguments.root().object_has("model") and not tool_spec_string(arguments, "model") { return false; }; if agent_json_optional_string(arguments.root(), "connection_id").len() > 256 or agent_json_optional_string(arguments.root(), "model").len() > 256 { return false; }; };
+    if name == "cancel_agent" { return arguments.root().object_has("id") and tool_spec_integer(arguments, "id", 1, 9223372036854775807); };
+    if name == "ask_user" { return question_arguments_valid(arguments); };
+    if name == "finish_goal" { return tool_spec_string(arguments, "summary") and tool_spec_goal_checks(arguments); };
+    if name == "mcp__list_tools" or name == "mcp__call" { if not tool_spec_string(arguments, "server") { return false; }; };
+    if name == "mcp__call" { if not tool_spec_string(arguments, "tool") or not arguments.root().object_has("arguments") { return false; }; let payload = arguments.root().object_get("arguments"); if not payload.is_ok() { return false; }; let payload_kind = payload.value.kind(); return payload_kind.is_ok() and payload_kind.value == JSON_KIND_OBJECT(); };
+    true;
+}
+
+struct ToolScheduledCall {
+    id: String,
+    name: String,
+    safe_read: bool,
+    predecessor: i64,
+    state: Vec<i64>,
+}
+
+struct ToolSchedule {
+    calls: Vec<ToolScheduledCall>,
+    control: Vec<i64>,
+}
+
+def tool_schedule_bool(value: bool, error: i64) -> Result<bool, i64> {
+    Result { is_ok: error == 0, value: value, error: error };
+}
+
+def tool_schedule_new(parallel_limit: i64) -> Result<ToolSchedule, i64> {
+    let valid = parallel_limit >= 1 and parallel_limit <= 8;
+    if not valid { let calls: Vec<ToolScheduledCall> = Vec { handle: 0, marker: 0 }; let control: Vec<i64> = Vec { handle: 0, marker: 0 }; return Result { is_ok: false, value: ToolSchedule { calls: calls, control: control }, error: 2 }; };
+    let calls: Vec<ToolScheduledCall> = vec_new();
+    let control: Vec<i64> = vec_new();
+    control.push(if valid { parallel_limit; } else { 1; });
+    control.push(0);
+    control.push(0);
+    control.push(0);
+    control.push(0);
+    Result { is_ok: true, value: ToolSchedule { calls: calls, control: control }, error: 0 };
+}
+
+def tool_schedule_find(schedule: &ToolSchedule, id: &str) -> i64 {
+    let mut ordinal = 0;
+    while ordinal < schedule.calls.len() { let call: &ToolScheduledCall = schedule.calls.get(ordinal); if call.id.as_str() == id { return ordinal; }; ordinal = ordinal + 1; };
+    -1;
+}
+
+def tool_schedule_state(schedule: &ToolSchedule, ordinal: i64) -> i64 {
+    if ordinal < 0 or ordinal >= schedule.calls.len() { return -1; };
+    let call: &ToolScheduledCall = schedule.calls.get(ordinal);
+    call.state.get(0).unwrap_or(-1);
+}
+
+def tool_schedule_active(schedule: &ToolSchedule) -> i64 {
+    schedule.control.get(3).unwrap_or(0);
+}
+
+def tool_schedule_safe_read(name: &str, arguments: &JsonDoc, has_executable_hooks: bool) -> bool {
+    if has_executable_hooks or not tool_spec_valid(name, arguments) { return false; };
+    let spec = tool_spec(name);
+    spec.read_only and not spec.coordinator and not spec.exclusive;
+}
+
+def tool_schedule_add(schedule: &ToolSchedule, id: &str, name: &str, arguments: &JsonDoc, has_executable_hooks: bool, predecessor: i64) -> Result<i64, i64> {
+    if schedule.control.get(1).unwrap_or(0) != 0 or schedule.control.get(2).unwrap_or(0) != 0 { return agent_fail(6); };
+    if id.len() == 0 or id.len() > 256 or predecessor < -1 or predecessor >= schedule.calls.len() or not tool_spec_valid(name, arguments) { return agent_fail(2); };
+    if tool_schedule_find(schedule, id) >= 0 { return agent_fail(6); };
+    if schedule.calls.len() >= 128 { return agent_fail(13); };
+    let captured_id = string_from_str(id)?;
+    let captured_name = string_from_str(name)?;
+    let state: Vec<i64> = vec_new();
+    if not state.push(0) or not state.push(0) { return agent_fail(8); };
+    let ordinal = schedule.calls.len();
+    let call = ToolScheduledCall { id: captured_id, name: captured_name, safe_read: tool_schedule_safe_read(name, arguments, has_executable_hooks), predecessor: predecessor, state: state };
+    if not schedule.calls.push(call) { return agent_fail(8); };
+    agent_ok(ordinal);
+}
+
+def tool_schedule_seal(schedule: &ToolSchedule) -> bool {
+    if schedule.control.get(2).unwrap_or(0) != 0 { return false; };
+    schedule.control.set(1, 1);
+    true;
+}
+
+def tool_schedule_next(schedule: &ToolSchedule) -> Result<i64, i64> {
+    if schedule.control.get(1).unwrap_or(0) == 0 { return agent_fail(6); };
+    if schedule.control.get(2).unwrap_or(0) != 0 { return agent_ok(-1); };
+    if tool_schedule_active(schedule) >= schedule.control.get(0).unwrap_or(1) { return agent_ok(-1); };
+    let mut earlier_pending = false;
+    let mut ordinal = 0;
+    while ordinal < schedule.calls.len() { let call: &ToolScheduledCall = schedule.calls.get(ordinal); let phase = call.state.get(0).unwrap_or(0); if phase < 3 { if not call.safe_read and (phase != 0 or earlier_pending or tool_schedule_active(schedule) != 0) { return agent_ok(-1); }; if phase == 0 { let mut dependency_ready = true; let mut dependency_failed = false; if call.predecessor >= 0 { let prior: &ToolScheduledCall = schedule.calls.get(call.predecessor); dependency_ready = prior.state.get(0).unwrap_or(0) >= 3; dependency_failed = dependency_ready and prior.state.get(1).unwrap_or(0) == 0; }; if dependency_failed { call.state.set(0, 5); (); } else { if dependency_ready { call.state.set(0, 1); schedule.control.set(3, tool_schedule_active(schedule) + 1); return agent_ok(ordinal); }; if not call.safe_read { return agent_ok(-1); }; earlier_pending = true; }; (); } else { earlier_pending = true; }; }; ordinal = ordinal + 1; };
+    agent_ok(-1);
+}
+
+def tool_schedule_complete(schedule: &ToolSchedule, ordinal: i64, success: bool, quiescent: bool) -> Result<bool, i64> {
+    if ordinal < 0 or ordinal >= schedule.calls.len() { return tool_schedule_bool(false, 3); };
+    let call: &ToolScheduledCall = schedule.calls.get(ordinal);
+    let phase = call.state.get(0).unwrap_or(0);
+    if phase >= 3 { return tool_schedule_bool(false, 0); };
+    if phase == 0 { return tool_schedule_bool(false, 6); };
+    if not quiescent { return tool_schedule_bool(false, 6); };
+    let canceled = phase == 2 or schedule.control.get(2).unwrap_or(0) != 0;
+    call.state.set(0, if canceled { 4; } else { 3; });
+    call.state.set(1, if success and not canceled { 1; } else { 0; });
+    schedule.control.set(3, tool_schedule_active(schedule) - 1);
+    tool_schedule_bool(true, 0);
+}
+
+def tool_schedule_cancel(schedule: &ToolSchedule) {
+    schedule.control.set(2, 1);
+    let mut ordinal = 0;
+    while ordinal < schedule.calls.len() { let call: &ToolScheduledCall = schedule.calls.get(ordinal); let phase = call.state.get(0).unwrap_or(0); if phase == 0 { call.state.set(0, 4); (); }; if phase == 1 { call.state.set(0, 2); (); }; ordinal = ordinal + 1; };
+    ();
+}
+
+def tool_schedule_publish_next(schedule: &ToolSchedule) -> i64 {
+    let ordinal = schedule.control.get(4).unwrap_or(0);
+    if ordinal >= schedule.calls.len() or tool_schedule_state(schedule, ordinal) < 3 { return -1; };
+    schedule.control.set(4, ordinal + 1);
+    ordinal;
+}
+
+def tool_schedule_quiescent(schedule: &ToolSchedule) -> bool {
+    if tool_schedule_active(schedule) != 0 { return false; };
+    let mut ordinal = 0;
+    while ordinal < schedule.calls.len() { if tool_schedule_state(schedule, ordinal) < 3 { return false; }; ordinal = ordinal + 1; };
+    true;
+}
+
+struct RetryEvidence {
+    attempt: i64,
+    status: i64,
+    error: i64,
+    request_started: bool,
+    stream_observed: bool,
+    side_effects: bool,
+}
+
+struct RetryDecision {
+    retry: bool,
+    delay_ms: i64,
+    reason: String,
+}
+
+def retry_decision(retry: bool, delay_ms: i64, reason: &str) -> RetryDecision {
+    RetryDecision { retry: retry, delay_ms: delay_ms, reason: agent_text(reason) };
+}
+
+def retry_leap(year: i64) -> bool {
+    year % 4 == 0 and (year % 100 != 0 or year % 400 == 0);
+}
+
+def retry_month(name: &str) -> i64 {
+    if name == "Jan" { return 1; };
+    if name == "Feb" { return 2; };
+    if name == "Mar" { return 3; };
+    if name == "Apr" { return 4; };
+    if name == "May" { return 5; };
+    if name == "Jun" { return 6; };
+    if name == "Jul" { return 7; };
+    if name == "Aug" { return 8; };
+    if name == "Sep" { return 9; };
+    if name == "Oct" { return 10; };
+    if name == "Nov" { return 11; };
+    if name == "Dec" { return 12; };
+    0;
+}
+
+def retry_month_days(year: i64, month: i64) -> i64 {
+    if month == 2 { return if retry_leap(year) { 29; } else { 28; }; };
+    if month == 4 or month == 6 or month == 9 or month == 11 { return 30; };
+    31;
+}
+
+def retry_http_date(value: &str) -> Result<i64, i64> {
+    if value.len() != 29 or agent_byte_slice(value, 3, 5)?.as_str() != ", " or agent_byte_slice(value, 7, 8)?.as_str() != " " or agent_byte_slice(value, 11, 12)?.as_str() != " " or agent_byte_slice(value, 16, 17)?.as_str() != " " or agent_byte_slice(value, 19, 20)?.as_str() != ":" or agent_byte_slice(value, 22, 23)?.as_str() != ":" or agent_byte_slice(value, 25, 29)?.as_str() != " GMT" { return agent_fail(2); };
+    let weekday = agent_byte_slice(value, 0, 3)?;
+    if weekday.as_str() != "Mon" and weekday.as_str() != "Tue" and weekday.as_str() != "Wed" and weekday.as_str() != "Thu" and weekday.as_str() != "Fri" and weekday.as_str() != "Sat" and weekday.as_str() != "Sun" { return agent_fail(2); };
+    let day = agent_parse_unsigned(agent_byte_slice(value, 5, 7)?.as_str(), 10)?;
+    let month = retry_month(agent_byte_slice(value, 8, 11)?.as_str());
+    let year = agent_parse_unsigned(agent_byte_slice(value, 12, 16)?.as_str(), 10)?;
+    let hour = agent_parse_unsigned(agent_byte_slice(value, 17, 19)?.as_str(), 10)?;
+    let minute = agent_parse_unsigned(agent_byte_slice(value, 20, 22)?.as_str(), 10)?;
+    let second = agent_parse_unsigned(agent_byte_slice(value, 23, 25)?.as_str(), 10)?;
+    if year < 1970 or year > 9999 or month < 1 or day < 1 or day > retry_month_days(year, month) or hour > 23 or minute > 59 or second > 59 { return agent_fail(2); };
+    let mut days = 0;
+    let mut cursor = 1970;
+    while cursor < year { days = days + if retry_leap(cursor) { 366; } else { 365; }; cursor = cursor + 1; };
+    cursor = 1;
+    while cursor < month { days = days + retry_month_days(year, cursor); cursor = cursor + 1; };
+    days = days + day - 1;
+    agent_ok(((days * 24 + hour) * 60 + minute) * 60000 + second * 1000);
+}
+
+def retry_after_delay(header: &str, now_ms: i64) -> Result<i64, i64> {
+    if header.len() == 0 or header.len() > 128 or now_ms < 0 { return agent_fail(2); };
+    let trimmed = str_trim(header)?;
+    let seconds = agent_parse_unsigned(trimmed.as_str(), 10);
+    if seconds.is_ok() { if seconds.value > 300 { return agent_fail(13); }; return agent_ok(seconds.value * 1000); };
+    let date = retry_http_date(trimmed.as_str())?;
+    if date <= now_ms { return agent_ok(0); };
+    if date - now_ms > 300000 { return agent_fail(13); };
+    agent_ok(date - now_ms);
+}
+
+def request_retry(evidence: &RetryEvidence, retry_after: &str, now_ms: i64, waited_ms: i64) -> RetryDecision {
+    if evidence.error == 19 { return retry_decision(false, 0, "request cancelled by user"); };
+    if evidence.side_effects { return retry_decision(false, 0, "tool outcome requires verification; model retry cannot replay tools"); };
+    if evidence.attempt < 1 or evidence.attempt >= 6 or waited_ms < 0 { return retry_decision(false, 0, "five retries exhausted"); };
+    let mut delay = 250;
+    let mut power = 1;
+    while power < evidence.attempt { delay = delay * 2; power = power + 1; };
+    if retry_after.len() > 0 { let parsed = retry_after_delay(retry_after, now_ms); if parsed.is_ok() and parsed.value > delay { delay = parsed.value; }; if not parsed.is_ok() and parsed.error == 13 { delay = 300000; }; };
+    retry_decision(true, delay, "retrying model request; completed tools retained");
+}
+
+struct AgentKernel {
+    checkpoint: JsonDoc,
+    dirty: bool,
+}
+
+struct AgentCommitReceipt {
+    run_id: String,
+    fence: i64,
+    revision: i64,
+}
+
+struct AgentMemoryLedger {
+    checkpoint: JsonDoc,
+    run_id: String,
+    fence: i64,
+    revision: i64,
+}
+
+impl !Send for AgentKernel {
+}
+
+impl !Sync for AgentKernel {
+}
+
+def agent_document() -> Result<JsonDoc, i64> {
+    json_doc_object_limits(4194304, 65536);
+}
+
+def agent_document_error(code: i64) -> Result<JsonDoc, i64> {
+    Result { is_ok: false, value: JsonDoc { handle: 0 }, error: code };
+}
+
+def agent_condition(valid: bool, code: i64) -> Result<bool, i64> {
+    Result { is_ok: valid, value: valid, error: if valid { 0; } else { code; } };
+}
+
+def agent_copy_document(source: &JsonDoc) -> Result<JsonDoc, i64> {
+    let encoded = source.serialize_string()?;
+    json_parse_limits(encoded.as_str(), 4194304, 65536);
+}
+
+def agent_object_document(value: JsonValue) -> Result<JsonDoc, i64> {
+    agent_condition(value.kind()? == JSON_KIND_OBJECT(), 2)?;
+    let document = agent_document()?;
+    let mut index = 0;
+    while index < value.object_len()? { let key = value.object_key(index)?; agent_condition(key.len() == key.as_str().len(), 2)?; document.root().object_set(key.as_str(), document.copy(value.object_get(key.as_str())?)?)?; index = index + 1; };
+    Result { is_ok: true, value: document, error: 0 };
+}
+
+def agent_persist_snapshot(action: &JsonDoc) -> Result<JsonDoc, i64> {
+    agent_condition(agent_control_string(action.root(), "type")?.as_str() == "persist", 2)?;
+    agent_object_document(action.root().object_get("checkpoint")?);
+}
+
+def agent_kernel_snapshot(kernel: &AgentKernel) -> Result<JsonDoc, i64> {
+    agent_condition(not kernel.dirty, 12)?;
+    agent_copy_document(&kernel.checkpoint);
+}
+
+def agent_control_string(value: JsonValue, key: &str) -> Result<String, i64> {
+    let text = agent_json_string(value, key)?;
+    agent_condition(text.len() == text.as_str().len(), 2)?;
+    Result { is_ok: true, value: text, error: 0 };
+}
+
+def agent_object_keys_valid(value: JsonValue, allowed: &str) -> Result<bool, i64> {
+    agent_condition(value.kind()? == JSON_KIND_OBJECT(), 2)?;
+    let mut index = 0;
+    while index < value.object_len()? { let key = value.object_key(index)?; agent_condition(key.len() == key.as_str().len(), 2)?; let names = agent_text(allowed); let parts = names.split(","); let mut known = false; loop { let next = parts.next(); if not next.is_some { break; }; if key.len() > 0 and next.value.as_str() == key.as_str() { known = true; break; }; }; parts.free(); agent_condition(known, 2)?; index = index + 1; };
+    Result { is_ok: true, value: true, error: 0 };
+}
+
+def agent_target_valid(value: JsonValue) -> Result<bool, i64> {
+    agent_object_keys_valid(value, ",connection,model,effort,protocol,base,cwd,")?;
+    let connection = agent_control_string(value, "connection")?;
+    let model = agent_control_string(value, "model")?;
+    agent_condition(connection.len() > 0 and connection.len() <= 256 and model.len() > 0 and model.len() <= 256, 2)?;
+    let fields = agent_text("effort,base,cwd");
+    let parts = fields.split(",");
+    loop { let key = parts.next(); if not key.is_some { break; }; if value.object_has(key.value.as_str()) { let text = agent_control_string(value, key.value.as_str())?; if key.value.as_str() == "effort" { agent_condition(text.len() == 0 or text.as_str() == "low" or text.as_str() == "medium" or text.as_str() == "high" or text.as_str() == "xhigh" or text.as_str() == "max", 2)?; (); }; if key.value.as_str() == "base" { agent_condition(not str_contains(text.as_str(), "@") and not str_contains(text.as_str(), "?") and not str_contains(text.as_str(), "#") and not str_contains(text.as_str(), "\r") and not str_contains(text.as_str(), "\n"), 2)?; (); }; }; };
+    parts.free();
+    if value.object_has("protocol") { let protocol = value.object_get("protocol")?.number_i64()?; agent_condition(protocol >= 0 and protocol <= 2, 2)?; (); };
+    Result { is_ok: true, value: true, error: 0 };
+}
+
+def agent_flag(value: JsonValue, key: &str) -> bool {
+    value.object_has(key) and value.object_get(key).unwrap_or(JsonValue { doc_handle: 0, node_id: 0 }).bool_value().unwrap_or(false);
+}
+
+def agent_policy_write(document: &JsonDoc, policy: &AgentPolicy) -> Result<bool, i64> {
+    let value = document.new_object()?;
+    agent_put_bool(document, value, "plan", policy.plan)?;
+    agent_put_bool(document, value, "auto_edit", policy.auto_edit)?;
+    agent_put_bool(document, value, "full_access", policy.full_access)?;
+    agent_put_bool(document, value, "interactive", policy.interactive)?;
+    agent_put_i64(document, value, "depth", policy.depth)?;
+    agent_put_i64(document, value, "maximum_depth", policy.maximum_depth)?;
+    document.root().object_set("policy", value);
+}
+
+def agent_policy_read(document: &JsonDoc) -> Result<AgentPolicy, i64> {
+    agent_policy_value(document.root().object_get("policy")?);
+}
+
+def agent_policy_value(value: JsonValue) -> Result<AgentPolicy, i64> {
+    agent_object_keys_valid(value, ",plan,auto_edit,full_access,interactive,depth,maximum_depth,")?;
+    let plan = value.object_get("plan")?.bool_value()?;
+    let auto_edit = value.object_get("auto_edit")?.bool_value()?;
+    let full_access = value.object_get("full_access")?.bool_value()?;
+    let interactive = value.object_get("interactive")?.bool_value()?;
+    let depth = value.object_get("depth")?.number_i64()?;
+    let maximum = value.object_get("maximum_depth")?.number_i64()?;
+    agent_condition(depth >= 0 and maximum >= 0 and maximum <= 64 and depth <= maximum, 2)?;
+    Result { is_ok: true, value: AgentPolicy { plan: plan, auto_edit: auto_edit, full_access: full_access, interactive: interactive, depth: depth, maximum_depth: maximum }, error: 0 };
+}
+
+def agent_registry_validate(tools: &JsonDoc) -> Result<bool, i64> {
+    let entries = tools.root().object_get("tools")?;
+    agent_condition(entries.array_len()? <= 256, 13)?;
+    let probe = json_doc_object()?;
+    let mut index = 0;
+    while index < entries.array_len()? { let entry = entries.array_get(index)?; agent_object_keys_valid(entry, ",name,description,parameters,read_only,exclusive,process,plan_safe,")?; let name = agent_control_string(entry, "name")?; agent_condition(name.len() > 0 and name.len() <= 256 and name.len() == name.as_str().len(), 2)?; let mut earlier = 0; while earlier < index { let old = agent_json_string(entries.array_get(earlier)?, "name")?; agent_condition(old.as_str() != name.as_str(), 2)?; earlier = earlier + 1; }; let flag_names = agent_text("read_only,exclusive,process,plan_safe"); let flags = flag_names.split(","); loop { let flag = flags.next(); if not flag.is_some { break; }; if entry.object_has(flag.value.as_str()) { agent_condition(entry.object_get(flag.value.as_str())?.bool_value().is_ok(), 2)?; (); }; }; flags.free(); let schema = entry.object_get("parameters")?; let validated = schema_validate(schema, probe.root())?; agent_condition(validated.stage.as_str() != "schema", 2)?; index = index + 1; };
+    Result { is_ok: true, value: true, error: 0 };
+}
+
+def agent_registry_entry(snapshot: &JsonDoc, name: &str) -> Result<JsonValue, i64> {
+    let entries = snapshot.root().object_get("tools")?;
+    let mut index = 0;
+    while index < entries.array_len()? { let entry = entries.array_get(index)?; let candidate = agent_json_string(entry, "name")?; if candidate.as_str() == name { return Result { is_ok: true, value: entry, error: 0 }; }; index = index + 1; };
+    Result { is_ok: false, value: JsonValue { doc_handle: 0, node_id: 0 }, error: 5 };
+}
+
+def agent_kernel_new(run_id: &str, fence: i64, target: &JsonDoc, history: &JsonDoc, tools: &JsonDoc, policy: &AgentPolicy, maximum_requests: i64, token_budget: i64) -> Result<AgentKernel, i64> {
+    agent_condition(run_id.len() > 0 and run_id.len() <= 128 and fence > 0 and maximum_requests >= 0 and token_budget >= 0, 2)?;
+    agent_registry_validate(tools)?;
+    agent_target_valid(target.root())?;
+    agent_condition(policy.depth >= 0 and policy.maximum_depth >= 0 and policy.maximum_depth <= 64 and policy.depth <= policy.maximum_depth, 2)?;
+    let document = agent_document()?;
+    let root = document.root();
+    agent_put_i64(&document, root, "schema", 1)?;
+    agent_put_string(&document, root, "run_id", run_id)?;
+    agent_put_i64(&document, root, "fence", fence)?;
+    agent_put_i64(&document, root, "revision", 1)?;
+    agent_put_i64(&document, root, "phase", 1)?;
+    agent_put_i64(&document, root, "sequence", 0)?;
+    agent_put_i64(&document, root, "requests", 0)?;
+    agent_put_i64(&document, root, "tokens", 0)?;
+    agent_put_bool(&document, root, "cleanup_required", false)?;
+    agent_put_i64(&document, root, "maximum_requests", maximum_requests)?;
+    agent_put_i64(&document, root, "token_budget", token_budget)?;
+    agent_put_string(&document, root, "pending_request", "")?;
+    agent_put_string(&document, root, "last_request", "")?;
+    agent_put_string(&document, root, "unresolved_call", "")?;
+    agent_put_string(&document, root, "last_output", "")?;
+    agent_put_string(&document, root, "reason", "initial")?;
+    agent_put_i64(&document, root, "call_index", 0)?;
+    agent_put_i64(&document, root, "attempt", 1)?;
+    agent_put_i64(&document, root, "retry_due", 0)?;
+    agent_put_i64(&document, root, "retry_waited", 0)?;
+    root.object_set("calls", document.new_array()?)?;
+    root.object_set("ledger", document.new_array()?)?;
+    root.object_set("messages", document.copy(history.root().object_get("messages")?)?)?;
+    root.object_set("tools", document.copy(tools.root().object_get("tools")?)?)?;
+    root.object_set("target", document.copy(target.root())?)?;
+    agent_policy_write(&document, policy)?;
+    root.object_set("initial_policy", document.copy(root.object_get("policy")?)?)?;
+    Result { is_ok: true, value: AgentKernel { checkpoint: document, dirty: true }, error: 0 };
+}
+
+def agent_kernel_transition(kernel: &mut AgentKernel, phase: i64, reason: &str) -> Result<bool, i64> {
+    let root = kernel.checkpoint.root();
+    if not kernel.dirty { let revision = agent_json_optional_i64(root, "revision", 0); agent_condition(revision < 9223372036854775807, 13)?; agent_put_i64(&kernel.checkpoint, root, "revision", revision + 1)?; (); };
+    agent_put_i64(&kernel.checkpoint, root, "phase", phase)?;
+    agent_put_string(&kernel.checkpoint, root, "reason", reason)?;
+    if phase == 5 { agent_put_bool(&kernel.checkpoint, root, "cleanup_required", true)?; (); };
+    if phase == 9 or phase == 10 { let mut policy = agent_policy_read(&kernel.checkpoint)?; policy_finish_plan(&mut policy); agent_policy_write(&kernel.checkpoint, &policy)?; (); };
+    kernel.dirty = true;
+    Result { is_ok: true, value: true, error: 0 };
+}
+
+def agent_kernel_action(kernel: &AgentKernel, kind: &str, suffix: &str) -> Result<JsonDoc, i64> {
+    let document = agent_document()?;
+    let root = document.root();
+    let source = kernel.checkpoint.root();
+    let run = agent_control_string(source, "run_id")?;
+    let id = agent_join(run.as_str(), ":")?;
+    id.push_str(suffix)?;
+    agent_put_i64(&document, root, "schema", 1)?;
+    agent_put_string(&document, root, "type", kind)?;
+    agent_put_string(&document, root, "id", id.as_str())?;
+    agent_put_string(&document, root, "run_id", run.as_str())?;
+    agent_put_i64(&document, root, "fence", source.object_get("fence")?.number_i64()?)?;
+    agent_put_i64(&document, root, "revision", source.object_get("revision")?.number_i64()?)?;
+    Result { is_ok: true, value: document, error: 0 };
+}
+
+def agent_kernel_current_call(kernel: &AgentKernel) -> Result<JsonValue, i64> {
+    let root = kernel.checkpoint.root();
+    root.object_get("calls")?.array_get(agent_json_optional_i64(root, "call_index", 0));
+}
+
+def agent_kernel_append_tool(kernel: &mut AgentKernel, content: &str, failed: bool, unknown: bool) -> Result<bool, i64> {
+    let call = agent_kernel_current_call(kernel)?;
+    let id = agent_control_string(call, "id")?;
+    let document = &kernel.checkpoint;
+    let root = document.root();
+    let result = document.new_object()?;
+    agent_put_string(document, result, "role", "tool")?;
+    agent_put_string(document, result, "tool_call_id", id.as_str())?;
+    let temporary = agent_document()?;
+    agent_put_string(&temporary, temporary.root(), "content", content)?;
+    agent_put_bool(&temporary, temporary.root(), "is_error", failed)?;
+    agent_put_bool(&temporary, temporary.root(), "outcome_unknown", unknown)?;
+    let encoded = temporary.serialize_string()?;
+    agent_put_string(document, result, "content", encoded.as_str())?;
+    root.object_get("messages")?.array_push(result)?;
+    let ledger = root.object_get("ledger")?;
+    let record = document.new_object()?;
+    agent_put_string(document, record, "call_id", id.as_str())?;
+    agent_put_string(document, record, "state", if unknown { "unknown"; } else { "complete"; })?;
+    agent_put_string(document, record, "content", content)?;
+    agent_put_bool(document, record, "is_error", failed)?;
+    ledger.array_push(record)?;
+    if unknown { agent_put_string(document, root, "unresolved_call", id.as_str())?; return agent_kernel_transition(kernel, 10, "tool_outcome_unknown"); };
+    let index = agent_json_optional_i64(root, "call_index", 0) + 1;
+    agent_put_i64(document, root, "call_index", index)?;
+    agent_kernel_transition(kernel, if index < root.object_get("calls")?.array_len()? { 3; } else { 1; }, "tool_result");
+}
+
+def agent_kernel_tool_decision(policy: &AgentPolicy, definition: JsonValue) -> i64 {
+    let read = agent_flag(definition, "read_only");
+    let process = agent_flag(definition, "process");
+    if policy.plan { return if read and not process { 0; } else { 2; }; };
+    if read and not process { return 0; };
+    if policy.full_access or policy.auto_edit and not process { return 0; };
+    if policy.interactive { 1; } else { 2; };
+}
+
+def agent_kernel_next(kernel: &mut AgentKernel) -> Result<JsonDoc, i64> {
+    let snapshot = agent_copy_document(&kernel.checkpoint)?;
+    let mut candidate = AgentKernel { checkpoint: snapshot, dirty: kernel.dirty };
+    let result = agent_kernel_next_body(&mut candidate);
+    if result.is_ok() { *kernel = candidate; };
+    result;
+}
+
+def agent_kernel_next_body(kernel: &mut AgentKernel) -> Result<JsonDoc, i64> {
+    let root = kernel.checkpoint.root();
+    if kernel.dirty { let suffix = agent_text("commit:"); suffix.push_i64(root.object_get("revision")?.number_i64()?)?; let action = agent_kernel_action(kernel, "persist", suffix.as_str())?; action.root().object_set("checkpoint", action.copy(root)?)?; return Result { is_ok: true, value: action, error: 0 }; };
+    let phase = root.object_get("phase")?.number_i64()?;
+    if phase == 1 { let requests = agent_json_optional_i64(root, "requests", 0); let tokens = agent_json_optional_i64(root, "tokens", 0); let maximum = agent_json_optional_i64(root, "maximum_requests", 0); let budget = agent_json_optional_i64(root, "token_budget", 0); if maximum > 0 and requests >= maximum or budget > 0 and tokens >= budget { agent_kernel_transition(kernel, 10, "budget")?; return agent_kernel_next_body(kernel); }; let sequence = agent_json_optional_i64(root, "sequence", 0) + 1; agent_condition(sequence > 0 and requests < 9223372036854775807, 13)?; let request = agent_control_string(root, "run_id")?; request.push_str(":request:")?; request.push_i64(sequence)?; agent_put_i64(&kernel.checkpoint, root, "sequence", sequence)?; agent_put_i64(&kernel.checkpoint, root, "requests", requests + 1)?; agent_put_string(&kernel.checkpoint, root, "pending_request", request.as_str())?; agent_kernel_transition(kernel, 2, "model_request")?; return agent_kernel_next_body(kernel); };
+    if phase == 2 { let request = agent_control_string(root, "pending_request")?; let action = agent_kernel_action(kernel, "model_request", request.as_str())?; agent_put_string(&action, action.root(), "request_id", request.as_str())?; action.root().object_set("target", action.copy(root.object_get("target")?)?)?; let history = action.new_object()?; history.object_set("messages", action.copy(root.object_get("messages")?)?)?; action.root().object_set("history", history)?; let tools = action.new_object()?; tools.object_set("tools", action.copy(root.object_get("tools")?)?)?; action.root().object_set("tools", tools)?; return Result { is_ok: true, value: action, error: 0 }; };
+    if phase == 3 { let call = agent_kernel_current_call(kernel)?; let name = agent_control_string(call, "name")?; let found = agent_registry_entry(&kernel.checkpoint, name.as_str()); if not found.is_ok() { agent_kernel_append_tool(kernel, "Unknown tool", true, false)?; return agent_kernel_next_body(kernel); }; let raw = agent_json_string(call, "arguments")?; let arguments = json_parse_limits(raw.as_str(), 1048576, 65536); if not arguments.is_ok() { agent_kernel_append_tool(kernel, "Invalid tool arguments", true, false)?; return agent_kernel_next_body(kernel); }; let checked = schema_validate(found.value.object_get("parameters")?, arguments.value.root())?; if not checked.valid { agent_kernel_append_tool(kernel, "Tool arguments do not match schema", true, false)?; return agent_kernel_next_body(kernel); }; let policy = agent_policy_read(&kernel.checkpoint)?; let decision = agent_kernel_tool_decision(&policy, found.value); if decision == 2 { agent_kernel_append_tool(kernel, "Tool rejected by captured policy", true, false)?; return agent_kernel_next_body(kernel); }; agent_kernel_transition(kernel, if decision == 1 { 4; } else { 5; }, if decision == 1 { "approval"; } else { "tool_claim"; })?; return agent_kernel_next_body(kernel); };
+    if phase == 4 or phase == 5 { let call = agent_kernel_current_call(kernel)?; let id = agent_control_string(call, "id")?; let action = agent_kernel_action(kernel, if phase == 4 { "approval"; } else { "tool_request"; }, id.as_str())?; action.root().object_set("call", action.copy(call)?)?; return Result { is_ok: true, value: action, error: 0 }; };
+    if phase == 6 { let action = agent_kernel_action(kernel, "retry_wait", "reconnect")?; agent_put_i64(&action, action.root(), "deadline_ms", root.object_get("retry_due")?.number_i64()?)?; agent_put_i64(&action, action.root(), "attempt", root.object_get("attempt")?.number_i64()?)?; return Result { is_ok: true, value: action, error: 0 }; };
+    let action = agent_kernel_action(kernel, if phase == 9 { "complete"; } else { "paused"; }, "terminal")?;
+    agent_put_string(&action, action.root(), "content", agent_json_optional_string(root, "last_output").as_str())?;
+    agent_put_string(&action, action.root(), "reason", agent_json_optional_string(root, "reason").as_str())?;
+    agent_put_bool(&action, action.root(), "cleanup_required", agent_flag(root, "cleanup_required"))?;
+    Result { is_ok: true, value: action, error: 0 };
+}
+
+def agent_kernel_commit(kernel: &mut AgentKernel, receipt: &AgentCommitReceipt) -> Result<bool, i64> {
+    let root = kernel.checkpoint.root();
+    let run = agent_control_string(root, "run_id")?;
+    agent_condition(receipt.run_id.len() == receipt.run_id.as_str().len(), 2)?;
+    agent_condition(receipt.run_id.as_str() == run.as_str() and receipt.fence == root.object_get("fence")?.number_i64()? and receipt.revision == root.object_get("revision")?.number_i64()?, 12)?;
+    kernel.dirty = false;
+    Result { is_ok: true, value: true, error: 0 };
+}
+
+def agent_kernel_accept_model(kernel: &mut AgentKernel, request_id: &str, result: &JsonDoc, completed: bool) -> Result<bool, i64> {
+    let snapshot = agent_copy_document(&kernel.checkpoint)?;
+    let mut candidate = AgentKernel { checkpoint: snapshot, dirty: kernel.dirty };
+    let accepted = agent_kernel_accept_model_body(&mut candidate, request_id, result, completed);
+    if accepted.is_ok() { *kernel = candidate; };
+    accepted;
+}
+
+def agent_kernel_accept_model_body(kernel: &mut AgentKernel, request_id: &str, result: &JsonDoc, completed: bool) -> Result<bool, i64> {
+    let root = kernel.checkpoint.root();
+    let last_request = agent_control_string(root, "last_request")?;
+    if last_request.as_str() == request_id { return Result { is_ok: true, value: false, error: 0 }; };
+    agent_condition(not kernel.dirty and root.object_get("phase")?.number_i64()? == 2 and completed, 12)?;
+    let pending = agent_control_string(root, "pending_request")?;
+    agent_condition(pending.as_str() == request_id, 12)?;
+    let role = agent_control_string(result.root(), "role")?;
+    let content = agent_json_string(result.root(), "content")?;
+    agent_condition(role.as_str() == "assistant" and content.len() == content.as_str().len(), 2)?;
+    let input = if result.root().object_has("input_tokens") { result.root().object_get("input_tokens")?.number_i64()?; } else { 0; };
+    let output = if result.root().object_has("output_tokens") { result.root().object_get("output_tokens")?.number_i64()?; } else { 0; };
+    if result.root().object_has("usage_reported") { result.root().object_get("usage_reported")?.bool_value()?; (); };
+    if agent_flag(result.root(), "usage_reported") { agent_condition(result.root().object_has("input_tokens") and result.root().object_has("output_tokens"), 2)?; (); };
+    let current = agent_json_optional_i64(root, "tokens", 0);
+    agent_condition(input >= 0 and output >= 0 and input <= 9223372036854775807 - output and current <= 9223372036854775807 - input - output, 13)?;
+    if agent_json_optional_i64(root, "token_budget", 0) > 0 and not agent_flag(result.root(), "usage_reported") { return agent_kernel_pause(kernel, "exact_usage_unavailable"); };
+    let calls = result.root().object_get("tool_calls")?;
+    agent_condition(calls.array_len()? <= 256, 13)?;
+    let mut index = 0;
+    while index < calls.array_len()? { let call = calls.array_get(index)?; let id = agent_control_string(call, "id")?; let name = agent_control_string(call, "name")?; let arguments = agent_json_string(call, "arguments")?; agent_condition(id.len() > 0 and id.len() <= 256 and id.len() == id.as_str().len() and name.len() > 0 and name.len() == name.as_str().len() and arguments.len() <= 1048576 and arguments.len() == arguments.as_str().len(), 2)?; let records = root.object_get("ledger")?; let mut saved_index = 0; while saved_index < records.array_len()? { let saved_id = agent_json_string(records.array_get(saved_index)?, "call_id")?; agent_condition(saved_id.as_str() != id.as_str(), 12)?; saved_index = saved_index + 1; }; let mut scan = 0; while scan < index { let old = agent_json_string(calls.array_get(scan)?, "id")?; agent_condition(old.as_str() != id.as_str(), 10)?; scan = scan + 1; }; index = index + 1; };
+    root.object_get("messages")?.array_push(kernel.checkpoint.copy(result.root())?)?;
+    root.object_set("calls", kernel.checkpoint.copy(calls)?)?;
+    agent_put_i64(&kernel.checkpoint, root, "call_index", 0)?;
+    agent_put_string(&kernel.checkpoint, root, "last_request", request_id)?;
+    agent_put_string(&kernel.checkpoint, root, "last_output", content.as_str())?;
+    agent_put_i64(&kernel.checkpoint, root, "attempt", 1)?;
+    agent_put_i64(&kernel.checkpoint, root, "retry_waited", 0)?;
+    agent_put_i64(&kernel.checkpoint, root, "tokens", current + input + output)?;
+    let continuation = if result.root().object_has("requires_continuation") { result.root().object_get("requires_continuation")?.bool_value()?; } else { false; };
+    agent_kernel_transition(kernel, if calls.array_len()? > 0 { 3; } else { if continuation { 1; } else { 9; }; }, "assistant");
+}
+
+def agent_kernel_approval(kernel: &mut AgentKernel, call_id: &str, approved: bool) -> Result<bool, i64> {
+    let snapshot = agent_copy_document(&kernel.checkpoint)?;
+    let mut candidate = AgentKernel { checkpoint: snapshot, dirty: kernel.dirty };
+    let result = agent_kernel_approval_body(&mut candidate, call_id, approved);
+    if result.is_ok() { *kernel = candidate; };
+    result;
+}
+
+def agent_kernel_approval_body(kernel: &mut AgentKernel, call_id: &str, approved: bool) -> Result<bool, i64> {
+    agent_condition(not kernel.dirty and kernel.checkpoint.root().object_get("phase")?.number_i64()? == 4, 12)?;
+    let call = agent_kernel_current_call(kernel)?;
+    let id = agent_control_string(call, "id")?;
+    agent_condition(id.as_str() == call_id, 12)?;
+    if not approved { return agent_kernel_append_tool(kernel, "Tool permission denied", true, false); };
+    agent_kernel_transition(kernel, 5, "tool_claim");
+}
+
+def agent_kernel_tool_result(kernel: &mut AgentKernel, call_id: &str, content: &str, failed: bool, outcome_known: bool, quiescent: bool) -> Result<bool, i64> {
+    let snapshot = agent_copy_document(&kernel.checkpoint)?;
+    let mut candidate = AgentKernel { checkpoint: snapshot, dirty: kernel.dirty };
+    let result = agent_kernel_tool_result_body(&mut candidate, call_id, content, failed, outcome_known, quiescent);
+    if result.is_ok() { *kernel = candidate; };
+    result;
+}
+
+def agent_kernel_tool_result_body(kernel: &mut AgentKernel, call_id: &str, content: &str, failed: bool, outcome_known: bool, quiescent: bool) -> Result<bool, i64> {
+    agent_condition(not kernel.dirty and kernel.checkpoint.root().object_get("phase")?.number_i64()? == 5, 12)?;
+    let call = agent_kernel_current_call(kernel)?;
+    let id = agent_control_string(call, "id")?;
+    agent_condition(id.as_str() == call_id, 12)?;
+    agent_put_bool(&kernel.checkpoint, kernel.checkpoint.root(), "cleanup_required", not quiescent)?;
+    agent_kernel_append_tool(kernel, content, failed, not outcome_known or not quiescent);
+}
+
+def agent_kernel_pause(kernel: &mut AgentKernel, reason: &str) -> Result<bool, i64> {
+    let snapshot = agent_copy_document(&kernel.checkpoint)?;
+    let mut candidate = AgentKernel { checkpoint: snapshot, dirty: kernel.dirty };
+    let result = agent_kernel_pause_body(&mut candidate, reason);
+    if result.is_ok() { *kernel = candidate; };
+    result;
+}
+
+def agent_kernel_pause_body(kernel: &mut AgentKernel, reason: &str) -> Result<bool, i64> {
+    let phase = kernel.checkpoint.root().object_get("phase")?.number_i64()?;
+    if phase == 5 { let call = agent_kernel_current_call(kernel)?; let id = agent_control_string(call, "id")?; agent_put_string(&kernel.checkpoint, kernel.checkpoint.root(), "unresolved_call", id.as_str())?; (); };
+    let policy = agent_policy_read(&kernel.checkpoint)?;
+    let mut finished = policy;
+    policy_finish_plan(&mut finished);
+    agent_policy_write(&kernel.checkpoint, &finished)?;
+    agent_kernel_transition(kernel, 10, reason);
+}
+
+def agent_kernel_resume(snapshot: &JsonDoc, run_id: &str, fence: i64) -> Result<AgentKernel, i64> {
+    let root = snapshot.root();
+    agent_object_keys_valid(root, ",schema,run_id,fence,revision,phase,sequence,requests,tokens,maximum_requests,token_budget,cleanup_required,messages,tools,target,policy,initial_policy,calls,call_index,ledger,reason,pending_request,last_request,last_output,attempt,retry_due,retry_waited,host_facts,unresolved_call,")?;
+    let saved_run = agent_control_string(root, "run_id")?;
+    let previous_fence = root.object_get("fence")?.number_i64()?;
+    agent_condition(saved_run.as_str() == run_id and fence >= previous_fence and previous_fence > 0 and root.object_get("schema")?.number_i64()? == 1, 12)?;
+    agent_condition(root.object_get("requests")?.number_i64()? >= 0 and root.object_get("tokens")?.number_i64()? >= 0 and root.object_get("maximum_requests")?.number_i64()? >= 0 and root.object_get("token_budget")?.number_i64()? >= 0 and root.object_get("sequence")?.number_i64()? >= 0 and root.object_get("revision")?.number_i64()? > 0, 2)?;
+    let phase = root.object_get("phase")?.number_i64()?;
+    agent_condition(phase == 1 or phase == 2 or phase == 3 or phase == 4 or phase == 5 or phase == 6 or phase == 9 or phase == 10, 2)?;
+    let cleanup_required = root.object_get("cleanup_required")?.bool_value()?;
+    agent_condition(not cleanup_required or phase == 5 or phase == 10, 2)?;
+    agent_condition(phase != 5 or cleanup_required, 2)?;
+    let policy = agent_policy_read(snapshot)?;
+    let initial = agent_policy_value(root.object_get("initial_policy")?)?;
+    agent_condition(not policy.full_access or initial.full_access, 12)?;
+    agent_condition(not policy.auto_edit or initial.auto_edit or initial.full_access, 12)?;
+    agent_condition(not policy.interactive or initial.interactive, 12)?;
+    agent_condition(policy.depth >= initial.depth and policy.maximum_depth <= initial.maximum_depth, 12)?;
+    agent_condition(root.object_get("attempt")?.number_i64()? >= 1 and root.object_get("attempt")?.number_i64()? <= 6 and root.object_get("retry_due")?.number_i64()? >= 0 and root.object_get("retry_waited")?.number_i64()? >= 0, 2)?;
+    agent_target_valid(root.object_get("target")?)?;
+    let registry = agent_document()?;
+    registry.root().object_set("tools", registry.copy(root.object_get("tools")?)?)?;
+    agent_registry_validate(&registry)?;
+    let controls = agent_text("run_id,pending_request,last_request,reason,last_output");
+    let fields = controls.split(",");
+    loop { let key = fields.next(); if not key.is_some { break; }; agent_control_string(root, key.value.as_str())?; };
+    fields.free();
+    let calls = root.object_get("calls")?;
+    let index = root.object_get("call_index")?.number_i64()?;
+    agent_condition(index >= 0 and index <= calls.array_len()? and calls.array_len()? <= 256, 2)?;
+    agent_condition((phase != 3 and phase != 4 and phase != 5) or index < calls.array_len()?, 2)?;
+    let mut scan = 0;
+    while scan < calls.array_len()? { let call = calls.array_get(scan)?; let id = agent_control_string(call, "id")?; let name = agent_control_string(call, "name")?; let arguments = agent_json_string(call, "arguments")?; agent_condition(id.len() > 0 and id.len() <= 256 and name.len() > 0 and name.len() <= 256 and arguments.len() == arguments.as_str().len() and arguments.len() <= 1048576, 2)?; let mut earlier = 0; while earlier < scan { let previous_id = agent_control_string(calls.array_get(earlier)?, "id")?; agent_condition(previous_id.as_str() != id.as_str(), 12)?; earlier = earlier + 1; }; scan = scan + 1; };
+    let ledger = root.object_get("ledger")?;
+    scan = 0;
+    while scan < ledger.array_len()? { let entry = ledger.array_get(scan)?; let id = agent_control_string(entry, "call_id")?; let state = agent_control_string(entry, "state")?; agent_condition(id.len() > 0 and id.len() <= 256 and (state.as_str() == "complete" or state.as_str() == "unknown" or state.as_str() == "resolved"), 2)?; scan = scan + 1; };
+    let checkpoint = agent_copy_document(snapshot)?;
+    let mut kernel = AgentKernel { checkpoint: checkpoint, dirty: false };
+    if fence > previous_fence { agent_put_i64(&kernel.checkpoint, kernel.checkpoint.root(), "fence", fence)?; agent_kernel_transition(&mut kernel, phase, "execution_handoff")?; (); };
+    if phase == 5 { agent_kernel_pause(&mut kernel, "tool_outcome_unknown")?; (); };
+    if phase == 2 { agent_kernel_pause(&mut kernel, "model_request_interrupted")?; (); };
+    Result { is_ok: true, value: kernel, error: 0 };
+}
+
+def agent_memory_ledger(run_id: &str, fence: i64) -> Result<AgentMemoryLedger, i64> {
+    agent_condition(run_id.len() > 0 and fence > 0, 2)?;
+    Result { is_ok: true, value: AgentMemoryLedger { checkpoint: agent_document()?, run_id: string_from_str(run_id)?, fence: fence, revision: 0 }, error: 0 };
+}
+
+def agent_memory_commit(ledger: &mut AgentMemoryLedger, action: &JsonDoc) -> Result<AgentCommitReceipt, i64> {
+    let root = action.root();
+    let run = agent_control_string(root, "run_id")?;
+    let revision = root.object_get("revision")?.number_i64()?;
+    let id = agent_control_string(root, "id")?;
+    let expected = agent_join(run.as_str(), ":commit:")?;
+    expected.push_i64(revision)?;
+    agent_condition(root.object_get("schema")?.number_i64()? == 1 and id.as_str() == expected.as_str(), 12)?;
+    agent_condition(agent_control_string(root, "type")?.as_str() == "persist" and run.as_str() == ledger.run_id.as_str() and root.object_get("fence")?.number_i64()? == ledger.fence, 12)?;
+    agent_condition(revision > 0 and (revision == ledger.revision or ledger.revision < 9223372036854775807 and revision == ledger.revision + 1), 12)?;
+    let saved = root.object_get("checkpoint")?;
+    let saved_run = agent_control_string(saved, "run_id")?;
+    agent_condition(saved_run.as_str() == run.as_str() and saved.object_get("fence")?.number_i64()? == ledger.fence and saved.object_get("revision")?.number_i64()? == revision and saved.object_get("schema")?.number_i64()? == 1, 12)?;
+    let checkpoint = agent_object_document(saved)?;
+    if revision == ledger.revision { let old = ledger.checkpoint.serialize_string()?; let current = checkpoint.serialize_string()?; agent_condition(old.as_str() == current.as_str(), 12)?; (); } else { ledger.checkpoint = checkpoint; ledger.revision = revision; };
+    Result { is_ok: true, value: AgentCommitReceipt { run_id: ledger.run_id.clone()?, fence: ledger.fence, revision: revision }, error: 0 };
+}
+
+def agent_kernel_model_failed(kernel: &mut AgentKernel, request_id: &str, code: i64, http_status: i64, retry_after: &str, now_ms: i64, allow_retry: bool, outcome_unknown: bool) -> Result<bool, i64> {
+    let snapshot = agent_copy_document(&kernel.checkpoint)?;
+    let mut candidate = AgentKernel { checkpoint: snapshot, dirty: kernel.dirty };
+    let root = candidate.checkpoint.root();
+    let pending = agent_control_string(root, "pending_request")?;
+    agent_condition(not candidate.dirty and root.object_get("phase")?.number_i64()? == 2 and pending.as_str() == request_id and code != 0 and now_ms >= 0, 12)?;
+    let attempt = agent_json_optional_i64(root, "attempt", 1);
+    let evidence = RetryEvidence { attempt: attempt, status: http_status, error: code, request_started: true, stream_observed: false, side_effects: outcome_unknown };
+    let waited = agent_json_optional_i64(root, "retry_waited", 0);
+    let decision = request_retry(&evidence, retry_after, now_ms, waited);
+    if allow_retry and decision.retry { agent_condition(now_ms <= 9223372036854775807 - decision.delay_ms and waited <= 9223372036854775807 - decision.delay_ms, 13)?; agent_put_i64(&candidate.checkpoint, root, "retry_due", now_ms + decision.delay_ms)?; agent_put_i64(&candidate.checkpoint, root, "retry_waited", waited + decision.delay_ms)?; agent_put_i64(&candidate.checkpoint, root, "attempt", attempt + 1)?; agent_kernel_transition(&mut candidate, 6, "reconnecting")?; } else { agent_kernel_pause_body(&mut candidate, if outcome_unknown { "outcome_unknown"; } else { if code == 19 { "cancelled"; } else { "model_request_failed"; }; })?; };
+    *kernel = candidate;
+    Result { is_ok: true, value: true, error: 0 };
+}
+
+def agent_kernel_retry_ready(kernel: &mut AgentKernel, now_ms: i64) -> Result<bool, i64> {
+    agent_condition(not kernel.dirty and kernel.checkpoint.root().object_get("phase")?.number_i64()? == 6, 12)?;
+    if now_ms < kernel.checkpoint.root().object_get("retry_due")?.number_i64()? { return Result { is_ok: true, value: false, error: 0 }; };
+    let snapshot = agent_copy_document(&kernel.checkpoint)?;
+    let mut candidate = AgentKernel { checkpoint: snapshot, dirty: kernel.dirty };
+    agent_kernel_transition(&mut candidate, 1, "retry_ready")?;
+    *kernel = candidate;
+    Result { is_ok: true, value: true, error: 0 };
+}
+
+def agent_memory_snapshot(ledger: &AgentMemoryLedger) -> Result<JsonDoc, i64> {
+    agent_condition(ledger.revision > 0, 5)?;
+    agent_copy_document(&ledger.checkpoint);
+}
+
+def agent_host_proof(kernel: &AgentKernel, run_id: &str, fence: i64, verified: bool) -> Result<bool, i64> {
+    let root = kernel.checkpoint.root();
+    let saved = agent_control_string(root, "run_id")?;
+    agent_condition(verified and not kernel.dirty and saved.as_str() == run_id and root.object_get("fence")?.number_i64()? == fence and root.object_get("phase")?.number_i64()? == 10, 12);
+}
+
+def agent_kernel_confirm_quiescence(kernel: &mut AgentKernel, run_id: &str, fence: i64, verified: bool, evidence: &str) -> Result<bool, i64> {
+    agent_host_proof(kernel, run_id, fence, verified)?;
+    agent_condition(evidence.len() > 0 and evidence.len() <= 65536, 2)?;
+    let snapshot = agent_copy_document(&kernel.checkpoint)?;
+    let mut candidate = AgentKernel { checkpoint: snapshot, dirty: kernel.dirty };
+    let root = candidate.checkpoint.root();
+    agent_put_bool(&candidate.checkpoint, root, "cleanup_required", false)?;
+    let facts = if root.object_has("host_facts") { root.object_get("host_facts")?; } else { let value = candidate.checkpoint.new_array()?; root.object_set("host_facts", value)?; value; };
+    let fact = candidate.checkpoint.new_object()?;
+    agent_put_string(&candidate.checkpoint, fact, "kind", "quiescence")?;
+    agent_put_string(&candidate.checkpoint, fact, "evidence", evidence)?;
+    agent_put_i64(&candidate.checkpoint, fact, "fence", fence)?;
+    facts.array_push(fact)?;
+    agent_kernel_transition(&mut candidate, 10, "host_quiescence_verified")?;
+    *kernel = candidate;
+    Result { is_ok: true, value: true, error: 0 };
+}
+
+def agent_kernel_resolve_tool(kernel: &mut AgentKernel, run_id: &str, fence: i64, call_id: &str, content: &str, failed: bool, quiescent: bool, verified: bool, evidence: &str) -> Result<bool, i64> {
+    agent_host_proof(kernel, run_id, fence, verified)?;
+    agent_condition(quiescent and evidence.len() > 0 and evidence.len() <= 65536 and content.len() <= 2097152, 2)?;
+    let call = agent_kernel_current_call(kernel)?;
+    let current = agent_control_string(call, "id")?;
+    let root_before = kernel.checkpoint.root();
+    let unresolved = agent_control_string(root_before, "unresolved_call")?;
+    let reason = agent_control_string(root_before, "reason")?;
+    agent_condition(current.as_str() == call_id and (unresolved.as_str() == call_id or reason.as_str() == "tool_outcome_unknown"), 12)?;
+    let snapshot = agent_copy_document(&kernel.checkpoint)?;
+    let mut candidate = AgentKernel { checkpoint: snapshot, dirty: kernel.dirty };
+    let document = &candidate.checkpoint;
+    let root = document.root();
+    let records = root.object_get("ledger")?;
+    let mut index = 0;
+    while index < records.array_len()? { let record = records.array_get(index)?; if agent_control_string(record, "call_id")?.as_str() == call_id and agent_control_string(record, "state")?.as_str() == "unknown" { agent_put_string(document, record, "state", "resolved")?; agent_put_string(document, record, "resolution_evidence", evidence)?; (); }; index = index + 1; };
+    let messages = root.object_get("messages")?;
+    index = messages.array_len()? - 1;
+    if index >= 0 { let last = messages.array_get(index)?; if agent_json_optional_string(last, "role").as_str() == "tool" and agent_json_optional_string(last, "tool_call_id").as_str() == call_id { let public = agent_document()?; public.root().object_set("messages", public.new_array()?)?; let mut copied = 0; while copied < index { public.root().object_get("messages")?.array_push(public.copy(messages.array_get(copied)?)?)?; copied = copied + 1; }; root.object_set("messages", document.copy(public.root().object_get("messages")?)?)?; (); }; };
+    agent_put_bool(document, root, "cleanup_required", false)?;
+    agent_put_string(document, root, "unresolved_call", "")?;
+    agent_kernel_append_tool(&mut candidate, content, failed, false)?;
+    let final_document = &candidate.checkpoint;
+    let final_records = final_document.root().object_get("ledger")?;
+    let latest = final_records.array_get(final_records.array_len()? - 1)?;
+    agent_put_string(final_document, latest, "resolution_evidence", evidence)?;
+    agent_put_i64(final_document, latest, "resolution_fence", fence)?;
+    *kernel = candidate;
+    Result { is_ok: true, value: true, error: 0 };
+}

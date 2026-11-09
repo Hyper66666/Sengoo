@@ -423,6 +423,11 @@ identify the required development toolchain separately from published releases.
 interactive-child API; rendering and terminal emulation remain application code.
 [Diagnostic UTF-8 and monotonic time](diagnostic-text-clock.md) document explicit
 lossy decoding and elapsed-time clocks; strict UTF-8 and calendar APIs remain compatible.
+[Pollable standard output](pollable-standard-output.md) documents the additive
+`0.2.1-dev.0` `StdWriter`: an owning, non-Send/non-Sync Windows local byte-pipe
+writer with bounded submission, status, cancellation and actual worker join.
+Other endpoints and the initial POSIX backend return unsupported. Its current
+Windows development evidence does not extend the v0.2 release claim.
 
 For node-rich network metadata, use `json_parse_limits(text, max_bytes,
 max_nodes)` with explicit application bounds. The legacy parser retains its

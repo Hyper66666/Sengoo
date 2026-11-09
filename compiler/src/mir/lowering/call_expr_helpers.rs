@@ -67,7 +67,35 @@ pub(super) fn lower_call_expr_with_expected_mir(
         }
     }
 
-    let mut arg_locals: Vec<Local> = args.iter().map(|a| ctx.lower_expr(a)).collect();
+    let borrowed_params = match func {
+        HIRExpr::Var { name, symbol }
+            if !ctx.local_names.contains_key(name) && !ctx.local_symbols.contains_key(symbol) =>
+        {
+            ctx.argument_borrow_policy(name)
+        }
+        _ => None,
+    };
+    let mut arg_locals = Vec::with_capacity(args.len());
+    for (index, arg) in args.iter().enumerate() {
+        let previous = ctx.borrowed_output_context;
+        ctx.borrowed_output_context = match func {
+            HIRExpr::Var { name, symbol }
+                if !ctx.local_names.contains_key(name)
+                    && !ctx.local_symbols.contains_key(symbol) =>
+            {
+                ctx.argument_output_is_borrowed(name, index, args.len())
+            }
+            _ => false,
+        };
+        let mut local = ctx.lower_expr(arg);
+        ctx.borrowed_output_context = previous;
+        // Register each produced owner before evaluating the next argument:
+        // a later `?` may return before the call transfers its arguments.
+        if is_fresh_owned_argument(arg) {
+            local = ctx.retain_temporary_receiver(local);
+        }
+        arg_locals.push(local);
+    }
 
     let result = match func {
         HIRExpr::Var { name, .. } => {
@@ -81,10 +109,31 @@ pub(super) fn lower_call_expr_with_expected_mir(
         }
         _ => lower_non_named_call(ctx, &arg_locals),
     };
-    for arg in args {
-        ctx.mark_drop_expr_moved(arg);
+    for (index, arg) in args.iter().enumerate() {
+        if !borrowed_params
+            .as_ref()
+            .and_then(|params| params.get(index))
+            .copied()
+            .unwrap_or(false)
+        {
+            ctx.mark_drop_expr_moved(arg);
+        }
     }
     result
+}
+
+pub(super) fn is_fresh_owned_argument(expr: &HIRExpr) -> bool {
+    matches!(
+        expr,
+        HIRExpr::Call { .. }
+            | HIRExpr::MethodCall { .. }
+            | HIRExpr::Try(_)
+            | HIRExpr::TryBlock(_)
+            | HIRExpr::Struct { .. }
+            | HIRExpr::Block(_)
+            | HIRExpr::If { .. }
+            | HIRExpr::Match { .. }
+    )
 }
 
 #[cfg(test)]

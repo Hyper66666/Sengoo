@@ -178,6 +178,74 @@ fn lower_hir_with_options_scoped(
         }
     }
 
+    let mut ownership_functions = Vec::new();
+    for item in items {
+        match item {
+            HIRItem::Function(function) if function.type_params.is_empty() => {
+                ownership_functions.push(function.clone());
+            }
+            HIRItem::Impl(implementation) => {
+                for implementation in
+                    expand_impl_variants(implementation, &concrete_named_types, &known_named_types)
+                {
+                    if implementation.trait_name.is_none() {
+                        for function in implementation.items {
+                            if function.type_params.is_empty() {
+                                ownership_functions.push(function);
+                            }
+                        }
+                    }
+                }
+            }
+            _ => {}
+        }
+    }
+    for function in &eager_trait_functions {
+        ownership_functions.push(function.clone());
+    }
+    let mut options = options;
+    let mut inferred = super::legacy_param_ownership::infer(
+        &ownership_functions,
+        &super::native_borrow_contracts::declared_observers(items),
+    );
+    for native in options.native_borrow_observers.iter() {
+        if !inferred.native_observers.contains(native) {
+            return Err(format!("[ownership::parameter_contract] checked native observation is not valid in typed HIR for {native}"));
+        }
+    }
+    for (name, params) in &mut inferred.observed {
+        for (index, observed) in params.iter_mut().enumerate() {
+            let checked = options
+                .checked_parameter_borrows
+                .as_ref()
+                .and_then(|contracts| contracts.get(name))
+                .and_then(|params| params.get(index))
+                .copied()
+                .unwrap_or(false);
+            if checked && !*observed {
+                return Err(format!("[ownership::parameter_contract] checked borrow is not valid in typed HIR for {name} parameter {index}"));
+            }
+            *observed = *observed && checked;
+        }
+    }
+    for (name, params) in &mut inferred.projected {
+        for (index, projected) in params.iter_mut().enumerate() {
+            let checked = options
+                .checked_projected_params
+                .as_ref()
+                .and_then(|contracts| contracts.get(name))
+                .and_then(|params| params.get(index))
+                .copied()
+                .unwrap_or(false);
+            if checked && !*projected {
+                return Err(format!("[ownership::parameter_contract] checked projection is not valid in typed HIR for {name} parameter {index}"));
+            }
+            *projected = *projected && checked;
+        }
+    }
+    options.borrowed_legacy_params = std::rc::Rc::new(inferred.observed);
+    options.projected_legacy_params = std::rc::Rc::new(inferred.projected);
+
     for item in items {
         match item {
             HIRItem::Function(fn_item) => {

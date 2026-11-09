@@ -27,6 +27,9 @@ pub(crate) mod impl_specialization_helpers;
 mod inst;
 pub(crate) mod local_type_helpers;
 mod lowering;
+#[cfg(test)]
+pub(crate) use lowering::infer_legacy_parameter_borrows;
+pub(crate) use lowering::{infer_legacy_parameter_contracts, native_argument_noescape};
 pub(crate) mod lowering_helpers;
 pub(crate) mod method_dispatch_helpers;
 pub(crate) mod method_specialization_helpers;

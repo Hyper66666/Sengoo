@@ -1,0 +1,84 @@
+import std::args;
+
+import std::env;
+
+import std::file;
+
+import std::ffi;
+
+extern "C" {
+    fn sengoo_buffer_live_handle_count() -> i64;
+    fn sengoo_string_live_handle_count() -> i64;
+}
+
+def read_argument() -> Result<bool, i64> {
+    let buffer = ffi_buffer_new(arg_len(0)?)?;
+    let copied = arg_copy(0, buffer)?;
+    if buffer.used_len() != copied { return Result { is_ok: false, value: false, error: 3 }; };
+    Result { is_ok: true, value: true, error: 0 };
+}
+
+def read_environment() -> Result<bool, i64> {
+    let buffer = ffi_buffer_new(env_var_len("PATH")?)?;
+    let copied = env_var_copy("PATH", buffer)?;
+    if buffer.used_len() != copied { return Result { is_ok: false, value: false, error: 3 }; };
+    Result { is_ok: true, value: true, error: 0 };
+}
+
+def read_file() -> Result<bool, i64> {
+    let path = "target/native-copy-boundaries-input.txt";
+    file_write_str(path, "中文 😀")?;
+    let buffer = ffi_buffer_new(128)?;
+    let copied = file_read_into(path, buffer)?;
+    if buffer.used_len() != copied { return Result { is_ok: false, value: false, error: 3 }; };
+    Result { is_ok: true, value: true, error: 0 };
+}
+
+def copy_buffer() -> Result<bool, i64> {
+    let source = ffi_buffer_new(128)?;
+    source.copy_from_str("中文 😀")?;
+    let output = ffi_buffer_new(128)?;
+    let copied = source.copy_out(output)?;
+    let needle = ffi_buffer_from_bytes("中文")?;
+    if source.index_of_bytes(needle, 0)? != 0 or needle.used_len() == 0 { return Result { is_ok: false, value: false, error: 3 }; };
+    if output.len() != 128 or source.used_len() != copied { return Result { is_ok: false, value: false, error: 3 }; };
+    Result { is_ok: true, value: true, error: 0 };
+}
+
+def missing_length() -> Result<i64, i64> {
+    Result { is_ok: false, value: 0, error: 9 };
+}
+
+def fresh_projection_failure() -> Result<bool, i64> {
+    let unused = string_from_bytes_raw(ffi_buffer_from_bytes("fresh")?.ptr(), missing_length()?)?;
+    Result { is_ok: true, value: unused.len() == 5, error: 0 };
+}
+
+def fresh_projection() -> Result<bool, i64> {
+    let copied = { string_from_bytes_raw(ffi_buffer_from_bytes("fresh")?.ptr(), 5)?; };
+    if copied.as_str() != "fresh" { return Result { is_ok: false, value: false, error: 3 }; };
+    if fresh_projection_failure().is_ok() { return Result { is_ok: false, value: false, error: 3 }; };
+    Result { is_ok: true, value: true, error: 0 };
+}
+
+def main() -> i64 {
+    let baseline = sengoo_buffer_live_handle_count();
+    if not read_argument().is_ok() { return 2; };
+    println("args copy Buffer delta:");
+    println(sengoo_buffer_live_handle_count() - baseline);
+    let env_before = sengoo_buffer_live_handle_count();
+    if not read_environment().is_ok() { return 3; };
+    println("env copy Buffer delta:");
+    println(sengoo_buffer_live_handle_count() - env_before);
+    let file_before = sengoo_buffer_live_handle_count();
+    if not read_file().is_ok() { return 4; };
+    println("file read Buffer delta:");
+    println(sengoo_buffer_live_handle_count() - file_before);
+    let copy_before = sengoo_buffer_live_handle_count();
+    if not copy_buffer().is_ok() { return 5; };
+    if not fresh_projection().is_ok() { return 6; };
+    println("Buffer copy_out delta:");
+    println(sengoo_buffer_live_handle_count() - copy_before);
+    if sengoo_buffer_live_handle_count() != baseline { return 1; };
+    0;
+}

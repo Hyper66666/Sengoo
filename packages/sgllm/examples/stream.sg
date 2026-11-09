@@ -1,0 +1,36 @@
+import sgllm;
+
+import std::args;
+
+import std::time;
+
+import std::io;
+
+def argument(index: i64) -> Result<String, i64> {
+    let buffer = ffi_buffer_new(32768)?;
+    let size = arg_copy(index, buffer)?;
+    string_from_bytes_raw(buffer.ptr(), size);
+}
+
+def request() -> Result<i64, i64> {
+    let base = argument(0)?;
+    let protocol = argument(1)?;
+    let model = argument(2)?;
+    let key = argument(3)?;
+    let config = llm_request_config(base.as_str(), provider_protocol(protocol.as_str()), model.as_str())?;
+    let history = json_parse("{\"messages\":[{\"role\":\"user\",\"content\":\"Say hello\"}]}")?;
+    let tools = json_parse("{\"tools\":[]}")?;
+    let mut job = llm_request_start(&config, key.as_str(), &history, &tools)?;
+    while not job.is_finished() { let polled = job.poll(); if not polled.is_ok() { let failure = llm_request_failure(&job, polled.error); println(failure.stage.as_str()); println(failure.http_status); println(failure.detail.as_str()); return llm_fail(polled.error); }; if polled.value.len() > 0 { io_stdout_write(polled.value.as_str())?; io_stdout_flush()?; (); }; time_sleep_ms(1); };
+    let accepted = job.result()?;
+    println("");
+    println(job.input_tokens());
+    println(job.output_tokens());
+    llm_ok(0);
+}
+
+def main() -> i64 {
+    let result = request();
+    if not result.is_ok() { return 1; };
+    result.value;
+}

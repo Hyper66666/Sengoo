@@ -228,7 +228,7 @@ pub(super) fn lower_unary_expr(
             {
                 return field_ref;
             }
-            let expr_local = ctx.lower_expr(operand);
+            let mut expr_local = ctx.lower_expr(operand);
             let expr_ty = ctx.get_local_type(expr_local).clone();
 
             // Drop body self is already the reference to its ABI-local
@@ -239,6 +239,13 @@ pub(super) fn lower_unary_expr(
                 && matches!(expr_ty, MIRType::Ref(_) | MIRType::Ptr(_))
             {
                 return expr_local;
+            }
+
+            // Source `&make_owner()` uses Unary::Ref, whereas generated HIR
+            // can use HIRExpr::Ref. Both forms must own the fresh referent
+            // until the surrounding scope exits, including a later `?`.
+            if super::call_expr_helpers::is_fresh_owned_argument(operand) {
+                expr_local = ctx.retain_temporary_receiver(expr_local);
             }
 
             let ptr_ty = MIRType::Ptr(Box::new(expr_ty));

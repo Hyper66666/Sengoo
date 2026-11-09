@@ -10,6 +10,30 @@ use super::*;
 const MONOMORPHIZATION_DEPTH_LIMIT: usize = 16;
 
 impl<'a> LoweringContext<'a> {
+    pub(super) fn argument_borrow_policy(&self, function: &str) -> Option<Vec<bool>> {
+        if self.borrowed_output_context {
+            if let Some(policy) = self.options.projected_legacy_params.get(function) {
+                return Some(policy.clone());
+            }
+        }
+        self.options.borrowed_legacy_params.get(function).cloned()
+    }
+
+    pub(super) fn argument_output_is_borrowed(
+        &self,
+        function: &str,
+        index: usize,
+        arity: usize,
+    ) -> bool {
+        (self.options.native_borrow_observers.contains(function)
+            && super::native_borrow_contracts::observes_argument(function, index, arity))
+            || self
+                .argument_borrow_policy(function)
+                .as_ref()
+                .and_then(|params| params.get(index))
+                .copied()
+                .unwrap_or(false)
+    }
     #[allow(clippy::too_many_arguments)]
     pub(super) fn new(
         mir_fn: &'a mut MirFunction,
@@ -55,8 +79,10 @@ impl<'a> LoweringContext<'a> {
             trait_method_templates,
             async_dispatch_registry,
             future_origins: HashMap::new(),
+            borrowed_output_context: false,
             try_scope_stack: Vec::new(),
             drop_bindings: Vec::new(),
+            temporary_drop_owners: HashSet::new(),
             drop_scope_markers: Vec::new(),
             moved_drop_locals: HashSet::new(),
             moved_drop_fields: HashSet::new(),

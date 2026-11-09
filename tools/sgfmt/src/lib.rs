@@ -772,6 +772,32 @@ mod tests {
     }
 
     #[test]
+    fn preserves_return_self_method_as_one_expression() {
+        let source = "struct Reader { value: i64 } impl Reader { def read(&self) -> i64 { self.value } def forward(&self) -> i64 { return self.read(); } }";
+        let formatted = format_test_source(source, FormatOptions::default());
+        assert!(formatted.contains("return self.read();"), "{formatted}");
+        assert!(!formatted.contains("return;"), "{formatted}");
+        let parsed = SgParser::parse(&formatted).expect("formatted receiver return must parse");
+        let implementation = parsed
+            .decls
+            .iter()
+            .find_map(|decl| match &decl.kind {
+                DeclKind::Impl(item) => Some(item),
+                _ => None,
+            })
+            .expect("implementation");
+        let forward = implementation
+            .items
+            .iter()
+            .find(|method| method.name.name == "forward")
+            .expect("forward method");
+        assert_eq!(forward.body.stmts.len(), 1);
+        assert!(
+            matches!(&forward.body.stmts[0].kind, sengoo_compiler::ast::StmtKind::Expr(expr) if matches!(&expr.kind, ExprKind::Return(Some(value)) if matches!(value.kind, ExprKind::MethodCall { .. })))
+        );
+    }
+
+    #[test]
     fn formats_unsigned_literals_without_losing_their_type() {
         let src = "def main() -> u64 { 7u64 }";
         let first = format_test_source(src, FormatOptions::default());

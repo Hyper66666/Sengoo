@@ -1,0 +1,11 @@
+{
+  "schema": 1,
+  "reference": "sengoo-agent-reference/1",
+  "case": "immutable-assignment",
+  "error_format": "json",
+  "expect": { "ok": false, "kind": "compile_error", "stage": "typecheck", "code": "immutable-assignment" },
+  "before": "def main() -> i64 {\n    let total = 1;\n    total = total + 1;\n    println(total);\n    0;\n}\n",
+  "after": "def main() -> i64 {\n    let mut total = 1;\n    total = total + 1;\n    println(total);\n    0;\n}\n",
+  "repair": "The assignment target is immutable. Add mut to its original local binding; keep the calculation and exit behavior.",
+  "expected_stdout": "2\n"
+}

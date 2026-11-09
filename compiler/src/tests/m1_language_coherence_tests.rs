@@ -122,7 +122,7 @@ fn m1_last_use_borrow_tracks_nested_control_flow_and_expression_order() {
     assert_eq!(typeck_err_code(&after_loop), "cannot-move-borrowed");
 
     let same_expr = format!(
-        "{stdlib}\n\ndef consume(value: String) -> i64 {{ value.len() }}\ndef main() -> i64 {{\n    let owner: String = string_from_str(\"x\").value;\n    let view = owner.as_str();\n    consume(owner) + view.len()\n}}\n"
+        "{stdlib}\n\ndef consume(value: String) -> i64 {{ let owned = value; owned.len() }}\ndef main() -> i64 {{\n    let owner: String = string_from_str(\"x\").value;\n    let view = owner.as_str();\n    consume(owner) + view.len()\n}}\n"
     );
     assert_eq!(typeck_err_code(&same_expr), "cannot-move-borrowed");
 }

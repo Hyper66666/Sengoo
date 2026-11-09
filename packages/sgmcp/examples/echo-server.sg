@@ -1,0 +1,33 @@
+import sgmcp;
+
+def echo(server: &SgMcpServer, action: &JsonDoc) -> Result<bool, i64> {
+    let arguments = action.root().object_get("arguments")?;
+    if not arguments.object_has("message") or arguments.object_get("message")?.kind()? != JSON_KIND_STRING() { return server.fail_tool(action.root().object_get("id")?, "message must be a string"); };
+    server.progress(action.root().object_get("id")?, 1, 1, "echoed")?;
+    let result = sgmcp_tool_result("", false)?;
+    let message = arguments.object_get("message")?;
+    result.root().object_get("content")?.array_get(0)?.object_set("text", result.copy(message)?)?;
+    let structured = result.new_object()?;
+    structured.object_set("message", result.copy(message)?)?;
+    result.root().object_set("structuredContent", structured)?;
+    server.complete(action.root().object_get("id")?, result.root());
+}
+
+def run() -> Result<bool, i64> {
+    let mut server = sgmcp_server("sengoo-example-tools", "0.1.0", 1)?;
+    let input = json_parse("{\"type\":\"object\",\"properties\":{\"message\":{\"type\":\"string\"}},\"required\":[\"message\"]}")?;
+    let output = json_parse("{\"type\":\"object\",\"properties\":{\"message\":{\"type\":\"string\"}}}")?;
+    server.tool("echo", "Return text and structured JSON without narrowing string bytes", input.root(), output.root())?;
+    server.tool("slow", "Wait until cancelled", input.root(), output.root())?;
+    let mut stdio = sgmcp_stdio()?;
+    let pending = json_doc_object()?;
+    while not stdio.eof { let request = stdio.next()?; if request.root().object_has("method") { let action = server.accept(&request)?; if sgmcp_string(action.root(), "kind").as_str() == "call" { let name = sgmcp_string(action.root(), "name"); if name.as_str() == "slow" { if pending.root().object_has("id") { server.fail_tool(action.root().object_get("id")?, "one slow operation at a time in this example")?; (); } else { pending.root().object_set("id", pending.copy(action.root().object_get("id")?)?)?; (); }; } else { echo(&server, &action)?; (); }; }; }; if pending.root().object_has("id") and server.cancelled(pending.root().object_get("id")?)? { let result = sgmcp_tool_result("cancelled", true)?; server.complete(pending.root().object_get("id")?, result.root())?; if not stdio.cancel(3000)? { return sgmcp_error(11); }; return sgmcp_ok(); }; stdio.flush(&server)?; time_sleep_ms(1); };
+    if not stdio.finish(&server, 30000)? { return sgmcp_error(11); };
+    sgmcp_ok();
+}
+
+def main() -> i64 {
+    let result = run();
+    if not result.is_ok() { io_stderr_write("MCP server failed\n"); return 1; };
+    0;
+}

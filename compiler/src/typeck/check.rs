@@ -360,6 +360,8 @@ impl TypeChecker {
 
         self.prepare_class_hierarchy(program)?;
 
+        self.prepare_legacy_parameter_borrows(program);
+
         // Auto-marker opt-outs must be visible while every function body is
         // checked, regardless of where the impl appears in source order.
         for decl in &program.decls {
@@ -399,6 +401,8 @@ impl TypeChecker {
 
         self.prepare_class_hierarchy(program)?;
 
+        self.prepare_legacy_parameter_borrows(program);
+
         for decl in &program.decls {
             if let DeclKind::Impl(impl_decl) = &decl.kind {
                 if impl_decl.is_negative {
@@ -417,6 +421,16 @@ impl TypeChecker {
         self.validate_supertrait_obligations()?;
 
         Ok(())
+    }
+
+    fn prepare_legacy_parameter_borrows(&mut self, program: &Program) {
+        // Only declared parameter/return identities are used by the summary;
+        // unresolved local types and unknown dispatch remain consuming.
+        let hir = crate::hir::lower_ast(program, &self.env);
+        let contracts = crate::mir::infer_legacy_parameter_contracts(&hir.items);
+        self.env.borrowed_legacy_params = std::rc::Rc::new(contracts.observed);
+        self.env.projected_legacy_params = std::rc::Rc::new(contracts.projected);
+        self.env.native_borrow_observers = std::rc::Rc::new(contracts.native_observers);
     }
 
     /// Register declarations so later bodies can resolve names.
@@ -1316,7 +1330,10 @@ impl TypeChecker {
                 let ty =
                     self.check_method_call(receiver, method, args, Some(expected), expr.span)?;
                 if Self::type_is_fully_concrete(&ty)
-                    || matches!(method.name.as_str(), "get" | "front" | "back" | "iter" | "iter_keys")
+                    || matches!(
+                        method.name.as_str(),
+                        "get" | "front" | "back" | "iter" | "iter_keys"
+                    )
                 {
                     self.env.record_method_return_type(expr.span, ty.clone());
                 }
@@ -1357,7 +1374,10 @@ impl TypeChecker {
             } => {
                 let ty = self.check_method_call(receiver, method, args, None, expr.span)?;
                 if Self::type_is_fully_concrete(&ty)
-                    || matches!(method.name.as_str(), "get" | "front" | "back" | "iter" | "iter_keys")
+                    || matches!(
+                        method.name.as_str(),
+                        "get" | "front" | "back" | "iter" | "iter_keys"
+                    )
                 {
                     self.env.record_method_return_type(expr.span, ty.clone());
                 }

@@ -320,7 +320,8 @@ fn compile_to_mir_bundle_inner(
             true,
             async_functions.clone(),
         )
-        .with_target_pointer_width(pointer_width.bits()),
+        .with_target_pointer_width(pointer_width.bits())
+        .with_checked_parameter_borrows(&type_env),
     )
     .map_err(CompileError::MirLower)?;
     drop(hir_module);

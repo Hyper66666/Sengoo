@@ -1,0 +1,10 @@
+[package]
+name = "agent-knowledge"
+version = "0.1.0"
+edition = "2026"
+description = "Local-root MCP knowledge index using Sengoo, sgmcp and SQLite."
+[bin]
+path = "src/main.sg"
+[dependencies]
+sgmcp = { path = "../../../packages/sgmcp" }
+sgsqlite = { path = "../../../packages/sgsqlite" }

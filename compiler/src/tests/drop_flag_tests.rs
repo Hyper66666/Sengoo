@@ -426,7 +426,8 @@ struct Pair {
 }
 
 def consume(value: String) -> i64 {
-    value.len()
+    let owned = value;
+    owned.len()
 }
 
 def main() -> i64 {
@@ -600,7 +601,8 @@ fn named_call_owned_argument_is_excluded_from_caller_drop_glue() {
     let mir = compile_with_owned_string(
         r#"
 def consume(value: String) -> i64 {
-    value.len()
+    let owned = value;
+    owned.len()
 }
 
 def main() -> i64 {
@@ -619,7 +621,7 @@ def main() -> i64 {
 }
 
 #[test]
-fn method_owned_argument_is_excluded_from_caller_drop_glue() {
+fn method_observed_argument_retains_both_caller_owners() {
     let mir = compile_with_owned_string(
         r#"
 def main() -> i64 {
@@ -637,8 +639,35 @@ def main() -> i64 {
 
     assert_eq!(
         string_drop_calls(main_fn).len(),
+        2,
+        "eq observes both handles; both owners remain in the caller"
+    );
+}
+
+#[test]
+fn method_owned_argument_is_excluded_from_caller_drop_glue() {
+    let mir = compile_with_owned_string(
+        r#"
+struct Sink { marker: i64 }
+impl Sink {
+    def take(&self, value: String) -> i64 { let owned = value; owned.len() }
+}
+def main() -> i64 {
+    let sink = Sink { marker: 1 };
+    let text = string_from_str("transferred").value;
+    sink.take(text)
+}
+"#,
+    );
+    assert_eq!(
+        string_drop_calls(function(&mir, "main")).len(),
+        0,
+        "caller transfers ownership"
+    );
+    assert_eq!(
+        string_drop_calls(function(&mir, "Sink_take")).len(),
         1,
-        "method call arguments are move-checked by typeck and should not be dropped again by the caller"
+        "callee releases its owner once"
     );
 }
 

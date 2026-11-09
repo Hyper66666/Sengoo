@@ -1,0 +1,46 @@
+import std::string;
+
+import std::result;
+
+extern "C" {
+    fn sengoo_string_live_handle_count() -> i64;
+}
+
+def check_view(view: &str, baseline: i64, expected: i64) -> Result<bool, i64> {
+    if sengoo_string_live_handle_count() != baseline + expected { return Result { is_ok: false, value: false, error: 101 }; };
+    let churn = string_from_str("heap allocation inside receiving function")?;
+    Result { is_ok: true, value: view == "Working", error: 0 };
+}
+
+def fail() -> Result<i64, i64> {
+    Result { is_ok: false, value: 0, error: 17 };
+}
+
+def consume_later(view: &str, next: i64) -> bool {
+    view == "Working" and next == 0;
+}
+
+def argument_failure(flag: bool) -> Result<bool, i64> {
+    let accepted = consume_later(if flag { string_from_str("Working")?.as_str(); } else { "Working"; }, fail()?);
+    Result { is_ok: true, value: accepted, error: 0 };
+}
+
+def later_failure(flag: bool, baseline: i64) -> Result<bool, i64> {
+    check_view(if flag { string_from_str("Working")?.as_str(); } else { "Working"; }, baseline, if flag { 1; } else { 0; })?;
+    fail()?;
+    Result { is_ok: true, value: true, error: 0 };
+}
+
+def round(flag: bool, baseline: i64) -> Result<bool, i64> {
+    if not check_view(if flag { string_from_str("Working")?.as_str(); } else { "Working"; }, baseline, if flag { 1; } else { 0; })? { return Result { is_ok: false, value: false, error: 102 }; };
+    if not check_view(if flag { "Working"; } else { { string_from_str("Working")?.as_str(); }; }, baseline, if flag { 0; } else { 1; })? { return Result { is_ok: false, value: false, error: 103 }; };
+    Result { is_ok: true, value: true, error: 0 };
+}
+
+def main() -> i64 {
+    let baseline = sengoo_string_live_handle_count();
+    let mut count = 0;
+    while count < 40 { let result = round(count % 2 == 0, baseline); if not result.is_ok() { println(result.error); return 1; }; let failure = later_failure(count % 2 == 0, baseline); if failure.is_ok() or failure.error != 17 { println(failure.error); return 2; }; let argument = argument_failure(count % 2 == 0); if argument.is_ok() or argument.error != 17 { return 4; }; if sengoo_string_live_handle_count() != baseline { return 3; }; count = count + 1; };
+    println("conditional borrowed owners remain live through their consumer");
+    0;
+}

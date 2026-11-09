@@ -1,0 +1,11 @@
+[package]
+name = "sgschema"
+version = "0.1.0"
+edition = "2026"
+description = "Explicit JSON Schema subset for Agent tool contracts."
+
+[lib]
+path = "src/lib.sg"
+
+[[test]]
+path = "tests/schema.sg"

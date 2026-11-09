@@ -1,0 +1,47 @@
+import sgagent;
+
+def retry_test(status: i64, code: i64, sent: bool, streamed: bool, side_effects: bool, attempt: i64, header: &str, expected: bool, delay: i64) -> i64 {
+    let evidence = RetryEvidence { attempt: attempt, status: status, error: code, request_started: sent, stream_observed: streamed, side_effects: side_effects };
+    let result = request_retry(&evidence, header, 1445412480000, 0);
+    if result.retry != expected or expected and result.delay_ms != delay { println("retry policy case failed"); return 1; };
+    0;
+}
+
+def main() -> i64 {
+    let mut failures = 0;
+    failures = failures + retry_test(429, 429, true, false, false, 1, "2", true, 2000);
+    failures = failures + retry_test(503, 503, true, false, false, 2, "", true, 500);
+    failures = failures + retry_test(500, 500, true, false, false, 1, "0", true, 250);
+    failures = failures + retry_test(502, 502, true, false, false, 6, "", false, 0);
+    failures = failures + retry_test(504, 504, true, false, false, 1, "31", true, 31000);
+    failures = failures + retry_test(401, 401, true, false, false, 1, "", true, 250);
+    failures = failures + retry_test(400, 400, true, false, false, 1, "", true, 250);
+    failures = failures + retry_test(429, 429, true, true, false, 1, "", true, 250);
+    failures = failures + retry_test(503, 503, true, false, true, 1, "", false, 0);
+    failures = failures + retry_test(0, 11, false, false, false, 1, "", true, 250);
+    failures = failures + retry_test(0, 9, false, false, false, 1, "", true, 250);
+    failures = failures + retry_test(0, 18, true, false, false, 1, "", true, 250);
+    failures = failures + retry_test(0, 7, false, false, false, 1, "", true, 250);
+    failures = failures + retry_test(0, 19, false, false, false, 1, "", false, 0);
+    failures = failures + retry_test(0, 18, false, false, false, 1, "", true, 250);
+    failures = failures + retry_test(429, 429, true, false, false, 1, "Wed, 21 Oct 2015 07:28:02 GMT", true, 2000);
+    failures = failures + retry_test(429, 429, true, false, false, 1, "Wed, 21 Oct 2015 07:29:00 GMT", true, 60000);
+    failures = failures + retry_test(429, 429, true, false, false, 1, "Wed, 31 Feb 2015 07:28:02 GMT", true, 250);
+    failures = failures + retry_test(429, 429, true, false, false, 1, "-1", true, 250);
+    failures = failures + retry_test(429, 429, true, false, false, 1, "99999999999999999999999", true, 250);
+    failures = failures + retry_test(429, 429, true, false, false, 1, "Sun, 01 Jan 1970 00:00:00 GMT", true, 250);
+    failures = failures + retry_test(0, 17, false, false, false, 1, "", true, 250);
+    failures = failures + retry_test(0, 17, true, false, false, 1, "", true, 250);
+    failures = failures + retry_test(0, 15, false, false, false, 1, "", true, 250);
+    failures = failures + retry_test(0, 16, false, false, false, 1, "", true, 250);
+    failures = failures + retry_test(502, 502, true, false, false, 3, "", true, 1000);
+    failures = failures + retry_test(502, 502, true, false, false, 4, "", true, 2000);
+    failures = failures + retry_test(502, 502, true, false, false, 5, "", true, 4000);
+    failures = failures + retry_test(200, 10, true, true, false, 1, "", true, 250);
+    failures = failures + retry_test(200, 11, true, true, false, 5, "", true, 4000);
+    failures = failures + retry_test(403, 403, true, false, false, 5, "", true, 4000);
+    let evidence = RetryEvidence { attempt: 2, status: 429, error: 429, request_started: true, stream_observed: false, side_effects: false };
+    if not request_retry(&evidence, "2", 1445412480000, 29000).retry { failures = failures + 1; };
+    if failures == 0 { println("bounded retry evidence and HTTP Retry-After acceptance passed"); };
+    failures;
+}

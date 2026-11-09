@@ -1,0 +1,29 @@
+import std::json;
+
+struct BorrowedClose {
+    document: JsonDoc,
+    closed: bool,
+}
+
+impl BorrowedClose {
+    def close(&mut self) -> bool {
+        self.closed = true;
+        true;
+    }
+}
+
+def exercise() -> Result<bool, i64> {
+    let document = json_doc_object_limits(4096, 128)?;
+    let mut owner = BorrowedClose { document: document, closed: false };
+    owner.close();
+    Result { is_ok: true, value: owner.closed, error: 0 };
+}
+
+def main() -> i64 {
+    let before = sengoo_json_bounded_live_documents();
+    let result = exercise();
+    if not result.is_ok() or not result.value { return 2; };
+    if sengoo_json_bounded_live_documents() != before { println("borrowed close suppressed scope cleanup"); return 1; };
+    println("borrowed close retains scope cleanup");
+    0;
+}

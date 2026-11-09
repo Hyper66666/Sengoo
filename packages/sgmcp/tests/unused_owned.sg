@@ -1,0 +1,16 @@
+import std::json;
+
+def exercise() -> Result<bool, i64> {
+    let mut index = 0;
+    while index < 20 { json_doc_object_limits(4096, 128)?; index = index + 1; };
+    Result { is_ok: true, value: true, error: 0 };
+}
+
+def main() -> i64 {
+    let before = sengoo_json_bounded_live_documents();
+    let result = exercise();
+    if not result.is_ok() { return 2; };
+    if sengoo_json_bounded_live_documents() != before { println("discarded owning Try value did not drop"); return 1; };
+    println("discarded owning Try value drops");
+    0;
+}

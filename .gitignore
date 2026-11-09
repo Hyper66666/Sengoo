@@ -23,6 +23,7 @@ desktop.ini
 /examples/**/build/
 /packages/**/build/
 /tools/stdlib/tests/build/
+/tools/sgeval/**/build/
 /.tmp-target-verify/
 
 # Temporary or scratch files

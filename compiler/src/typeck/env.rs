@@ -122,6 +122,10 @@ pub struct TypeEnv {
     interner: Rc<RefCell<TyInterner>>,
     /// Canonical stdlib `String { handle: i64 }` type identity for move rules.
     pub owned_string_ty: Option<Ty>,
+    /// Conservative ownership contracts available before body borrow checking.
+    pub(crate) borrowed_legacy_params: Rc<HashMap<String, Vec<bool>>>,
+    pub(crate) projected_legacy_params: Rc<HashMap<String, Vec<bool>>>,
+    pub(crate) native_borrow_observers: Rc<HashSet<String>>,
     /// Type keys for non-Copy values with compiler-managed ownership.
     drop_owned_type_keys: HashSet<String>,
     /// Resolved field layouts used by ownership analysis after type checking.
@@ -154,6 +158,9 @@ impl TypeEnv {
             next_ty_var_id: 0,
             interner: Rc::new(RefCell::new(TyInterner::new())),
             owned_string_ty: None,
+            borrowed_legacy_params: Rc::new(HashMap::new()),
+            projected_legacy_params: Rc::new(HashMap::new()),
+            native_borrow_observers: Rc::new(HashSet::new()),
             drop_owned_type_keys: HashSet::new(),
             struct_field_types: HashMap::new(),
             resolved_method_return_types: HashMap::new(),

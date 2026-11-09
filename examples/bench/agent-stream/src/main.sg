@@ -1,0 +1,148 @@
+import sgllm;
+
+import business;
+
+import std::args;
+
+import std::time;
+
+import std::io;
+
+extern "C" {
+    fn sengoo_string_live_handle_count() -> i64;
+    fn sengoo_buffer_live_handle_count() -> i64;
+    fn sengoo_net_stream_live_request_bytes() -> i64;
+}
+
+struct BenchStream {
+    job: ProviderJob,
+    index: i64,
+    start: i64,
+    first: i64,
+    ended: i64,
+    delta_count: i64,
+    delta_bytes: i64,
+    pending_high: i64,
+    reported: bool,
+    expected_pieces: i64,
+}
+
+struct BenchWater {
+    workers: i64,
+    handles: i64,
+    request_bytes: i64,
+    decoder_pending: i64,
+}
+
+def bench_need(valid: bool, code: i64) -> Result<bool, i64> {
+    Result { is_ok: valid, value: valid, error: if valid { 0; } else { code; } };
+}
+
+def bench_argument(index: i64) -> Result<String, i64> {
+    let output = ffi_buffer_new(arg_len(index)?)?;
+    let count = arg_copy(index, output)?;
+    string_from_utf8(output, count);
+}
+
+def bench_emit(value: &JsonDoc) -> Result<bool, i64> {
+    let encoded = value.serialize_string()?;
+    println(encoded.as_str());
+    bench_need(true, 0);
+}
+
+def bench_start(base: &String, index: i64, mode: i64) -> Result<BenchStream, i64> {
+    let mut config = llm_request_config(base.as_str(), 0, "synthetic-model")?;
+    config.limits.queue_bytes = 4096;
+    config.limits.idle_timeout_ms = 5000;
+    let history = json_parse(if mode == 1 { "{\"messages\":[{\"role\":\"user\",\"content\":\"cancel-wave\"}]}"; } else { if mode == 2 { "{\"messages\":[{\"role\":\"user\",\"content\":\"slow-wave\"}]}"; } else { "{\"messages\":[{\"role\":\"user\",\"content\":\"complete-wave\"}]}"; }; })?;
+    let tools = json_parse("{\"tools\":[]}")?;
+    let start = time_monotonic_ms();
+    bench_need(start >= 0, 12)?;
+    let job = llm_request_start(&config, "SYNTHETIC-ONLY", &history, &tools)?;
+    Result { is_ok: true, value: BenchStream { job: job, index: index, start: start, first: -1, ended: -1, delta_count: 0, delta_bytes: 0, pending_high: 0, reported: false, expected_pieces: if mode == 2 { 16384; } else { 16; } }, error: 0 };
+}
+
+def bench_pending(stream: &BenchStream) -> i64 {
+    stream.job.http.pending.used_len() + stream.job.sse.pending.used_len() + stream.job.sse.data.len();
+}
+
+def bench_sample(stream: &mut BenchStream, water: &mut BenchWater) {
+    let pending = bench_pending(stream);
+    if pending > stream.pending_high { stream.pending_high = pending; };
+    if pending > water.decoder_pending { water.decoder_pending = pending; };
+    let workers = sengoo_net_stream_live_workers();
+    let handles = sengoo_net_stream_live_handles();
+    let request_bytes = sengoo_net_stream_live_request_bytes();
+    if workers > water.workers { water.workers = workers; };
+    if handles > water.handles { water.handles = handles; };
+    if request_bytes > water.request_bytes { water.request_bytes = request_bytes; };
+}
+
+def bench_poll(stream: &mut BenchStream, water: &mut BenchWater) -> Result<bool, i64> {
+    bench_sample(stream, water);
+    if stream.reported { return bench_need(true, 0); };
+    let delta = stream.job.poll()?;
+    let now = time_monotonic_ms();
+    if delta.len() > 0 { if stream.first < 0 { stream.first = now - stream.start; }; stream.delta_count = stream.delta_count + 1; stream.delta_bytes = stream.delta_bytes + delta.len(); };
+    bench_sample(stream, water);
+    if stream.job.is_finished() { let accepted = stream.job.result()?; let content = llm_json_string(accepted.root(), "content")?; let expected = string_new(); let mut index = 0; while index < stream.expected_pieces { expected.push_str("世界😀 ")?; index = index + 1; }; bench_need(content.as_str() == expected.as_str(), 10)?; stream.ended = now - stream.start; stream.reported = true; let result = json_doc_object_limits(4096, 64)?; llm_put_string(&result, result.root(), "type", "completed_stream")?; llm_put_i64(&result, result.root(), "stream", stream.index)?; llm_put_i64(&result, result.root(), "first_delta_ms", stream.first)?; llm_put_i64(&result, result.root(), "completion_ms", stream.ended)?; llm_put_i64(&result, result.root(), "delta_count", stream.delta_count)?; llm_put_i64(&result, result.root(), "delta_bytes", stream.delta_bytes)?; llm_put_i64(&result, result.root(), "expected_utf8_bytes", expected.len())?; llm_put_i64(&result, result.root(), "sampled_decoder_pending_high_bytes", stream.pending_high)?; bench_emit(&result)?; (); };
+    bench_need(true, 0);
+}
+
+def bench_wave(base: &String, mode: i64) -> Result<bool, i64> {
+    let started = time_monotonic_ms();
+    let mut first = bench_start(base, 0, mode)?;
+    let mut second = bench_start(base, 1, mode)?;
+    let mut third = bench_start(base, 2, mode)?;
+    let mut fourth = bench_start(base, 3, mode)?;
+    let mut water = BenchWater { workers: 0, handles: 0, request_bytes: 0, decoder_pending: 0 };
+    if mode != 0 { time_sleep_ms(250); (); };
+    loop { bench_poll(&mut first, &mut water)?; bench_poll(&mut second, &mut water)?; bench_poll(&mut third, &mut water)?; bench_poll(&mut fourth, &mut water)?; if mode == 1 and time_monotonic_ms() - started >= 100 { let before = time_monotonic_ms(); first.job.cancel(); second.job.cancel(); third.job.cancel(); fourth.job.cancel(); let result = json_doc_object_limits(4096, 64)?; llm_put_string(&result, result.root(), "type", "cancel_requested")?; llm_put_i64(&result, result.root(), "cancel_calls_ms", time_monotonic_ms() - before)?; bench_emit(&result)?; break; }; if first.reported and second.reported and third.reported and fourth.reported { break; }; bench_need(time_monotonic_ms() - started < 15000, 11)?; time_sleep_ms(if mode == 2 { 5; } else { 1; }); };
+    let result = json_doc_object_limits(4096, 64)?;
+    llm_put_string(&result, result.root(), "type", if mode == 1 { "cancel_wave"; } else { if mode == 2 { "slow_wave"; } else { "complete_wave"; }; })?;
+    llm_put_i64(&result, result.root(), "initial_poll_delay_ms", if mode != 0 { 250; } else { 0; })?;
+    llm_put_i64(&result, result.root(), "poll_interval_ms", if mode == 2 { 5; } else { 1; })?;
+    llm_put_i64(&result, result.root(), "workers_sampled_peak", water.workers)?;
+    llm_put_i64(&result, result.root(), "handles_sampled_peak", water.handles)?;
+    llm_put_i64(&result, result.root(), "request_copy_bytes_sampled_peak", water.request_bytes)?;
+    llm_put_i64(&result, result.root(), "decoder_pending_sampled_high_bytes", water.decoder_pending)?;
+    llm_put_i64(&result, result.root(), "per_stream_native_queue_capacity_bytes", 4096)?;
+    result.root().object_set("native_queue_high_water_bytes", result.new_null()?)?;
+    llm_put_i64(&result, result.root(), "business_revision", bench_business_revision())?;
+    bench_emit(&result);
+}
+
+def bench_cleaned(started: i64, strings: i64, buffers: i64, documents: i64, reserved: i64) -> Result<bool, i64> {
+    let deadline = time_monotonic_ms() + 3000;
+    while sengoo_net_stream_live_workers() != 0 or sengoo_net_stream_live_request_bytes() != 0 { bench_need(time_monotonic_ms() < deadline, 12)?; time_sleep_ms(1); };
+    bench_need(sengoo_net_stream_live_handles() == 0 and sengoo_string_live_handle_count() == strings and sengoo_buffer_live_handle_count() == buffers and sengoo_json_bounded_live_documents() == documents and sengoo_json_bounded_reserved_bytes() == reserved, 12)?;
+    let result = json_doc_object_limits(4096, 64)?;
+    llm_put_string(&result, result.root(), "type", "baseline_restored")?;
+    llm_put_i64(&result, result.root(), "cleanup_wait_ms", time_monotonic_ms() - started)?;
+    llm_put_i64(&result, result.root(), "workers", sengoo_net_stream_live_workers())?;
+    llm_put_i64(&result, result.root(), "handles", sengoo_net_stream_live_handles())?;
+    llm_put_i64(&result, result.root(), "request_copy_bytes", sengoo_net_stream_live_request_bytes())?;
+    bench_emit(&result);
+}
+
+def bench_run() -> Result<bool, i64> {
+    bench_need(args_len() == 1, 2)?;
+    let base = bench_argument(0)?;
+    let strings = sengoo_string_live_handle_count();
+    let buffers = sengoo_buffer_live_handle_count();
+    let documents = sengoo_json_bounded_live_documents();
+    let reserved = sengoo_json_bounded_reserved_bytes();
+    bench_wave(&base, 0)?;
+    bench_cleaned(time_monotonic_ms(), strings, buffers, documents, reserved)?;
+    bench_wave(&base, 1)?;
+    bench_cleaned(time_monotonic_ms(), strings, buffers, documents, reserved)?;
+    bench_wave(&base, 2)?;
+    bench_cleaned(time_monotonic_ms(), strings, buffers, documents, reserved);
+}
+
+def main() -> i64 {
+    if args_len() == 1 { let argument = bench_argument(0); if argument.is_ok() { if argument.value.as_str() == "--startup-probe" { println("{\"type\":\"sdk_ready\"}"); return 0; }; }; };
+    let result = bench_run();
+    if not result.is_ok() { io_stderr_write("Agent stream benchmark failed\n"); return result.error; };
+    0;
+}

@@ -1,0 +1,39 @@
+import sgmcp;
+
+import std::args;
+
+def wait(client: &mut SgMcpClient) -> Result<JsonDoc, i64> {
+    loop { if client.poll()? { break; }; time_sleep_ms(1); };
+    client.result();
+}
+
+def run(server_path: &str) -> Result<bool, i64> {
+    let arguments = json_parse("[]")?;
+    let mut client = sgmcp_start(server_path, arguments.root(), ".")?;
+    client.begin_initialize("2025-11-25", "sengoo-example-client", 5000)?;
+    let accepted = wait(&mut client)?;
+    client.finish_initialize()?;
+    let empty = json_doc_object()?;
+    client.begin("tools/list", empty.root(), 5000)?;
+    let first = wait(&mut client)?;
+    let cursor = sgmcp_string(first.root().object_get("result")?, "nextCursor");
+    if cursor.len() > 0 { sgmcp_put(&empty, empty.root(), "cursor", cursor.as_str())?; client.begin("tools/list", empty.root(), 5000)?; let accepted = wait(&mut client)?; (); };
+    let params = json_parse("{\"name\":\"echo\",\"arguments\":{\"message\":\"Hello 中文😀\"},\"_meta\":{\"progressToken\":\"echo-progress\"}}")?;
+    client.begin("tools/call", params.root(), 5000)?;
+    let result = wait(&mut client)?;
+    let text = sgmcp_string(result.root().object_get("result")?.object_get("structuredContent")?, "message");
+    println(text.as_str());
+    client.close()?;
+    sgmcp_ok();
+}
+
+def main() -> i64 {
+    if args_len() != 1 { println("usage: echo-client SERVER_EXECUTABLE"); return 2; };
+    let size = arg_len(0).unwrap_or(0);
+    let buffer = ffi_buffer_new(size + 1).unwrap_or(Buffer { handle: 0 });
+    let count = arg_copy(0, buffer).unwrap_or(0);
+    let path = sgmcp_bytes_text(&buffer, count).unwrap_or(string_new());
+    let result = run(path.as_str());
+    if not result.is_ok() { println(result.error); return 1; };
+    0;
+}

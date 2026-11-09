@@ -1,0 +1,808 @@
+import std::string;
+
+import std::json;
+
+import std::collections;
+
+import std::ffi;
+
+import std::net;
+
+def llm_ok(value: i64) -> Result<i64, i64> {
+    Result { is_ok: true, value: value, error: 0 };
+}
+
+def llm_fail(code: i64) -> Result<i64, i64> {
+    Result { is_ok: false, value: 0, error: code };
+}
+
+def llm_text(text: &str) -> String {
+    string_from_str(text).unwrap_or(string_new());
+}
+
+def llm_join(a: &str, b: &str) -> Result<String, i64> {
+    let out = string_from_str(a)?;
+    out.push_str(b)?;
+    Result { is_ok: true, value: out, error: 0 };
+}
+
+def llm_byte_slice(text: &str, start: i64, end: i64) -> Result<String, i64> {
+    if start < 0 or end < start or end > text.len() { return string_result_err(2); };
+    string_from_bytes_raw(sengoo_stdlib_str_ptr(text) + start, end - start);
+}
+
+def llm_bytes(capacity: i64) -> Buffer {
+    ffi_buffer_new(capacity).unwrap_or(Buffer { handle: 0 });
+}
+
+def llm_bytes_error(code: i64) -> Result<Buffer, i64> {
+    Result { is_ok: false, value: Buffer { handle: 0 }, error: code };
+}
+
+def llm_bytes_index(buffer: &Buffer, pattern: &str) -> Result<i64, i64> {
+    let needle = ffi_buffer_from_bytes(pattern)?;
+    buffer.index_of_bytes(needle, 0);
+}
+
+def llm_bytes_append(destination: &Buffer, source: &Buffer, start: i64, count: i64) -> Result<i64, i64> {
+    if start < 0 or count < 0 or start > source.used_len() or count > source.used_len() - start { return llm_fail(2); };
+    ffi_byte_count_result(sengoo_ffi_buffer_append(destination.raw_handle(), source.ptr() + start, count));
+}
+
+def llm_bytes_text(buffer: &Buffer, start: i64, count: i64) -> Result<String, i64> {
+    if start < 0 or count < 0 or start > buffer.used_len() or count > buffer.used_len() - start { return string_result_err(2); };
+    string_from_bytes_raw(buffer.ptr() + start, count);
+}
+
+def llm_parse_unsigned(text: &str, radix: i64) -> Result<i64, i64> {
+    if text.len() == 0 { return llm_fail(2); };
+    let source = llm_text(text);
+    let iter = source.bytes();
+    let mut result = 0;
+    loop { let byte = iter.next(); if not byte.is_some { break; }; let mut digit = byte.value - 48; if byte.value >= 65 and byte.value <= 70 { digit = byte.value - 55; }; if byte.value >= 97 and byte.value <= 102 { digit = byte.value - 87; }; if digit < 0 or digit >= radix { iter.free(); return llm_fail(2); }; if result > (9223372036854775807 - digit) / radix { iter.free(); return llm_fail(13); }; result = result * radix + digit; };
+    iter.free();
+    llm_ok(result);
+}
+
+def llm_json_string(object: JsonValue, key: &str) -> Result<String, i64> {
+    object.object_get(key)?.string_value();
+}
+
+def llm_json_optional_string(object: JsonValue, key: &str) -> String {
+    if not object.object_has(key) { return string_new(); };
+    object.object_get(key).value.string_value().unwrap_or(string_new());
+}
+
+def llm_json_optional_i64(object: JsonValue, key: &str, fallback: i64) -> i64 {
+    if not object.object_has(key) { return fallback; };
+    let field = object.object_get(key);
+    if not field.is_ok() { return fallback; };
+    field.value.number_i64().unwrap_or(fallback);
+}
+
+def llm_put_string(document: &JsonDoc, object: JsonValue, key: &str, text: &str) -> Result<bool, i64> {
+    object.object_set(key, document.new_string(text)?);
+}
+
+def llm_put_i64(document: &JsonDoc, object: JsonValue, key: &str, value: i64) -> Result<bool, i64> {
+    object.object_set(key, document.new_i64(value)?);
+}
+
+def llm_put_bool(document: &JsonDoc, object: JsonValue, key: &str, value: bool) -> Result<bool, i64> {
+    object.object_set(key, document.new_bool(value)?);
+}
+
+def llm_diagnostic(text: &str) {
+    ();
+}
+
+def context_document() -> Result<JsonDoc, i64> {
+    json_doc_object_limits(1048576, 32768);
+}
+
+def context_empty_history() -> Result<JsonDoc, i64> {
+    let document = context_document()?;
+    document.root().object_set("messages", document.new_array()?)?;
+    Result { is_ok: true, value: document, error: 0 };
+}
+
+def context_copy_request_limits(source: &JsonDoc, target: &JsonDoc) -> Result<bool, i64> {
+    if source.root().object_has("context_window_tokens") { target.root().object_set("context_window_tokens", target.copy(source.root().object_get("context_window_tokens")?)?)?; (); };
+    if source.root().object_has("max_output_tokens") { target.root().object_set("max_output_tokens", target.copy(source.root().object_get("max_output_tokens")?)?)?; (); };
+    Result { is_ok: true, value: true, error: 0 };
+}
+
+struct HttpEndpoint {
+    host: String,
+    port: i64,
+    tls: bool,
+    path: String,
+}
+
+def http_endpoint(base: &str, route: &str) -> Result<HttpEndpoint, i64> {
+    let failed = HttpEndpoint { host: String { handle: 0 }, port: 0, tls: false, path: String { handle: 0 } };
+    let tls = str_starts_with(base, "https://");
+    if not tls and not str_starts_with(base, "http://") { return Result { is_ok: false, value: failed, error: 2 }; };
+    if str_contains(base, "\r") or str_contains(base, "\n") or str_contains(base, "#") or str_contains(base, "@") or str_contains(base, "?") { return Result { is_ok: false, value: failed, error: 2 }; };
+    let offset = if tls { 8; } else { 7; };
+    let remainder = llm_byte_slice(base, offset, base.len())?;
+    let slash = str_index_of(remainder.as_str(), "/");
+    let authority = if slash < 0 { remainder.clone()?; } else { llm_byte_slice(remainder.as_str(), 0, slash)?; };
+    let mut host = authority.clone()?;
+    let mut port = if tls { 443; } else { 80; };
+    if str_starts_with(authority.as_str(), "[") { let closing = str_index_of(authority.as_str(), "]"); if closing < 0 { return Result { is_ok: false, value: failed, error: 2 }; }; host = llm_byte_slice(authority.as_str(), 1, closing)?; if closing + 1 < authority.len() { let tail = llm_byte_slice(authority.as_str(), closing + 1, authority.len())?; if not str_starts_with(tail.as_str(), ":") { return Result { is_ok: false, value: failed, error: 2 }; }; port = llm_parse_unsigned(llm_byte_slice(tail.as_str(), 1, tail.len())?.as_str(), 10)?; }; } else { let colon = str_index_of(authority.as_str(), ":"); if colon >= 0 { host = llm_byte_slice(authority.as_str(), 0, colon)?; port = llm_parse_unsigned(llm_byte_slice(authority.as_str(), colon + 1, authority.len())?.as_str(), 10)?; }; };
+    if host.len() == 0 or port < 1 or port > 65535 { return Result { is_ok: false, value: failed, error: 2 }; };
+    if not tls and host.as_str() != "localhost" and host.as_str() != "127.0.0.1" and host.as_str() != "::1" { return Result { is_ok: false, value: failed, error: 7 }; };
+    let mut path = if slash < 0 { string_new(); } else { llm_byte_slice(remainder.as_str(), slash, remainder.len())?; };
+    while str_ends_with(path.as_str(), "/") { path = llm_byte_slice(path.as_str(), 0, path.len() - 1)?; };
+    if not str_ends_with(path.as_str(), route) { path.push_str(route)?; (); };
+    Result { is_ok: true, value: HttpEndpoint { host: host, port: port, tls: tls, path: path }, error: 0 };
+}
+
+def http_request(endpoint: &HttpEndpoint, protocol: i64, credential: &str, body: &str) -> Result<String, i64> {
+    if str_contains(credential, "\r") or str_contains(credential, "\n") { return string_result_err(2); };
+    let request = llm_text("POST ");
+    request.push_str(endpoint.path.as_str())?;
+    request.push_str(" HTTP/1.1\r\nHost: ")?;
+    if str_contains(endpoint.host.as_str(), ":") { request.push_str("[")?; request.push_str(endpoint.host.as_str())?; request.push_str("]")?; (); } else { request.push_str(endpoint.host.as_str())?; (); };
+    request.push_str(":")?;
+    request.push_i64(endpoint.port)?;
+    request.push_str("\r\nContent-Type: application/json\r\nAccept: text/event-stream\r\nAccept-Encoding: identity\r\nConnection: close\r\nUser-Agent: sgllm/0.1\r\n")?;
+    if protocol == 2 { request.push_str("anthropic-version: 2023-06-01\r\nx-api-key: ")?; (); } else { request.push_str("Authorization: Bearer ")?; (); };
+    request.push_str(credential)?;
+    request.push_str("\r\nContent-Length: ")?;
+    request.push_i64(body.len())?;
+    request.push_str("\r\n\r\n")?;
+    request.push_str(body)?;
+    Result { is_ok: true, value: request, error: 0 };
+}
+
+def http_request_bounded(endpoint: &HttpEndpoint, protocol: i64, credential: &str, body: &str, request_limit: i64) -> Result<String, i64> {
+    if request_limit < 1 or request_limit > 16777216 { return string_result_err(2); };
+    if body.len() > request_limit { return string_result_err(13); };
+    let request = http_request(endpoint, protocol, credential, body)?;
+    if request.len() > request_limit { llm_diagnostic("The complete HTTP request exceeds the local byte limit; nothing was sent."); return string_result_err(13); };
+    Result { is_ok: true, value: request, error: 0 };
+}
+
+struct HttpDecoder {
+    pending: Buffer,
+    headers_ready: bool,
+    status: i64,
+    retry_after: String,
+    body_mode: i64,
+    remaining: i64,
+    chunk_remaining: i64,
+    chunk_state: i64,
+    complete: bool,
+}
+
+def http_decoder() -> HttpDecoder {
+    HttpDecoder { pending: llm_bytes(2097152), headers_ready: false, status: 0, retry_after: string_new(), body_mode: 0, remaining: 0, chunk_remaining: 0, chunk_state: 0, complete: false };
+}
+
+impl HttpDecoder {
+    def consume(&mut self, count: i64) -> Result<bool, i64> {
+        self.pending.consume(count)?;
+        Result { is_ok: true, value: true, error: 0 };
+    }
+    def feed(&mut self, bytes: &str) -> Result<Buffer, i64> {
+        let input = ffi_buffer_from_bytes(bytes)?;
+        self.feed_bytes(&input, 0, input.used_len());
+    }
+    def feed_bytes(&mut self, bytes: &Buffer, start: i64, count: i64) -> Result<Buffer, i64> {
+        if start < 0 or count < 0 or start > bytes.used_len() or count > bytes.used_len() - start { return llm_bytes_error(2); };
+        if count > 2097152 - self.pending.used_len() { return llm_bytes_error(13); };
+        let output = ffi_buffer_new(self.pending.used_len() + count)?;
+        if self.complete and count != 0 { return llm_bytes_error(10); };
+        if self.pending.used_len() + count > 2097152 { return llm_bytes_error(13); };
+        llm_bytes_append(&self.pending, bytes, start, count)?;
+        if not self.headers_ready { let end = llm_bytes_index(&self.pending, "\r\n\r\n")?; if end < 0 { if self.pending.used_len() > 65536 { return llm_bytes_error(13); }; return Result { is_ok: true, value: output, error: 0 }; }; if end > 65536 { return llm_bytes_error(13); }; let header = llm_bytes_text(&self.pending, 0, end)?; let lines = header.split("\r\n"); let status_line = lines.next(); if not status_line.is_some or not str_starts_with(status_line.value.as_str(), "HTTP/1.") or status_line.value.len() < 12 { return llm_bytes_error(10); }; self.status = llm_parse_unsigned(llm_byte_slice(status_line.value.as_str(), 9, 12)?.as_str(), 10)?; let mut content_length = -1; let mut chunked = false; loop { let line = lines.next(); if not line.is_some { break; }; let lower = str_to_ascii_lower(line.value.as_str())?; if str_starts_with(lower.as_str(), "retry-after:") { if self.retry_after.len() > 0 { return llm_bytes_error(10); }; let raw = llm_byte_slice(line.value.as_str(), 12, line.value.len())?; self.retry_after = str_trim(raw.as_str())?; if self.retry_after.len() < 1 or self.retry_after.len() > 128 { return llm_bytes_error(10); }; }; if str_starts_with(lower.as_str(), "content-length:") { let raw = llm_byte_slice(lower.as_str(), 15, lower.len())?; let length = llm_parse_unsigned(str_trim(raw.as_str())?.as_str(), 10)?; if content_length != -1 and content_length != length { return llm_bytes_error(10); }; content_length = length; }; if str_starts_with(lower.as_str(), "transfer-encoding:") { let raw = llm_byte_slice(lower.as_str(), 18, lower.len())?; let coding = str_trim(raw.as_str())?; if coding.as_str() != "chunked" { return llm_bytes_error(10); }; chunked = true; }; if str_starts_with(lower.as_str(), "content-encoding:") { let raw = llm_byte_slice(lower.as_str(), 17, lower.len())?; let coding = str_trim(raw.as_str())?; if coding.as_str() != "identity" { return llm_bytes_error(10); }; }; }; if chunked and content_length >= 0 { return llm_bytes_error(10); }; self.body_mode = if chunked { 2; } else { if content_length >= 0 { 1; } else { 3; }; }; self.remaining = content_length; self.headers_ready = true; self.consume(end + 4)?; };
+        if self.body_mode == 3 { llm_bytes_append(&output, &self.pending, 0, self.pending.used_len())?; self.pending.clear(); return Result { is_ok: true, value: output, error: 0 }; };
+        if self.body_mode == 1 { if self.pending.used_len() > self.remaining { return llm_bytes_error(10); }; self.remaining = self.remaining - self.pending.used_len(); llm_bytes_append(&output, &self.pending, 0, self.pending.used_len())?; self.pending.clear(); self.complete = self.remaining == 0; return Result { is_ok: true, value: output, error: 0 }; };
+        loop { if self.chunk_state == 0 { let end = llm_bytes_index(&self.pending, "\r\n")?; if end < 0 { if self.pending.used_len() > 8192 { return llm_bytes_error(13); }; break; }; let line = llm_bytes_text(&self.pending, 0, end)?; let extension = str_index_of(line.as_str(), ";"); let size = if extension < 0 { line.clone()?; } else { llm_byte_slice(line.as_str(), 0, extension)?; }; self.chunk_remaining = llm_parse_unsigned(size.as_str(), 16)?; if self.chunk_remaining > 1048576 { return llm_bytes_error(13); }; self.consume(end + 2)?; self.chunk_state = if self.chunk_remaining == 0 { 3; } else { 1; }; }; if self.chunk_state == 1 { let count = if self.pending.used_len() < self.chunk_remaining { self.pending.used_len(); } else { self.chunk_remaining; }; if count == 0 { break; }; llm_bytes_append(&output, &self.pending, 0, count)?; self.consume(count)?; self.chunk_remaining = self.chunk_remaining - count; if self.chunk_remaining != 0 { break; }; self.chunk_state = 2; }; if self.chunk_state == 2 { if self.pending.used_len() < 2 { break; }; if llm_bytes_index(&self.pending, "\r\n")? != 0 { return llm_bytes_error(10); }; self.consume(2)?; self.chunk_state = 0; }; if self.chunk_state == 3 { let end = llm_bytes_index(&self.pending, "\r\n")?; if end < 0 { break; }; if end == 0 { self.consume(2)?; self.complete = true; self.chunk_state = 4; break; }; self.consume(end + 2)?; }; if self.chunk_state == 4 { break; }; };
+        Result { is_ok: true, value: output, error: 0 };
+    }
+    def finish(&mut self) -> Result<bool, i64> {
+        if not self.headers_ready { return Result { is_ok: false, value: false, error: 10 }; };
+        if self.body_mode == 3 { self.complete = true; };
+        Result { is_ok: self.complete and self.pending.used_len() == 0, value: self.complete, error: if self.complete and self.pending.used_len() == 0 { 0; } else { 10; } };
+    }
+}
+
+struct SseEvent {
+    event: String,
+    data: String,
+    id: String,
+}
+
+struct SseDecoder {
+    pending: Buffer,
+    data: String,
+    event: String,
+    id: String,
+    maximum: i64,
+    first: bool,
+}
+
+def sse_events_error(code: i64) -> Result<Vec<SseEvent>, i64> {
+    let empty: Vec<SseEvent> = Vec { handle: 0, marker: 0 };
+    Result { is_ok: false, value: empty, error: code };
+}
+
+def sse_decoder() -> SseDecoder {
+    SseDecoder { pending: llm_bytes(1048576), data: string_new(), event: string_new(), id: string_new(), maximum: 1048576, first: true };
+}
+
+impl SseDecoder {
+    def feed(&mut self, chunk: &str) -> Result<Vec<SseEvent>, i64> {
+        let bytes = ffi_buffer_from_bytes(chunk)?;
+        self.feed_bytes(&bytes, 0, bytes.used_len());
+    }
+    def feed_bytes(&mut self, chunk: &Buffer, start: i64, count: i64) -> Result<Vec<SseEvent>, i64> {
+        if start < 0 or count < 0 or start > chunk.used_len() or count > chunk.used_len() - start { return sse_events_error(2); };
+        let events: Vec<SseEvent> = vec_new();
+        if self.pending.used_len() + count > self.maximum { return sse_events_error(13); };
+        llm_bytes_append(&self.pending, chunk, start, count)?;
+        loop { let newline = llm_bytes_index(&self.pending, "\n")?; if newline < 0 { break; }; let mut line = llm_bytes_text(&self.pending, 0, newline)?; self.pending.consume(newline + 1)?; if str_ends_with(line.as_str(), "\r") { line = llm_byte_slice(line.as_str(), 0, line.len() - 1)?; }; if self.first { self.first = false; if str_starts_with(line.as_str(), "﻿") { line = llm_byte_slice(line.as_str(), 3, line.len())?; }; }; if line.len() == 0 { if self.data.len() > 0 { let payload = llm_byte_slice(self.data.as_str(), 0, self.data.len() - 1)?; let name = if self.event.len() == 0 { llm_text("message"); } else { self.event.clone()?; }; events.push(SseEvent { event: name, data: payload, id: self.id.clone()? }); (); }; self.data = string_new(); self.event = string_new(); } else { if not str_starts_with(line.as_str(), ":") { let colon = str_index_of(line.as_str(), ":"); let name = if colon < 0 { line.clone()?; } else { llm_byte_slice(line.as_str(), 0, colon)?; }; let mut value = if colon < 0 { string_new(); } else { llm_byte_slice(line.as_str(), colon + 1, line.len())?; }; if str_starts_with(value.as_str(), " ") { value = llm_byte_slice(value.as_str(), 1, value.len())?; }; if name.as_str() == "data" { if self.data.len() + value.len() + 1 > self.maximum { return sse_events_error(13); }; self.data.push_str(value.as_str())?; self.data.push_str("\n")?; (); }; if name.as_str() == "event" { self.event = value.clone()?; }; if name.as_str() == "id" { self.id = value.clone()?; }; }; }; };
+        Result { is_ok: true, value: events, error: 0 };
+    }
+    def finish(&self) -> Result<bool, i64> {
+        if self.pending.used_len() != 0 or self.data.len() != 0 { return Result { is_ok: false, value: false, error: 10 }; };
+        Result { is_ok: true, value: true, error: 0 };
+    }
+}
+
+def provider_media_error(code: i64) -> Result<JsonValue, i64> {
+    Result { is_ok: false, value: JsonValue { doc_handle: 0, node_id: 0 }, error: code };
+}
+
+def provider_media_c_string_safe(value: &String) -> bool {
+    value.len() == value.as_str().len();
+}
+
+def provider_media_fields(value: JsonValue, allowed: &str) -> Result<bool, i64> {
+    let mut index = 0;
+    while index < value.object_len()? { let key = value.object_key(index)?; if not provider_media_c_string_safe(&key) { return Result { is_ok: false, value: false, error: 2 }; }; let wrapped = llm_join("|", key.as_str())?; wrapped.push_str("|")?; if not str_contains(allowed, wrapped.as_str()) { return Result { is_ok: false, value: false, error: 2 }; }; index = index + 1; };
+    Result { is_ok: true, value: true, error: 0 };
+}
+
+def provider_base64_digit(byte: i64) -> i64 {
+    if byte >= 65 and byte <= 90 { return byte - 65; };
+    if byte >= 97 and byte <= 122 { return byte - 71; };
+    if byte >= 48 and byte <= 57 { return byte + 4; };
+    if byte == 43 { return 62; };
+    if byte == 47 { return 63; };
+    -1;
+}
+
+def provider_media_base64(value: &String, expected: i64) -> Result<bool, i64> {
+    if expected < 1 or expected > 8388608 { return Result { is_ok: false, value: false, error: 13 }; };
+    if value.len() != ((expected + 2) / 3) * 4 { return Result { is_ok: false, value: false, error: 2 }; };
+    let bytes = value.bytes();
+    let mut index = 0;
+    let padding = if expected % 3 == 0 { 0; } else { 3 - expected % 3; };
+    loop { let byte = bytes.next(); if not byte.is_some { break; }; let digit = provider_base64_digit(byte.value); let pad = index >= value.len() - padding; if pad and byte.value != 61 or not pad and digit < 0 { bytes.free(); return Result { is_ok: false, value: false, error: 2 }; }; if index == value.len() - padding - 1 and (padding == 2 and digit % 16 != 0 or padding == 1 and digit % 4 != 0) { bytes.free(); return Result { is_ok: false, value: false, error: 2 }; }; index = index + 1; };
+    bytes.free();
+    Result { is_ok: true, value: true, error: 0 };
+}
+
+def provider_media_content(document: &JsonDoc, original: JsonValue, protocol: i64, enabled: bool) -> Result<JsonValue, i64> {
+    if not enabled { llm_diagnostic("Media content requires an explicitly captured target capability; nothing was sent."); return provider_media_error(7); };
+    let role = llm_json_string(original, "role")?;
+    if not provider_media_c_string_safe(&role) or role.as_str() != "user" or original.object_has("tool_calls") or original.object_has("tool_call_id") { return provider_media_error(2); };
+    if original.object_has("content") { let content_value = original.object_get("content")?; if not content_value.string_value().is_ok() { return provider_media_error(2); }; let content = content_value.string_value()?; if not provider_media_c_string_safe(&content) or content.len() != 0 { return provider_media_error(2); }; };
+    let parts = original.object_get("content_parts")?;
+    let count = parts.array_len()?;
+    if count < 1 or count > 64 { return provider_media_error(13); };
+    let output = document.new_array()?;
+    let mut index = 0;
+    let mut input_bytes = 0;
+    while index < count { let part = parts.array_get(index)?; let kind = llm_json_string(part, "type")?; if not provider_media_c_string_safe(&kind) { return provider_media_error(2); }; let wire = document.new_object()?; if kind.as_str() == "text" { provider_media_fields(part, "|type||text|")?; let text = llm_json_string(part, "text")?; if not provider_media_c_string_safe(&text) { return provider_media_error(2); }; input_bytes = input_bytes + text.len(); llm_put_string(document, wire, "type", if protocol == 1 { "input_text"; } else { "text"; })?; llm_put_string(document, wire, "text", text.as_str())?; (); } else { if kind.as_str() != "image" { return provider_media_error(8); }; provider_media_fields(part, "|type||mime||data||byte_length|")?; let mime = llm_json_string(part, "mime")?; let data = llm_json_string(part, "data")?; if not provider_media_c_string_safe(&mime) or not provider_media_c_string_safe(&data) { return provider_media_error(2); }; let size = part.object_get("byte_length")?.number_i64()?; if mime.as_str() != "image/png" and mime.as_str() != "image/jpeg" { return provider_media_error(8); }; provider_media_base64(&data, size)?; input_bytes = input_bytes + data.len(); if protocol == 2 { llm_put_string(document, wire, "type", "image")?; let source = document.new_object()?; llm_put_string(document, source, "type", "base64")?; llm_put_string(document, source, "media_type", mime.as_str())?; llm_put_string(document, source, "data", data.as_str())?; wire.object_set("source", source)?; (); } else { let url = llm_text("data:"); url.push_str(mime.as_str())?; url.push_str(";base64,")?; url.push_str(data.as_str())?; llm_put_string(document, wire, "type", if protocol == 1 { "input_image"; } else { "image_url"; })?; if protocol == 1 { llm_put_string(document, wire, "image_url", url.as_str())?; (); } else { let reference = document.new_object()?; llm_put_string(document, reference, "url", url.as_str())?; wire.object_set("image_url", reference)?; (); }; }; }; if input_bytes > 16777216 { return provider_media_error(13); }; output.array_push(wire)?; index = index + 1; };
+    Result { is_ok: true, value: output, error: 0 };
+}
+
+def provider_owned_text_valid(text: &String) -> Result<bool, i64> {
+    if text.len() != text.as_str().len() { return Result { is_ok: false, value: false, error: 10 }; };
+    Result { is_ok: true, value: true, error: 0 };
+}
+
+def provider_json_text_valid(value: JsonValue, depth: i64) -> Result<bool, i64> {
+    if depth > 64 { return Result { is_ok: false, value: false, error: 13 }; };
+    let kind = value.kind()?;
+    if kind == JSON_KIND_STRING() { let text = value.string_value()?; return provider_owned_text_valid(&text); };
+    if kind == JSON_KIND_ARRAY() { let mut index = 0; while index < value.array_len()? { provider_json_text_valid(value.array_get(index)?, depth + 1)?; index = index + 1; }; };
+    if kind == JSON_KIND_OBJECT() { let keys = value.object_keys()?; let mut index = 0; while index < keys.root().array_len()? { let key = keys.root().array_get(index)?.string_value()?; provider_owned_text_valid(&key)?; provider_json_text_valid(value.object_get(key.as_str())?, depth + 1)?; index = index + 1; }; };
+    Result { is_ok: true, value: true, error: 0 };
+}
+
+def provider_protocol(name: &str) -> i64 {
+    if name == "chatCompletions" or name == "openai-chat-completions" or name == "chat-completions" or name == "openai" or name == "chat_completions" { return 0; };
+    if name == "openai-responses" or name == "responses" or name == "openai_responses" { return 1; };
+    if name == "messages" or name == "anthropic-messages" or name == "anthropic" or name == "anthropic_messages" { return 2; };
+    -1;
+}
+
+def provider_route(protocol: i64) -> &str {
+    if protocol == 0 { return "/chat/completions"; };
+    if protocol == 1 { return "/responses"; };
+    "/messages";
+}
+
+def provider_history_tools(document: &JsonDoc, calls: JsonValue, protocol: i64) -> Result<JsonValue, i64> {
+    let output = document.new_array()?;
+    let count = calls.array_len()?;
+    let mut index = 0;
+    while index < count { let call = calls.array_get(index)?; let id = llm_json_string(call, "id")?; let name = llm_json_string(call, "name")?; let arguments = llm_json_string(call, "arguments")?; provider_owned_text_valid(&id)?; provider_owned_text_valid(&name)?; provider_owned_text_valid(&arguments)?; let item = document.new_object()?; if protocol == 0 { llm_put_string(document, item, "id", id.as_str())?; llm_put_string(document, item, "type", "function")?; let function = document.new_object()?; llm_put_string(document, function, "name", name.as_str())?; llm_put_string(document, function, "arguments", arguments.as_str())?; item.object_set("function", function)?; (); }; if protocol == 1 { llm_put_string(document, item, "type", "function_call")?; llm_put_string(document, item, "call_id", id.as_str())?; llm_put_string(document, item, "name", name.as_str())?; llm_put_string(document, item, "arguments", arguments.as_str())?; (); }; if protocol == 2 { llm_put_string(document, item, "type", "tool_use")?; llm_put_string(document, item, "id", id.as_str())?; llm_put_string(document, item, "name", name.as_str())?; let parsed = json_parse(arguments.as_str())?; item.object_set("input", document.copy(parsed.root())?)?; (); }; output.array_push(item)?; index = index + 1; };
+    Result { is_ok: true, value: output, error: 0 };
+}
+
+def provider_effort_valid(effort: &str) -> bool {
+    effort.len() == 0 or effort == "low" or effort == "medium" or effort == "high" or effort == "xhigh" or effort == "max";
+}
+
+def provider_effort_wire(protocol: i64, effort: &str) -> &str {
+    if effort == "max" and (protocol == 0 or protocol == 1) { return "xhigh"; };
+    if effort == "xhigh" and protocol == 2 { return "high"; };
+    effort;
+}
+
+def provider_encode_effort(document: &JsonDoc, root: JsonValue, protocol: i64, effort: &str) -> Result<bool, i64> {
+    if not provider_effort_valid(effort) { return Result { is_ok: false, value: false, error: 2 }; };
+    if effort.len() == 0 { return Result { is_ok: true, value: true, error: 0 }; };
+    if protocol == 0 { llm_put_string(document, root, "reasoning_effort", provider_effort_wire(protocol, effort))?; return Result { is_ok: true, value: true, error: 0 }; };
+    if protocol == 1 { let reasoning = document.new_object()?; llm_put_string(document, reasoning, "effort", provider_effort_wire(protocol, effort))?; root.object_set("reasoning", reasoning)?; return Result { is_ok: true, value: true, error: 0 }; };
+    if protocol == 2 { let thinking = document.new_object()?; llm_put_string(document, thinking, "type", "adaptive")?; llm_put_string(document, thinking, "display", "summarized")?; root.object_set("thinking", thinking)?; let config = document.new_object()?; llm_put_string(document, config, "effort", provider_effort_wire(protocol, effort))?; root.object_set("output_config", config)?; return Result { is_ok: true, value: true, error: 0 }; };
+    Result { is_ok: false, value: false, error: 2 };
+}
+
+def provider_build_request(protocol: i64, model: &str, history: &JsonDoc, tools: &JsonDoc) -> Result<String, i64> {
+    provider_build_request_with_effort(protocol, model, "", history, tools);
+}
+
+def provider_build_request_with_effort(protocol: i64, model: &str, effort: &str, history: &JsonDoc, tools: &JsonDoc) -> Result<String, i64> {
+    provider_build_request_checked_with_effort(protocol, model, effort, history, tools, false, 16777216);
+}
+
+def provider_build_request_with_media(protocol: i64, model: &str, history: &JsonDoc, tools: &JsonDoc, images_allowed: bool, body_limit: i64) -> Result<String, i64> {
+    provider_build_request_with_media_effort(protocol, model, "", history, tools, images_allowed, body_limit);
+}
+
+def provider_build_request_with_media_effort(protocol: i64, model: &str, effort: &str, history: &JsonDoc, tools: &JsonDoc, images_allowed: bool, body_limit: i64) -> Result<String, i64> {
+    provider_build_request_checked_with_effort(protocol, model, effort, history, tools, images_allowed, body_limit);
+}
+
+def provider_build_request_checked(protocol: i64, model: &str, history: &JsonDoc, tools: &JsonDoc, images_allowed: bool, body_limit: i64) -> Result<String, i64> {
+    provider_build_request_checked_with_effort(protocol, model, "", history, tools, images_allowed, body_limit);
+}
+
+def provider_build_request_checked_with_effort(protocol: i64, model: &str, effort: &str, history: &JsonDoc, tools: &JsonDoc, images_allowed: bool, body_limit: i64) -> Result<String, i64> {
+    if protocol < 0 or protocol > 2 or model.len() == 0 { return string_result_err(2); };
+    if not provider_effort_valid(effort) { return string_result_err(2); };
+    if body_limit < 1 or body_limit > 16777216 { return string_result_err(2); };
+    let size = history.serialize_string()?.len() + tools.serialize_string()?.len();
+    let document = json_doc_object_limits(if images_allowed { body_limit; } else { if size * 2 + 65536 < body_limit { size * 2 + 65536; } else { body_limit; }; }, 65536)?;
+    let root = document.root();
+    llm_put_string(&document, root, "model", model)?;
+    llm_put_bool(&document, root, "stream", true)?;
+    let window = llm_json_optional_i64(history.root(), "context_window_tokens", 262144);
+    let maximum = llm_json_optional_i64(history.root(), "max_output_tokens", 131072);
+    if window < 64 or window > 1048576 or maximum < 1 or maximum > 1048576 { return string_result_err(2); };
+    let mut text_bytes = size;
+    let mut image_tokens = 0;
+    let mut image_row = 0;
+    let history_rows = history.root().object_get("messages")?;
+    while image_row < history_rows.array_len()? { let row = history_rows.array_get(image_row)?; if row.object_has("content_parts") { let parts = row.object_get("content_parts")?; let mut part_index = 0; if parts.array_len()? > 64 { return string_result_err(13); }; while part_index < parts.array_len()? { let part = parts.array_get(part_index)?; if llm_json_optional_string(part, "type").as_str() == "image" and part.object_has("data") { let data = llm_json_string(part, "data")?; if data.len() > text_bytes { return string_result_err(10); }; text_bytes = text_bytes - data.len(); image_tokens = image_tokens + 4096; }; part_index = part_index + 1; }; }; image_row = image_row + 1; };
+    let estimated = (text_bytes + 2) / 3 + history_rows.array_len()? * 16 + image_tokens;
+    let remaining = window - estimated - 32;
+    if remaining < 1 or protocol == 1 and (maximum < 16 or remaining < 16) { return string_result_err(13); };
+    let output_limit = if maximum < remaining { maximum; } else { remaining; };
+    llm_put_i64(&document, root, if protocol == 0 { "max_completion_tokens"; } else { if protocol == 1 { "max_output_tokens"; } else { "max_tokens"; }; }, output_limit)?;
+    if protocol == 1 { llm_put_bool(&document, root, "store", false)?; let include = document.new_array()?; include.array_push(document.new_string("reasoning.encrypted_content")?)?; root.object_set("include", include)?; (); };
+    provider_encode_effort(&document, root, protocol, effort)?;
+    let messages = document.new_array()?;
+    let source = history.root().object_get("messages")?;
+    let mut index = 0;
+    let system = string_new();
+    while index < source.array_len()? { let original = source.array_get(index)?; let role = llm_json_string(original, "role")?; let text = llm_json_optional_string(original, "content"); provider_owned_text_valid(&role)?; provider_owned_text_valid(&text)?; let media = original.object_has("content_parts"); let parts = if media { provider_media_content(&document, original, protocol, images_allowed)?; } else { document.new_array()?; }; let message = document.new_object()?; if protocol == 0 { llm_put_string(&document, message, "role", role.as_str())?; if media { message.object_set("content", parts)?; (); } else { llm_put_string(&document, message, "content", text.as_str())?; (); }; if original.object_has("tool_call_id") { message.object_set("tool_call_id", document.copy(original.object_get("tool_call_id")?)?)?; (); }; if original.object_has("tool_calls") { message.object_set("tool_calls", provider_history_tools(&document, original.object_get("tool_calls")?, 0)?)?; (); }; messages.array_push(message)?; (); }; if protocol == 1 { if role.as_str() == "tool" { llm_put_string(&document, message, "type", "function_call_output")?; message.object_set("call_id", document.copy(original.object_get("tool_call_id")?)?)?; llm_put_string(&document, message, "output", text.as_str())?; messages.array_push(message)?; (); } else { if role.as_str() == "assistant" and original.object_has("responses_output") { let items = original.object_get("responses_output")?; if items.array_len()? > 64 { return string_result_err(13); }; let mut item_index = 0; while item_index < items.array_len()? { let item = items.array_get(item_index)?; provider_json_text_valid(item, 0)?; let kind = llm_json_string(item, "type")?; if kind.as_str() != "reasoning" and kind.as_str() != "function_call" and kind.as_str() != "message" { return string_result_err(10); }; messages.array_push(document.copy(item)?)?; item_index = item_index + 1; }; index = index + 1; continue; }; if text.len() > 0 or media { llm_put_string(&document, message, "role", role.as_str())?; if media { message.object_set("content", parts)?; (); } else { llm_put_string(&document, message, "content", text.as_str())?; (); }; messages.array_push(message)?; (); }; if original.object_has("tool_calls") { let calls = provider_history_tools(&document, original.object_get("tool_calls")?, 1)?; let mut call_index = 0; while call_index < calls.array_len()? { messages.array_push(calls.array_get(call_index)?)?; call_index = call_index + 1; }; }; }; }; if protocol == 2 { if role.as_str() == "system" { system.push_str(text.as_str())?; system.push_str("\n")?; (); } else { let content = document.new_array()?; if role.as_str() == "tool" { llm_put_string(&document, message, "role", "user")?; let result = document.new_object()?; llm_put_string(&document, result, "type", "tool_result")?; result.object_set("tool_use_id", document.copy(original.object_get("tool_call_id")?)?)?; llm_put_string(&document, result, "content", text.as_str())?; content.array_push(result)?; (); } else { llm_put_string(&document, message, "role", role.as_str())?; if media { let mut part_index = 0; while part_index < parts.array_len()? { content.array_push(parts.array_get(part_index)?)?; part_index = part_index + 1; }; (); }; if text.len() > 0 { let part = document.new_object()?; llm_put_string(&document, part, "type", "text")?; llm_put_string(&document, part, "text", text.as_str())?; content.array_push(part)?; (); }; if original.object_has("tool_calls") { let calls = provider_history_tools(&document, original.object_get("tool_calls")?, 2)?; let mut call_index = 0; while call_index < calls.array_len()? { content.array_push(calls.array_get(call_index)?)?; call_index = call_index + 1; }; }; }; message.object_set("content", content)?; messages.array_push(message)?; (); }; }; index = index + 1; };
+    root.object_set(if protocol == 1 { "input"; } else { "messages"; }, messages)?;
+    if protocol == 2 { llm_put_string(&document, root, "system", system.as_str())?; (); };
+    if protocol == 0 { let options = document.new_object()?; llm_put_bool(&document, options, "include_usage", true)?; root.object_set("stream_options", options)?; (); };
+    let definitions = document.new_array()?;
+    let source_tools = tools.root().object_get("tools")?;
+    index = 0;
+    while index < source_tools.array_len()? { let tool = source_tools.array_get(index)?; let function = document.new_object()?; function.object_set("name", document.copy(tool.object_get("name")?)?)?; function.object_set("description", document.copy(tool.object_get("description")?)?)?; function.object_set(if protocol == 2 { "input_schema"; } else { "parameters"; }, document.copy(tool.object_get("parameters")?)?)?; if protocol == 0 { let wrapper = document.new_object()?; llm_put_string(&document, wrapper, "type", "function")?; wrapper.object_set("function", function)?; definitions.array_push(wrapper)?; (); } else { if protocol == 1 { llm_put_string(&document, function, "type", "function")?; (); }; definitions.array_push(function)?; (); }; index = index + 1; };
+    if definitions.array_len()? > 0 { root.object_set("tools", definitions)?; (); };
+    let serialized = document.serialize_string()?;
+    if serialized.len() > body_limit { llm_diagnostic("The complete serialized model request exceeds the local byte limit; nothing was sent."); return string_result_err(13); };
+    Result { is_ok: true, value: serialized, error: 0 };
+}
+
+struct ProviderToolCall {
+    index: i64,
+    id: String,
+    name: String,
+    arguments: String,
+}
+
+impl ProviderToolCall {
+    def number(&self) -> i64 {
+        self.index;
+    }
+    def id_matches(&self, id: &str) -> bool {
+        self.id.as_str() == id;
+    }
+    def add_fragments(&self, id: &str, name: &str, arguments: &str) -> Result<bool, i64> {
+        if self.id.len() == 0 { self.id.push_str(id)?; (); } else { if id.len() > 0 and self.id.as_str() != id { return Result { is_ok: false, value: false, error: 10 }; }; };
+        self.name.push_str(name)?;
+        self.arguments.push_str(arguments)?;
+        if self.arguments.len() > 1048576 { return Result { is_ok: false, value: false, error: 13 }; };
+        Result { is_ok: true, value: true, error: 0 };
+    }
+    def to_json(&self, document: &JsonDoc) -> Result<JsonValue, i64> {
+        provider_owned_text_valid(&self.id)?;
+        provider_owned_text_valid(&self.name)?;
+        provider_owned_text_valid(&self.arguments)?;
+        if self.id.len() == 0 or self.name.len() == 0 { return Result { is_ok: false, value: JsonValue { doc_handle: 0, node_id: 0 }, error: 10 }; };
+        let arguments = if self.arguments.len() == 0 { llm_text("{}"); } else { self.arguments.clone()?; };
+        let valid = json_parse(arguments.as_str())?;
+        if valid.root().kind()? != JSON_KIND_OBJECT() { return Result { is_ok: false, value: JsonValue { doc_handle: 0, node_id: 0 }, error: 10 }; };
+        let out = document.new_object()?;
+        llm_put_string(document, out, "id", self.id.as_str())?;
+        llm_put_string(document, out, "name", self.name.as_str())?;
+        llm_put_string(document, out, "arguments", arguments.as_str())?;
+        Result { is_ok: true, value: out, error: 0 };
+    }
+}
+
+struct ProviderTurn {
+    content: String,
+    calls: Vec<ProviderToolCall>,
+    reasoning_items: Vec<String>,
+    reasoning_indices: Vec<i64>,
+    done: bool,
+    input_tokens: i64,
+    output_tokens: i64,
+    finish_reason: String,
+    reasoning: bool,
+    activity: i64,
+    usage_reported: bool,
+    responses_end_turn: i64,
+    failure_kind: i64,
+}
+
+def provider_turn() -> ProviderTurn {
+    let calls: Vec<ProviderToolCall> = vec_new();
+    let reasoning_items: Vec<String> = vec_new();
+    let reasoning_indices: Vec<i64> = vec_new();
+    ProviderTurn { content: string_new(), calls: calls, reasoning_items: reasoning_items, reasoning_indices: reasoning_indices, done: false, input_tokens: 0, output_tokens: 0, finish_reason: string_new(), reasoning: false, activity: 0, usage_reported: false, responses_end_turn: -1, failure_kind: 0 };
+}
+
+impl ProviderTurn {
+    def failure_label(&self) -> &str {
+        if self.failure_kind == 1 { return "Provider reported a failed response"; };
+        if self.failure_kind == 2 { return "Provider reported an incomplete response"; };
+        if self.failure_kind == 3 { return "Provider reported a stream error"; };
+        if self.failure_kind == 4 or self.finish_reason.as_str() == "length" or self.finish_reason.as_str() == "max_tokens" { return "Provider output token limit reached"; };
+        if self.failure_kind == 5 or self.finish_reason.as_str() == "content_filter" { return "Provider content filter stopped the response"; };
+        if self.failure_kind == 6 or self.finish_reason.as_str() == "refusal" { return "Provider refused the response"; };
+        if self.failure_kind == 7 { return "Provider rate limit reported inside the stream"; };
+        if self.failure_kind == 8 { return "Invalid provider event JSON"; };
+        if self.failure_kind == 9 { return "Provider event exceeded the local JSON byte, node or memory limit"; };
+        if self.failure_kind == 10 { return "Invalid provider event fields, identity or tool arguments"; };
+        "";
+    }
+    def classify_failure(&mut self, value: JsonValue) -> Result<bool, i64> {
+        if value.kind()? != JSON_KIND_OBJECT() { return Result { is_ok: true, value: false, error: 0 }; };
+        let code = llm_json_optional_string(value, "code");
+        let kind = llm_json_optional_string(value, "type");
+        let reason = llm_json_optional_string(value, "reason");
+        if code.as_str() == "max_output_tokens" or reason.as_str() == "max_output_tokens" or reason.as_str() == "max_tokens" { self.failure_kind = 4; };
+        if code.as_str() == "content_filter" or reason.as_str() == "content_filter" { self.failure_kind = 5; };
+        if code.as_str() == "rate_limit_exceeded" or kind.as_str() == "rate_limit_error" { self.failure_kind = 7; };
+        Result { is_ok: true, value: true, error: 0 };
+    }
+    def retain_reasoning(&mut self, output_index: i64, item: JsonValue) -> Result<bool, i64> {
+        if output_index < 0 or output_index > 4096 { return Result { is_ok: false, value: false, error: 10 }; };
+        let kind = llm_json_string(item, "type")?;
+        provider_json_text_valid(item, 0)?;
+        if kind.as_str() != "reasoning" and kind.as_str() != "function_call" and kind.as_str() != "message" { return Result { is_ok: false, value: false, error: 10 }; };
+        let id = llm_json_optional_string(item, "id");
+        if id.len() > 256 or kind.as_str() == "reasoning" and id.len() == 0 { return Result { is_ok: false, value: false, error: 10 }; };
+        let owned = json_doc_object()?;
+        owned.root().object_set("item", owned.copy(item)?)?;
+        let serialized = owned.serialize_string()?;
+        if serialized.len() > 262144 { return Result { is_ok: false, value: false, error: 13 }; };
+        let mut index = 0;
+        let mut total = serialized.len();
+        let mut replace = -1;
+        while index < self.reasoning_indices.len() { let previous = self.reasoning_items.get(index)?; total = total + previous.len(); let old = json_parse(previous.as_str())?; let previous_id = llm_json_optional_string(old.root().object_get("item")?, "id"); if self.reasoning_indices.get(index).unwrap_or(-1) != output_index and id.len() > 0 and previous_id.as_str() == id.as_str() { return Result { is_ok: false, value: false, error: 10 }; }; if self.reasoning_indices.get(index).unwrap_or(-1) == output_index { if id.len() > 0 and previous_id.len() > 0 and id.as_str() != previous_id.as_str() { return Result { is_ok: false, value: false, error: 10 }; }; if llm_json_string(old.root().object_get("item")?, "type")?.as_str() != kind.as_str() { return Result { is_ok: false, value: false, error: 10 }; }; replace = index; total = total - previous.len(); }; index = index + 1; };
+        if total > 786432 { return Result { is_ok: false, value: false, error: 13 }; };
+        if replace >= 0 { self.reasoning_items.set(replace, serialized); return Result { is_ok: true, value: true, error: 0 }; };
+        if self.reasoning_items.len() >= 64 { return Result { is_ok: false, value: false, error: 13 }; };
+        self.reasoning_indices.push(output_index);
+        self.reasoning_items.push(serialized);
+        let mut position = self.reasoning_indices.len() - 1;
+        while position > 0 and self.reasoning_indices.get(position).unwrap_or(-1) < self.reasoning_indices.get(position - 1).unwrap_or(-1) { let left_number = self.reasoning_indices.get(position - 1).unwrap_or(-1); let right_number = self.reasoning_indices.get(position).unwrap_or(-1); let left = self.reasoning_items.get(position - 1)?; let right = self.reasoning_items.get(position)?; self.reasoning_indices.set(position - 1, right_number); self.reasoning_indices.set(position, left_number); self.reasoning_items.set(position - 1, right); self.reasoning_items.set(position, left); position = position - 1; };
+        Result { is_ok: true, value: true, error: 0 };
+    }
+    def complete_tool(&mut self, output_index: i64, item: JsonValue) -> Result<bool, i64> {
+        let id = llm_json_string(item, "call_id")?;
+        let name = llm_json_string(item, "name")?;
+        let arguments = llm_json_string(item, "arguments")?;
+        provider_owned_text_valid(&id)?;
+        provider_owned_text_valid(&name)?;
+        provider_owned_text_valid(&arguments)?;
+        let replacement = ProviderToolCall { index: output_index, id: id, name: name, arguments: arguments };
+        let mut index = 0;
+        while index < self.calls.len() { if self.calls.get(index).number() == output_index { let existing = self.calls.get(index); if existing.id.len() > 0 and not existing.id_matches(replacement.id.as_str()) { return Result { is_ok: false, value: false, error: 10 }; }; self.calls.set(index, replacement); return Result { is_ok: true, value: true, error: 0 }; }; index = index + 1; };
+        if self.calls.len() >= 64 { return Result { is_ok: false, value: false, error: 13 }; };
+        self.calls.push(replacement);
+        Result { is_ok: true, value: true, error: 0 };
+    }
+    def tool_delta(&mut self, index: i64, id: &str, name: &str, arguments: &str) -> Result<bool, i64> {
+        let mut cursor = 0;
+        while cursor < self.calls.len() { let existing: &ProviderToolCall = self.calls.get(cursor); if existing.number() == index { let appended = existing.add_fragments(id, name, arguments); return appended; }; cursor = cursor + 1; };
+        if self.calls.len() >= 64 { return Result { is_ok: false, value: false, error: 13 }; };
+        self.calls.push(ProviderToolCall { index: index, id: llm_text(id), name: llm_text(name), arguments: llm_text(arguments) });
+        Result { is_ok: true, value: true, error: 0 };
+    }
+    def text_delta(&mut self, text: &str) -> Result<String, i64> {
+        if self.content.len() + text.len() > 2097152 { return string_result_err(13); };
+        self.content.push_str(text)?;
+        string_from_str(text);
+    }
+    def owned_text_delta(&mut self, text: &String) -> Result<String, i64> {
+        provider_owned_text_valid(text)?;
+        self.text_delta(text.as_str());
+    }
+    def event(&mut self, protocol: i64, data: &str) -> Result<String, i64> {
+        let result = self.decode_event(protocol, data);
+        if not result.is_ok() and self.failure_kind == 0 { self.failure_kind = 10; };
+        result;
+    }
+    def decode_event(&mut self, protocol: i64, data: &str) -> Result<String, i64> {
+        if protocol == 0 and data == "[DONE]" { self.done = true; self.activity = 0; return Result { is_ok: true, value: string_new(), error: 0 }; };
+        if self.done { return string_result_err(10); };
+        let parsed = json_parse_limits(data, 1048576, 65536);
+        if not parsed.is_ok() { self.failure_kind = if parsed.error == 13 { 9; } else { 8; }; return string_result_err(parsed.error); };
+        let document = parsed?;
+        let root = document.root();
+        if root.object_has("error") and not root.object_get("error")?.is_null() { self.failure_kind = 3; self.classify_failure(root.object_get("error")?)?; return string_result_err(9); };
+        if protocol == 0 { if root.object_has("usage") { let usage = root.object_get("usage")?; if not usage.is_null() { self.input_tokens = llm_json_optional_i64(usage, "prompt_tokens", self.input_tokens); self.output_tokens = llm_json_optional_i64(usage, "completion_tokens", self.output_tokens); self.usage_reported = true; }; }; if root.object_has("choices") { let choices = root.object_get("choices")?; if choices.array_len()? > 0 { let choice = choices.array_get(0)?; if choice.object_has("finish_reason") { let reason = choice.object_get("finish_reason")?; if not reason.is_null() { let finish = reason.string_value()?; provider_owned_text_valid(&finish)?; self.finish_reason = finish; }; }; if choice.object_has("delta") { let delta = choice.object_get("delta")?; if delta.object_has("reasoning_content") and not delta.object_get("reasoning_content")?.is_null() { let reasoning = delta.object_get("reasoning_content")?.string_value()?; provider_owned_text_valid(&reasoning)?; if reasoning.len() > 0 { self.activity = 1; }; }; if delta.object_has("refusal") and not delta.object_get("refusal")?.is_null() { self.failure_kind = 6; return string_result_err(7); }; if delta.object_has("tool_calls") { self.activity = 0; let calls = delta.object_get("tool_calls")?; let mut cursor = 0; while cursor < calls.array_len()? { let call = calls.array_get(cursor)?; let index = llm_json_optional_i64(call, "index", 0); let id = llm_json_optional_string(call, "id"); let mut name = string_new(); let mut arguments = string_new(); if call.object_has("function") { let function = call.object_get("function")?; name = llm_json_optional_string(function, "name"); arguments = llm_json_optional_string(function, "arguments"); }; provider_owned_text_valid(&id)?; provider_owned_text_valid(&name)?; provider_owned_text_valid(&arguments)?; self.tool_delta(index, id.as_str(), name.as_str(), arguments.as_str())?; cursor = cursor + 1; }; }; let text = llm_json_optional_string(delta, "content"); if text.len() > 0 { self.activity = 0; }; return self.owned_text_delta(&text); }; }; }; };
+        if protocol == 1 { let kind = llm_json_optional_string(root, "type"); provider_owned_text_valid(&kind)?; if kind.as_str() == "response.refusal.delta" or kind.as_str() == "response.refusal.done" { self.failure_kind = 6; return string_result_err(7); }; if kind.as_str() == "response.output_text.delta" { self.activity = 0; let text = llm_json_string(root, "delta")?; return self.owned_text_delta(&text); }; if kind.as_str() == "response.output_item.added" { let item = root.object_get("item")?; let item_type = llm_json_optional_string(item, "type"); provider_owned_text_valid(&item_type)?; self.retain_reasoning(llm_json_optional_i64(root, "output_index", 0), item)?; if item_type.as_str() == "reasoning" { self.reasoning = true; self.activity = 1; }; if item_type.as_str() == "function_call" { self.activity = 0; let id = llm_json_string(item, "call_id")?; let name = llm_json_string(item, "name")?; let args = llm_json_optional_string(item, "arguments"); provider_owned_text_valid(&id)?; provider_owned_text_valid(&name)?; provider_owned_text_valid(&args)?; self.tool_delta(llm_json_optional_i64(root, "output_index", 0), id.as_str(), name.as_str(), args.as_str())?; (); }; }; if kind.as_str() == "response.output_item.done" { let item = root.object_get("item")?; let item_type = llm_json_optional_string(item, "type"); self.retain_reasoning(llm_json_optional_i64(root, "output_index", 0), item)?; if item_type.as_str() == "function_call" { self.complete_tool(llm_json_optional_i64(root, "output_index", 0), item)?; (); }; if item_type.as_str() == "reasoning" { self.reasoning = true; self.activity = 0; }; }; if kind.as_str() == "response.function_call_arguments.delta" { let arguments = llm_json_string(root, "delta")?; provider_owned_text_valid(&arguments)?; self.tool_delta(llm_json_optional_i64(root, "output_index", 0), "", "", arguments.as_str())?; (); }; if kind.as_str() == "response.failed" or kind.as_str() == "response.incomplete" or kind.as_str() == "error" { self.failure_kind = if kind.as_str() == "response.failed" { 1; } else { if kind.as_str() == "response.incomplete" { 2; } else { 3; }; }; if root.object_has("response") { let response = root.object_get("response")?; if response.object_has("error") { self.classify_failure(response.object_get("error")?)?; (); }; if response.object_has("incomplete_details") { self.classify_failure(response.object_get("incomplete_details")?)?; (); }; }; return string_result_err(10); }; if kind.as_str() == "response.completed" { if root.object_has("response") { let response = root.object_get("response")?; if response.object_has("error") and not response.object_get("error")?.is_null() { self.failure_kind = 1; self.classify_failure(response.object_get("error")?)?; return string_result_err(9); }; if response.object_has("incomplete_details") and not response.object_get("incomplete_details")?.is_null() { self.failure_kind = 2; self.classify_failure(response.object_get("incomplete_details")?)?; return string_result_err(10); }; if response.object_has("status") and llm_json_string(response, "status")?.as_str() != "completed" { self.failure_kind = 2; return string_result_err(10); }; if response.object_has("end_turn") { let end_turn = response.object_get("end_turn")?.bool_value()?; self.responses_end_turn = if end_turn { 1; } else { 0; }; }; if response.object_has("output") { let output = response.object_get("output")?; let mut output_index = 0; let final_text = string_new(); while output_index < output.array_len()? { let item = output.array_get(output_index)?; self.retain_reasoning(output_index, item)?; if llm_json_optional_string(item, "type").as_str() == "function_call" { self.complete_tool(output_index, item)?; (); }; if llm_json_optional_string(item, "type").as_str() == "reasoning" { self.reasoning = true; }; if llm_json_optional_string(item, "type").as_str() == "message" and item.object_has("content") { let content = item.object_get("content")?; let mut part_index = 0; while part_index < content.array_len()? { let part = content.array_get(part_index)?; if llm_json_optional_string(part, "type").as_str() == "refusal" { self.failure_kind = 6; return string_result_err(7); }; if llm_json_optional_string(part, "type").as_str() == "output_text" { final_text.push_str(llm_json_string(part, "text")?.as_str())?; (); }; part_index = part_index + 1; }; }; output_index = output_index + 1; }; if self.content.len() == 0 { self.content = final_text; }; }; if response.object_has("usage") { let usage = response.object_get("usage")?; self.input_tokens = llm_json_optional_i64(usage, "input_tokens", 0); self.output_tokens = llm_json_optional_i64(usage, "output_tokens", 0); self.usage_reported = not usage.is_null(); }; }; self.done = true; self.activity = 0; self.finish_reason = llm_text("stop"); }; };
+        if protocol == 2 { let kind = llm_json_optional_string(root, "type"); provider_owned_text_valid(&kind)?; if kind.as_str() == "message_start" { let message = root.object_get("message")?; if message.object_has("usage") { let usage = message.object_get("usage")?; self.input_tokens = llm_json_optional_i64(usage, "input_tokens", 0); self.usage_reported = not usage.is_null(); }; }; if kind.as_str() == "content_block_start" { let item = root.object_get("content_block")?; let item_type = llm_json_optional_string(item, "type"); provider_owned_text_valid(&item_type)?; if item_type.as_str() == "thinking" or item_type.as_str() == "redacted_thinking" { self.activity = 1; }; if item_type.as_str() == "tool_use" { self.activity = 0; let id = llm_json_string(item, "id")?; let name = llm_json_string(item, "name")?; provider_owned_text_valid(&id)?; provider_owned_text_valid(&name)?; self.tool_delta(llm_json_optional_i64(root, "index", 0), id.as_str(), name.as_str(), "")?; (); }; if item_type.as_str() == "text" { self.activity = 0; let text = llm_json_optional_string(item, "text"); return self.owned_text_delta(&text); }; }; if kind.as_str() == "content_block_delta" { let delta = root.object_get("delta")?; let delta_type = llm_json_optional_string(delta, "type"); provider_owned_text_valid(&delta_type)?; if delta_type.as_str() == "thinking_delta" { self.activity = 1; }; if delta_type.as_str() == "text_delta" { self.activity = 0; let text = llm_json_string(delta, "text")?; return self.owned_text_delta(&text); }; if delta_type.as_str() == "input_json_delta" { let arguments = llm_json_string(delta, "partial_json")?; provider_owned_text_valid(&arguments)?; self.tool_delta(llm_json_optional_i64(root, "index", 0), "", "", arguments.as_str())?; (); }; }; if kind.as_str() == "message_delta" { let delta = root.object_get("delta")?; self.finish_reason = llm_json_optional_string(delta, "stop_reason"); provider_owned_text_valid(&self.finish_reason)?; if root.object_has("usage") { self.output_tokens = llm_json_optional_i64(root.object_get("usage")?, "output_tokens", 0); }; }; if kind.as_str() == "content_block_stop" { self.activity = 0; }; if kind.as_str() == "message_stop" { self.done = true; self.activity = 0; }; if kind.as_str() == "error" { self.failure_kind = 3; return string_result_err(9); }; };
+        Result { is_ok: true, value: string_new(), error: 0 };
+    }
+    def finish(&self) -> Result<JsonDoc, i64> {
+        let document = json_doc_object()?;
+        if not self.done or self.finish_reason.len() == 0 or self.finish_reason.as_str() == "length" or self.finish_reason.as_str() == "max_tokens" or self.finish_reason.as_str() == "content_filter" or self.finish_reason.as_str() == "refusal" { return Result { is_ok: false, value: JsonDoc { handle: 0 }, error: 10 }; };
+        let root = document.root();
+        llm_put_string(&document, root, "role", "assistant")?;
+        llm_put_string(&document, root, "content", self.content.as_str())?;
+        if self.responses_end_turn >= 0 { llm_put_bool(&document, root, "responses_end_turn", self.responses_end_turn == 1)?; (); };
+        llm_put_bool(&document, root, "requires_continuation", self.responses_end_turn == 0 and self.finish_reason.as_str() == "stop")?;
+        let calls = document.new_array()?;
+        let mut index = 0;
+        while index < self.calls.len() { let call = self.calls.get(index).to_json(&document)?; let id = llm_json_string(call, "id")?; let mut previous = 0; while previous < index { if self.calls.get(previous).id_matches(id.as_str()) { return Result { is_ok: false, value: JsonDoc { handle: 0 }, error: 10 }; }; previous = previous + 1; }; calls.array_push(call)?; index = index + 1; };
+        root.object_set("tool_calls", calls)?;
+        if self.reasoning_items.len() > 0 { let items = document.new_array()?; let mut reasoning_index = 0; while reasoning_index < self.reasoning_items.len() { let item = json_parse(self.reasoning_items.get(reasoning_index)?.as_str())?; let retained = item.root().object_get("item")?; let copied = document.copy(retained)?; if llm_json_optional_string(retained, "type").as_str() == "function_call" { let mut call_index = 0; while call_index < self.calls.len() { let call = self.calls.get(call_index); if call.number() == self.reasoning_indices.get(reasoning_index).unwrap_or(-1) { let valid = call.to_json(&document)?; llm_put_string(&document, copied, "call_id", llm_json_string(valid, "id")?.as_str())?; llm_put_string(&document, copied, "name", llm_json_string(valid, "name")?.as_str())?; llm_put_string(&document, copied, "arguments", llm_json_string(valid, "arguments")?.as_str())?; break; }; call_index = call_index + 1; }; }; items.array_push(copied)?; reasoning_index = reasoning_index + 1; }; root.object_set("responses_output", items)?; };
+        llm_put_i64(&document, root, "input_tokens", self.input_tokens)?;
+        llm_put_i64(&document, root, "output_tokens", self.output_tokens)?;
+        Result { is_ok: true, value: document, error: 0 };
+    }
+}
+
+struct ProviderJob {
+    stream: NetByteStream,
+    base: String,
+    model: String,
+    connection: String,
+    protocol: i64,
+    http: HttpDecoder,
+    sse: SseDecoder,
+    turn: ProviderTurn,
+    finished: bool,
+    error: i64,
+    stream_observed: bool,
+    failure_stage: i64,
+}
+
+def provider_target_history(history: &JsonDoc, base: &str, model: &str) -> Result<JsonDoc, i64> {
+    provider_target_history_scoped(history, base, model, "");
+}
+
+def provider_target_history_scoped(history: &JsonDoc, base: &str, model: &str, connection: &str) -> Result<JsonDoc, i64> {
+    let size = history.serialize_string()?.len();
+    let output = json_doc_object_limits(if size + 4096 < 16777216 { size + 4096; } else { 16777216; }, 32768)?;
+    context_copy_request_limits(history, &output)?;
+    let items = output.new_array()?;
+    output.root().object_set("messages", items)?;
+    let source = history.root().object_get("messages")?;
+    let mut index = 0;
+    while index < source.array_len()? { let item = source.array_get(index)?; if (item.object_has("responses_output") or item.object_has("responses_end_turn") or item.object_has("responses_endpoint")) and (llm_json_optional_string(item, "responses_endpoint").as_str() != base or llm_json_optional_string(item, "responses_model").as_str() != model or llm_json_optional_string(item, "responses_connection").as_str() != connection) { let public = output.new_object()?; let field_names = llm_text("role,content,tool_calls,tool_call_id,content_parts,context_summary"); let fields = field_names.split(","); loop { let next = fields.next(); if not next.is_some { break; }; let key = next.value; if item.object_has(key.as_str()) { public.object_set(key.as_str(), output.copy(item.object_get(key.as_str())?)?)?; (); }; }; items.array_push(public)?; (); } else { items.array_push(output.copy(item)?)?; (); }; index = index + 1; };
+    Result { is_ok: true, value: output, error: 0 };
+}
+
+def provider_job_start(base: &str, protocol: i64, model: &str, key: &str, history: &JsonDoc, tools: &JsonDoc) -> Result<ProviderJob, i64> {
+    provider_job_start_with_effort(base, protocol, model, "", key, history, tools);
+}
+
+def provider_job_start_with_effort(base: &str, protocol: i64, model: &str, effort: &str, key: &str, history: &JsonDoc, tools: &JsonDoc) -> Result<ProviderJob, i64> {
+    provider_job_start_with_effort_scoped(base, protocol, model, effort, "", key, history, tools);
+}
+
+def provider_job_start_with_effort_scoped(base: &str, protocol: i64, model: &str, effort: &str, connection: &str, key: &str, history: &JsonDoc, tools: &JsonDoc) -> Result<ProviderJob, i64> {
+    let endpoint = http_endpoint(base, provider_route(protocol))?;
+    let targeted = provider_target_history_scoped(history, base, model, connection)?;
+    let body = provider_build_request_with_effort(protocol, model, effort, &targeted, tools)?;
+    let request = http_request(&endpoint, protocol, key, body.as_str())?;
+    let stream = net_stream_start(endpoint.host.as_str(), endpoint.port, endpoint.tls, request.as_str(), 30000, 90000, 262144)?;
+    Result { is_ok: true, value: ProviderJob { stream: stream, base: llm_text(base), model: llm_text(model), connection: llm_text(connection), protocol: protocol, http: http_decoder(), sse: sse_decoder(), turn: provider_turn(), finished: false, error: 0, stream_observed: false, failure_stage: 0 }, error: 0 };
+}
+
+def provider_job_start_with_media(base: &str, protocol: i64, model: &str, key: &str, history: &JsonDoc, tools: &JsonDoc, images_allowed: bool, body_limit: i64, request_limit: i64) -> Result<ProviderJob, i64> {
+    provider_job_start_with_media_effort(base, protocol, model, "", key, history, tools, images_allowed, body_limit, request_limit);
+}
+
+def provider_job_start_with_media_effort(base: &str, protocol: i64, model: &str, effort: &str, key: &str, history: &JsonDoc, tools: &JsonDoc, images_allowed: bool, body_limit: i64, request_limit: i64) -> Result<ProviderJob, i64> {
+    provider_job_start_with_media_effort_scoped(base, protocol, model, effort, "", key, history, tools, images_allowed, body_limit, request_limit);
+}
+
+def provider_job_start_with_media_effort_scoped(base: &str, protocol: i64, model: &str, effort: &str, connection: &str, key: &str, history: &JsonDoc, tools: &JsonDoc, images_allowed: bool, body_limit: i64, request_limit: i64) -> Result<ProviderJob, i64> {
+    let endpoint = http_endpoint(base, provider_route(protocol))?;
+    let targeted = provider_target_history_scoped(history, base, model, connection)?;
+    let body = provider_build_request_with_media_effort(protocol, model, effort, &targeted, tools, images_allowed, body_limit)?;
+    let request = http_request_bounded(&endpoint, protocol, key, body.as_str(), request_limit)?;
+    let stream = net_stream_start_bounded(endpoint.host.as_str(), endpoint.port, endpoint.tls, request.as_str(), 30000, 90000, 262144, request_limit)?;
+    Result { is_ok: true, value: ProviderJob { stream: stream, base: llm_text(base), model: llm_text(model), connection: llm_text(connection), protocol: protocol, http: http_decoder(), sse: sse_decoder(), turn: provider_turn(), finished: false, error: 0, stream_observed: false, failure_stage: 0 }, error: 0 };
+}
+
+impl ProviderJob {
+    def failure_stage_label(&self) -> &str {
+        if self.http.headers_ready and (self.http.status < 200 or self.http.status >= 300) { return "http_status"; };
+        if self.failure_stage == 1 { return "network_read"; };
+        if self.failure_stage == 2 { return "http_decode"; };
+        if self.failure_stage == 3 { return "http_finish"; };
+        if self.failure_stage == 4 { return "sse_decode"; };
+        if self.failure_stage == 5 { return "sse_finish"; };
+        if self.failure_stage == 6 { return "provider_event"; };
+        if self.failure_stage == 7 { return "provider_terminal"; };
+        if self.failure_stage == 8 { return "provider_validation"; };
+        "";
+    }
+    def failure_label(&self) -> &str {
+        if self.http.headers_ready and (self.http.status < 200 or self.http.status >= 300) { return ""; };
+        if self.turn.failure_label().len() > 0 { return self.turn.failure_label(); };
+        if self.failure_stage == 2 { return "Invalid HTTP response framing"; };
+        if self.failure_stage == 3 { return "HTTP response body ended before completion"; };
+        if self.failure_stage == 4 { return "Invalid SSE data or UTF-8"; };
+        if self.failure_stage == 5 { return "SSE event ended before completion"; };
+        if self.failure_stage == 6 { return "Invalid provider event or tool arguments"; };
+        if self.failure_stage == 7 { return "Stream ended without a provider completion event"; };
+        if self.failure_stage == 8 { return "Provider completion or tool calls failed validation"; };
+        "";
+    }
+    def poll(&mut self) -> Result<String, i64> {
+        let result = self.poll_body();
+        if not result.is_ok() { self.error = result.error; self.finished = true; self.stream.cancel(); (); };
+        result;
+    }
+    def poll_body(&mut self) -> Result<String, i64> {
+        let output = string_new();
+        if self.finished { return Result { is_ok: true, value: output, error: 0 }; };
+        if self.error != 0 { return string_result_err(self.error); };
+        let buffer = ffi_buffer_new(16384)?;
+        let read = self.stream.read_into(buffer);
+        if read.error != 0 { self.failure_stage = 1; self.error = read.error; return string_result_err(read.error); };
+        if not read.ready { return Result { is_ok: true, value: output, error: 0 }; };
+        if read.eof { self.failure_stage = 3; let checked = self.http.finish(); if not checked.is_ok() { self.error = checked.error; return string_result_err(checked.error); }; self.failure_stage = 5; self.sse.finish()?; self.failure_stage = 7; if not self.turn.done { return string_result_err(10); }; self.finished = true; self.failure_stage = 0; return Result { is_ok: true, value: output, error: 0 }; };
+        self.failure_stage = 2;
+        let bytes = self.http.feed_bytes(&buffer, 0, read.count)?;
+        if self.http.headers_ready and (self.http.status < 200 or self.http.status >= 300) { self.stream.cancel(); self.error = self.http.status; return string_result_err(self.http.status); };
+        if bytes.used_len() > 0 { self.stream_observed = true; };
+        self.failure_stage = 4;
+        let events = self.sse.feed_bytes(&bytes, 0, bytes.used_len())?;
+        let mut index = 0;
+        while index < events.len() { let event: &SseEvent = events.get(index); self.failure_stage = 6; let delta = self.turn.event(self.protocol, event.data.as_str())?; output.push_str(delta.as_str())?; index = index + 1; };
+        if self.http.complete { self.failure_stage = 3; let checked = self.http.finish(); if not checked.is_ok() { self.error = checked.error; return string_result_err(checked.error); }; self.failure_stage = 5; self.sse.finish()?; self.failure_stage = 7; if not self.turn.done { return string_result_err(10); }; self.stream.cancel(); self.finished = true; };
+        self.failure_stage = 0;
+        Result { is_ok: true, value: output, error: 0 };
+    }
+    def cancel(&mut self) {
+        self.stream.cancel();
+        self.error = 19;
+        self.finished = true;
+        ();
+    }
+    def result(&self) -> Result<JsonDoc, i64> {
+        if not self.finished { return Result { is_ok: false, value: JsonDoc { handle: 0 }, error: 12 }; };
+        if self.error != 0 { return Result { is_ok: false, value: JsonDoc { handle: 0 }, error: self.error }; };
+        let result = self.turn.finish()?;
+        if self.protocol == 1 { llm_put_string(&result, result.root(), "responses_endpoint", self.base.as_str())?; llm_put_string(&result, result.root(), "responses_model", self.model.as_str())?; llm_put_string(&result, result.root(), "responses_connection", self.connection.as_str())?; (); };
+        Result { is_ok: true, value: result, error: 0 };
+    }
+}
+
+struct LlmLimits {
+    connect_timeout_ms: i64,
+    idle_timeout_ms: i64,
+    queue_bytes: i64,
+    request_bytes: i64,
+    body_bytes: i64,
+}
+
+struct LlmRequestConfig {
+    base: String,
+    protocol: i64,
+    model: String,
+    effort: String,
+    scope: String,
+    images_allowed: bool,
+    limits: LlmLimits,
+}
+
+struct LlmFailure {
+    code: i64,
+    http_status: i64,
+    stage: String,
+    detail: String,
+    retry_after: String,
+    request_started: bool,
+    stream_observed: bool,
+}
+
+def llm_default_limits() -> LlmLimits {
+    LlmLimits { connect_timeout_ms: 30000, idle_timeout_ms: 90000, queue_bytes: 262144, request_bytes: 1048576, body_bytes: 1048576 };
+}
+
+def llm_limits_validate(limits: &LlmLimits) -> Result<bool, i64> {
+    let valid = limits.connect_timeout_ms >= 1 and limits.connect_timeout_ms <= 60000 and limits.idle_timeout_ms >= 1 and limits.idle_timeout_ms <= 600000 and limits.queue_bytes >= 4096 and limits.queue_bytes <= 1048576 and limits.request_bytes >= 1 and limits.request_bytes <= 16777216 and limits.body_bytes >= 1 and limits.body_bytes <= limits.request_bytes;
+    Result { is_ok: valid, value: valid, error: if valid { 0; } else { 2; } };
+}
+
+def llm_request_config(base: &str, protocol: i64, model: &str) -> Result<LlmRequestConfig, i64> {
+    let endpoint = http_endpoint(base, provider_route(protocol))?;
+    let valid = Result { is_ok: protocol >= 0 and protocol <= 2 and model.len() > 0, value: true, error: 2 };
+    valid?;
+    Result { is_ok: true, value: LlmRequestConfig { base: string_from_str(base)?, protocol: protocol, model: string_from_str(model)?, effort: string_new(), scope: string_new(), images_allowed: false, limits: llm_default_limits() }, error: 0 };
+}
+
+def llm_request_start(config: &LlmRequestConfig, credential: &str, history: &JsonDoc, tools: &JsonDoc) -> Result<ProviderJob, i64> {
+    llm_limits_validate(&config.limits)?;
+    provider_owned_text_valid(&config.base)?;
+    provider_owned_text_valid(&config.model)?;
+    provider_owned_text_valid(&config.effort)?;
+    provider_owned_text_valid(&config.scope)?;
+    let endpoint = http_endpoint(config.base.as_str(), provider_route(config.protocol))?;
+    let targeted = provider_target_history_scoped(history, config.base.as_str(), config.model.as_str(), config.scope.as_str())?;
+    let body = provider_build_request_with_media_effort(config.protocol, config.model.as_str(), config.effort.as_str(), &targeted, tools, config.images_allowed, config.limits.body_bytes)?;
+    let request = http_request_bounded(&endpoint, config.protocol, credential, body.as_str(), config.limits.request_bytes)?;
+    let stream = net_stream_start_bounded(endpoint.host.as_str(), endpoint.port, endpoint.tls, request.as_str(), config.limits.connect_timeout_ms, config.limits.idle_timeout_ms, config.limits.queue_bytes, config.limits.request_bytes)?;
+    Result { is_ok: true, value: ProviderJob { stream: stream, base: config.base.clone()?, model: config.model.clone()?, connection: config.scope.clone()?, protocol: config.protocol, http: http_decoder(), sse: sse_decoder(), turn: provider_turn(), finished: false, error: 0, stream_observed: false, failure_stage: 0 }, error: 0 };
+}
+
+def llm_request_failure(job: &ProviderJob, code: i64) -> LlmFailure {
+    LlmFailure { code: code, http_status: job.http.status, stage: llm_text(job.failure_stage_label()), detail: llm_text(job.failure_label()), retry_after: llm_text(job.http.retry_after.as_str()), request_started: job.stream.request_started().unwrap_or(true), stream_observed: job.stream_observed };
+}
+
+impl ProviderJob {
+    def completed(&self) -> bool {
+        self.finished and self.error == 0 and self.turn.done;
+    }
+    def is_finished(&self) -> bool {
+        self.finished;
+    }
+    def activity(&self) -> i64 {
+        self.turn.activity;
+    }
+    def input_tokens(&self) -> i64 {
+        self.turn.input_tokens;
+    }
+    def output_tokens(&self) -> i64 {
+        self.turn.output_tokens;
+    }
+    def usage_reported(&self) -> bool {
+        self.turn.usage_reported;
+    }
+}

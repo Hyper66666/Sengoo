@@ -1,0 +1,41 @@
+import std::io;
+
+import std::ffi;
+
+import std::result;
+
+import std::status;
+
+import std::time;
+
+extern "C" {
+    fn sengoo_buffer_live_handle_count() -> i64;
+}
+
+def stream_binary() -> Result<bool, i64> {
+    let writer = io_stdout_writer(1024)?;
+    let duplicate = io_stdout_writer(1024);
+    if duplicate.is_ok() or duplicate.error != STATUS_ALREADY_EXISTS() { return Result { is_ok: false, value: false, error: 101 }; };
+    let bytes = ffi_buffer_new(8192)?;
+    let mut index = 0;
+    while index < 8192 { bytes.push_u8((index * 31 + index / 7) % 256)?; index = index + 1; };
+    let deadline = time_monotonic_ms() + 10000;
+    while bytes.used_len() > 0 { let accepted = writer.try_write(&bytes, bytes.used_len())?; if accepted > 0 { bytes.consume(accepted)?; } else { if time_monotonic_ms() > deadline { return Result { is_ok: false, value: false, error: 102 }; }; writer.poll(1)?; }; };
+    writer.finish()?;
+    if not writer.wait_quiescent(5000)? { return Result { is_ok: false, value: false, error: 103 }; };
+    let status = writer.snapshot()?;
+    if status.state != 5 or status.accepted_bytes != 8192 or status.written_bytes != 8192 or status.queued_bytes != 0 or status.in_flight_bytes != 0 or status.unknown_delivery { return Result { is_ok: false, value: false, error: 104 }; };
+    Result { is_ok: true, value: true, error: 0 };
+}
+
+def main() -> i64 {
+    let buffers_before = sengoo_buffer_live_handle_count();
+    let result = stream_binary();
+    if not result.is_ok() { return result.error; };
+    if sengoo_buffer_live_handle_count() != buffers_before { return 120; };
+    let mut field = 0;
+    while field < 6 { if io_writer_resource_count(field) != 0 { return 110 + field; }; field = field + 1; };
+    io_stderr_write("SG BINARY OK\n");
+    io_stderr_flush();
+    0;
+}

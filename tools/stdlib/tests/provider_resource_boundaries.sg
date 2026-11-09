@@ -1,0 +1,51 @@
+import sgllm;
+
+extern "C" {
+    fn sengoo_string_live_handle_count() -> i64;
+    fn sengoo_buffer_live_handle_count() -> i64;
+}
+
+def endpoint_round() -> Result<bool, i64> {
+    let endpoint = http_endpoint("http://localhost:1234/v1", "/responses")?;
+    if endpoint.port != 1234 { return Result { is_ok: false, value: false, error: 2 }; };
+    let config = llm_request_config("http://localhost:1234/v1", 1, "fixture-model")?;
+    Result { is_ok: true, value: config.protocol == 1, error: 0 };
+}
+
+def http_round() -> Result<bool, i64> {
+    let mut decoder = http_decoder();
+    let response = decoder.feed("HTTP/1.1 200 OK\r\nContent-Length: 2\r\n\r\n{}")?;
+    Result { is_ok: true, value: response.len() == 2, error: 0 };
+}
+
+def sse_round() -> Result<bool, i64> {
+    let mut decoder = sse_decoder();
+    let events = decoder.feed("event: message\ndata: {\"answer\":42}\n\n")?;
+    Result { is_ok: true, value: events.len() == 1, error: 0 };
+}
+
+def main() -> i64 {
+    let strings = sengoo_string_live_handle_count();
+    let buffers = sengoo_buffer_live_handle_count();
+    if not endpoint_round().is_ok() { return 2; };
+    println("endpoint/config String delta:");
+    println(sengoo_string_live_handle_count() - strings);
+    println("endpoint/config Buffer delta:");
+    println(sengoo_buffer_live_handle_count() - buffers);
+    let next_strings = sengoo_string_live_handle_count();
+    let next_buffers = sengoo_buffer_live_handle_count();
+    if not http_round().is_ok() { return 3; };
+    println("HTTP success String delta:");
+    println(sengoo_string_live_handle_count() - next_strings);
+    println("HTTP success Buffer delta:");
+    println(sengoo_buffer_live_handle_count() - next_buffers);
+    let sse_strings = sengoo_string_live_handle_count();
+    let sse_buffers = sengoo_buffer_live_handle_count();
+    if not sse_round().is_ok() { return 4; };
+    println("SSE success String delta:");
+    println(sengoo_string_live_handle_count() - sse_strings);
+    println("SSE success Buffer delta:");
+    println(sengoo_buffer_live_handle_count() - sse_buffers);
+    if sengoo_string_live_handle_count() != strings or sengoo_buffer_live_handle_count() != buffers { return 1; };
+    0;
+}

@@ -22,12 +22,45 @@ impl<'a> LoweringContext<'a> {
         if self.current_block_is_terminated() {
             return;
         }
+        // A scoped tail may return a view of an anonymous owning receiver:
+        // `consume(if c { make_string()?.as_str() } else { "literal" })`.
+        // Its owner must reach the enclosing consumer, not die at the branch
+        // edge. Keep only anonymous producers (not lexical owner bindings),
+        // with their existing initialization flags, in the enclosing scope.
+        // Inactive branches therefore remain uninitialized and early exits
+        // still clean up exactly the owners which were constructed.
+        let borrowed_tail = moved_result
+            .is_some_and(|result| Self::type_contains_borrowed_view(self.get_local_type(result)));
         for binding in bindings.iter().rev() {
             if self.drop_binding_is_moved(binding) {
                 continue;
             }
+            if borrowed_tail && self.temporary_drop_owners.contains(&binding.local) {
+                continue;
+            }
             self.push_task_scope_normal_join(self.current_block(), binding);
             self.push_drop_call(self.current_block(), binding);
+        }
+        if borrowed_tail {
+            for binding in bindings {
+                if self.temporary_drop_owners.contains(&binding.local)
+                    && !self.drop_binding_is_moved(&binding)
+                {
+                    self.drop_bindings.push(binding);
+                }
+            }
+        }
+    }
+
+    fn type_contains_borrowed_view(ty: &MIRType) -> bool {
+        match ty {
+            MIRType::Ref(_) | MIRType::Ptr(_) => true,
+            MIRType::Tuple(items) => items.iter().any(Self::type_contains_borrowed_view),
+            MIRType::Struct { fields, .. } => fields
+                .iter()
+                .any(|(_, ty)| Self::type_contains_borrowed_view(ty)),
+            MIRType::Array(inner, _) => Self::type_contains_borrowed_view(inner),
+            _ => false,
         }
     }
 
@@ -145,6 +178,28 @@ impl<'a> LoweringContext<'a> {
                 self.drop_bindings.push(binding);
             }
         }
+    }
+
+    /// Materialize an anonymous owning receiver into an initialized cleanup
+    /// place. Drop flags follow Store initialization; registering an SSA
+    /// Call/Extract temporary directly would leave its flag permanently false.
+    pub(super) fn retain_temporary_receiver(&mut self, local: Local) -> Local {
+        let ty = self.get_local_type(local).clone();
+        if !self.type_needs_drop(&ty) {
+            return local;
+        }
+        let owner = self.add_local(None, LocalKind::User, ty);
+        if let Some(name) = self.type_names.get(&local).cloned() {
+            self.type_names.insert(owner, name);
+        }
+        self.push_inst(Instruction::Store {
+            destination: owner,
+            value: local,
+        });
+        self.mark_drop_local_moved(local);
+        self.record_drop_binding_if_needed(owner);
+        self.temporary_drop_owners.insert(owner);
+        owner
     }
 
     /// A user destructor owns its fields during its body. Release remaining

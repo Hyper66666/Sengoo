@@ -1,0 +1,7 @@
+- [x] Implement fixed real sgllm four-stream/cancel workload with owned resource baseline assertions.
+- [x] Implement external checksummed registry locked cold/hot/business-only build and Windows RSS sampler.
+- [x] Separate measured frontend/pending/native counters from cache assumptions and unavailable native queue occupancy.
+- [x] Add SDK ready-and-exit startup samples and four burst streams with delayed consumption, preserving the queue observability boundary.
+- [x] Run with the final v2 frozen compiler/registry and retain raw logs, identities and distributions.
+- [x] Validate build phase source/cache evidence, canonical four streams and cancellation resource restoration.
+- [x] Pass formatting and strict OpenSpec validation; document host observations and unrun boundaries.

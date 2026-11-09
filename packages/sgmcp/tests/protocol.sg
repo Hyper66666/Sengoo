@@ -1,0 +1,172 @@
+import sgmcp;
+
+import std::assert;
+
+extern "C" {
+    fn sengoo_string_live_handle_count() -> i64;
+}
+
+def fallback_case(document: &JsonDoc) -> Result<bool, i64> {
+    let missing = sgmcp_string(document.root(), "missing");
+    let wrong_type = sgmcp_string(document.root(), "number");
+    let rejected_nul = sgmcp_string(document.root(), "nul");
+    if missing.handle <= 0 or wrong_type.handle <= 0 or rejected_nul.handle <= 0 { return sgmcp_error(99); };
+    if missing.len() != 0 or missing.as_str().len() != 0 or wrong_type.len() != 0 or wrong_type.as_str().len() != 0 or rejected_nul.len() != 0 or rejected_nul.as_str().len() != 0 { return sgmcp_error(99); };
+    sgmcp_ok();
+}
+
+def fallback_baseline() -> Result<bool, i64> {
+    let document = json_parse("{\"number\":42,\"nul\":\"valid\\u0000suffix\"}")?;
+    let before = sengoo_string_live_handle_count();
+    let mut index = 0;
+    while index < 20 { fallback_case(&document)?; index = index + 1; };
+    if sengoo_string_live_handle_count() != before { return sgmcp_error(99); };
+    sgmcp_ok();
+}
+
+def expect(ok: bool, message: &str) -> Result<bool, i64> {
+    if not ok { println(message); return Result { is_ok: false, value: false, error: 99 }; };
+    sgmcp_ok();
+}
+
+def deliver(server: &mut SgMcpServer, text: &str) -> Result<JsonDoc, i64> {
+    let request = json_parse(text)?;
+    server.accept(&request);
+}
+
+def handled(server: &mut SgMcpServer, text: &str) -> Result<bool, i64> {
+    let action = deliver(server, text)?;
+    sgmcp_ok();
+}
+
+def framing() -> Result<bool, i64> {
+    let frame = sgmcp_framer(1024)?;
+    let source = ffi_buffer_from_bytes("{\"jsonrpc\":\"2.0\",\"method\":\"notice\",\"params\":{\"message\":\"中文😀\\nline\"}}\r\n")?;
+    let mut index = 0;
+    while index < source.used_len() { let one = ffi_buffer_new(1)?; source.copy_range(index, 1, one)?; frame.feed(&one, 1)?; let parsed = frame.next()?; if index + 1 < source.used_len() { expect(not parsed.root().object_has("jsonrpc"), "framer decoded incomplete line")?; (); } else { expect(sgmcp_string(parsed.root().object_get("params")?, "message").as_str() == "中文😀\nline", "framer lost split UTF-8 or escaped newline")?; (); }; index = index + 1; };
+    expect(frame.complete(), "framer retained completed bytes")?;
+    let invalid = ffi_buffer_from_bytes("[]\n")?;
+    frame.feed(&invalid, invalid.used_len())?;
+    expect(not frame.next().is_ok(), "array JSON-RPC envelope accepted")?;
+    let oversized = ffi_buffer_new(1024)?;
+    oversized.append_str("x")?;
+    let small = sgmcp_framer(128)?;
+    let repeated = string_new();
+    index = 0;
+    while index < 129 { repeated.push_str("x")?; index = index + 1; };
+    let bytes = ffi_buffer_from_bytes(repeated.as_str())?;
+    expect(not small.feed(&bytes, bytes.used_len()).is_ok(), "oversized frame was not bounded");
+}
+
+def lifecycle() -> Result<bool, i64> {
+    let mut server = sgmcp_server("fixture", "0.1.0", 1)?;
+    let schema = json_parse("{\"type\":\"object\"}")?;
+    let unsupported = json_parse("{\"$ref\":\"unsupported\"}")?;
+    expect(not server.tool("unsupported", "Reject schema", unsupported.root(), schema.root()).is_ok(), "unsupported schema keyword silently accepted")?;
+    let echo_schema = json_parse("{\"type\":\"object\",\"properties\":{\"message\":{\"type\":\"string\"}},\"required\":[\"message\"],\"additionalProperties\":false}")?;
+    server.tool("echo", "Echo text", echo_schema.root(), echo_schema.root())?;
+    server.tool("count", "Count values", schema.root(), schema.root())?;
+    expect(not server.tool("echo", "Duplicate", schema.root(), schema.root()).is_ok(), "duplicate tool registered")?;
+    handled(&mut server, "{\"jsonrpc\":\"2.0\",\"id\":1,\"method\":\"tools/list\"}")?;
+    let denied = server.next_output()?;
+    expect(sgmcp_number(denied.root().object_get("error")?, "code", 0) == -32002, "server ran before initialization")?;
+    handled(&mut server, "{\"jsonrpc\":\"2.0\",\"id\":2,\"method\":\"initialize\",\"params\":{\"protocolVersion\":\"unknown\",\"capabilities\":{},\"clientInfo\":{\"name\":\"fixture\",\"version\":\"1\"}}}")?;
+    let negotiated = server.next_output()?;
+    expect(sgmcp_string(negotiated.root().object_get("result")?, "protocolVersion").as_str() == "2025-11-25", "server version negotiation failed")?;
+    expect(not server.tool("new", "Frozen", schema.root(), schema.root()).is_ok(), "catalogue changed without listChanged capability")?;
+    handled(&mut server, "{\"jsonrpc\":\"2.0\",\"method\":\"notifications/initialized\"}")?;
+    handled(&mut server, "{\"jsonrpc\":\"2.0\",\"id\":3,\"method\":\"tools/list\"}")?;
+    let first = server.next_output()?;
+    let result = first.root().object_get("result")?;
+    expect(result.object_get("tools")?.array_len()? == 1 and sgmcp_string(result, "nextCursor").as_str() == "1", "first tool page incorrect")?;
+    handled(&mut server, "{\"jsonrpc\":\"2.0\",\"id\":4,\"method\":\"tools/list\",\"params\":{\"cursor\":\"1\"}}")?;
+    let second = server.next_output()?;
+    expect(sgmcp_string(second.root().object_get("result")?.object_get("tools")?.array_get(0)?, "name").as_str() == "count", "second page lost tool")?;
+    handled(&mut server, "{\"jsonrpc\":\"2.0\",\"id\":5,\"method\":\"tools/list\",\"params\":{\"cursor\":\"invalid\"}}")?;
+    expect(server.next_output()?.root().object_has("error"), "invalid cursor accepted")?;
+    let action = deliver(&mut server, "{\"jsonrpc\":\"2.0\",\"id\":\"opaque-call\",\"method\":\"tools/call\",\"params\":{\"name\":\"echo\",\"arguments\":{\"message\":\"中文😀\"},\"_meta\":{\"progressToken\":\"token\"}}}")?;
+    expect(sgmcp_string(action.root(), "kind").as_str() == "call", "registered tool did not dispatch")?;
+    server.progress(action.root().object_get("id")?, 1, 2, "working")?;
+    let progress = server.next_output()?;
+    expect(sgmcp_string(progress.root().object_get("params")?, "progressToken").as_str() == "token", "progress lost opaque token")?;
+    let result = sgmcp_tool_result("中文😀", false)?;
+    let bad_result = sgmcp_tool_result("wrong output", false)?;
+    bad_result.root().object_set("structuredContent", bad_result.new_object()?)?;
+    expect(not server.complete(action.root().object_get("id")?, bad_result.root()).is_ok(), "success bypassed outputSchema validation")?;
+    let structured = result.new_object()?;
+    sgmcp_put(&result, structured, "message", "中文😀")?;
+    result.root().object_set("structuredContent", structured)?;
+    server.complete(action.root().object_get("id")?, result.root())?;
+    let complete = server.next_output()?;
+    expect(sgmcp_string(complete.root(), "id").as_str() == "opaque-call" and complete.root().object_get("result")?.object_has("structuredContent"), "structured result or response id lost")?;
+    expect(not server.complete(action.root().object_get("id")?, result.root()).is_ok(), "completed call replayed")?;
+    let invalid_action = deliver(&mut server, "{\"jsonrpc\":\"2.0\",\"id\":66,\"method\":\"tools/call\",\"params\":{\"name\":\"echo\",\"arguments\":{\"message\":99}}}")?;
+    expect(sgmcp_string(invalid_action.root(), "kind").as_str() == "handled" and server.next_output()?.root().object_has("error"), "schema mismatch executed tool")?;
+    let cancelled = deliver(&mut server, "{\"jsonrpc\":\"2.0\",\"id\":6,\"method\":\"tools/call\",\"params\":{\"name\":\"count\",\"arguments\":{}}}")?;
+    handled(&mut server, "{\"jsonrpc\":\"2.0\",\"method\":\"notifications/cancelled\",\"params\":{\"requestId\":999}}")?;
+    handled(&mut server, "{\"jsonrpc\":\"2.0\",\"method\":\"notifications/cancelled\",\"params\":{\"requestId\":[]}}")?;
+    expect(not server.cancelled(cancelled.root().object_get("id")?)?, "unknown cancel hit active request")?;
+    handled(&mut server, "{\"jsonrpc\":\"2.0\",\"method\":\"notifications/cancelled\",\"params\":{\"requestId\":6}}")?;
+    expect(server.cancelled(cancelled.root().object_get("id")?)?, "matching cancel was lost")?;
+    server.complete(cancelled.root().object_get("id")?, result.root())?;
+    expect(not server.next_output()?.root().object_has("jsonrpc"), "cancelled call sent a response")?;
+    let failed = deliver(&mut server, "{\"jsonrpc\":\"2.0\",\"id\":7,\"method\":\"tools/call\",\"params\":{\"name\":\"count\",\"arguments\":{}}}")?;
+    server.fail_tool(failed.root().object_get("id")?, "application failure")?;
+    expect(server.next_output()?.root().object_get("result")?.object_get("isError")?.bool_value()?, "tool failure became transport error")?;
+    handled(&mut server, "{\"jsonrpc\":\"2.0\",\"id\":8,\"method\":\"sampling/createMessage\"}")?;
+    expect(sgmcp_number(server.next_output()?.root().object_get("error")?, "code", 0) == -32601, "unsupported capability silently succeeded");
+}
+
+def nul_boundaries() -> Result<bool, i64> {
+    let mut server = sgmcp_server("nul-fixture", "1", 1)?;
+    let schema = json_parse("{\"type\":\"object\"}")?;
+    server.tool("echo", "echo", schema.root(), schema.root())?;
+    let wrong_method = json_parse("{\"jsonrpc\":\"2.0\",\"id\":1,\"method\":\"ping\\u0000suffix\"}")?;
+    expect(not server.accept(&wrong_method).is_ok(), "NUL method matched its visible prefix")?;
+    let wrong_key = json_parse("{\"jsonrpc\":\"2.0\",\"id\":1,\"method\\u0000suffix\":\"ping\"}")?;
+    expect(not server.accept(&wrong_key).is_ok(), "NUL control key was accepted")?;
+    let wrong_version = json_parse("{\"jsonrpc\":\"2.0\",\"id\":1,\"method\":\"initialize\",\"params\":{\"protocolVersion\":\"2025-11-25\\u0000suffix\",\"clientInfo\":{\"name\":\"valid\",\"version\":\"1\"},\"capabilities\":{}}}")?;
+    server.accept(&wrong_version)?;
+    expect(server.next_output()?.root().object_has("error") and not server.negotiated, "NUL protocol version negotiated as its prefix")?;
+    let wrong_peer = json_parse("{\"jsonrpc\":\"2.0\",\"id\":1,\"method\":\"initialize\",\"params\":{\"protocolVersion\":\"2025-11-25\",\"clientInfo\":{\"name\":\"valid\\u0000suffix\",\"version\":\"1\"},\"capabilities\":{}}}")?;
+    server.accept(&wrong_peer)?;
+    expect(server.next_output()?.root().object_has("error") and not server.negotiated, "NUL client identity accepted")?;
+    handled(&mut server, "{\"jsonrpc\":\"2.0\",\"id\":1,\"method\":\"initialize\",\"params\":{\"clientInfo\":{\"name\":\"valid\",\"version\":\"1\"},\"capabilities\":{}}}")?;
+    expect(server.next_output()?.root().object_has("error") and not server.negotiated, "missing version was not rejected")?;
+    handled(&mut server, "{\"jsonrpc\":\"2.0\",\"id\":1,\"method\":\"initialize\",\"params\":{\"protocolVersion\":42,\"clientInfo\":{\"name\":\"valid\",\"version\":\"1\"},\"capabilities\":{}}}")?;
+    expect(server.next_output()?.root().object_has("error") and not server.negotiated, "wrong version field type was not rejected")?;
+    handled(&mut server, "{\"jsonrpc\":\"2.0\",\"id\":2,\"method\":\"initialize\",\"params\":{\"protocolVersion\":\"2025-11-25\",\"clientInfo\":{\"name\":\"valid\",\"version\":\"1\"},\"capabilities\":{}}}")?;
+    let initialized = server.next_output()?;
+    handled(&mut server, "{\"jsonrpc\":\"2.0\",\"method\":\"notifications/initialized\"}")?;
+    handled(&mut server, "{\"jsonrpc\":\"2.0\",\"id\":3,\"method\":\"tools/call\",\"params\":{\"name\":\"echo\\u0000suffix\",\"arguments\":{}}}")?;
+    expect(server.next_output()?.root().object_has("error") and server.calls.len() == 0, "NUL tool name dispatched its prefix")?;
+    handled(&mut server, "{\"jsonrpc\":\"2.0\",\"id\":4,\"method\":\"tools/list\",\"params\":{\"cursor\":\"0\\u0000suffix\"}}")?;
+    expect(server.next_output()?.root().object_has("error"), "NUL cursor reset pagination")?;
+    let action = deliver(&mut server, "{\"jsonrpc\":\"2.0\",\"id\":\"opaque\\u0000suffix\",\"method\":\"tools/call\",\"params\":{\"name\":\"echo\",\"arguments\":{\"message\":\"A\\u0000B\"}}}")?;
+    let raw = action.root().object_get("arguments")?.object_get("message")?.string_value()?;
+    expect(raw.len() == 3 and raw.as_str().len() == 1, "business payload lost bytes after NUL")?;
+    let result = sgmcp_tool_result("copied", false)?;
+    result.root().object_set("structuredContent", result.copy(action.root().object_get("arguments")?)?)?;
+    server.complete(action.root().object_get("id")?, result.root())?;
+    let output = server.next_output()?;
+    let id = output.root().object_get("id")?.string_value()?;
+    expect(id.len() > id.as_str().len() and output.root().object_get("result")?.object_get("structuredContent")?.object_get("message")?.string_value()?.len() == 3, "opaque ID or business NUL was narrowed")?;
+    let owned = json_parse("{\"command\":\"not-a-program\\u0000suffix\"}")?;
+    let command = owned.root().object_get("command")?.string_value()?;
+    let cwd = sgmcp_text(".");
+    let args = json_parse("[]")?;
+    expect(not sgmcp_start_owned(&command, args.root(), &cwd).is_ok(), "owned startup command narrowed before validation");
+}
+
+def main() -> i64 {
+    let framed = framing();
+    if not framed.is_ok() { println(framed.error); return 1; };
+    let tested = lifecycle();
+    if not tested.is_ok() { println(tested.error); return 1; };
+    let nul = nul_boundaries();
+    if not nul.is_ok() { println(nul.error); return 1; };
+    let fallback = fallback_baseline();
+    if not fallback.is_ok() { println("invalid empty String fallback or resource drift"); return 1; };
+    println("sgmcp framing, lifecycle, negotiation, paging, opaque IDs, structured results, cancellation and errors passed");
+    0;
+}

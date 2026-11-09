@@ -1,0 +1,6 @@
+- [x] Implement a Sengoo MCP knowledge server with trusted argv root and registered public schemas.
+- [x] Implement safe bounded snapshot reads and persistent SQLite search/full-refresh index.
+- [x] Implement and document explicit path/encoding/size/scan/platform/stdio boundaries.
+- [x] Pass independent MCP client Unicode/schema/traversal/reparse/error/persistence/rollback fixtures.
+- [x] Pass formatted, repository-external locked build and document exact candidate evidence.
+- [x] Pass strict OpenSpec validation and preserve unrun release/platform boundaries.

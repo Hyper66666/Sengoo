@@ -1,0 +1,37 @@
+import sgeval;
+
+def expect(value: bool) -> Result<bool, i64> {
+    if not value { return eval_error(99); };
+    Result { is_ok: true, value: true, error: 0 };
+}
+
+def test_redaction_and_replay() -> Result<bool, i64> {
+    let input = "{\"type\":\"text_delta\",\"text\":\"Hello private-key 中文😀\",\"headers\":{\"Authorization\":\"Bearer hidden\"}}\n{\"type\":\"tool\",\"arguments\":{\"command\":\"echo never execute\"},\"value\":9223372036854775807}\n";
+    let secrets = json_parse("{\"secrets\":[\"private-key\"]}")?;
+    let recorded = eval_record_text(input, &secrets)?;
+    expect(not str_contains(recorded.as_str(), "private-key") and not str_contains(recorded.as_str(), "Bearer hidden"))?;
+    let spec = json_parse("{\"schema\":1,\"event_count\":2,\"types\":[\"text_delta\",\"tool\"],\"checks\":[{\"event\":0,\"path\":[\"headers\",\"Authorization\"],\"equals\":\"[REDACTED]\"},{\"event\":1,\"path\":[\"value\"],\"equals\":9223372036854775807}],\"absent_strings\":[\"private-key\",\"Bearer hidden\"]}")?;
+    let result = eval_replay_text(recorded.as_str(), &spec)?;
+    expect(result.root().object_get("passed")?.bool_value()?)?;
+    let bad_order = json_parse("{\"schema\":1,\"event_count\":2,\"types\":[\"tool\",\"text_delta\"],\"checks\":[]}")?;
+    let rejected = eval_replay_text(recorded.as_str(), &bad_order)?;
+    expect(not rejected.root().object_get("passed")?.bool_value()?)?;
+    let duplicate = "{\"schema\":1,\"sequence\":1,\"event\":{\"type\":\"tool\"}}\n";
+    expect(not eval_recording(duplicate).is_ok())?;
+    expect(not eval_record_text("{broken", &secrets).is_ok())?;
+    let unsupported = json_parse("{\"schema\":1,\"event_count\":2,\"types\":[],\"checks\":[],\"execute\":true}")?;
+    expect(not eval_replay_text(recorded.as_str(), &unsupported).is_ok())?;
+    expect(not eval_record_text("{\"type\":\"text_delta\",\"text\":\"before\\u0000private-key\"}\n", &secrets).is_ok())?;
+    expect(not eval_record_text("{\"type\":\"text_delta\",\"headers\":{\"Authorization\\u0000suffix\":\"private-key\"}}\n", &secrets).is_ok())?;
+    let nul_assertion = json_parse("{\"schema\":1,\"event_count\":2,\"types\":[\"text_delta\",\"tool\"],\"checks\":[{\"event\":0,\"path\":[\"text\"],\"equals\":\"Hello\\u0000private-key\"}]}")?;
+    expect(not eval_replay_text(recorded.as_str(), &nul_assertion).is_ok());
+}
+
+def main() -> i64 {
+    let before = sengoo_json_bounded_live_documents();
+    let reserved = sengoo_json_bounded_reserved_bytes();
+    let mut index = 0;
+    while index < 20 { let result = test_redaction_and_replay(); if not result.is_ok() { println(result.error); return 1; }; if sengoo_json_bounded_live_documents() != before or sengoo_json_bounded_reserved_bytes() != reserved { println("evaluation leaked bounded JSON admission"); println(sengoo_json_bounded_live_documents() - before); return 1; }; index = index + 1; };
+    println("sgeval redaction, exact integers, deterministic assertions, invalid data rejection and repeated JSON cleanup passed");
+    0;
+}

@@ -1,0 +1,91 @@
+import sgagent;
+
+import sgllm;
+
+import std::file;
+
+import std::args;
+
+import std::time;
+
+import std::process;
+
+import std::io;
+
+def host_arg(index: i64) -> Result<String, i64> {
+    let bytes = ffi_buffer_new(32768)?;
+    let count = arg_copy(index, bytes)?;
+    string_from_bytes_raw(bytes.ptr(), count);
+}
+
+def host_read(path: &str) -> Result<String, i64> {
+    let length = file_len(path)?;
+    agent_condition(length >= 0 and length <= 65536, 13)?;
+    let bytes = ffi_buffer_new(length)?;
+    let count = file_read_into(path, bytes)?;
+    string_from_utf8(bytes, count);
+}
+
+def host_model(action: &JsonDoc, base: &str, key: &str) -> Result<JsonDoc, i64> {
+    let config = llm_request_config(base, 1, "fixture")?;
+    let history = agent_object_document(action.root().object_get("history")?)?;
+    let tools = agent_object_document(action.root().object_get("tools")?)?;
+    let mut job = llm_request_start(&config, key, &history, &tools)?;
+    let mut wrote = false;
+    while not job.is_finished() { let delta = job.poll()?; if delta.len() > 0 { io_stdout_write(delta.as_str())?; io_stdout_flush()?; wrote = true; }; time_sleep_ms(1); };
+    let result = job.result()?;
+    if wrote { io_stdout_write("\n")?; (); };
+    agent_put_bool(&result, result.root(), "usage_reported", job.usage_reported())?;
+    Result { is_ok: true, value: result, error: 0 };
+}
+
+def host_new(fence: i64) -> Result<AgentKernel, i64> {
+    let target = json_parse("{\"connection\":\"loopback\",\"model\":\"fixture\",\"protocol\":1}")?;
+    let history = json_parse("{\"messages\":[{\"role\":\"user\",\"content\":\"Read fixture.txt, replace before with after, run the fixed verification command, then report.\"}]}")?;
+    let tools = json_parse("{\"tools\":[{\"name\":\"read_fixture\",\"description\":\"Read fixture.txt\",\"read_only\":true,\"parameters\":{\"type\":\"object\",\"additionalProperties\":false}},{\"name\":\"patch_fixture\",\"description\":\"Replace fixture.txt exact before with after once\",\"read_only\":false,\"parameters\":{\"type\":\"object\",\"additionalProperties\":false}},{\"name\":\"verify_fixture\",\"description\":\"Run the fixed host verification script\",\"process\":true,\"parameters\":{\"type\":\"object\",\"additionalProperties\":false}}]}")?;
+    let mut policy = policy_default();
+    policy.full_access = true;
+    agent_kernel_new("maintenance", fence, &target, &history, &tools, &policy, 0, 0);
+}
+
+struct HostCommandResult {
+    code: i64,
+    outcome_known: bool,
+    quiescent: bool,
+}
+
+def host_verify_command() -> Result<HostCommandResult, i64> {
+    let command = process_command("C:/Windows/System32/cmd.exe")?;
+    command.arg("/d")?;
+    command.arg("/c")?;
+    command.arg("verify.cmd")?;
+    let child = command.spawn_piped()?;
+    child.close_stdin()?;
+    let started = time_monotonic_ms();
+    let mut stdout = ffi_buffer_new(65536)?;
+    let mut stderr = ffi_buffer_new(65536)?;
+    loop { let exited = child.try_wait()?; let quiescent = child.tree_quiescent()?; if exited and quiescent { let code = child.reap(0)?; return Result { is_ok: true, value: HostCommandResult { code: code, outcome_known: true, quiescent: true }, error: 0 }; }; child.read_stdout(&mut stdout)?; stdout.clear(); child.read_stderr(&mut stderr)?; stderr.clear(); if time_monotonic_ms() - started > 10000 { child.terminate_tree()?; child.reap(5000)?; let cleanup_started = time_monotonic_ms(); let mut stopped = child.tree_quiescent()?; while not stopped and time_monotonic_ms() - cleanup_started < 5000 { time_sleep_ms(1); stopped = child.tree_quiescent()?; }; return Result { is_ok: true, value: HostCommandResult { code: 11, outcome_known: false, quiescent: stopped }, error: 0 }; }; time_sleep_ms(1); };
+    Result { is_ok: false, value: HostCommandResult { code: 99, outcome_known: false, quiescent: false }, error: 99 };
+}
+
+def host_run() -> Result<i64, i64> {
+    let database = host_arg(0)?;
+    let base = host_arg(1)?;
+    let key_path = host_arg(2)?;
+    let mode = host_arg(3)?;
+    let raw_key = host_read(key_path.as_str())?;
+    let key = str_trim(raw_key.as_str())?;
+    let run_id = agent_text("maintenance");
+    let mut store = agent_sqlite_open(&database, &run_id, 4194304)?;
+    let saved = agent_sqlite_load(&store);
+    let mut kernel = if saved.is_ok() { agent_kernel_resume(&saved.value, "maintenance", store.fence)?; } else { host_new(store.fence)?; };
+    let mut patched = false;
+    loop { let action = agent_kernel_next(&mut kernel)?; let kind = agent_control_string(action.root(), "type")?; if kind.as_str() == "persist" { let receipt = agent_sqlite_commit(&mut store, &action)?; agent_kernel_commit(&mut kernel, &receipt)?; if patched and mode.as_str() == "pause-after-patch" { store.close()?; println("CHECKPOINT_AFTER_PATCH"); return agent_ok(0); }; } else { if kind.as_str() == "model_request" { let id = agent_control_string(action.root(), "request_id")?; let result = host_model(&action, base.as_str(), key.as_str())?; agent_kernel_accept_model(&mut kernel, id.as_str(), &result, true)?; (); } else { if kind.as_str() == "tool_request" { let call = action.root().object_get("call")?; let id = agent_control_string(call, "id")?; let name = agent_control_string(call, "name")?; if name.as_str() == "read_fixture" { let text = host_read("fixture.txt")?; agent_kernel_tool_result(&mut kernel, id.as_str(), text.as_str(), false, true, true)?; (); } else { if name.as_str() == "patch_fixture" { let text = host_read("fixture.txt")?; agent_condition(text.as_str() == "before", 12)?; file_write_str("fixture.txt", "after")?; file_append_str("patch-count.txt", "once\n")?; if mode.as_str() == "crash-after-effect" { println("EFFECT_APPLIED_AWAITING_RESULT"); io_stdout_flush()?; loop { time_sleep_ms(100); }; }; agent_kernel_tool_result(&mut kernel, id.as_str(), "patched", false, true, true)?; patched = true; } else { if name.as_str() == "verify_fixture" { let result = host_verify_command()?; agent_kernel_tool_result(&mut kernel, id.as_str(), if result.code == 0 { "PASS"; } else { "FAIL"; }, result.code != 0, result.outcome_known, result.quiescent)?; (); } else { return agent_fail(5); }; }; }; } else { if kind.as_str() == "complete" { println("MAINTENANCE_COMPLETE"); store.close()?; return agent_ok(0); } else { if kind.as_str() == "paused" { println(agent_json_optional_string(action.root(), "reason").as_str()); return agent_fail(12); } else { return agent_fail(12); }; }; }; }; }; };
+    agent_fail(99);
+}
+
+def main() -> i64 {
+    let result = host_run();
+    if not result.is_ok() { println(result.error); return 1; };
+    result.value;
+}

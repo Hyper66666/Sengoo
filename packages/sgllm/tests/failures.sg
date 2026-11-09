@@ -1,0 +1,76 @@
+import sgllm;
+
+import std::args;
+
+import std::time;
+
+def expect(value: bool, label: &str) -> Result<bool, i64> {
+    if not value { println(label); return Result { is_ok: false, value: false, error: 99 }; };
+    Result { is_ok: true, value: true, error: 0 };
+}
+
+def fault(base: &str, path: &str, expected: i64, stage: &str) -> Result<bool, i64> {
+    let endpoint = llm_join(base, path)?;
+    let mut config = llm_request_config(endpoint.as_str(), 0, "fixture")?;
+    config.limits.connect_timeout_ms = 1000;
+    config.limits.idle_timeout_ms = 150;
+    let history = json_parse("{\"messages\":[{\"role\":\"user\",\"content\":\"fault\"}]}")?;
+    let tools = json_parse("{\"tools\":[]}")?;
+    let mut job = llm_request_start(&config, "fixture-key", &history, &tools)?;
+    let started = time_monotonic_ms();
+    let mut code = 0;
+    loop { let next = job.poll(); if not next.is_ok() { code = next.error; break; }; if job.is_finished() { break; }; if time_monotonic_ms() - started > 5000 { return expect(false, "fault did not terminate"); }; time_sleep_ms(1); };
+    expect(code == expected and job.is_finished() and not job.completed(), "fault returns exact error and terminates job")?;
+    let detail = llm_request_failure(&job, code);
+    expect(detail.code == expected and detail.stage.as_str() == stage, "fault separates status, stage and reason")?;
+    expect(not str_contains(detail.detail.as_str(), "SECRET"), "remote bodies never enter diagnostics")?;
+    if expected == 500 { expect(detail.http_status == 500 and detail.retry_after.as_str() == "1", "HTTP status and Retry-After remain available")?; (); };
+    if expected == 10 { expect(detail.http_status == 200, "HTTP success does not imply complete provider response")?; (); };
+    let final_result = job.result();
+    expect(not final_result.is_ok() and final_result.error == expected, "failed job cannot authorize tool execution")?;
+    expect(job.poll()?.len() == 0, "terminal job does not retry itself");
+}
+
+def cancel_four(base: &str) -> Result<bool, i64> {
+    let endpoint = llm_join(base, "/slow")?;
+    let config = llm_request_config(endpoint.as_str(), 0, "fixture")?;
+    let history = json_parse("{\"messages\":[{\"role\":\"user\",\"content\":\"cancel\"}]}")?;
+    let tools = json_parse("{\"tools\":[]}")?;
+    let mut a = llm_request_start(&config, "fixture-key", &history, &tools)?;
+    let mut b = llm_request_start(&config, "fixture-key", &history, &tools)?;
+    let mut c = llm_request_start(&config, "fixture-key", &history, &tools)?;
+    let mut d = llm_request_start(&config, "fixture-key", &history, &tools)?;
+    let started = time_monotonic_ms();
+    while time_monotonic_ms() - started < 100 { a.poll()?; b.poll()?; c.poll()?; d.poll()?; time_sleep_ms(1); };
+    a.cancel();
+    b.cancel();
+    c.cancel();
+    d.cancel();
+    let result = a.result();
+    expect(not result.is_ok() and result.error == 19 and a.is_finished() and not a.completed(), "explicit cancellation is terminal and never becomes success");
+}
+
+def tests() -> Result<bool, i64> {
+    let buffer = ffi_buffer_new(32768)?;
+    let count = arg_copy(0, buffer)?;
+    let base = string_from_bytes_raw(buffer.ptr(), count)?;
+    fault(base.as_str(), "/http500", 500, "http_status")?;
+    fault(base.as_str(), "/malformed", 10, "provider_event")?;
+    fault(base.as_str(), "/missing", 10, "provider_terminal")?;
+    fault(base.as_str(), "/truncated", 10, "http_finish")?;
+    fault(base.as_str(), "/partial-sse", 10, "sse_finish")?;
+    fault(base.as_str(), "/slow", 11, "network_read")?;
+    let baseline = sengoo_net_stream_live_handles();
+    cancel_four(base.as_str())?;
+    let started = time_monotonic_ms();
+    while sengoo_net_stream_live_workers() != 0 and time_monotonic_ms() - started < 3000 { time_sleep_ms(1); };
+    expect(sengoo_net_stream_live_workers() == 0 and sengoo_net_stream_live_request_bytes() == 0 and sengoo_net_stream_live_handles() == baseline, "cancel/drop reclaims workers, handles and byte reservations")?;
+    println("HTTP 500, HTTP200 invalid/incomplete, timeout, four-way cancellation and reclamation passed");
+    Result { is_ok: true, value: true, error: 0 };
+}
+
+def main() -> i64 {
+    let result = tests();
+    if not result.is_ok() { println(result.error); return 1; };
+    0;
+}

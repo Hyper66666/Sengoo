@@ -1,0 +1,12 @@
+[package]
+name = "agent_learning"
+version = "0.1.0"
+edition = "2026"
+
+[bin]
+path = "tool_schema.sg"
+
+[dependencies]
+sgschema = { path = "../../packages/sgschema" }
+sgllm = { path = "../../packages/sgllm" }
+sgagent = { path = "../../packages/sgagent" }

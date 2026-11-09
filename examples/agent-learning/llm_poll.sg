@@ -1,0 +1,44 @@
+import sgllm;
+
+import std::args;
+
+import std::file;
+
+import std::time;
+
+import std::io;
+
+def poll_argument(index: i64) -> Result<String, i64> {
+    let bytes = ffi_buffer_new(arg_len(index)?)?;
+    let copied = arg_copy(index, bytes)?;
+    string_from_utf8(bytes, copied);
+}
+
+def poll_model() -> Result<i64, i64> {
+    let base = poll_argument(0)?;
+    let model = poll_argument(1)?;
+    let key_path = poll_argument(2)?;
+    let length = file_len(key_path.as_str())?;
+    if length < 1 or length > 4096 { return llm_fail(13); };
+    let bytes = ffi_buffer_new(length)?;
+    let copied = file_read_into(key_path.as_str(), bytes)?;
+    let raw_key = string_from_utf8(bytes, copied)?;
+    let key = str_trim(raw_key.as_str())?;
+    let config = llm_request_config(base.as_str(), 1, model.as_str())?;
+    let history = json_parse("{\"messages\":[{\"role\":\"user\",\"content\":\"Say hello\"}]}")?;
+    let tools = json_parse("{\"tools\":[]}")?;
+    let mut job = llm_request_start(&config, key.as_str(), &history, &tools)?;
+    let started = time_monotonic_ms();
+    while not job.is_finished() { if arg_exists(3) or time_monotonic_ms() - started > 10000 { job.cancel(); return llm_fail(19); }; let delta = job.poll(); if not delta.is_ok() { let failure = llm_request_failure(&job, delta.error); println(failure.stage.as_str()); println(failure.http_status); return llm_fail(delta.error); }; if delta.value.len() > 0 { io_stdout_write(delta.value.as_str())?; io_stdout_flush()?; (); }; time_sleep_ms(1); };
+    let result = job.result()?;
+    println("");
+    println(job.input_tokens());
+    println(job.output_tokens());
+    llm_ok(0);
+}
+
+def main() -> i64 {
+    let result = poll_model();
+    if not result.is_ok() { print("{\"ok\":false,\"code\":"); print(result.error); println("}"); return 1; };
+    result.value;
+}

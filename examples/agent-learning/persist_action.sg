@@ -1,0 +1,34 @@
+import sgagent;
+
+import std::args;
+
+def persist_argument() -> Result<String, i64> {
+    let bytes = ffi_buffer_new(arg_len(0)?)?;
+    let copied = arg_copy(0, bytes)?;
+    string_from_utf8(bytes, copied);
+}
+
+def persist_new(fence: i64) -> Result<AgentKernel, i64> {
+    let target = json_parse("{\"connection\":\"deterministic-example\",\"model\":\"fixture\"}")?;
+    let history = json_parse("{\"messages\":[{\"role\":\"user\",\"content\":\"Say hello\"}]}")?;
+    let tools = json_parse("{\"tools\":[]}")?;
+    let policy = policy_default();
+    agent_kernel_new("learning", fence, &target, &history, &tools, &policy, 0, 0);
+}
+
+def persist_run() -> Result<i64, i64> {
+    let path = persist_argument()?;
+    let run = agent_text("learning");
+    let mut store = agent_sqlite_open(&path, &run, 4194304)?;
+    let saved = agent_sqlite_load(&store);
+    if not saved.is_ok() and saved.error != 5 { return agent_fail(saved.error); };
+    let mut kernel = if saved.is_ok() { agent_kernel_resume(&saved.value, "learning", store.fence)?; } else { persist_new(store.fence)?; };
+    loop { let action = agent_kernel_next(&mut kernel)?; let kind = agent_control_string(action.root(), "type")?; if kind.as_str() == "persist" { let receipt = agent_sqlite_commit(&mut store, &action)?; agent_kernel_commit(&mut kernel, &receipt)?; } else { if kind.as_str() == "model_request" { let id = agent_control_string(action.root(), "request_id")?; let completed = json_parse("{\"role\":\"assistant\",\"content\":\"Hello from a deterministic adapter\",\"tool_calls\":[]}")?; agent_kernel_accept_model(&mut kernel, id.as_str(), &completed, true)?; } else { let output = action.serialize_string()?; println(output.as_str()); store.close()?; if kind.as_str() == "complete" { return agent_ok(0); }; return agent_fail(12); }; }; };
+    agent_fail(99);
+}
+
+def main() -> i64 {
+    let result = persist_run();
+    if not result.is_ok() { print("{\"ok\":false,\"code\":"); print(result.error); println("}"); return 1; };
+    result.value;
+}

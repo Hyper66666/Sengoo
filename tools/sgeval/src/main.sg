@@ -1,0 +1,7 @@
+import sgeval;
+
+def main() -> i64 {
+    let result = eval_main();
+    if not result.is_ok() { io_stderr_write("sgeval: invalid input, resource limit or file operation failure (code ").unwrap_or(0); let code = string_new(); code.push_i64(result.error).unwrap_or(false); code.push_str(")\n").unwrap_or(false); io_stderr_write(code.as_str()).unwrap_or(0); return 2; };
+    result.value;
+}

@@ -1,0 +1,5 @@
+- [x] Implement Sengoo schema validation and bounded NUL-safe small-signature Python exports.
+- [x] Add wheel configuration, relative package graph and independent clean-consumer fixture.
+- [x] Build a real external locked platform wheel without modifying the backend/compiler.
+- [x] Remove copied sources and pass fresh offline venv install/import, Unicode/exact-i64/errors/NUL and repeated resources.
+- [x] Record source/compiler/wheel evidence, format and strict validation with unrun platform boundaries.

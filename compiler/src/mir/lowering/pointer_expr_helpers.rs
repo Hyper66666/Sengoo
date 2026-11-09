@@ -5,7 +5,13 @@ pub(super) fn lower_ref_expr(ctx: &mut LoweringContext<'_>, expr: &HIRExpr) -> L
         return field_ref;
     }
 
-    let expr_local = ctx.lower_expr(expr);
+    let mut expr_local = ctx.lower_expr(expr);
+    // `observe(&make_owner())` borrows a fresh value without a user binding.
+    // Keep its owner in an initialized cleanup place before taking the
+    // address. Named locals and projected fields remain aliases, not owners.
+    if super::call_expr_helpers::is_fresh_owned_argument(expr) {
+        expr_local = ctx.retain_temporary_receiver(expr_local);
+    }
     borrow_local(ctx, expr_local)
 }
 
@@ -17,7 +23,10 @@ pub(super) fn borrow_local(ctx: &mut LoweringContext<'_>, local: Local) -> Local
         local
     } else {
         let storage = ctx.add_local(None, LocalKind::User, expr_ty.clone());
-        ctx.push_inst(Instruction::Store { destination: storage, value: local });
+        ctx.push_inst(Instruction::Store {
+            destination: storage,
+            value: local,
+        });
         storage
     };
 
@@ -46,7 +55,9 @@ pub(super) fn try_lower_addressable_field_ref(
     if let HIRExpr::Field { base, field } = expr {
         let base_local = match base.as_ref() {
             HIRExpr::Field { .. } => try_lower_addressable_field_ref(ctx, base)?,
-            HIRExpr::Deref(inner) | HIRExpr::Unary(hir::HIRUnaryOp::Deref, inner) => ctx.lower_expr(inner),
+            HIRExpr::Deref(inner) | HIRExpr::Unary(hir::HIRUnaryOp::Deref, inner) => {
+                ctx.lower_expr(inner)
+            }
             HIRExpr::Var { .. } => ctx.lower_expr(base),
             _ => return None,
         };
@@ -56,28 +67,27 @@ pub(super) fn try_lower_addressable_field_ref(
             _ if base_local.kind == LocalKind::User => &base_ty,
             _ => return None,
         };
-            let field_info = match aggregate_ty {
-                MIRType::Struct { fields, .. } => fields
-                    .iter()
-                    .position(|(name, _)| name == field)
-                    .map(|index| (index, fields[index].1.clone())),
-                MIRType::Tuple(items) => field
-                    .parse::<usize>()
-                    .ok()
-                    .filter(|index| *index < items.len())
-                    .map(|index| (index, items[index].clone())),
-                _ => None,
-            };
-            if let Some((field_index, field_ty)) = field_info {
-                let ptr_local =
-                    ctx.add_local(None, LocalKind::Temp, MIRType::Ptr(Box::new(field_ty)));
-                ctx.push_inst(Instruction::FieldAddr {
-                    destination: ptr_local,
-                    base: base_local,
-                    field: field_index as u32,
-                });
-                return Some(ptr_local);
-            }
+        let field_info = match aggregate_ty {
+            MIRType::Struct { fields, .. } => fields
+                .iter()
+                .position(|(name, _)| name == field)
+                .map(|index| (index, fields[index].1.clone())),
+            MIRType::Tuple(items) => field
+                .parse::<usize>()
+                .ok()
+                .filter(|index| *index < items.len())
+                .map(|index| (index, items[index].clone())),
+            _ => None,
+        };
+        if let Some((field_index, field_ty)) = field_info {
+            let ptr_local = ctx.add_local(None, LocalKind::Temp, MIRType::Ptr(Box::new(field_ty)));
+            ctx.push_inst(Instruction::FieldAddr {
+                destination: ptr_local,
+                base: base_local,
+                field: field_index as u32,
+            });
+            return Some(ptr_local);
+        }
     }
     None
 }

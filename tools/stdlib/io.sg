@@ -8,68 +8,138 @@ extern "C" {
     fn sengoo_io_stderr_flush() -> i64;
     fn sengoo_io_fd_read(fd: i64, buffer: i64, capacity: i64) -> i64;
     fn sengoo_io_fd_write(fd: i64, data: i64, len: i64) -> i64;
+    fn sengoo_io_writer_new(endpoint: i64, capacity: i64) -> i64;
+    fn sengoo_io_writer_try_write(handle: i64, buffer: i64, length: i64) -> i64;
+    fn sengoo_io_writer_poll(handle: i64, timeout_ms: i64) -> i64;
+    fn sengoo_io_writer_stop(handle: i64, cancel: i64) -> i64;
+    fn sengoo_io_writer_wait(handle: i64, timeout_ms: i64) -> i64;
+    fn sengoo_io_writer_snapshot(handle: i64, buffer: i64) -> i64;
+    fn sengoo_io_writer_snapshot_get(buffer: i64, index: i64) -> i64;
+    fn sengoo_io_writer_close(handle: i64) -> i64;
+    fn sengoo_io_writer_resource_count(field: i64) -> i64;
+}
+
+struct StdWriter {
+    handle: i64,
+}
+
+impl !Send for StdWriter {
+}
+
+impl !Sync for StdWriter {
+}
+
+struct StdWriterStatus {
+    state: i64,
+    accepted_bytes: i64,
+    written_bytes: i64,
+    queued_bytes: i64,
+    in_flight_bytes: i64,
+    os_error: i64,
+    unknown_delivery: bool,
+    capacity_bytes: i64,
+}
+
+def io_std_writer(endpoint: i64, capacity_bytes: i64) -> Result<StdWriter, i64> {
+    let handle = sengoo_io_writer_new(endpoint, capacity_bytes);
+    if handle > 0 { Result { is_ok: true, value: StdWriter { handle: handle }, error: 0 }; } else { Result { is_ok: false, value: StdWriter { handle: 0 }, error: status_from_raw_ffi(handle) }; };
+}
+
+def io_stdout_writer(capacity_bytes: i64) -> Result<StdWriter, i64> {
+    io_std_writer(1, capacity_bytes);
+}
+
+def io_stderr_writer(capacity_bytes: i64) -> Result<StdWriter, i64> {
+    io_std_writer(2, capacity_bytes);
+}
+
+def io_writer_resource_count(field: i64) -> i64 {
+    sengoo_io_writer_resource_count(field);
+}
+
+impl StdWriter {
+    def try_write(&self, bytes: &Buffer, length: i64) -> Result<i64, i64> {
+        io_i64_result(sengoo_io_writer_try_write(self.handle, bytes.handle, length));
+    }
+    def poll(&self, timeout_ms: i64) -> Result<i64, i64> {
+        io_i64_result(sengoo_io_writer_poll(self.handle, timeout_ms));
+    }
+    def finish(&self) -> Result<bool, i64> {
+        io_bool_result(sengoo_io_writer_stop(self.handle, 0));
+    }
+    def cancel(&self) -> Result<bool, i64> {
+        io_bool_result(sengoo_io_writer_stop(self.handle, 1));
+    }
+    def wait_quiescent(&self, timeout_ms: i64) -> Result<bool, i64> {
+        let raw = sengoo_io_writer_wait(self.handle, timeout_ms);
+        if raw >= 0 { Result { is_ok: true, value: raw != 0, error: 0 }; } else { Result { is_ok: false, value: false, error: status_from_raw_ffi(raw) }; };
+    }
+    def snapshot(&self) -> Result<StdWriterStatus, i64> {
+        let buffer = ffi_buffer_new(64)?;
+        let status = sengoo_io_writer_snapshot(self.handle, buffer.handle);
+        if status != 0 { return Result { is_ok: false, value: StdWriterStatus { state: 0, accepted_bytes: 0, written_bytes: 0, queued_bytes: 0, in_flight_bytes: 0, os_error: 0, unknown_delivery: false, capacity_bytes: 0 }, error: status_from_raw_ffi(status) }; };
+        Result { is_ok: true, value: StdWriterStatus { state: sengoo_io_writer_snapshot_get(buffer.handle, 0), accepted_bytes: sengoo_io_writer_snapshot_get(buffer.handle, 1), written_bytes: sengoo_io_writer_snapshot_get(buffer.handle, 2), queued_bytes: sengoo_io_writer_snapshot_get(buffer.handle, 3), in_flight_bytes: sengoo_io_writer_snapshot_get(buffer.handle, 4), os_error: sengoo_io_writer_snapshot_get(buffer.handle, 5), unknown_delivery: sengoo_io_writer_snapshot_get(buffer.handle, 6) != 0, capacity_bytes: sengoo_io_writer_snapshot_get(buffer.handle, 7) }, error: 0 };
+    }
+}
+
+impl Drop for StdWriter {
+    def drop(&mut self) {
+        sengoo_io_writer_close(self.handle);
+    }
 }
 
 def io_i64_result(value: i64) -> Result<i64, i64> {
-    if value >= 0 {
-        Result { is_ok: true, value: value, error: 0 }
-    } else {
-        Result { is_ok: false, value: 0, error: status_from_raw_ffi(value) }
-    }
+    if value >= 0 { Result { is_ok: true, value: value, error: 0 }; } else { Result { is_ok: false, value: 0, error: status_from_raw_ffi(value) }; };
 }
 
 def io_bool_result(status: i64) -> Result<bool, i64> {
-    if status == 0 {
-        Result { is_ok: true, value: true, error: 0 }
-    } else {
-        Result { is_ok: false, value: false, error: status_from_raw_ffi(status) }
-    }
+    if status == 0 { Result { is_ok: true, value: true, error: 0 }; } else { Result { is_ok: false, value: false, error: status_from_raw_ffi(status) }; };
 }
 
 def io_stdin_read_raw(buffer_ptr: i64, capacity: i64) -> Result<i64, i64> {
-    io_i64_result(sengoo_io_stdin_read(buffer_ptr, capacity))
+    io_i64_result(sengoo_io_stdin_read(buffer_ptr, capacity));
 }
 
 def io_stdin_read(buffer: Buffer) -> Result<i64, i64> {
-    io_stdin_read_raw(buffer.ptr(), buffer.len())
+    io_stdin_read_raw(buffer.ptr(), buffer.len());
 }
 
 def io_stdin_read_line_raw(buffer_ptr: i64, capacity: i64) -> Result<i64, i64> {
-    io_i64_result(sengoo_io_stdin_read_line(buffer_ptr, capacity))
+    io_i64_result(sengoo_io_stdin_read_line(buffer_ptr, capacity));
 }
 
 def io_stdin_read_line(buffer: Buffer) -> Result<i64, i64> {
-    io_stdin_read_line_raw(buffer.ptr(), buffer.len())
+    io_stdin_read_line_raw(buffer.ptr(), buffer.len());
 }
 
 def io_stdout_write_raw(data_ptr: i64, len: i64) -> Result<i64, i64> {
-    io_i64_result(sengoo_io_stdout_write(data_ptr, len))
+    io_i64_result(sengoo_io_stdout_write(data_ptr, len));
 }
 
 def io_stdout_write(data: &str) -> Result<i64, i64> {
-    io_stdout_write_raw(sengoo_stdlib_str_ptr(data), data.len())
+    io_stdout_write_raw(sengoo_stdlib_str_ptr(data), data.len());
 }
 
 def io_stderr_write_raw(data_ptr: i64, len: i64) -> Result<i64, i64> {
-    io_i64_result(sengoo_io_stderr_write(data_ptr, len))
+    io_i64_result(sengoo_io_stderr_write(data_ptr, len));
 }
 
 def io_stderr_write(data: &str) -> Result<i64, i64> {
-    io_stderr_write_raw(sengoo_stdlib_str_ptr(data), data.len())
+    io_stderr_write_raw(sengoo_stdlib_str_ptr(data), data.len());
 }
 
 def io_stdout_flush() -> Result<bool, i64> {
-    io_bool_result(sengoo_io_stdout_flush())
+    io_bool_result(sengoo_io_stdout_flush());
 }
 
 def io_stderr_flush() -> Result<bool, i64> {
-    io_bool_result(sengoo_io_stderr_flush())
+    io_bool_result(sengoo_io_stderr_flush());
 }
 
 def io_fd_read(fd: i64, buffer: Buffer) -> Result<i64, i64> {
-    io_i64_result(sengoo_io_fd_read(fd, buffer.ptr(), buffer.len()))
+    io_i64_result(sengoo_io_fd_read(fd, buffer.ptr(), buffer.len()));
 }
 
 def io_fd_write(fd: i64, data: &str) -> Result<i64, i64> {
-    io_i64_result(sengoo_io_fd_write(fd, sengoo_stdlib_str_ptr(data), data.len()))
+    io_i64_result(sengoo_io_fd_write(fd, sengoo_stdlib_str_ptr(data), data.len()));
 }
