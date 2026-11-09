@@ -97,6 +97,14 @@ execution remains outside this fixture until a complete runtime probe is
 added. Exception/termination handlers, chained entries, XMM saves and
 CodeView locals remain open.
 
+`x64_sse.sg` provides a separate checked scalar SSE encoder for f32/f64
+memory operations, add/subtract/multiply/divide, ordered comparison instruction
+bytes and integer-bit transfer to XMM. Legacy prefixes precede REX and opcode
+bytes. Independent C fixture bytes and direct execution verify arithmetic,
+loads/stores and a f64 bit pattern; negative mutation must fail before executing
+the buffer. This encoder checkpoint does not yet integrate floating MIR, full
+NaN comparison rules, conversions or the complete float call ABI.
+
 `tools/native.sg` joins the SG frontend, semantic checker, owned HIR/MIR and
 scalar consumer into a single-source development CLI. Its positional interface
 is `INPUT OUTPUT.obj [--wrap]`; JSON schema-version-1 diagnostics identify the

@@ -1,0 +1,38 @@
+import selfhost_x64;
+
+def sh_x64_sse_memory(output: &ShBinary, store: bool, single: bool, xmm: i64, base: i64, displacement: i64) -> Result<i64, i64> {
+    if xmm < 0 or xmm > 15 or base < 0 or base > 15 or displacement < -2147483648 or displacement > 2147483647 { return sh_i64_error(6101); };
+    let start = sh_binary_len(output);
+    let mut valid = sh_binary_byte(output, if single { 243; } else { 242; }).is_ok() and sh_binary_byte(output, 64 | ((xmm >> 3) << 2) | (base >> 3)).is_ok() and sh_binary_byte(output, 15).is_ok() and sh_binary_byte(output, if store { 17; } else { 16; }).is_ok();
+    valid = valid and sh_binary_byte(output, 128 | ((xmm & 7) << 3) | (base & 7)).is_ok();
+    if (base & 7) == 4 { valid = valid and sh_binary_byte(output, 36).is_ok(); };
+    valid = valid and sh_binary_i32(output, displacement).is_ok();
+    if not valid { return sh_x64_rewind(output, start, 6001); };
+    sh_i64_ok(start);
+}
+
+def sh_x64_sse_binary(output: &ShBinary, single: bool, operation: i64, destination: i64, source: i64) -> Result<i64, i64> {
+    if destination < 0 or destination > 15 or source < 0 or source > 15 or operation < 0 or operation > 3 { return sh_i64_error(6101); };
+    let opcode = if operation == 0 { 88; } else { if operation == 1 { 92; } else { if operation == 2 { 89; } else { 94; }; }; };
+    let start = sh_binary_len(output);
+    let valid = sh_binary_byte(output, if single { 243; } else { 242; }).is_ok() and sh_binary_byte(output, 64 | ((destination >> 3) << 2) | (source >> 3)).is_ok() and sh_binary_byte(output, 15).is_ok() and sh_binary_byte(output, opcode).is_ok() and sh_binary_byte(output, 192 | ((destination & 7) << 3) | (source & 7)).is_ok();
+    if not valid { return sh_x64_rewind(output, start, 6001); };
+    sh_i64_ok(start);
+}
+
+def sh_x64_sse_compare(output: &ShBinary, single: bool, destination: i64, source: i64) -> Result<i64, i64> {
+    if destination < 0 or destination > 15 or source < 0 or source > 15 { return sh_i64_error(6101); };
+    let start = sh_binary_len(output);
+    let prefix = single or sh_binary_byte(output, 102).is_ok();
+    let valid = prefix and sh_binary_byte(output, 64 | ((destination >> 3) << 2) | (source >> 3)).is_ok() and sh_binary_byte(output, 15).is_ok() and sh_binary_byte(output, 47).is_ok() and sh_binary_byte(output, 192 | ((destination & 7) << 3) | (source & 7)).is_ok();
+    if not valid { return sh_x64_rewind(output, start, 6001); };
+    sh_i64_ok(start);
+}
+
+def sh_x64_sse_movq(output: &ShBinary, xmm: i64, register: i64) -> Result<i64, i64> {
+    if xmm < 0 or xmm > 15 or register < 0 or register > 15 { return sh_i64_error(6101); };
+    let start = sh_binary_len(output);
+    let valid = sh_binary_byte(output, 102).is_ok() and sh_binary_byte(output, 72 | ((xmm >> 3) << 2) | (register >> 3)).is_ok() and sh_binary_byte(output, 15).is_ok() and sh_binary_byte(output, 110).is_ok() and sh_binary_byte(output, 192 | ((xmm & 7) << 3) | (register & 7)).is_ok();
+    if not valid { return sh_x64_rewind(output, start, 6001); };
+    sh_i64_ok(start);
+}

@@ -8,6 +8,7 @@
 - [x] Implement and independently execute the initial validated scalar MIR consumer, including parallel CFG edge copies, integer widths, local memory, direct/indirect calls, six-argument Windows C calls, checked arithmetic failures and wrapping mode (`target/selfhost/m4-scalar-initialization/evidence.json`). Complete MIR/native ABI and cleanup support remain open.
 - [x] Verify the initial SG source-to-native-object CLI through frontend/semantics/owned HIR/MIR/x64/COFF against the frozen qualified Rust/LLVM reference for nine exact source programs and three output-preserving rejections (`target/selfhost/m4-source-supported/evidence.json`). Public sgc/module/tool parity remains open.
 - [x] Emit fixed-frame Windows x64 `.pdata/.xdata` unwind records and checked `__chkstk` probes for >4 KiB frames; verify LLVM inspection, `RtlLookupFunctionEntry`, `RtlVirtualUnwind`, deterministic objects and exact resource recovery (`target/selfhost/m4-unwind-final3/evidence.json`). Exception handlers, XMM saves and CodeView remain open.
+- [x] Verify bounded scalar SSE f32/f64 instruction encoding with independently specified bytes, CPU arithmetic/load/store/bit-pattern execution, damaged-byte rejection and 100 exact resource scopes (`target/selfhost/m4-sse-final/evidence.json`). Floating MIR and complete ABI/NaN/conversion behavior remain open.
 - [x] Emit fixed-frame Windows x64 `.pdata/.xdata` unwind records and checked `__chkstk` probes for >4 KiB frames; verify LLVM inspection, `RtlLookupFunctionEntry`, `RtlVirtualUnwind`, deterministic objects and exact resource recovery (`target/selfhost/m4-unwind-final3/evidence.json`). Exception handlers, XMM saves and CodeView remain open.
 
 ## Supported target behavior
@@ -77,3 +78,12 @@ wrapping. Boundary fixtures cover invalid unwind frame sizes, incomplete
 buffers and the >4 KiB `__chkstk` encoder. The prior report remains retained
 as development evidence; exception handlers, XMM saves, CodeView and actual
 large-frame execution remain open.
+
+Scalar SSE encoder evidence: `target/selfhost/m4-sse-final/evidence.json`,
+SHA-256 `910dda9aa543f0cde288b0dd35a3c70379408a94e0c6480a460fcc7576bb5895`,
+revision `9a62b4e2c24d9610451b18915dea5629ce356b9e`, Windows 11 x64.
+Nine commands passed with unchanged sources/tools. One hundred SG
+success/failure scopes recovered tracked resources exactly, repeated byte
+streams matched, the independent C probe compared known instruction bytes and
+executed f32/f64 arithmetic/memory/bit-pattern fixtures, and a deliberately
+corrupted instruction stream was rejected with exit 66 before execution.

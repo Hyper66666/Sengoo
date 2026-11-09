@@ -1,0 +1,87 @@
+import selfhost_x64_sse;
+
+import std::assert;
+
+import std::args;
+
+import std::file;
+
+extern "C" {
+    fn sengoo_string_live_handle_count() -> i64;
+    fn sengoo_buffer_live_handle_count() -> i64;
+    fn sengoo_opaque_live_handle_count() -> i64;
+}
+
+def sh_sse_fixture() -> Result<ShBinary, i64> {
+    let output = sh_binary_new(1024);
+    sh_x64_sse_binary(&output, false, 0, 0, 1)?;
+    sh_x64_ret(&output)?;
+    sh_binary_align(&output, 16, 144)?;
+    sh_x64_sse_memory(&output, false, false, 0, 1, 0)?;
+    sh_x64_sse_binary(&output, false, 0, 0, 1)?;
+    sh_x64_ret(&output)?;
+    sh_binary_align(&output, 16, 144)?;
+    sh_x64_sse_binary(&output, true, 0, 0, 1)?;
+    sh_x64_ret(&output)?;
+    sh_binary_align(&output, 16, 144)?;
+    sh_x64_sse_binary(&output, false, 1, 0, 1)?;
+    sh_x64_ret(&output)?;
+    sh_binary_align(&output, 16, 144)?;
+    sh_x64_sse_binary(&output, false, 2, 0, 1)?;
+    sh_x64_ret(&output)?;
+    sh_binary_align(&output, 16, 144)?;
+    sh_x64_sse_binary(&output, false, 3, 0, 1)?;
+    sh_x64_ret(&output)?;
+    sh_binary_align(&output, 16, 144)?;
+    sh_x64_sse_memory(&output, true, false, 1, 1, 0)?;
+    sh_x64_ret(&output)?;
+    sh_binary_align(&output, 16, 144)?;
+    sh_x64_sse_memory(&output, true, true, 1, 1, 0)?;
+    sh_x64_ret(&output)?;
+    sh_binary_align(&output, 16, 144)?;
+    sh_x64_sse_movq(&output, 0, 1)?;
+    sh_x64_ret(&output)?;
+    Result { is_ok: true, value: output, error: 0 };
+}
+
+def sh_test_sse() -> Result<bool, i64> {
+    let output = sh_sse_fixture()?;
+    let before = sh_binary_len(&output);
+    assert_eq_i64(sh_x64_sse_memory(&output, false, false, 16, 5, 0).error, 6101, "x64_sse.sg", 50);
+    assert_eq_i64(sh_binary_len(&output), before, "x64_sse.sg", 51);
+    assert_eq_i64(sh_x64_sse_binary(&output, false, 4, 0, 1).error, 6101, "x64_sse.sg", 52);
+    assert_eq_i64(sh_x64_sse_compare(&output, false, -1, 1).error, 6101, "x64_sse.sg", 53);
+    let tiny = sh_binary_new(3);
+    assert_eq_i64(sh_x64_sse_movq(&tiny, 0, 0).error, 6001, "x64_sse.sg", 55);
+    assert_eq_i64(sh_binary_len(&tiny), 0, "x64_sse.sg", 56);
+    let high = sh_binary_new(64);
+    sh_x64_sse_memory(&high, false, false, 15, 12, 2147483647)?;
+    sh_x64_sse_binary(&high, true, 3, 15, 14)?;
+    sh_x64_sse_compare(&high, true, 8, 9)?;
+    sh_x64_sse_compare(&high, false, 8, 9)?;
+    Result { is_ok: true, value: true, error: 0 };
+}
+
+def sh_sse_emit() -> Result<bool, i64> {
+    let buffer = ffi_buffer_new(arg_len(0).unwrap_or(0))?;
+    let copied = arg_copy(0, buffer)?;
+    let path = string_from_utf8(buffer, copied)?;
+    let code = sh_sse_fixture()?;
+    let bytes = sh_binary_buffer(&code)?;
+    file_write_str_raw(sengoo_stdlib_str_ptr(path.as_str()), bytes.ptr(), bytes.used_len())?;
+    Result { is_ok: true, value: true, error: 0 };
+}
+
+def main() -> i64 {
+    if args_len() > 0 { let emitted = sh_sse_emit(); return if emitted.is_ok() { 0; } else { 1; }; };
+    let strings = sengoo_string_live_handle_count();
+    let buffers = sengoo_buffer_live_handle_count();
+    let opaque = sengoo_opaque_live_handle_count();
+    let mut round = 0;
+    while round < 100 { let result = sh_test_sse(); if not result.is_ok() { println(result.error); return 1; }; round = round + 1; };
+    assert_eq_i64(sengoo_string_live_handle_count(), strings, "x64_sse.sg", 84);
+    assert_eq_i64(sengoo_buffer_live_handle_count(), buffers, "x64_sse.sg", 85);
+    assert_eq_i64(sengoo_opaque_live_handle_count(), opaque, "x64_sse.sg", 86);
+    println("selfhost x64 SSE scalar encoding: ok");
+    0;
+}
