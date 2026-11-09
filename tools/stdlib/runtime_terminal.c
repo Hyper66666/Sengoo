@@ -379,6 +379,21 @@ long long sengoo_terminal_write(long long handle, long long bytes, long long len
     if (length < 0 || length > SENGOO_TERMINAL_LIMIT || (length && !bytes)) return -SENGOO_STATUS_INVALID_ARGUMENT;
     return sengoo_terminal_write_bytes(terminal, (const unsigned char*)(intptr_t)bytes, (size_t)length) ? length : -SENGOO_STATUS_IO;
 }
+/* Frame content/layout belongs to Sengoo. This boundary only admits a write
+ * against live terminal geometry; a rejected/raced write is not a valid cache. */
+long long sengoo_terminal_write_frame(long long handle, long long bytes, long long length, long long width, long long height) {
+    SengooTerminal* terminal = sengoo_terminal_resolve(handle);
+    if (!terminal) return -SENGOO_STATUS_INVALID_HANDLE;
+    if (length < 0 || length > SENGOO_TERMINAL_LIMIT || (length && !bytes) || width < 1 || height < 1)
+        return -SENGOO_STATUS_INVALID_ARGUMENT;
+    if (!terminal->output_tty) return -SENGOO_STATUS_UNSUPPORTED;
+    long long actual_width, actual_height;
+    sengoo_terminal_dimensions(terminal, &actual_width, &actual_height);
+    if (actual_width != width || actual_height != height) return 0;
+    if (!sengoo_terminal_write_bytes(terminal, (const unsigned char*)(intptr_t)bytes, (size_t)length)) return -SENGOO_STATUS_IO;
+    sengoo_terminal_dimensions(terminal, &actual_width, &actual_height);
+    return actual_width == width && actual_height == height;
+}
 static void sengoo_terminal_consume(SengooTerminal* terminal, size_t length) {
     memmove(terminal->pending, terminal->pending + length, terminal->pending_len - length);
     terminal->pending_len -= length; terminal->escape_since = 0;
@@ -560,6 +575,12 @@ static long long sengoo_terminal_read_input(SengooTerminal* terminal) {
             INPUT_RECORD event; DWORD count;
             if (!ReadConsoleInputW(terminal->input, &event, 1, &count)) return -SENGOO_STATUS_IO;
             if (!count) continue;
+            if (event.EventType == WINDOW_BUFFER_SIZE_EVENT) {
+                /* The window may have changed away and back since the last
+                 * poll. Deliver an invalidation even if its final size matches. */
+                sengoo_terminal_dimensions(terminal, &terminal->width, &terminal->height);
+                return SG_TERM_RESIZE;
+            }
             if (event.EventType == MOUSE_EVENT) {
                 long long kind = sengoo_terminal_windows_mouse(terminal, &event.Event.MouseEvent);
                 if (kind) return kind;

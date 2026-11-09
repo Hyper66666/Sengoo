@@ -290,6 +290,19 @@ static int tty_probe(void) {
     long long terminal = sengoo_terminal_open();
     if (terminal <= 0 || sengoo_terminal_is_tty(terminal) != 1) return 72;
     if (sengoo_terminal_enter_raw(terminal) != 1) return 73;
+    CONSOLE_SCREEN_BUFFER_INFO frame_info;
+    if (!GetConsoleScreenBufferInfo(output, &frame_info)) return 110;
+    long long frame_width = frame_info.srWindow.Right - frame_info.srWindow.Left + 1;
+    long long frame_height = frame_info.srWindow.Bottom - frame_info.srWindow.Top + 1;
+    if (sengoo_terminal_write_frame(terminal, raw(""), 0, frame_width, frame_height) != 1
+        || sengoo_terminal_write_frame(terminal, raw("must-not-render"), 15, frame_width + 1, frame_height) != 0
+        || sengoo_terminal_write_frame(terminal, raw(""), 0, 0, frame_height) != -SENGOO_STATUS_INVALID_ARGUMENT) return 111;
+    if (!FlushConsoleInputBuffer(input)) return 112;
+    INPUT_RECORD resized; memset(&resized, 0, sizeof(resized));
+    resized.EventType = WINDOW_BUFFER_SIZE_EVENT; resized.Event.WindowBufferSizeEvent.dwSize = frame_info.dwSize;
+    DWORD resize_written;
+    if (!WriteConsoleInputW(input, &resized, 1, &resize_written) || resize_written != 1
+        || sengoo_terminal_read_event(terminal, 1000) != SG_TERM_RESIZE) return 113;
     INPUT_RECORD events[2]; memset(events, 0, sizeof(events));
     for (int i = 0; i < 2; i++) { events[i].EventType = KEY_EVENT; events[i].Event.KeyEvent.bKeyDown = TRUE; events[i].Event.KeyEvent.wRepeatCount = 1; }
     events[0].Event.KeyEvent.uChar.UnicodeChar = L'\x6587';

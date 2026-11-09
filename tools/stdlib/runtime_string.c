@@ -30,11 +30,13 @@ typedef struct {
     SengooOwnedString* owned;
     uint32_t generation;
     unsigned char alive;
+    size_t next_free;
 } SengooStringSlot;
 
 static SengooStringSlot* g_string_slots = NULL;
 static size_t g_string_slot_count = 0;
 static size_t g_string_slot_capacity = 0;
+static size_t g_string_free_head = SIZE_MAX;
 static long long g_string_iter_live_count;
 long long sengoo_string_iter_live_handle_count(void) { return g_string_iter_live_count; }
 enum { SENGOO_TEXT_ITER_BYTES = 1, SENGOO_TEXT_ITER_SPLIT = 2 };
@@ -105,18 +107,13 @@ static int sengoo_string_slot_ensure_capacity(size_t min_slots) {
 }
 
 static long long sengoo_string_alloc_handle(SengooOwnedString* owned) {
-    size_t index = 0;
-    for (; index < g_string_slot_count; ++index) {
-        if (!g_string_slots[index].alive) {
-            break;
-        }
-    }
+    size_t index = g_string_free_head == SIZE_MAX ? g_string_slot_count : g_string_free_head;
     if (index == g_string_slot_count) {
         if (!sengoo_string_slot_ensure_capacity(g_string_slot_count + 1)) {
             return -(long long)SENGOO_STATUS_OUT_OF_MEMORY;
         }
         g_string_slot_count += 1;
-    }
+    } else { g_string_free_head = g_string_slots[index].next_free; }
 
     SengooStringSlot* slot = &g_string_slots[index];
     slot->owned = owned;
@@ -329,6 +326,8 @@ long long sengoo_string_free_status(long long handle) {
     sengoo_owned_string_destroy(slot->owned);
     slot->owned = NULL;
     slot->alive = 0;
+    slot->next_free = g_string_free_head;
+    g_string_free_head = index;
     return SENGOO_STATUS_OK;
 }
 

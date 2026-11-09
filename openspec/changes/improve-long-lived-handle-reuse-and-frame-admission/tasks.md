@@ -1,0 +1,5 @@
+- [x] Reproduce linear temporary String allocation with retained live handles.
+- [x] Implement constant-time freed String/Buffer/opaque slot reuse and independent stale/cleanup tests.
+- [x] Add generic frame geometry admission and same-size resize notification.
+- [x] Run native handle, JSON, process/terminal and Unicode compatibility checks.
+- [x] Document interfaces, record performance evidence and strict-validate OpenSpec.

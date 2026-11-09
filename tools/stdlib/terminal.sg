@@ -9,6 +9,7 @@ extern "C" {
     fn sengoo_terminal_discard_input(handle: i64) -> i64;
     fn sengoo_terminal_clear_after_cursor(handle: i64) -> i64;
     fn sengoo_terminal_write(handle: i64, bytes: i64, length: i64) -> i64;
+    fn sengoo_terminal_write_frame(handle: i64, bytes: i64, length: i64, width: i64, height: i64) -> i64;
     fn sengoo_terminal_read_event(handle: i64, timeout_ms: i64) -> i64;
     fn sengoo_terminal_event_field(handle: i64, field: i64) -> i64;
     fn sengoo_terminal_event_text(handle: i64) -> i64;
@@ -132,6 +133,11 @@ impl Terminal {
     }
     def write(&self, text: &str) -> Result<bool, i64> {
         terminal_status(sengoo_terminal_write(self.handle, sengoo_stdlib_str_ptr(text), text.len()));
+    }
+    // False means geometry changed; invalidate the caller's frame cache and
+    // retry on the next event-loop frame. Does not consume keyboard input.
+    def write_frame(&self, text: &str, width: i64, height: i64) -> Result<bool, i64> {
+        terminal_status(sengoo_terminal_write_frame(self.handle, sengoo_stdlib_str_ptr(text), text.len(), width, height))
     }
     def read_event(&self, timeout_ms: i64) -> Result<TerminalEvent, i64> {
         let kind = sengoo_terminal_read_event(self.handle, timeout_ms);

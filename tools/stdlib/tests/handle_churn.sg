@@ -1,0 +1,52 @@
+import std::string;
+import std::collections;
+import std::time;
+import std::ffi;
+
+extern "C" { fn sengoo_vec_push_i64(handle: i64, value: i64) -> i64; fn sengoo_buffer_live_handle_count() -> i64; fn sengoo_vec_new_i64() -> i64; fn sengoo_vec_free_i64(handle: i64); fn sengoo_vec_len_i64(handle: i64) -> i64; fn sengoo_ffi_buffer_free(handle: i64) -> i64; fn sengoo_opaque_live_handle_count() -> i64; fn sengoo_string_live_handle_count() -> i64; }
+
+def churn_case() -> Result<i64, i64> {
+    let retained: Vec<String> = vec_new(); let mut index = 0;
+    while index < 20000 { retained.push(string_from_str("retained 世界")?); index = index + 1; };
+    let stale = string_from_str("old")?;
+    let stale_handle = stale.handle;
+    sengoo_string_free_status(stale_handle);
+    let reused = string_from_str("new")?;
+    if reused.handle == stale_handle or sengoo_string_len(stale_handle) >= 0 { return Result { is_ok: false, value: 0, error: 99 }; };
+    let started = time_monotonic_ms(); index = 0;
+    while index < 100000 { let temporary = string_from_str("temporary")?; if temporary.len() != 9 { return Result { is_ok: false, value: 0, error: 99 }; }; index = index + 1; };
+    println(time_monotonic_ms() - started);
+    // Exercise opaque generations through real owned vector handles. Retain
+    // handles explicitly so the test does not depend on generic Vec<Buffer> Drop.
+    let buffers: Vec<i64> = vec_new(); index = 0;
+    while index < 20000 { buffers.push(sengoo_ffi_buffer_new(1)); index = index + 1; };
+    let stale_raw = sengoo_ffi_buffer_new(1); sengoo_ffi_buffer_free(stale_raw);
+    let fresh_raw = sengoo_ffi_buffer_new(1);
+    if fresh_raw == stale_raw or sengoo_ffi_buffer_len(stale_raw) >= 0 { return Result { is_ok: false, value: 0, error: 99 }; };
+    let buffer_started = time_monotonic_ms(); index = 0;
+    while index < 100000 { let temporary = sengoo_ffi_buffer_new(1); if temporary <= 0 { return Result { is_ok: false, value: 0, error: 99 }; }; sengoo_ffi_buffer_free(temporary); index = index + 1; };
+    println(time_monotonic_ms() - buffer_started);
+    index = 0; while index < buffers.len() { sengoo_ffi_buffer_free(buffers.get(index).unwrap_or(0)); index = index + 1; };
+    sengoo_ffi_buffer_free(fresh_raw);
+    // Opaque slot registration is used by vectors, JSON and iterator handles.
+    let opaque_handles: Vec<i64> = vec_new(); index = 0;
+    while index < 20000 { opaque_handles.push(sengoo_vec_new_i64()); index = index + 1; };
+    let old_vec = sengoo_vec_new_i64(); sengoo_vec_free_i64(old_vec);
+    let new_vec = sengoo_vec_new_i64();
+    sengoo_vec_push_i64(new_vec, 42); sengoo_vec_free_i64(old_vec);
+    if old_vec == new_vec or sengoo_vec_len_i64(old_vec) != 0 or sengoo_vec_len_i64(new_vec) != 1 { return Result { is_ok: false, value: 0, error: 99 }; };
+    let opaque_started = time_monotonic_ms(); index = 0;
+    while index < 100000 { let temporary = sengoo_vec_new_i64(); sengoo_vec_free_i64(temporary); index = index + 1; };
+    println(time_monotonic_ms() - opaque_started);
+    index = 0; while index < opaque_handles.len() { sengoo_vec_free_i64(opaque_handles.get(index).unwrap_or(0)); index = index + 1; }; sengoo_vec_free_i64(new_vec);
+    let first = retained.get(0)?; let last = retained.get(19999)?;
+    if first.as_str() != "retained 世界" or last.as_str() != "retained 世界" { return Result { is_ok: false, value: 0, error: 99 }; };
+    Result { is_ok: true, value: 0, error: 0 }
+}
+
+def main() -> i64 {
+    let buffer_count = sengoo_buffer_live_handle_count(); let strings = sengoo_string_live_handle_count(); let opaque = sengoo_opaque_live_handle_count();
+    let result = churn_case(); if not result.is_ok() { println(result.error); return 1; };
+    if sengoo_buffer_live_handle_count() != buffer_count or sengoo_string_live_handle_count() != strings or sengoo_opaque_live_handle_count() != opaque { println("handle cleanup mismatch"); println(strings); println(sengoo_string_live_handle_count()); println(opaque); println(sengoo_opaque_live_handle_count()); return 1; };
+    result.value
+}

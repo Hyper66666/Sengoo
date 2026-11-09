@@ -917,11 +917,13 @@ typedef struct {
     SengooFfiBuffer* buffer;
     uint32_t generation;
     unsigned char alive;
+    size_t next_free;
 } SengooBufferSlot;
 
 static SengooBufferSlot* g_buffer_slots = NULL;
 static size_t g_buffer_slot_count = 0;
 static size_t g_buffer_slot_capacity = 0;
+static size_t g_buffer_free_head = SIZE_MAX;
 
 static int sengoo_buffer_slot_ensure_capacity(size_t min_slots) {
     if (g_buffer_slot_capacity >= min_slots) {
@@ -951,18 +953,13 @@ static int sengoo_buffer_slot_ensure_capacity(size_t min_slots) {
 }
 
 static long long sengoo_buffer_alloc_handle(SengooFfiBuffer* buffer) {
-    size_t index = 0;
-    for (; index < g_buffer_slot_count; ++index) {
-        if (!g_buffer_slots[index].alive) {
-            break;
-        }
-    }
+    size_t index = g_buffer_free_head == SIZE_MAX ? g_buffer_slot_count : g_buffer_free_head;
     if (index == g_buffer_slot_count) {
         if (!sengoo_buffer_slot_ensure_capacity(g_buffer_slot_count + 1)) {
             return 0;
         }
         g_buffer_slot_count += 1;
-    }
+    } else { g_buffer_free_head = g_buffer_slots[index].next_free; }
 
     SengooBufferSlot* slot = &g_buffer_slots[index];
     slot->buffer = buffer;
@@ -1350,6 +1347,8 @@ long long sengoo_ffi_buffer_free(long long buffer_handle) {
     SengooFfiBuffer* buffer = slot->buffer;
     slot->alive = 0;
     slot->buffer = NULL;
+    slot->next_free = g_buffer_free_head;
+    g_buffer_free_head = index;
     free(buffer->bytes);
     free(buffer);
     return SENGOO_FFI_STATUS_OK;
@@ -4561,11 +4560,13 @@ typedef struct {
     void* ptr;
     uint32_t generation;
     int alive;
+    size_t next_free;
 } SengooOpaqueHandleSlot;
 
 static SengooOpaqueHandleSlot* g_opaque_handle_slots = NULL;
 static size_t g_opaque_handle_slot_count = 0;
 static size_t g_opaque_handle_slot_capacity = 0;
+static size_t g_opaque_handle_free_head = SIZE_MAX;
 
 static int sengoo_opaque_handle_ensure_capacity(size_t min_capacity) {
     if (g_opaque_handle_slot_capacity >= min_capacity) {
@@ -4619,19 +4620,13 @@ long long sengoo_opaque_handle_new(void* ptr) {
     if (!ptr) {
         return 0;
     }
-    size_t index = g_opaque_handle_slot_count;
-    for (size_t i = 0; i < g_opaque_handle_slot_count; ++i) {
-        if (!g_opaque_handle_slots[i].alive) {
-            index = i;
-            break;
-        }
-    }
+    size_t index = g_opaque_handle_free_head == SIZE_MAX ? g_opaque_handle_slot_count : g_opaque_handle_free_head;
     if (index == g_opaque_handle_slot_count) {
         if (!sengoo_opaque_handle_ensure_capacity(g_opaque_handle_slot_count + 1)) {
             return 0;
         }
         g_opaque_handle_slot_count += 1;
-    }
+    } else { g_opaque_handle_free_head = g_opaque_handle_slots[index].next_free; }
     SengooOpaqueHandleSlot* slot = &g_opaque_handle_slots[index];
     slot->ptr = ptr;
     slot->alive = 1;
@@ -4668,6 +4663,8 @@ void* sengoo_opaque_handle_take(long long handle) {
     void* ptr = slot->ptr;
     slot->ptr = NULL;
     slot->alive = 0;
+    slot->next_free = g_opaque_handle_free_head;
+    g_opaque_handle_free_head = index;
     return ptr;
 }
 

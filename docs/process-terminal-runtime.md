@@ -4,6 +4,9 @@ These additive development APIs preserve existing `std::process` functions,
 edition 2026 and runtime ABI 1. Windows x64 is the first verified host. POSIX
 implementations are present; a Windows run does not qualify POSIX behavior.
 
+For geometry-checked output and long-lived handle allocation, see
+[frame admission and handle reuse](terminal-frame-and-handle-reuse.md).
+
 ## Piped processes
 
 `ProcessCommand.spawn_piped()` borrows a command and returns an owning,
