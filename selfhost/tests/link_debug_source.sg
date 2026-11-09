@@ -1,0 +1,5 @@
+def main() -> i64 {
+    let mut answer: i64 = 40;
+    answer = answer + 2;
+    return answer;
+}

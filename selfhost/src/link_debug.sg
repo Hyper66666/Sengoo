@@ -1,0 +1,196 @@
+import selfhost_link_msf;
+
+import selfhost_link_hash;
+
+struct ShLinkDebug {
+    names: ShSymbols,
+    path: i64,
+    source: Vec<i64>,
+    source_lines: i64,
+    functions: Vec<i64>,
+    locals: Vec<i64>,
+    lines: Vec<i64>,
+}
+
+def sh_link_debug_new() -> ShLinkDebug {
+    ShLinkDebug { names: sh_symbols_new(1048576), path: -1, source: vec_new_i64(), source_lines: 0, functions: vec_new_i64(), locals: vec_new_i64(), lines: vec_new_i64() };
+}
+
+def sh_link_debug_name(debug: &ShLinkDebug, text: &String) -> Result<i64, i64> {
+    if text.len() == 0 or text.len() > 65535 { return sh_i64_error(7301); };
+    let bytes = sh_coff_symbol_bytes(text)?;
+    let mut index = 0;
+    while index < text.len() { if bytes.get_u8(index)? == 0 { return sh_i64_error(7301); }; index = index + 1; };
+    sh_intern(&debug.names, text);
+}
+
+def sh_link_debug_source(debug: &mut ShLinkDebug, path: &String, source: &ShBinary) -> Result<i64, i64> {
+    if debug.path >= 0 { return sh_i64_error(7303); };
+    if sh_binary_len(source) > 1048576 { return sh_i64_error(7302); };
+    let name = sh_link_debug_name(debug, path)?;
+    let buffer = sh_binary_buffer(source)?;
+    let decoded = string_from_utf8(buffer, sh_binary_len(source));
+    if not decoded.is_ok() { return sh_i64_error(7301); };
+    let mut lines = 1;
+    let mut index = 0;
+    while index < sh_binary_len(source) { let byte = sh_binary_get(source, index)?; if byte == 0 { return sh_i64_error(7301); }; if byte == 10 { lines = lines + 1; }; sh_link_push(&debug.source, byte)?; index = index + 1; };
+    debug.path = name;
+    debug.source_lines = lines;
+    sh_i64_ok(0);
+}
+
+def sh_link_debug_function(debug: &ShLinkDebug, name: &String, segment: i64, offset: i64, size: i64, frame: i64, prologue: i64, epilogue: i64) -> Result<i64, i64> {
+    if debug.functions.len() / 8 >= 256 { return sh_i64_error(7302); };
+    if debug.path < 0 or segment < 1 or segment > 96 or offset < 0 or offset > 4294967295 or size < 1 or size > 65535 or frame < 0 or frame > 1048576 or frame % 8 != 0 or prologue < 0 or epilogue < prologue or epilogue > size { return sh_i64_error(7301); };
+    let symbol = sh_link_debug_name(debug, name)?;
+    let mut index = 0;
+    while index < debug.functions.len() / 8 { if sh_link_word(&debug.functions, 8, index, 0) == symbol { return sh_i64_error(7305); }; if sh_link_word(&debug.functions, 8, index, 1) == segment { let first = sh_link_word(&debug.functions, 8, index, 2); let end = first + sh_link_word(&debug.functions, 8, index, 3); if offset < end and first < offset + size { return sh_i64_error(7301); }; }; index = index + 1; };
+    sh_link_push(&debug.functions, symbol)?;
+    sh_link_push(&debug.functions, segment)?;
+    sh_link_push(&debug.functions, offset)?;
+    sh_link_push(&debug.functions, size)?;
+    sh_link_push(&debug.functions, frame)?;
+    sh_link_push(&debug.functions, prologue)?;
+    sh_link_push(&debug.functions, epilogue)?;
+    sh_link_push(&debug.functions, 19)?;
+    sh_i64_ok(debug.functions.len() / 8 - 1);
+}
+
+def sh_link_debug_local(debug: &ShLinkDebug, function: i64, name: &String, kind: i64, stack: i64, start: i64, size: i64) -> Result<i64, i64> {
+    if debug.locals.len() / 6 >= 4096 { return sh_i64_error(7302); };
+    if kind != 19 { return sh_i64_error(7303); };
+    if function < 0 or function >= debug.functions.len() / 8 or stack < 0 or stack > sh_link_word(&debug.functions, 8, function, 4) - 8 or start < sh_link_word(&debug.functions, 8, function, 5) or size < 1 or start + size > sh_link_word(&debug.functions, 8, function, 6) { return sh_i64_error(7301); };
+    let symbol = sh_link_debug_name(debug, name)?;
+    let mut index = 0;
+    while index < debug.locals.len() / 6 { if sh_link_word(&debug.locals, 6, index, 0) == function and sh_link_word(&debug.locals, 6, index, 1) == symbol { return sh_i64_error(7305); }; index = index + 1; };
+    sh_link_push(&debug.locals, function)?;
+    sh_link_push(&debug.locals, symbol)?;
+    sh_link_push(&debug.locals, kind)?;
+    sh_link_push(&debug.locals, stack)?;
+    sh_link_push(&debug.locals, start)?;
+    sh_link_push(&debug.locals, size)?;
+    sh_i64_ok(debug.locals.len() / 6 - 1);
+}
+
+def sh_link_debug_line(debug: &ShLinkDebug, function: i64, offset: i64, line: i64) -> Result<i64, i64> {
+    if debug.lines.len() / 3 >= 65536 { return sh_i64_error(7302); };
+    if function < 0 or function >= debug.functions.len() / 8 or offset < 0 or offset >= sh_link_word(&debug.functions, 8, function, 3) or line < 1 or line > debug.source_lines or line > 16777215 { return sh_i64_error(7301); };
+    let mut index = 0;
+    while index < debug.lines.len() / 3 { if sh_link_word(&debug.lines, 3, index, 0) == function and sh_link_word(&debug.lines, 3, index, 1) >= offset { return sh_i64_error(7301); }; index = index + 1; };
+    sh_link_push(&debug.lines, function)?;
+    sh_link_push(&debug.lines, offset)?;
+    sh_link_push(&debug.lines, line)?;
+    sh_i64_ok(debug.lines.len() / 3 - 1);
+}
+
+def sh_link_debug_append(output: &ShBinary, bytes: &ShBinary) -> Result<i64, i64> {
+    let mut index = 0;
+    while index < sh_binary_len(bytes) { sh_binary_byte(output, sh_binary_get(bytes, index)?)?; index = index + 1; };
+    sh_i64_ok(sh_binary_len(bytes));
+}
+
+def sh_link_debug_text(output: &ShBinary, text: &String) -> Result<i64, i64> {
+    let bytes = sh_coff_symbol_bytes(text)?;
+    let mut index = 0;
+    while index < text.len() { sh_binary_byte(output, bytes.get_u8(index)?)?; index = index + 1; };
+    sh_binary_byte(output, 0)?;
+    sh_i64_ok(text.len() + 1);
+}
+
+def sh_link_debug_zeros(output: &ShBinary, size: i64) -> Result<i64, i64> {
+    let mut index = 0;
+    while index < size { sh_binary_byte(output, 0)?; index = index + 1; };
+    sh_i64_ok(size);
+}
+
+def sh_link_debug_validate(debug: &ShLinkDebug, image: &ShBinary) -> Result<i64, i64> {
+    if sh_binary_len(image) < 512 or sh_link_uint(image, 0, 2)? != 23117 or sh_link_uint(image, 60, 4)? != 64 or sh_link_uint(image, 64, 4)? != 17744 or sh_link_uint(image, 68, 2)? != 34404 or sh_link_uint(image, 88, 2)? != 523 or sh_link_uint(image, 120, 4)? != 4096 or sh_link_uint(image, 124, 4)? != 512 { return sh_i64_error(7303); };
+    let sections = sh_link_uint(image, 70, 2)?;
+    if sections < 1 or sections >= 96 or 328 + sections * 40 > sh_link_uint(image, 148, 4)? or sh_link_uint(image, 248, 8)? != 0 or sh_link_uint(image, 232, 8)? != 0 { return sh_i64_error(7303); };
+    let headers = sh_link_uint(image, 148, 4)?;
+    let virtual_size = sh_link_uint(image, 144, 4)?;
+    if headers % 512 != 0 or headers > sh_binary_len(image) or sh_binary_len(image) % 512 != 0 or virtual_size % 4096 != 0 or virtual_size > 16777216 { return sh_i64_error(7301); };
+    let mut previous_raw = headers;
+    let mut previous_virtual = sh_link_align(headers, 4096, 16777216)?;
+    let mut section = 0;
+    while section < sections { let row = 328 + section * 40; let size = sh_link_uint(image, row + 8, 4)?; let rva = sh_link_uint(image, row + 12, 4)?; let padded = sh_link_uint(image, row + 16, 4)?; let raw = sh_link_uint(image, row + 20, 4)?; if rva % 4096 != 0 or raw % 512 != 0 or padded % 512 != 0 or rva < previous_virtual or raw < previous_raw or raw > sh_binary_len(image) or padded > sh_binary_len(image) - raw or size > padded or rva > virtual_size or size > virtual_size - rva { return sh_i64_error(7301); }; previous_raw = raw + padded; previous_virtual = sh_link_align(rva + size, 4096, 16777216)?; section = section + 1; };
+    if debug.path < 0 or debug.functions.len() == 0 { return sh_i64_error(7301); };
+    let mut function = 0;
+    while function < debug.functions.len() / 8 { let segment = sh_link_word(&debug.functions, 8, function, 1); if segment > sections { return sh_i64_error(7301); }; let row = 328 + (segment - 1) * 40; let offset = sh_link_word(&debug.functions, 8, function, 2); let size = sh_link_word(&debug.functions, 8, function, 3); if (sh_link_uint(image, row + 36, 4)? & 536870912) == 0 or offset > sh_link_uint(image, row + 8, 4)? or size > sh_link_uint(image, row + 8, 4)? - offset { return sh_i64_error(7301); }; function = function + 1; };
+    sh_i64_ok(sections);
+}
+
+def sh_link_debug_identity(debug: &ShLinkDebug, image: &ShBinary, pdb_path: &String) -> Result<ShBinary, i64> {
+    sh_link_debug_validate(debug, image)?;
+    if pdb_path.len() < 1 or pdb_path.len() > 65535 { return sh_coff_error(7301); };
+    let path_bytes = sh_coff_symbol_bytes(pdb_path)?;
+    let mut path_at = 0;
+    while path_at < pdb_path.len() { if path_bytes.get_u8(path_at)? == 0 { return sh_coff_error(7301); }; path_at = path_at + 1; };
+    let identity = sh_binary_new(16777216);
+    let domain = string_from_str("Sengoo-PDB-v1")?;
+    sh_link_debug_text(&identity, &domain)?;
+    sh_binary_unsigned(&identity, sh_binary_len(image), 8)?;
+    sh_binary_unsigned(&identity, debug.names.names.len(), 8)?;
+    sh_binary_unsigned(&identity, debug.source.len(), 8)?;
+    sh_binary_unsigned(&identity, debug.functions.len(), 8)?;
+    sh_binary_unsigned(&identity, debug.locals.len(), 8)?;
+    sh_binary_unsigned(&identity, debug.lines.len(), 8)?;
+    sh_link_debug_text(&identity, pdb_path)?;
+    sh_link_debug_append(&identity, image)?;
+    let mut name = 0;
+    while name < debug.names.names.len() { let text = sh_symbol_text(&debug.names, name)?; sh_link_debug_text(&identity, &text)?; name = name + 1; };
+    let mut index = 0;
+    while index < debug.source.len() { sh_binary_byte(&identity, sengoo_vec_get_or_default_i64(debug.source.handle, index, -1))?; index = index + 1; };
+    index = 0;
+    while index < debug.functions.len() { sh_binary_unsigned(&identity, sengoo_vec_get_or_default_i64(debug.functions.handle, index, 0), 8)?; index = index + 1; };
+    index = 0;
+    while index < debug.locals.len() { sh_binary_unsigned(&identity, sengoo_vec_get_or_default_i64(debug.locals.handle, index, 0), 8)?; index = index + 1; };
+    index = 0;
+    while index < debug.lines.len() { sh_binary_unsigned(&identity, sengoo_vec_get_or_default_i64(debug.lines.handle, index, 0), 8)?; index = index + 1; };
+    sh_link_sha256(&identity);
+}
+
+def sh_link_debug_image(debug: &ShLinkDebug, image: &ShBinary, pdb_path: &String) -> Result<ShBinary, i64> {
+    let digest = sh_link_debug_identity(debug, image, pdb_path)?;
+    let sections = sh_link_uint(image, 70, 2)?;
+    let headers = sh_link_uint(image, 148, 4)?;
+    let needed = sh_link_align(328 + (sections + 1) * 40, 512, 16777216)?;
+    let growth = if needed > headers { needed - headers; } else { 0; };
+    let raw = sh_link_align(sh_binary_len(image) + growth, 512, 16777216)?;
+    let rva = sh_link_uint(image, 144, 4)?;
+    let size = 28 + 24 + pdb_path.len() + 1;
+    let padded = sh_link_align(size, 512, 16777216)?;
+    let output = sh_binary_new(16777216);
+    let mut index = 0;
+    while index < sh_binary_len(image) { if index == headers { sh_link_debug_zeros(&output, growth)?; (); }; sh_binary_byte(&output, sh_binary_get(image, index)?)?; index = index + 1; };
+    sh_link_debug_zeros(&output, raw + padded - sh_binary_len(&output))?;
+    let mut section = 0;
+    while section < sections { let row = 328 + section * 40; sh_binary_patch(&output, row + 20, sh_link_uint(image, row + 20, 4)? + growth, 4)?; section = section + 1; };
+    let row = 328 + sections * 40;
+    index = 0;
+    while index < 40 { sh_binary_patch(&output, row + index, 0, 1)?; index = index + 1; };
+    sh_binary_patch(&output, row, 113753859646510, 8)?;
+    sh_binary_patch(&output, row + 8, size, 4)?;
+    sh_binary_patch(&output, row + 12, rva, 4)?;
+    sh_binary_patch(&output, row + 16, padded, 4)?;
+    sh_binary_patch(&output, row + 20, raw, 4)?;
+    sh_binary_patch(&output, row + 36, 1107296320, 4)?;
+    sh_binary_patch(&output, 70, sections + 1, 2)?;
+    sh_binary_patch(&output, 96, sh_link_uint(image, 96, 4)? + padded, 4)?;
+    sh_binary_patch(&output, 144, sh_link_align(rva + size, 4096, 16777216)?, 4)?;
+    sh_binary_patch(&output, 148, headers + growth, 4)?;
+    sh_binary_patch(&output, 248, rva, 4)?;
+    sh_binary_patch(&output, 252, 28, 4)?;
+    sh_binary_patch(&output, raw + 12, 2, 4)?;
+    sh_binary_patch(&output, raw + 16, size - 28, 4)?;
+    sh_binary_patch(&output, raw + 20, rva + 28, 4)?;
+    sh_binary_patch(&output, raw + 24, raw + 28, 4)?;
+    sh_binary_patch(&output, raw + 28, 1396986706, 4)?;
+    index = 0;
+    while index < 16 { sh_binary_patch(&output, raw + 32 + index, sh_binary_get(&digest, index)?, 1)?; index = index + 1; };
+    sh_binary_patch(&output, raw + 48, 1, 4)?;
+    let path_bytes = sh_coff_symbol_bytes(pdb_path)?;
+    index = 0;
+    while index < pdb_path.len() { sh_binary_patch(&output, raw + 52 + index, path_bytes.get_u8(index)?, 1)?; index = index + 1; };
+    Result { is_ok: true, value: output, error: 0 };
+}

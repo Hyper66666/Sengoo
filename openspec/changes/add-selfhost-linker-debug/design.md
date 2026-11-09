@@ -122,3 +122,58 @@ successful SDK linking and malformed archive/import failure paths.
 These are archive/import checkpoints, not complete static SDK or M5 evidence.
 Full CodeView/PDB generation, real debugger source/local gates, DLL/TLS/resource
 and native-package compatibility remain mandatory open tasks.
+
+
+## SG-owned CodeView/PDB debugger checkpoint
+
+`link_hash.sg` implements SHA-256 in SG using bounded 32-bit arithmetic;
+`link_msf.sg` emits MSF 7.00 superblock, duplicate free-page maps, block map,
+stream directory, stream pages and deterministic zero padding. The first
+container limit is 16 MiB, 4,096 blocks and 256 streams, so additional FPM
+intervals are rejected rather than emitted incorrectly.
+
+`link_debug.sg` exposes checked source/function/line/local records and appends
+a real PE debug directory and RSDS record. It grows the PE header table when
+needed and adjusts raw section offsets without changing code RVAs. The PE/PDB
+GUID and age bind the unsigned input image, source names and complete source
+bytes, function/local/line records and PDB path through SG SHA-256. Source
+checksums use CodeView SHA256 records and remain independently verifiable.
+No timestamp, random identifier or external PDB producer participates.
+
+`link_pdb.sg` emits the PDB Info/named-stream table, TPI/IPI, DBI module and
+section contribution/map/file information, global source string table, module
+symbols/C13 lines/checksums, PE section-header stream, symbol records and
+public/global hash streams. Function symbols include a procedure type, frame
+metadata, scoped local symbols and explicit SP-relative lifetime ranges.
+The checkpoint supports one UTF-8 source module, 256 nonoverlapping no-argument
+i64 functions, 4,096 i64 stack locals, 65,536 ordered lines, 1 MiB source and
+16 MiB image/PDB output. Other local/type forms and multiple source modules
+report explicit unsupported errors; malformed source/address/lifetime ranges
+and conflicting names fail before successful output publication.
+
+The debugger fixture constructs the corresponding x64 instructions in SG,
+then the SG linker writes both PE and PDB with an unavailable toolchain PATH.
+LLVM independently parses all named streams, line/checksum data and PE RSDS.
+LLDB must set a source breakpoint, stop at line 3 with local answer = 40, step
+to line 4 with answer = 42 and resume to Windows exit 42. The fixture keeps its
+multiline source bytes because reformatting would change the address/line map.
+A separate fixture forces PE header growth, and equal-length source comment
+changes must change both checksum and GUID. SHA-256 is compared to hashlib on
+1,024 deterministic messages, including padding boundaries and one million
+bytes. Multi-page MSF streams are independently reconstructed and allocation/
+free maps checked. Native scopes repeatedly exercise success and twelve
+failure classes with exact tracked resource counts and preserve old outputs
+on failed command invocations.
+
+This establishes a usable SG-written debug artifact subset. Reading/remapping
+arbitrary native COFF CodeView source/type/local records, multiple source
+modules, native compiler automatic debug-address generation, full aggregate/
+generic/async/reflection types and the complete M5 debugger corpus remain
+open. These checkpoint APIs do not silently accept those unsupported records.
+
+Debug format references:
+https://llvm.org/docs/PDB/MsfFile.html
+https://llvm.org/docs/PDB/PdbStream.html
+https://llvm.org/docs/PDB/DbiStream.html
+https://llvm.org/docs/PDB/TpiStream.html
+https://github.com/llvm/llvm-project/blob/llvmorg-19.1.7/lldb/source/Plugins/SymbolFile/NativePDB/PdbIndex.cpp

@@ -1,0 +1,97 @@
+import selfhost_link_model;
+
+def sh_link_hash_k(index: i64) -> i64 {
+    if index == 0 { return 1116352408; };
+    if index == 1 { return 1899447441; };
+    if index == 2 { return 3049323471; };
+    if index == 3 { return 3921009573; };
+    if index == 4 { return 961987163; };
+    if index == 5 { return 1508970993; };
+    if index == 6 { return 2453635748; };
+    if index == 7 { return 2870763221; };
+    if index == 8 { return 3624381080; };
+    if index == 9 { return 310598401; };
+    if index == 10 { return 607225278; };
+    if index == 11 { return 1426881987; };
+    if index == 12 { return 1925078388; };
+    if index == 13 { return 2162078206; };
+    if index == 14 { return 2614888103; };
+    if index == 15 { return 3248222580; };
+    if index == 16 { return 3835390401; };
+    if index == 17 { return 4022224774; };
+    if index == 18 { return 264347078; };
+    if index == 19 { return 604807628; };
+    if index == 20 { return 770255983; };
+    if index == 21 { return 1249150122; };
+    if index == 22 { return 1555081692; };
+    if index == 23 { return 1996064986; };
+    if index == 24 { return 2554220882; };
+    if index == 25 { return 2821834349; };
+    if index == 26 { return 2952996808; };
+    if index == 27 { return 3210313671; };
+    if index == 28 { return 3336571891; };
+    if index == 29 { return 3584528711; };
+    if index == 30 { return 113926993; };
+    if index == 31 { return 338241895; };
+    if index == 32 { return 666307205; };
+    if index == 33 { return 773529912; };
+    if index == 34 { return 1294757372; };
+    if index == 35 { return 1396182291; };
+    if index == 36 { return 1695183700; };
+    if index == 37 { return 1986661051; };
+    if index == 38 { return 2177026350; };
+    if index == 39 { return 2456956037; };
+    if index == 40 { return 2730485921; };
+    if index == 41 { return 2820302411; };
+    if index == 42 { return 3259730800; };
+    if index == 43 { return 3345764771; };
+    if index == 44 { return 3516065817; };
+    if index == 45 { return 3600352804; };
+    if index == 46 { return 4094571909; };
+    if index == 47 { return 275423344; };
+    if index == 48 { return 430227734; };
+    if index == 49 { return 506948616; };
+    if index == 50 { return 659060556; };
+    if index == 51 { return 883997877; };
+    if index == 52 { return 958139571; };
+    if index == 53 { return 1322822218; };
+    if index == 54 { return 1537002063; };
+    if index == 55 { return 1747873779; };
+    if index == 56 { return 1955562222; };
+    if index == 57 { return 2024104815; };
+    if index == 58 { return 2227730452; };
+    if index == 59 { return 2361852424; };
+    if index == 60 { return 2428436474; };
+    if index == 61 { return 2756734187; };
+    if index == 62 { return 3204031479; };
+    if index == 63 { return 3329325298; };
+    0;
+}
+
+def sh_link_hash_rotr(value: i64, bits: i64) -> i64 {
+    ((value >> bits) | (value << (32 - bits))) & 4294967295;
+}
+
+def sh_link_sha256(bytes: &ShBinary) -> Result<ShBinary, i64> {
+    let length = sh_binary_len(bytes);
+    if length > 16777216 { return sh_coff_error(7302); };
+    let state = vec_new_i64();
+    sh_link_push(&state, 1779033703)?;
+    sh_link_push(&state, 3144134277)?;
+    sh_link_push(&state, 1013904242)?;
+    sh_link_push(&state, 2773480762)?;
+    sh_link_push(&state, 1359893119)?;
+    sh_link_push(&state, 2600822924)?;
+    sh_link_push(&state, 528734635)?;
+    sh_link_push(&state, 1541459225)?;
+    let words = vec_new_i64();
+    let mut index = 0;
+    while index < 64 { sh_link_push(&words, 0)?; index = index + 1; };
+    let padded = ((length + 9 + 63) / 64) * 64;
+    let mut block = 0;
+    while block < padded { index = 0; while index < 16 { let mut value = 0; let mut byte_index = 0; while byte_index < 4 { let at = block + index * 4 + byte_index; let byte = if at < length { sh_binary_get(bytes, at)?; } else { if at == length { 128; } else { if at >= padded - 8 { ((length * 8) >> ((padded - at - 1) * 8)) & 255; } else { 0; }; }; }; value = value * 256 + byte; byte_index = byte_index + 1; }; words.set(index, value); index = index + 1; }; while index < 64 { let before = sengoo_vec_get_or_default_i64(words.handle, index - 15, 0); let recent = sengoo_vec_get_or_default_i64(words.handle, index - 2, 0); let s0 = sh_link_hash_rotr(before, 7) ^ sh_link_hash_rotr(before, 18) ^ (before >> 3); let s1 = sh_link_hash_rotr(recent, 17) ^ sh_link_hash_rotr(recent, 19) ^ (recent >> 10); words.set(index, (sengoo_vec_get_or_default_i64(words.handle, index - 16, 0) + s0 + sengoo_vec_get_or_default_i64(words.handle, index - 7, 0) + s1) & 4294967295); index = index + 1; }; let mut a = sengoo_vec_get_or_default_i64(state.handle, 0, 0); let mut b = sengoo_vec_get_or_default_i64(state.handle, 1, 0); let mut c = sengoo_vec_get_or_default_i64(state.handle, 2, 0); let mut d = sengoo_vec_get_or_default_i64(state.handle, 3, 0); let mut e = sengoo_vec_get_or_default_i64(state.handle, 4, 0); let mut f = sengoo_vec_get_or_default_i64(state.handle, 5, 0); let mut g = sengoo_vec_get_or_default_i64(state.handle, 6, 0); let mut h = sengoo_vec_get_or_default_i64(state.handle, 7, 0); index = 0; while index < 64 { let sum1 = sh_link_hash_rotr(e, 6) ^ sh_link_hash_rotr(e, 11) ^ sh_link_hash_rotr(e, 25); let choose = (e & f) ^ ((e ^ 4294967295) & g); let temporary1 = (h + sum1 + choose + sh_link_hash_k(index) + sengoo_vec_get_or_default_i64(words.handle, index, 0)) & 4294967295; let sum0 = sh_link_hash_rotr(a, 2) ^ sh_link_hash_rotr(a, 13) ^ sh_link_hash_rotr(a, 22); let majority = (a & b) ^ (a & c) ^ (b & c); let temporary2 = (sum0 + majority) & 4294967295; h = g; g = f; f = e; e = (d + temporary1) & 4294967295; d = c; c = b; b = a; a = (temporary1 + temporary2) & 4294967295; index = index + 1; }; state.set(0, (sengoo_vec_get_or_default_i64(state.handle, 0, 0) + a) & 4294967295); state.set(1, (sengoo_vec_get_or_default_i64(state.handle, 1, 0) + b) & 4294967295); state.set(2, (sengoo_vec_get_or_default_i64(state.handle, 2, 0) + c) & 4294967295); state.set(3, (sengoo_vec_get_or_default_i64(state.handle, 3, 0) + d) & 4294967295); state.set(4, (sengoo_vec_get_or_default_i64(state.handle, 4, 0) + e) & 4294967295); state.set(5, (sengoo_vec_get_or_default_i64(state.handle, 5, 0) + f) & 4294967295); state.set(6, (sengoo_vec_get_or_default_i64(state.handle, 6, 0) + g) & 4294967295); state.set(7, (sengoo_vec_get_or_default_i64(state.handle, 7, 0) + h) & 4294967295); block = block + 64; };
+    let digest = sh_binary_new(32);
+    index = 0;
+    while index < 8 { let value = sengoo_vec_get_or_default_i64(state.handle, index, 0); let mut shift = 24; while shift >= 0 { sh_binary_byte(&digest, (value >> shift) & 255)?; shift = shift - 8; }; index = index + 1; };
+    Result { is_ok: true, value: digest, error: 0 };
+}

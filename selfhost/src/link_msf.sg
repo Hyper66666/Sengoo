@@ -1,0 +1,58 @@
+import selfhost_link_model;
+
+struct ShLinkMsf {
+    bytes: Vec<i64>,
+    ranges: Vec<i64>,
+    limit: i64,
+}
+
+def sh_link_msf_new(limit: i64) -> ShLinkMsf {
+    ShLinkMsf { bytes: vec_new_i64(), ranges: vec_new_i64(), limit: limit };
+}
+
+def sh_link_msf_add(msf: &ShLinkMsf, stream: &ShBinary) -> Result<i64, i64> {
+    if msf.limit < 0 or msf.limit > 16777216 or msf.ranges.len() / 2 >= 256 or msf.bytes.len() > msf.limit or sh_binary_len(stream) > msf.limit - msf.bytes.len() { return sh_i64_error(7302); };
+    let first = msf.bytes.len();
+    let mut index = 0;
+    while index < sh_binary_len(stream) { sh_link_push(&msf.bytes, sh_binary_get(stream, index)?)?; index = index + 1; };
+    sh_link_push(&msf.ranges, first)?;
+    sh_link_push(&msf.ranges, sh_binary_len(stream))?;
+    sh_i64_ok(msf.ranges.len() / 2 - 1);
+}
+
+def sh_link_msf_emit(msf: &ShLinkMsf) -> Result<ShBinary, i64> {
+    let count = msf.ranges.len() / 2;
+    if count > 256 or msf.ranges.len() % 2 != 0 or msf.limit < 0 or msf.limit > 16777216 { return sh_coff_error(7302); };
+    let mut data_blocks = 0;
+    let mut stream = 0;
+    while stream < count { let size = sh_link_word(&msf.ranges, 2, stream, 1); if size < 0 or size > msf.limit { return sh_coff_error(7301); }; data_blocks = data_blocks + (size + 4095) / 4096; stream = stream + 1; };
+    let directory_size = 4 + count * 4 + data_blocks * 4;
+    let directory_blocks = (directory_size + 4095) / 4096;
+    let blocks = 4 + directory_blocks + data_blocks;
+    if directory_blocks > 1024 or blocks > 4096 or blocks * 4096 > msf.limit { return sh_coff_error(7302); };
+    let output = sh_binary_new(msf.limit);
+    let mut at = 0;
+    while at < blocks * 4096 { sh_binary_byte(&output, 0)?; at = at + 1; };
+    let magic = string_from_str("Microsoft C/C++ MSF 7.00\r\n")?;
+    let magic_bytes = sh_coff_symbol_bytes(&magic)?;
+    at = 0;
+    while at < magic.len() { sh_binary_patch(&output, at, magic_bytes.get_u8(at)?, 1)?; at = at + 1; };
+    sh_binary_patch(&output, 26, 26, 1)?;
+    sh_binary_patch(&output, 27, 68, 1)?;
+    sh_binary_patch(&output, 28, 83, 1)?;
+    sh_binary_patch(&output, 32, 4096, 4)?;
+    sh_binary_patch(&output, 36, 1, 4)?;
+    sh_binary_patch(&output, 40, blocks, 4)?;
+    sh_binary_patch(&output, 44, directory_size, 4)?;
+    sh_binary_patch(&output, 52, 3, 4)?;
+    at = 0;
+    while at < 4096 { let used = blocks - at * 8; let value = if used >= 8 { 0; } else { if used <= 0 { 255; } else { 255 - ((1 << used) - 1); }; }; sh_binary_patch(&output, 4096 + at, value, 1)?; sh_binary_patch(&output, 8192 + at, value, 1)?; at = at + 1; };
+    at = 0;
+    while at < directory_blocks { sh_binary_patch(&output, 12288 + at * 4, 4 + at, 4)?; at = at + 1; };
+    sh_binary_patch(&output, 16384, count, 4)?;
+    let mut block = 4 + directory_blocks;
+    let mut block_at = 16384 + 4 + count * 4;
+    stream = 0;
+    while stream < count { let first = sh_link_word(&msf.ranges, 2, stream, 0); let size = sh_link_word(&msf.ranges, 2, stream, 1); if first < 0 or first > msf.bytes.len() or size > msf.bytes.len() - first { return sh_coff_error(7301); }; sh_binary_patch(&output, 16384 + 4 + stream * 4, size, 4)?; at = 0; while at < size { sh_binary_patch(&output, block * 4096 + at, sengoo_vec_get_or_default_i64(msf.bytes.handle, first + at, -1), 1)?; at = at + 1; }; let pages = (size + 4095) / 4096; at = 0; while at < pages { sh_binary_patch(&output, block_at, block + at, 4)?; block_at = block_at + 4; at = at + 1; }; block = block + pages; stream = stream + 1; };
+    Result { is_ok: true, value: output, error: 0 };
+}

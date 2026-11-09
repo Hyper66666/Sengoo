@@ -1,0 +1,172 @@
+import selfhost_link_pdb;
+
+import selfhost_link_pe;
+
+import std::file;
+
+import std::args;
+
+import std::assert;
+
+import std::io;
+
+extern "C" {
+    fn sengoo_string_live_handle_count() -> i64;
+    fn sengoo_buffer_live_handle_count() -> i64;
+    fn sengoo_opaque_live_handle_count() -> i64;
+    fn sengoo_file_snapshot_live_handle_count() -> i64;
+    fn sengoo_file_snapshot_live_bytes() -> i64;
+}
+
+def sh_ldt_object(grow: bool) -> Result<ShBinary, i64> {
+    let object = sh_object_new(16384);
+    let code = sh_binary_new(64);
+    sh_binary_byte(&code, 72)?;
+    sh_binary_byte(&code, 131)?;
+    sh_binary_byte(&code, 236)?;
+    sh_binary_byte(&code, 40)?;
+    sh_binary_byte(&code, 72)?;
+    sh_binary_byte(&code, 199)?;
+    sh_binary_byte(&code, 68)?;
+    sh_binary_byte(&code, 36)?;
+    sh_binary_byte(&code, 32)?;
+    sh_binary_byte(&code, 40)?;
+    sh_binary_byte(&code, 0)?;
+    sh_binary_byte(&code, 0)?;
+    sh_binary_byte(&code, 0)?;
+    sh_binary_byte(&code, 72)?;
+    sh_binary_byte(&code, 131)?;
+    sh_binary_byte(&code, 68)?;
+    sh_binary_byte(&code, 36)?;
+    sh_binary_byte(&code, 32)?;
+    sh_binary_byte(&code, 2)?;
+    sh_binary_byte(&code, 72)?;
+    sh_binary_byte(&code, 139)?;
+    sh_binary_byte(&code, 68)?;
+    sh_binary_byte(&code, 36)?;
+    sh_binary_byte(&code, 32)?;
+    sh_binary_byte(&code, 72)?;
+    sh_binary_byte(&code, 131)?;
+    sh_binary_byte(&code, 196)?;
+    sh_binary_byte(&code, 40)?;
+    sh_binary_byte(&code, 195)?;
+    let text_name = string_from_str(".text")?;
+    let text = sh_object_add_section(&object, &text_name, &code, 1610612768, 16)?;
+    let main_name = string_from_str("main")?;
+    let main = sh_object_add_symbol(&object, &main_name, 0, text + 1, true, 2)?;
+    let unwind = sh_binary_new(8);
+    sh_binary_unsigned(&unwind, 66561, 4)?;
+    sh_binary_unsigned(&unwind, 16900, 4)?;
+    let unwind_name = string_from_str(".xdata")?;
+    let unwind_section = sh_object_add_section(&object, &unwind_name, &unwind, 1073741888, 4)?;
+    let unwind_symbol_name = string_from_str("debug_main_unwind")?;
+    let unwind_symbol = sh_object_add_symbol(&object, &unwind_symbol_name, 0, unwind_section + 1, false, 3)?;
+    let pdata = sh_binary_new(12);
+    sh_binary_unsigned(&pdata, 0, 4)?;
+    sh_binary_unsigned(&pdata, sh_binary_len(&code), 4)?;
+    sh_binary_unsigned(&pdata, 0, 4)?;
+    let pdata_name = string_from_str(".pdata")?;
+    let pdata_section = sh_object_add_section(&object, &pdata_name, &pdata, 1073741888, 4)?;
+    sh_object_add_relocation(&object, pdata_section, 0, main, 3)?;
+    sh_object_add_relocation(&object, pdata_section, 4, main, 3)?;
+    sh_object_add_relocation(&object, pdata_section, 8, unwind_symbol, 3)?;
+    if grow { let mut extra = 0; while extra < 12 { let buffer = ffi_buffer_new(8)?; buffer.push_u8(46)?; buffer.push_u8(101)?; buffer.push_u8(120)?; buffer.push_u8(116)?; buffer.push_u8(114)?; buffer.push_u8(97)?; buffer.push_u8(95)?; buffer.push_u8(65 + extra)?; let name = string_from_utf8(buffer, 8)?; sh_object_add_section(&object, &name, &unwind, 1073741888, 4)?; extra = extra + 1; }; };
+    sh_object_emit(&object);
+}
+
+def sh_ldt_scope(source_path: &String, pdb_path: &String, image_path: &String, write: bool, invalid: i64) -> Result<i64, i64> {
+    let source = sh_link_load(source_path.as_str(), 1048576)?;
+    let object = sh_ldt_object(invalid == 13)?;
+    let mut link = sh_link_new(1048576);
+    sh_link_coff(&mut link, &object)?;
+    let main = string_from_str("main")?;
+    let image = sh_link_pe(&mut link, &main)?;
+    let mut debug = sh_link_debug_new();
+    sh_link_debug_source(&mut debug, source_path, &source)?;
+    if invalid == 9 { sh_link_debug_source(&mut debug, source_path, &source)?; (); };
+    let function = sh_link_debug_function(&debug, &main, if invalid == 1 { 97; } else { if invalid == 2 { 2; } else { 1; }; }, if invalid == 3 { 4294967295; } else { 0; }, 29, 40, 4, 24)?;
+    if invalid == 7 { sh_link_debug_function(&debug, &main, 1, 32, 29, 40, 4, 24)?; (); };
+    let local = string_from_str("answer")?;
+    sh_link_debug_local(&debug, function, &local, if invalid == 4 { 64; } else { 19; }, if invalid == 5 { 40; } else { 32; }, 13, if invalid == 6 { 12; } else { 11; })?;
+    if invalid == 8 { sh_link_debug_local(&debug, function, &local, 19, 32, 13, 11)?; (); };
+    sh_link_debug_line(&debug, function, 0, 1)?;
+    sh_link_debug_line(&debug, function, 4, 2)?;
+    sh_link_debug_line(&debug, function, 13, 3)?;
+    sh_link_debug_line(&debug, function, 19, 4)?;
+    sh_link_debug_line(&debug, function, 24, 5)?;
+    if invalid == 10 { sh_link_debug_line(&debug, function, 23, 4)?; (); };
+    if invalid == 11 { sh_link_debug_line(&debug, function, 25, 99)?; (); };
+    let msf = sh_link_msf_new(4096);
+    let msf_error = sh_link_msf_emit(&msf);
+    if msf_error.is_ok() or msf_error.error != 7302 { return sh_i64_error(7390); };
+    let linked = sh_link_debug_image(&debug, &image, pdb_path)?;
+    if invalid == 12 { sh_link_debug_image(&debug, &linked, pdb_path)?; (); };
+    let pdb = sh_link_pdb(&debug, &image, pdb_path)?;
+    if write { let image_buffer = sh_binary_buffer(&linked)?; let pdb_buffer = sh_binary_buffer(&pdb)?; file_write_str_raw(sengoo_stdlib_str_ptr(pdb_path.as_str()), pdb_buffer.ptr(), pdb_buffer.used_len())?; file_write_str_raw(sengoo_stdlib_str_ptr(image_path.as_str()), image_buffer.ptr(), image_buffer.used_len())?; (); };
+    sh_i64_ok(sh_binary_len(&pdb));
+}
+
+def sh_ldt_argument(index: i64) -> Result<String, i64> {
+    let buffer = ffi_buffer_new(arg_len(index).unwrap_or(0))?;
+    let length = arg_copy(index, buffer)?;
+    string_from_utf8(buffer, length);
+}
+
+def sh_ldt_run() -> Result<i64, i64> {
+    if args_len() == 4 { let mode = sh_ldt_argument(0)?; let grow = string_from_str("grow")?; if sengoo_string_eq(mode.handle, grow.handle) != 0 { let image = sh_ldt_argument(1)?; let pdb = sh_ldt_argument(2)?; let source = sh_ldt_argument(3)?; sh_ldt_scope(&source, &pdb, &image, true, 13)?; return sh_i64_ok(0); }; };
+    if args_len() > 0 { let mode = sh_ldt_argument(0)?; let invalid_name = string_from_str("invalid")?; let hash_name = string_from_str("hash-corpus")?; let msf_name = string_from_str("msf")?; if sengoo_string_eq(mode.handle, invalid_name.handle) != 0 { if args_len() != 5 { return sh_i64_ok(64); }; let case_name = sh_ldt_argument(1)?; let case_bytes = sh_coff_symbol_bytes(&case_name)?; if case_name.len() != 1 { return sh_i64_ok(64); }; let case_number = case_bytes.get_u8(0)? - 65 + 1; let image = sh_ldt_argument(2)?; let pdb = sh_ldt_argument(3)?; let source = sh_ldt_argument(4)?; sh_ldt_scope(&source, &pdb, &image, true, case_number)?; return sh_i64_ok(0); }; if sengoo_string_eq(mode.handle, hash_name.handle) != 0 { if args_len() != 3 { return sh_i64_ok(64); }; let input = sh_ldt_argument(1)?; let output = sh_ldt_argument(2)?; return sh_ldt_hash_corpus(&input, &output); }; if sengoo_string_eq(mode.handle, msf_name.handle) != 0 { if args_len() != 2 { return sh_i64_ok(64); }; let output = sh_ldt_argument(1)?; return sh_ldt_msf(&output); }; };
+    if args_len() != 3 { return sh_i64_ok(64); };
+    let image = sh_ldt_argument(0)?;
+    let pdb = sh_ldt_argument(1)?;
+    let source = sh_ldt_argument(2)?;
+    sh_ldt_scope(&source, &pdb, &image, true, 0)?;
+    let strings = sengoo_string_live_handle_count();
+    let buffers = sengoo_buffer_live_handle_count();
+    let opaque = sengoo_opaque_live_handle_count();
+    let snapshots = sengoo_file_snapshot_live_handle_count();
+    let snapshot_bytes = sengoo_file_snapshot_live_bytes();
+    let mut round = 0;
+    while round < 20 { sh_ldt_scope(&source, &pdb, &image, false, 0)?; let mut invalid = 1; while invalid <= 12 { let rejected = sh_ldt_scope(&source, &pdb, &image, false, invalid); let expected = if invalid == 4 or invalid == 9 or invalid == 12 { 7303; } else { if invalid == 7 or invalid == 8 { 7305; } else { 7301; }; }; if rejected.is_ok() or rejected.error != expected { return sh_i64_error(7391); }; invalid = invalid + 1; }; round = round + 1; };
+    assert_eq_i64(sengoo_string_live_handle_count(), strings, "link_debug.sg", 90);
+    assert_eq_i64(sengoo_buffer_live_handle_count(), buffers, "link_debug.sg", 90);
+    assert_eq_i64(sengoo_opaque_live_handle_count(), opaque, "link_debug.sg", 90);
+    assert_eq_i64(sengoo_file_snapshot_live_handle_count(), snapshots, "link_debug.sg", 90);
+    assert_eq_i64(sengoo_file_snapshot_live_bytes(), snapshot_bytes, "link_debug.sg", 90);
+    println("selfhost SG CodeView/PDB exact resources: ok");
+    sh_i64_ok(0);
+}
+
+def main() -> i64 {
+    let result = sh_ldt_run();
+    if not result.is_ok() { println(result.error); return 65; };
+    result.value;
+}
+
+def sh_ldt_hash_corpus(input: &String, path: &String) -> Result<i64, i64> {
+    let source = sh_link_load(input.as_str(), 16777216)?;
+    let output = sh_binary_new(131072);
+    let mut at = 0;
+    let mut count = 0;
+    while at < sh_binary_len(&source) { if count >= 4096 { return sh_i64_error(7302); }; let size = sh_link_uint(&source, at, 4)?; at = at + 4; if size > 1048576 or size > sh_binary_len(&source) - at { return sh_i64_error(7301); }; let bytes = sh_binary_new(1048576); let mut index = 0; while index < size { sh_binary_byte(&bytes, sh_binary_get(&source, at + index)?)?; index = index + 1; }; let digest = sh_link_sha256(&bytes)?; sh_link_debug_append(&output, &digest)?; at = at + size; count = count + 1; };
+    let buffer = sh_binary_buffer(&output)?;
+    file_write_str_raw(sengoo_stdlib_str_ptr(path.as_str()), buffer.ptr(), buffer.used_len())?;
+    sh_i64_ok(0);
+}
+
+def sh_ldt_msf(path: &String) -> Result<i64, i64> {
+    let streams = sh_link_msf_new(16777216);
+    let sizes = vec_new_i64();
+    sh_link_push(&sizes, 0)?;
+    sh_link_push(&sizes, 1)?;
+    sh_link_push(&sizes, 4095)?;
+    sh_link_push(&sizes, 4096)?;
+    sh_link_push(&sizes, 4097)?;
+    sh_link_push(&sizes, 9000)?;
+    sh_link_push(&sizes, 17000)?;
+    let mut stream = 0;
+    while stream < sizes.len() { let bytes = sh_binary_new(20000); let mut index = 0; while index < sengoo_vec_get_or_default_i64(sizes.handle, stream, 0) { sh_binary_byte(&bytes, (stream * 17 + index * 31) & 255)?; index = index + 1; }; sh_link_msf_add(&streams, &bytes)?; stream = stream + 1; };
+    let output = sh_link_msf_emit(&streams)?;
+    let buffer = sh_binary_buffer(&output)?;
+    file_write_str_raw(sengoo_stdlib_str_ptr(path.as_str()), buffer.ptr(), buffer.used_len())?;
+    sh_i64_ok(0);
+}

@@ -71,3 +71,38 @@ final checked report adds cross-library closure, ordinal/type-1 IAT cases and
 stronger malformed index/long-name checks. Full static SDK auxiliary/weak/common/
 COMDAT compatibility, DLL/TLS/resources, CodeView/PDB and real debugger gates
 remain open; `m5_complete` is `false`.
+
+
+## SG CodeView/PDB and real debugger checkpoint evidence
+
+- [x] Implement SG SHA-256 and deterministic bounded MSF 7.00 block/directory/free-map emission; independently compare 1,024 SHA messages and reconstruct multi-page streams.
+- [x] Emit source-bound PE RSDS plus PDB Info/TPI/IPI/DBI/module/line/SHA256 source checksum/section/public/global records directly in SG.
+- [x] Independently parse the PDB streams and matching PE signature with LLVM; prove exact repeated unsigned PE/PDB bytes and equal-length source changes updating checksum/GUID.
+- [x] Force PE header-table growth to 18 sections and 1,536 header bytes and execute the updated image with exit 42.
+- [x] Use real LLDB to stop at source line 3, read answer = 40, step to line 4, read answer = 42 and resume to Windows exit 42.
+- [x] Verify 20 native success scopes plus twelve failure classes per scope recover String/Buffer/opaque/FileSnapshot counts/bytes exactly, and twelve failed CLI calls preserve both previous outputs.
+
+Evidence: `target/selfhost/m5-link-debug-qualified/evidence.json`, SHA-256
+`c1245a5ba503b57fcfa0e19a560ccb360de32c60dc39b2ff128620f10e4f8e8f`.
+Start/end full revision `c68790bb9c9dc168e353419ccd88da6e10e58042`, Windows 11
+AMD64, all 177 source inputs and 37 recorded tool/runtime dependency identities
+unchanged. Thirty-two commands passed. The report and retained logs include
+actual debugger source stops, stepping/local observations, independent PDB/PE
+inspection, the SHA corpus, source-bound identities and resource failures.
+Product emission ran with an empty toolchain PATH.
+
+LLDB 19.1.7 requires Python 3.10. Its missing standard-library dependency was
+provided only for independent verification by the Python.org 3.10.11 embeddable
+runtime under `target/selfhost/m5-linker-dev/lldb-python310`. The original zip
+SHA-256 is `608619f8619075629c9c69f361352a0da6ed7e62f83a0e19c63e0ea32eb7629d`.
+The final gate records all local Python DLL/PYD/stdlib and liblldb identities
+and queries the debugger's actual loaded Python DLL path. An earlier identity
+trial retained under `m5-link-debug-checked` had a buffered Python probe;
+the qualified run explicitly loads a target, flushes stdout and verifies the
+recorded dependency path.
+
+The corresponding machine code is explicitly constructed by the SG fixture.
+Automatic native compiler debug mapping, arbitrary COFF CodeView input/type
+merging, multiple modules, aggregates/generics/async/reflection debug types and
+complete native SDK/DLL/debug support remain open. This usable debugger subset
+does not close the complete M5 tasks above; `m5_complete` remains `false`.

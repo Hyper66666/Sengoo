@@ -56,3 +56,11 @@ and final process/equality/performance gates SHALL retain their own evidence.
 - **WHEN** the entry and its strong unresolved references reside in separate supported indexed archives
 - **THEN** repeated selection resolves the required closure in deterministic object order
 - **AND** unused duplicate members do not introduce false duplicate-definition failures
+
+
+#### Scenario: A supported SG debug image and PDB are emitted
+- **WHEN** checked source, function, line and local records describe supported linked code
+- **THEN** SG writes the MSF/PDB streams and matching PE RSDS without an external PDB producer
+- **AND** equal inputs and options yield equal PE/PDB bytes with a source-bound identity
+- **AND** an independent debugger proves source breakpoints, stepping and expected local values
+- **AND** unsupported debug type/module forms and invalid address/lifetime ranges fail explicitly
