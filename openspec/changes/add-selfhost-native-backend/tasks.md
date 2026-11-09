@@ -4,6 +4,7 @@
 - [x] Implement x64 register/memory/immediate encodings and branch/call fixups with independent byte/CPU tests (`target/selfhost/native-foundations/evidence.json`).
 - [x] Emit and inspect a deterministic single-text COFF object with short/long symbols; full sections/data/relocations remain open (`target/selfhost/native-foundations/evidence.json`).
 - [x] Resolve bounded concrete Windows x64 type sizes, alignments, array strides and nominal/tuple/enum field offsets; verify recursive/overflow/claim failures and exact resources, and compare ten layout results with independently compiled C (`target/selfhost/m4-layout-final/evidence.json`). Full calling conventions remain open.
+- [x] Emit deterministic multiple initialized COFF sections, short/long section and symbol names, external/static symbols and checked AMD64 relocations; independently inspect and link/execute external calls, cross-section loads and absolute data pointers (`target/selfhost/m4-object-checked/evidence.json`). Auxiliary/COMDAT/BSS/debug/unwind records remain open.
 
 ## Supported target behavior
 
@@ -28,3 +29,12 @@ revision `4aa6e5d219ba4b491af05da8cea258f4ff32d96d`, Windows 11 x64.
 Seven commands passed with unchanged source/tool identities. The SG fixture
 ran 100 success/failure scopes with exact String/Buffer/opaque resource recovery;
 its ten emitted layout results matched the C probe. `m4_complete` remains false.
+
+Multi-section object evidence: report SHA-256
+`dc37b0e3b7950bbf8eb06490a4eca0c1b52cf787ef4eb2f7de99d27e858343a8`,
+revision `d5ee01a` (the report records its full revision), Windows 11 x64.
+All nine commands passed with empty source/tool change lists. One hundred
+native success/failure scopes restored resources exactly; repeated COFF bytes
+matched, LLVM independently inspected all three sections and their symbols and
+relocations, and the linked C probe verified the external call plus data/pointer
+relocations. These are object-writer gates, not completed M4/M5 milestones.

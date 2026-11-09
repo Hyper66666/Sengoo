@@ -45,6 +45,24 @@ layout. Object files retain source/target/ABI identity, literal data and
 required CodeView/unwind metadata. No external assembler generates machine
 instructions on behalf of SG, and failure must not silently invoke LLVM.
 
+`object.sg` extends the single-function object foundation with logical section,
+symbol and relocation IDs. It writes multiple aligned initialized sections,
+defined/undefined/absolute symbols, long UTF-8 names through the COFF string
+table, and checked AMD64 ADDR64, ADDR32, ADDR32NB, REL32 through REL32_5,
+SECTION and SECREL records. Relocation fields must lie within section data and
+cannot overlap. File timestamps are zero, table order follows stable IDs, and
+repeated emission of the same object produces identical bytes. Emission
+revalidates every flat row rather than trusting builder calls; partially built
+output is never returned as a successful object.
+
+This initial object schema caps sections at 1,024, symbols/relocations at
+100,000, per-section relocations at 65,535, output at 64 MiB, and alignment at
+8,192. Auxiliary/weak/common/COMDAT records and BSS remain later work. BSS,
+COMDAT and relocation-overflow section flags are rejected until their required
+records are implemented. Native verification independently inspects names and
+relocation kinds, then links a generated function that calls a C external,
+loads another section through REL32 and exposes an ADDR64 data pointer.
+
 Primary references:
 
 - Intel instruction reference: https://www.intel.com/content/www/us/en/content-details/671110/intel-64-and-ia-32-architectures-software-developer-s-manual-combined-volumes-2a-2b-2c-and-2d-instruction-set-reference-a-z.html

@@ -1,0 +1,128 @@
+import selfhost_object;
+
+import std::assert;
+
+import std::args;
+
+import std::file;
+
+extern "C" {
+    fn sengoo_string_live_handle_count() -> i64;
+    fn sengoo_buffer_live_handle_count() -> i64;
+    fn sengoo_opaque_live_handle_count() -> i64;
+}
+
+def sh_ot_fixture(object: &ShObject) -> Result<bool, i64> {
+    let text = sh_binary_new(100);
+    sh_binary_unsigned(&text, 686588744, 4)?;
+    sh_binary_byte(&text, 232)?;
+    sh_binary_unsigned(&text, 0, 4)?;
+    sh_binary_unsigned(&text, 683967304, 4)?;
+    sh_binary_byte(&text, 72)?;
+    sh_binary_byte(&text, 3)?;
+    sh_binary_byte(&text, 5)?;
+    sh_binary_unsigned(&text, 0, 4)?;
+    sh_binary_byte(&text, 195)?;
+    let name = string_from_str(".text")?;
+    let section = sh_object_add_section(object, &name, &text, 1610612768, 16)?;
+    let data = sh_binary_new(8);
+    sh_binary_unsigned(&data, 2, 8)?;
+    let data_name = string_from_str(".rdata")?;
+    let data_section = sh_object_add_section(object, &data_name, &data, 1073741888, 8)?;
+    let pointer_data = sh_binary_new(8);
+    sh_binary_unsigned(&pointer_data, 0, 8)?;
+    let pointer_name = string_from_str(".rodata.verylong")?;
+    let pointer_section = sh_object_add_section(object, &pointer_name, &pointer_data, 1073741888, 8)?;
+    let function_name = string_from_str("sg_object_answer")?;
+    sh_object_add_symbol(object, &function_name, 0, section + 1, true, 2)?;
+    let external_name = string_from_str("sg_object_external")?;
+    let external = sh_object_add_symbol(object, &external_name, 0, 0, true, 2)?;
+    let value_name = string_from_str("sg_object_value")?;
+    let value = sh_object_add_symbol(object, &value_name, 0, data_section + 1, false, 2)?;
+    let pointer_symbol_name = string_from_str("sg_object_pointer")?;
+    sh_object_add_symbol(object, &pointer_symbol_name, 0, pointer_section + 1, false, 2)?;
+    sh_object_add_relocation(object, section, 5, external, 4)?;
+    sh_object_add_relocation(object, section, 16, value, 4)?;
+    sh_object_add_relocation(object, pointer_section, 0, value, 1)?;
+    Result { is_ok: true, value: true, error: 0 };
+}
+
+def sh_test_object() -> Result<bool, i64> {
+    let object = sh_object_new(4096);
+    sh_ot_fixture(&object)?;
+    let bytes = sh_object_emit(&object)?;
+    let repeated = sh_object_emit(&object)?;
+    assert_eq_i64(sh_binary_len(&bytes), sh_binary_len(&repeated), "object.sg", 57);
+    let mut index = 0;
+    while index < sh_binary_len(&bytes) { assert_eq_i64(sh_binary_get(&bytes, index)?, sh_binary_get(&repeated, index)?, "object.sg", 59); index = index + 1; };
+    assert_eq_i64(sh_binary_get(&bytes, 0)?, 100, "object.sg", 60);
+    assert_eq_i64(sh_binary_get(&bytes, 2)?, 3, "object.sg", 61);
+    assert_eq_i64(sh_binary_get(&bytes, 4)?, 0, "object.sg", 62);
+    assert_eq_i64(sh_binary_get(&bytes, 100)?, 47, "object.sg", 63);
+    assert_eq_i64(sh_binary_get(&bytes, 52)?, 2, "object.sg", 64);
+    assert_eq_i64(sh_binary_get(&bytes, 132)?, 1, "object.sg", 65);
+    assert_eq_i64(sh_object_add_relocation(&object, 0, 6, 1, 4).error, 6401, "object.sg", 66);
+    assert_eq_i64(sh_object_add_relocation(&object, 0, 21, 1, 4).error, 6401, "object.sg", 67);
+    assert_eq_i64(sh_object_add_relocation(&object, 0, 13, 999, 4).error, 6401, "object.sg", 68);
+    assert_eq_i64(sh_object_add_relocation(&object, 0, 13, 1, 99).error, 6401, "object.sg", 69);
+    let same_name = string_from_str("sg_object_answer")?;
+    assert_eq_i64(sh_object_add_symbol(&object, &same_name, 0, 1, true, 2).error, 6401, "object.sg", 71);
+    let undefined_name = string_from_str("invalid_common")?;
+    assert_eq_i64(sh_object_add_symbol(&object, &undefined_name, 1, 0, false, 2).error, 6401, "object.sg", 73);
+    let name = string_from_str(".new")?;
+    let empty = sh_binary_new(0);
+    assert_eq_i64(sh_object_add_section(&object, &name, &empty, 1073741888, 3).error, 6401, "object.sg", 76);
+    assert_eq_i64(sh_object_add_section(&object, &name, &empty, 1073741952, 1).error, 6401, "object.sg", 77);
+    assert_eq_i64(sh_object_add_section(&object, &name, &empty, 1090519104, 1).error, 6401, "object.sg", 77);
+    assert_eq_i64(sh_object_add_section(&object, &name, &empty, 1073745984, 1).error, 6401, "object.sg", 77);
+    object.relocations.set(1, 9223372036854775807);
+    let bad_relocation = sh_object_emit(&object);
+    assert_eq_i64(bad_relocation.error, 6401, "object.sg", 79);
+    object.relocations.set(1, 5);
+    object.data.set(0, 256);
+    let bad_byte = sh_object_emit(&object);
+    assert_eq_i64(bad_byte.error, 6002, "object.sg", 83);
+    object.data.set(0, 72);
+    object.symbols.set(2, 999);
+    let bad_section = sh_object_emit(&object);
+    assert_eq_i64(bad_section.error, 6401, "object.sg", 87);
+    object.symbols.set(2, 1);
+    object.sections.push(1);
+    let bad_rows = sh_object_emit(&object);
+    assert_eq_i64(bad_rows.error, 6401, "object.sg", 91);
+    object.sections.pop();
+    let tiny = sh_object_new(8);
+    sh_object_add_section(&tiny, &name, &empty, 1073741888, 1)?;
+    let no_room = sh_object_emit(&tiny);
+    assert_eq_i64(no_room.error, 6001, "object.sg", 96);
+    let no_sections = sh_object_new(100);
+    let invalid = sh_object_emit(&no_sections);
+    assert_eq_i64(invalid.error, 6401, "object.sg", 99);
+    Result { is_ok: true, value: true, error: 0 };
+}
+
+def sh_ot_emit() -> Result<bool, i64> {
+    let path_bytes = ffi_buffer_new(arg_len(0).unwrap_or(0))?;
+    let copied = arg_copy(0, path_bytes)?;
+    let path = string_from_utf8(path_bytes, copied)?;
+    let object = sh_object_new(4096);
+    sh_ot_fixture(&object)?;
+    let bytes = sh_object_emit(&object)?;
+    let buffer = sh_binary_buffer(&bytes)?;
+    file_write_str_raw(sengoo_stdlib_str_ptr(path.as_str()), buffer.ptr(), buffer.used_len())?;
+    Result { is_ok: true, value: true, error: 0 };
+}
+
+def main() -> i64 {
+    if args_len() > 0 { let emitted = sh_ot_emit(); return if emitted.is_ok() { 0; } else { 1; }; };
+    let strings = sengoo_string_live_handle_count();
+    let buffers = sengoo_buffer_live_handle_count();
+    let opaque = sengoo_opaque_live_handle_count();
+    let mut round = 0;
+    while round < 100 { let result = sh_test_object(); if not result.is_ok() { println(result.error); return 1; }; round = round + 1; };
+    assert_eq_i64(sengoo_string_live_handle_count(), strings, "object.sg", 126);
+    assert_eq_i64(sengoo_buffer_live_handle_count(), buffers, "object.sg", 127);
+    assert_eq_i64(sengoo_opaque_live_handle_count(), opaque, "object.sg", 128);
+    println("selfhost COFF sections and relocations: ok");
+    0;
+}

@@ -1,0 +1,130 @@
+import selfhost_coff;
+
+struct ShObject {
+    names: ShSymbols,
+    sections: Vec<i64>,
+    data: Vec<i64>,
+    symbols: Vec<i64>,
+    relocations: Vec<i64>,
+    limit: i64,
+}
+
+def sh_object_new(limit: i64) -> ShObject {
+    ShObject { names: sh_symbols_new(100000), sections: vec_new_i64(), data: vec_new_i64(), symbols: vec_new_i64(), relocations: vec_new_i64(), limit: limit };
+}
+
+def sh_object_word(words: &Vec<i64>, width: i64, row: i64, field: i64) -> i64 {
+    if width < 1 or words.len() % width != 0 or row < 0 or row >= words.len() / width or field < 0 or field >= width { return -1; };
+    sengoo_vec_get_or_default_i64(words.handle, row * width + field, -1);
+}
+
+def sh_object_name(object: &ShObject, text: &String) -> Result<i64, i64> {
+    if text.len() < 1 or text.len() > 1048576 { return sh_i64_error(6401); };
+    let bytes = sh_coff_symbol_bytes(text)?;
+    let mut index = 0;
+    while index < bytes.used_len() { if bytes.get_u8(index).unwrap_or(0) == 0 { return sh_i64_error(6401); }; index = index + 1; };
+    sh_intern(&object.names, text);
+}
+
+def sh_object_relocation_width(kind: i64) -> i64 {
+    if kind == 1 { return 8; };
+    if kind >= 2 and kind <= 9 or kind == 11 { return 4; };
+    if kind == 10 { return 2; };
+    -1;
+}
+
+def sh_object_add_section(object: &ShObject, name: &String, bytes: &ShBinary, characteristics: i64, alignment: i64) -> Result<i64, i64> {
+    if object.limit < 0 or object.limit > 67108864 or object.sections.len() % 5 != 0 or object.sections.len() / 5 >= 1024 or characteristics < 0 or characteristics > 4294967295 or (characteristics & 32510080) != 0 or alignment < 1 or alignment > 8192 or (alignment & (alignment - 1)) != 0 { return sh_i64_error(6401); };
+    let count = sh_binary_len(bytes);
+    if count < 0 or count > object.limit or object.data.len() > object.limit - count { return sh_i64_error(6402); };
+    let symbol = sh_object_name(object, name)?;
+    let mut row = 0;
+    while row < object.sections.len() / 5 { if sh_object_word(&object.sections, 5, row, 0) == symbol { return sh_i64_error(6401); }; row = row + 1; };
+    let first = object.data.len();
+    let before = object.sections.len();
+    let mut index = 0;
+    while index < count { let byte = sh_binary_get(bytes, index)?; if byte < 0 or byte > 255 or not object.data.push(byte) { while object.data.len() > first { object.data.pop(); }; return sh_i64_error(6402); }; index = index + 1; };
+    let stored = object.sections.push(symbol) and object.sections.push(first) and object.sections.push(count) and object.sections.push(characteristics) and object.sections.push(alignment);
+    if not stored { while object.data.len() > first { object.data.pop(); }; while object.sections.len() > before { object.sections.pop(); }; return sh_i64_error(6402); };
+    sh_i64_ok(before / 5);
+}
+
+def sh_object_add_symbol(object: &ShObject, name: &String, value: i64, section: i64, function: bool, storage: i64) -> Result<i64, i64> {
+    if object.symbols.len() % 5 != 0 or object.symbols.len() / 5 >= 100000 or value < 0 or value > 4294967295 or section < -1 or section > object.sections.len() / 5 or storage != 2 and storage != 3 or section == 0 and value != 0 { return sh_i64_error(6401); };
+    if section > 0 and value > sh_object_word(&object.sections, 5, section - 1, 2) { return sh_i64_error(6401); };
+    let symbol = sh_object_name(object, name)?;
+    let mut index = 0;
+    while index < object.symbols.len() / 5 { if sh_object_word(&object.symbols, 5, index, 0) == symbol { return sh_i64_error(6401); }; index = index + 1; };
+    let before = object.symbols.len();
+    let stored = object.symbols.push(symbol) and object.symbols.push(value) and object.symbols.push(section) and object.symbols.push(if function { 32; } else { 0; }) and object.symbols.push(storage);
+    if not stored { while object.symbols.len() > before { object.symbols.pop(); }; return sh_i64_error(6402); };
+    sh_i64_ok(before / 5);
+}
+
+def sh_object_add_relocation(object: &ShObject, section: i64, offset: i64, symbol: i64, kind: i64) -> Result<i64, i64> {
+    let width = sh_object_relocation_width(kind);
+    if object.relocations.len() % 4 != 0 or object.relocations.len() / 4 >= 100000 or section < 0 or section >= object.sections.len() / 5 or offset < 0 or symbol < 0 or symbol >= object.symbols.len() / 5 or width < 0 { return sh_i64_error(6401); };
+    let size = sh_object_word(&object.sections, 5, section, 2);
+    if offset > size or width > size - offset { return sh_i64_error(6401); };
+    let mut count = 0;
+    let mut index = 0;
+    while index < object.relocations.len() / 4 { if sh_object_word(&object.relocations, 4, index, 0) == section { count = count + 1; let previous = sh_object_word(&object.relocations, 4, index, 1); let previous_width = sh_object_relocation_width(sh_object_word(&object.relocations, 4, index, 3)); if previous < offset + width and offset < previous + previous_width { return sh_i64_error(6401); }; }; index = index + 1; };
+    if count >= 65535 { return sh_i64_error(6402); };
+    let before = object.relocations.len();
+    let stored = object.relocations.push(section) and object.relocations.push(offset) and object.relocations.push(symbol) and object.relocations.push(kind);
+    if not stored { while object.relocations.len() > before { object.relocations.pop(); }; return sh_i64_error(6402); };
+    sh_i64_ok(before / 4);
+}
+
+def sh_object_write_name(output: &ShBinary, object: &ShObject, name: i64, string_offsets: &Vec<i64>, section: bool) -> Result<i64, i64> {
+    let text = sh_symbol_text(&object.names, name)?;
+    let bytes = sh_coff_symbol_bytes(&text)?;
+    let start = sh_binary_len(output);
+    if text.len() <= 8 { let mut index = 0; while index < 8 { sh_binary_byte(output, if index < text.len() { bytes.get_u8(index)?; } else { 0; })?; index = index + 1; }; } else { let mut offset = sengoo_vec_get_or_default_i64(string_offsets.handle, name, -1); if offset < 4 { return sh_i64_error(6401); }; if section { if offset > 9999999 { return sh_i64_error(6402); }; sh_binary_byte(output, 47)?; let digits = vec_new_i64(); while offset > 0 { if not digits.push(48 + offset % 10) { return sh_i64_error(6402); }; offset = offset / 10; }; let mut index = digits.len(); while index > 0 { index = index - 1; sh_binary_byte(output, sengoo_vec_get_or_default_i64(digits.handle, index, 0))?; }; while sh_binary_len(output) - start < 8 { sh_binary_byte(output, 0)?; }; } else { sh_binary_unsigned(output, 0, 4)?; sh_binary_unsigned(output, offset, 4)?; (); }; };
+    sh_i64_ok(start);
+}
+
+def sh_object_emit_checked(object: &ShObject, output: &ShBinary) -> Result<i64, i64> {
+    if sh_binary_len(output) != 0 or output.limit != object.limit { return sh_i64_error(6401); };
+    if object.limit < 0 or object.limit > 67108864 or object.sections.len() % 5 != 0 or object.symbols.len() % 5 != 0 or object.relocations.len() % 4 != 0 or object.sections.len() < 5 or object.sections.len() / 5 > 1024 or object.symbols.len() / 5 > 100000 or object.relocations.len() / 4 > 100000 or object.data.len() > object.limit or sh_symbol_count(&object.names) > 100000 { return sh_i64_error(6401); };
+    let sections = object.sections.len() / 5;
+    let symbols = object.symbols.len() / 5;
+    let relocations = object.relocations.len() / 4;
+    let strings = sh_binary_new(object.limit);
+    sh_binary_unsigned(&strings, 4, 4)?;
+    let string_offsets = vec_new_i64();
+    let mut index = 0;
+    while index < sh_symbol_count(&object.names) { let text = sh_symbol_text(&object.names, index)?; let bytes = sh_coff_symbol_bytes(&text)?; if text.len() < 1 or text.len() > 1048576 or not text.char_count().is_ok() { return sh_i64_error(6401); }; let mut byte = 0; while byte < text.len() { if bytes.get_u8(byte).unwrap_or(0) == 0 { return sh_i64_error(6401); }; byte = byte + 1; }; let offset = if text.len() > 8 { sh_binary_len(&strings); } else { -1; }; if not string_offsets.push(offset) { return sh_i64_error(6402); }; if offset >= 0 { byte = 0; while byte < text.len() { sh_binary_byte(&strings, bytes.get_u8(byte)?)?; byte = byte + 1; }; sh_binary_byte(&strings, 0)?; (); }; index = index + 1; };
+    sh_binary_patch(&strings, 0, sh_binary_len(&strings), 4)?;
+    sh_binary_unsigned(output, 34404, 2)?;
+    sh_binary_unsigned(output, sections, 2)?;
+    sh_binary_unsigned(output, 0, 4)?;
+    sh_binary_unsigned(output, 0, 4)?;
+    sh_binary_unsigned(output, symbols, 4)?;
+    sh_binary_unsigned(output, 0, 2)?;
+    sh_binary_unsigned(output, 0, 2)?;
+    index = 0;
+    while index < sections * 40 { sh_binary_byte(output, 0)?; index = index + 1; };
+    let mut section = 0;
+    let mut covered_data = 0;
+    while section < sections { let name = sh_object_word(&object.sections, 5, section, 0); let first = sh_object_word(&object.sections, 5, section, 1); let count = sh_object_word(&object.sections, 5, section, 2); let flags = sh_object_word(&object.sections, 5, section, 3); let alignment = sh_object_word(&object.sections, 5, section, 4); if first != covered_data or count < 0 or first > object.data.len() or count > object.data.len() - first or flags < 0 or flags > 4294967295 or (flags & 32510080) != 0 or alignment < 1 or alignment > 8192 or (alignment & (alignment - 1)) != 0 { return sh_i64_error(6401); }; covered_data = first + count; let mut previous = 0; while previous < section { if sh_object_word(&object.sections, 5, previous, 0) == name { return sh_i64_error(6401); }; previous = previous + 1; }; let encoded_name = sh_binary_new(8); sh_object_write_name(&encoded_name, object, name, &string_offsets, true)?; index = 0; while index < 8 { sh_binary_patch(output, 20 + section * 40 + index, sh_binary_get(&encoded_name, index)?, 1)?; index = index + 1; }; sh_binary_align(output, alignment, 0)?; let data_start = sh_binary_len(output); index = 0; while index < count { sh_binary_byte(output, sengoo_vec_get_or_default_i64(object.data.handle, first + index, -1))?; index = index + 1; }; sh_binary_patch(output, 20 + section * 40 + 16, count, 4)?; sh_binary_patch(output, 20 + section * 40 + 20, if count > 0 { data_start; } else { 0; }, 4)?; let mut encoded_alignment = 1; let mut power = 1; while power < alignment { power = power * 2; encoded_alignment = encoded_alignment + 1; }; sh_binary_patch(output, 20 + section * 40 + 36, flags | (encoded_alignment << 20), 4)?; section = section + 1; };
+    if covered_data != object.data.len() { return sh_i64_error(6401); };
+    let mut total_relocations = 0;
+    section = 0;
+    while section < sections { sh_binary_align(output, 4, 0)?; let first = sh_binary_len(output); let mut count = 0; index = 0; while index < relocations { if sh_object_word(&object.relocations, 4, index, 0) == section { let offset = sh_object_word(&object.relocations, 4, index, 1); let symbol = sh_object_word(&object.relocations, 4, index, 2); let kind = sh_object_word(&object.relocations, 4, index, 3); let width = sh_object_relocation_width(kind); let size = sh_object_word(&object.sections, 5, section, 2); if offset < 0 or offset > size or width < 0 or width > size - offset or symbol < 0 or symbol >= symbols or count >= 65535 { return sh_i64_error(6401); }; let mut previous = 0; while previous < index { if sh_object_word(&object.relocations, 4, previous, 0) == section { let old_offset = sh_object_word(&object.relocations, 4, previous, 1); let old_width = sh_object_relocation_width(sh_object_word(&object.relocations, 4, previous, 3)); if old_offset < offset + width and offset < old_offset + old_width { return sh_i64_error(6401); }; }; previous = previous + 1; }; sh_binary_unsigned(output, offset, 4)?; sh_binary_unsigned(output, symbol, 4)?; sh_binary_unsigned(output, kind, 2)?; count = count + 1; }; index = index + 1; }; if count > 0 { sh_binary_patch(output, 20 + section * 40 + 24, first, 4)?; sh_binary_patch(output, 20 + section * 40 + 32, count, 2)?; (); }; total_relocations = total_relocations + count; section = section + 1; };
+    if total_relocations != relocations { return sh_i64_error(6401); };
+    sh_binary_align(output, 4, 0)?;
+    sh_binary_patch(output, 8, sh_binary_len(output), 4)?;
+    index = 0;
+    while index < symbols { let name = sh_object_word(&object.symbols, 5, index, 0); let value = sh_object_word(&object.symbols, 5, index, 1); let symbol_section = sh_object_word(&object.symbols, 5, index, 2); let ty = sh_object_word(&object.symbols, 5, index, 3); let storage = sh_object_word(&object.symbols, 5, index, 4); if value < 0 or value > 4294967295 or symbol_section < -1 or symbol_section > sections or symbol_section == 0 and value != 0 or ty != 0 and ty != 32 or storage != 2 and storage != 3 { return sh_i64_error(6401); }; if symbol_section > 0 and value > sh_object_word(&object.sections, 5, symbol_section - 1, 2) { return sh_i64_error(6401); }; let mut previous = 0; while previous < index { if sh_object_word(&object.symbols, 5, previous, 0) == name { return sh_i64_error(6401); }; previous = previous + 1; }; sh_object_write_name(output, object, name, &string_offsets, false)?; sh_binary_unsigned(output, value, 4)?; sh_binary_unsigned(output, symbol_section & 65535, 2)?; sh_binary_unsigned(output, ty, 2)?; sh_binary_byte(output, storage)?; sh_binary_byte(output, 0)?; index = index + 1; };
+    index = 0;
+    while index < sh_binary_len(&strings) { sh_binary_byte(output, sh_binary_get(&strings, index)?)?; index = index + 1; };
+    sh_i64_ok(sh_binary_len(output));
+}
+
+def sh_object_emit(object: &ShObject) -> Result<ShBinary, i64> {
+    let output = sh_binary_new(object.limit);
+    let emitted = sh_object_emit_checked(object, &output);
+    if not emitted.is_ok() { return sh_coff_error(emitted.error); };
+    Result { is_ok: true, value: output, error: 0 };
+}
