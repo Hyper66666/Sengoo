@@ -82,7 +82,7 @@ def sh_hir_validate_calls(hir: &ShHir) -> i64 {
             let category = sh_binding_word(&hir.checked, target, 2);
             if target >= 0 and category != 0 and category != 1 and category != 2 and category != 5 and category != 13 and category != 15 { return 5504; };
             let signature = sh_s_resolve(&hir.checked, sh_node_type(&hir.checked, callee));
-            if category != 13 {
+            {
                 if sh_s_kind(&hir.checked, signature) != 11 or sh_s_arity(&hir.checked, signature) < 1 { return 5503; };
                 let callable = sh_s_resolve(&hir.checked, sh_node_callable_type(&hir.checked, node));
                 if callable != signature { return 5503; };

@@ -235,8 +235,7 @@ def sh_s_unify(checked: &ShChecked, expected: i64, actual: i64, depth: i64) -> b
     if left == right { return true; };
     let a = sh_s_kind(checked, left);
     let b = sh_s_kind(checked, right);
-    if a == 14 and b == 12 and sh_s_implements(checked, right, sh_s_nominal(checked, left)) { return true; };
-    if a == 14 and b == 6 and sh_s_kind(checked, sh_s_argument(checked, right, 0)) == 12 and sh_s_implements(checked, sh_s_argument(checked, right, 0), sh_s_nominal(checked, left)) { return true; };
+    if a == 14 and sh_s_flags(checked, left) == 1 and b == 12 and sh_s_dyn_coercion(checked, left, right) { return true; };
     if a == 18 or b == 18 or a == 17 or b == 17 { return true; };
     if a == 19 { if sh_s_occurs(checked, left, right, 0) { return false; }; return sh_s_substitute(checked, left, right); };
     if b == 19 { if sh_s_occurs(checked, right, left, 0) { return false; }; return sh_s_substitute(checked, right, left); };

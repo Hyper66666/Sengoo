@@ -12,7 +12,7 @@ import selfhost_types;
 // field[2]: type,offset; -1 size/align/offset explicitly means physical layout is pending.
 // source[2]: file,length; span[3]: file,start,end. Spans use byte offsets.
 // Opcodes: 1 ABI parameter,2 block parameter,3 unit,4 integer bits,5 float(bits or flags=1 literal symbol),
-// 6 bool,7 char,8 string symbol,9 function address,10 unary,11 binary,12 cast(flags=1 unsafe),
+// 6 bool,7 char,8 string symbol,9 function address,10 unary,11 binary,12 cast(flags=1 unsafe,2 class-prefix ref upcast),
 // 13 local address,14 load,15 store,16 aggregate,17 field address,18 extract field,19 element address,
 // 20 call(aux=function or -1 indirect; extra=SG0/C1),21 drop(aux=local or -1 projection; extra=pointee type),
 // 22 typed memory move,23 enum discriminant,24 enum variant,25 local initialization flag(aux=local,extra=0/1).
@@ -40,6 +40,7 @@ struct ShMir {
     fields: Vec<i64>,
     instances: Vec<i64>,
     substitutions: Vec<i64>,
+    parents: Vec<i64>,
     sources: Vec<i64>,
     spans: Vec<i64>,
 }
@@ -62,7 +63,7 @@ struct ShLowered {
 }
 
 def sh_mir_new(limit: i64) -> ShMir {
-    ShMir { schema: 1, target: 1, runtime_abi: 1, pointer_width: 64, limit: limit, types: sh_types_new(limit), symbols: sh_symbols_new(limit), functions: vec_new_i64(), locals: vec_new_i64(), scopes: vec_new_i64(), blocks: vec_new_i64(), instructions: vec_new_i64(), operands: vec_new_i64(), parameters: vec_new_i64(), terminators: vec_new_i64(), edges: vec_new_i64(), layouts: vec_new_i64(), fields: vec_new_i64(), instances: vec_new_i64(), substitutions: vec_new_i64(), sources: vec_new_i64(), spans: vec_new_i64() };
+    ShMir { schema: 1, target: 1, runtime_abi: 1, pointer_width: 64, limit: limit, types: sh_types_new(limit), symbols: sh_symbols_new(limit), functions: vec_new_i64(), locals: vec_new_i64(), scopes: vec_new_i64(), blocks: vec_new_i64(), instructions: vec_new_i64(), operands: vec_new_i64(), parameters: vec_new_i64(), terminators: vec_new_i64(), edges: vec_new_i64(), layouts: vec_new_i64(), fields: vec_new_i64(), instances: vec_new_i64(), substitutions: vec_new_i64(), parents: vec_new_i64(), sources: vec_new_i64(), spans: vec_new_i64() };
 }
 
 def sh_mir_limit(mir: &ShMir) -> bool {
@@ -399,3 +400,7 @@ def sh_mir_field_type(mir: &ShMir, ty: i64, variant: i64, field: i64) -> i64 {
 // substitution[2]: abstract type parameter, concrete type. No abstract function body is emitted.
 def sh_mir_instance_count(mir: &ShMir) -> i64 { sh_mir_count(&mir.instances, 5); }
 def sh_mir_instance(mir: &ShMir, instance: i64, field: i64) -> i64 { sh_mir_word(&mir.instances, 5, instance, field); }
+
+// parent[2]: class type,direct parent; layouts flatten parent members first.
+def sh_mir_parent(mir: &ShMir, ty: i64) -> i64 { let mut row = 0; while row < sh_mir_count(&mir.parents, 2) { if sh_mir_word(&mir.parents, 2, row, 0) == ty { return sh_mir_word(&mir.parents, 2, row, 1); }; row = row + 1; }; -1; }
+def sh_mir_class_ancestor(mir: &ShMir, child: i64, ancestor: i64) -> bool { let mut current = child; let mut steps = 0; while current >= 0 and steps <= sh_type_count(&mir.types) { if current == ancestor { return true; }; current = sh_mir_parent(mir, current); steps = steps + 1; }; false; }

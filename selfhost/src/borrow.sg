@@ -67,7 +67,12 @@ def sh_b_drop_inner(checked: &ShChecked, ty_input: i64, depth: i64) -> bool {
     while index < checked.constraints.len() { if checked.constraints.get(index + 2).unwrap_or(0) == -2 { let target = checked.constraints.get(index).unwrap_or(-1); let trait_name = sh_symbol_text(&checked.symbols, checked.constraints.get(index + 1).unwrap_or(-1)); if sh_s_nominal(checked, sh_s_resolve(checked, target)) == sh_s_nominal(checked, ty) and trait_name.is_ok() and sh_s_text_equal(&trait_name.value, "Drop") { return true; }; }; index = index + 4; };
     let owner = sh_adt_binding(checked, ty);
     index = 0;
-    while index < sh_binding_count(checked) { if sh_binding_word(checked, index, 2) == 6 and sh_binding_word(checked, index, 6) == owner { if sh_b_drop_inner(checked, sh_resolved_field_type(checked, ty, index), depth + 1) { return true; }; }; index = index + 1; };
+    if sh_binding_word(checked, owner, 2) == 4 {
+        while index < sh_binding_count(checked) { let field_owner = sh_binding_word(checked, index, 6); if sh_binding_word(checked, index, 2) == 6 and sh_binding_word(checked, field_owner, 2) == 5 and sh_binding_word(checked, field_owner, 6) == owner { if sh_b_drop_inner(checked, sh_resolved_field_type(checked, ty, index), depth + 1) { return true; }; }; index = index + 1; };
+    } else {
+        let fields = sh_layout_field_count(checked, ty);
+        while index < fields { let field = sh_layout_field_binding(checked, ty, index); if sh_b_drop_inner(checked, sh_resolved_field_type(checked, ty, field), depth + 1) { return true; }; index = index + 1; };
+    };
     false;
 }
 
@@ -257,7 +262,7 @@ def sh_b_drop_path(result: &mut ShOwnership, checked: &ShChecked, ast: &ShAst, n
     let mut partial = false;
     let mut index = 0;
     while index < result.state.len() { if index != path and sh_b_path_contains(result, path, index) and (result.state.get(index).unwrap_or(0) & 2) != 0 { partial = true; }; index = index + 1; };
-    if partial { if sh_b_custom_drop(checked, ty) { sh_b_error(result, ast, node, 6107, sh_b_path_root(result, path), path); return; }; let owner = sh_adt_binding(checked, ty); let mut field = sh_binding_count(checked) - 1; while field >= 0 { if sh_binding_word(checked, field, 2) == 6 and sh_binding_word(checked, field, 6) == owner { let field_type = sh_resolved_field_type(checked, ty, field); if sh_b_drop_inner(checked, field_type, 0) { let child = sh_b_path(result, sh_b_path_root(result, path), path, field, field_type); sh_b_drop_path(result, checked, ast, node, child, scope, conditional, depth + 1); }; }; field = field - 1; }; } else { sh_b_action(result, ast, node, sh_b_path_root(result, path), 3, scope, if (state & 2) != 0 { 1; } else { conditional; }); if result.paths.get(path * 4 + 1).unwrap_or(-1) >= 0 { result.action_paths.set(result.action_paths.len() - 1, path); (); }; };
+    if partial { if sh_b_custom_drop(checked, ty) { sh_b_error(result, ast, node, 6107, sh_b_path_root(result, path), path); return; }; let owner = sh_adt_binding(checked, ty); if sh_binding_word(checked, owner, 2) == 4 { sh_b_error(result, ast, node, 6111, sh_b_path_root(result, path), path); return; }; let mut index = sh_layout_field_count(checked, ty) - 1; while index >= 0 { let field = sh_layout_field_binding(checked, ty, index); let field_type = sh_resolved_field_type(checked, ty, field); if sh_b_drop_inner(checked, field_type, 0) { let child = sh_b_path(result, sh_b_path_root(result, path), path, field, field_type); sh_b_drop_path(result, checked, ast, node, child, scope, conditional, depth + 1); }; index = index - 1; }; } else { sh_b_action(result, ast, node, sh_b_path_root(result, path), 3, scope, if (state & 2) != 0 { 1; } else { conditional; }); if result.paths.get(path * 4 + 1).unwrap_or(-1) >= 0 { result.action_paths.set(result.action_paths.len() - 1, path); (); }; };
     result.state.set(path, 0);
     ();
 }

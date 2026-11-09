@@ -22,6 +22,8 @@ def sh_borrow_case(raw: &str, expected: i64) -> Result<bool, i64> {
 }
 
 def sh_test_borrow_round() -> Result<bool, i64> {
+    sh_borrow_case("struct Owner { value: i64, } impl Drop for Owner { def drop(&mut self) {} } class Parent { owner: Owner; } class Child: Parent { extra: i64; } def consume(value: Child) {} def f() { let value = Child { owner: Owner { value: 1 }, extra: 2 }; consume(value); consume(value); }", 6101)?;
+    sh_borrow_case("struct Owner { value: i64, } impl Drop for Owner { def drop(&mut self) {} } enum Choice { Empty, Value(Owner), } def consume(value: Choice) {} def f() { let value = Choice::Value(Owner { value: 1 }); consume(value); consume(value); }", 6101)?;
     sh_borrow_case("struct Owner { value: i64, } impl Drop for Owner { def drop(&mut self) {} } def consume(value: Owner) {} def f() { let owner = Owner { value: 1 }; consume(owner); consume(owner); }", 6101)?;
     sh_borrow_case("struct Owner { value: i64, } impl Drop for Owner { def drop(&mut self) {} } def consume(value: Owner) {} def f() { let owner = Owner { value: 1 }; consume(owner); let owner = Owner { value: 2 }; consume(owner); }", 0)?;
     sh_borrow_case("def use_ref(value: &i64) {} def f() { let mut value = 1; let a = &value; let b = &mut value; use_ref(a); }", 6103)?;

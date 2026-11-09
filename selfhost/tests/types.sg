@@ -57,10 +57,41 @@ def main() -> i64 {
     let buffers = sengoo_buffer_live_handle_count();
     let opaque = sengoo_opaque_live_handle_count();
     let mut round = 0;
-    while round < 100 { let result = sh_test_types(); if not result.is_ok() { println(result.error); return 1; }; round = round + 1; };
+    while round < 100 { let result = sh_test_types(); if not result.is_ok() { println(result.error); return 1; }; let dynamic = sh_test_dyn_types(); if not dynamic.is_ok() { println(dynamic.error); return 2; }; round = round + 1; };
     assert_eq_i64(sengoo_string_live_handle_count(), strings, "types.sg", 64);
     assert_eq_i64(sengoo_buffer_live_handle_count(), buffers, "types.sg", 65);
     assert_eq_i64(sengoo_opaque_live_handle_count(), opaque, "types.sg", 66);
     println("selfhost types: ok");
     0;
+}
+
+def sh_test_dyn_types() -> Result<bool, i64> {
+    let types = sh_types_new(30);
+    let integer = sh_type_primitive(&types, 2, 64, 1)?;
+    let empty = vec_new_i64();
+    let value = vec_new_i64();
+    value.push(integer);
+    let projection = sh_type_intern(&types, 15, 100, 0, 101, &value)?;
+    let fixed = sh_type_intern(&types, 15, 100, 1, 101, &value)?;
+    assert_true(projection != fixed, "types.sg", 82);
+    let entries = vec_new_i64();
+    entries.push(fixed);
+    let dynamic = sh_type_intern(&types, 14, 0, 1, 100, &entries)?;
+    assert_eq_i64(sh_type_argument(&types, dynamic, 0)?, fixed, "types.sg", 84);
+    assert_eq_i64(sh_type_intern(&types, 14, 0, 1, 100, &entries)?, dynamic, "types.sg", 85);
+    let ordinary = sh_type_intern(&types, 14, 0, 0, 100, &value)?;
+    assert_true(ordinary != dynamic, "types.sg", 87);
+    assert_eq_i64(sh_type_intern(&types, 14, 0, 1, 100, &value).error, 4003, "types.sg", 88);
+    assert_eq_i64(sh_type_intern(&types, 14, 0, 1, 102, &entries).error, 4003, "types.sg", 89);
+    entries.push(fixed);
+    assert_eq_i64(sh_type_intern(&types, 14, 0, 1, 100, &entries).error, 4003, "types.sg", 91);
+    assert_eq_i64(sh_type_intern(&types, 14, 0, 2, 100, &empty).error, 4003, "types.sg", 92);
+    assert_eq_i64(sh_type_intern(&types, 15, 100, 2, 101, &value).error, 4003, "types.sg", 93);
+    assert_eq_i64(sh_type_intern(&types, 15, 100, 0, 101, &empty).error, 4003, "types.sg", 94);
+    let nested = vec_new_i64();
+    nested.push(fixed);
+    assert_eq_i64(sh_type_intern(&types, 15, 100, 1, 103, &nested).error, 4003, "types.sg", 96);
+    assert_eq_i64(sh_type_intern(&types, 13, 7, 1, 101, &empty).error, 4003, "types.sg", 97);
+    assert_eq_i64(sh_type_intern(&types, 12, 0, 1, 101, &empty).error, 4003, "types.sg", 98);
+    Result { is_ok: true, value: true, error: 0 };
 }

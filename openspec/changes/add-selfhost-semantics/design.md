@@ -92,6 +92,10 @@ instantiated function type. The resolved binding retains its declaration
 template. Projection normalization and generic obligations run after inference;
 type applications also check their declared bounds. Built-in signatures have
 declaration ID -1 and flag 4096 and do not introduce executable bodies.
+`call_types` has one entry per AST node and exposes the same callable signature
+through `sh_node_callable_type`; non-call nodes use -1. Ordinary and built-in
+call facts carry the actual ordered argument types and return type. HIR schema 2
+owns and serializes this table rather than recovering it from source spelling.
 
 Class inheritance keeps the declared parent type, substitutes actual generic
 arguments through it, and exposes fields in parent-first order through
@@ -114,3 +118,30 @@ destruction pattern. The native regression
 `self.child.drop()` inside a parent's destructor to run once and suppress the
 child's automatic cleanup. Preserve that scoped case and pass its ownership
 fact to lowering; do not skip implementation-body checking globally.
+
+## Future and dynamic type contracts
+
+A Future may be stored directly in a local variable and awaited later. Future
+values inside aggregate storage, ordinary function arguments or escaping return
+values are rejected. Direct `let scope = task_scope()` is the supported lexical
+TaskScope introduction; constructing the capability or storing it in another
+aggregate is rejected. AsyncContext remains opaque and poll-scoped. An earlier
+development checker rejected all local Future storage; that was an implementation
+error, not a supported-subset restriction or an approved reference exception.
+
+User Future implementations retain their declared output type. The checker
+validates a mutable receiver, the AsyncContext parameter and Poll layout before
+accepting await. A separate path scan checks evident Pending constructions for a
+prior `wake` or `wake_after` call on that function's context binding; wake calls
+on unrelated values and wake registration in only one branch do not satisfy an
+unregistered Pending path.
+
+Type kind 14 has flags 0 for trait bounds and flags 1 for dynamic trait objects.
+The latter's ordered arguments are kind-15 entries with flags 1: data names the
+trait symbol, nominal names the associated item, and the sole argument is its
+fixed type. Kind 15 with flags 0 remains an associated projection whose sole
+argument is the base type. Type construction rejects other flags, mismatched
+trait identities, duplicate associated items and nested binding payloads before
+publishing an ID. Object safety and fixed-associated-type coercions are checked
+against declarations; associated entries are type metadata, not runtime payload
+fields.

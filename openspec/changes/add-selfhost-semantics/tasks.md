@@ -146,6 +146,46 @@ callable facts, error propagation, closures/contracts/async/concurrency and
 cancellation remain open, as does full supported-corpus parity.
 `m3_complete` remains `false`; the complete M3 tasks above stay unchecked.
 
+## Class prefix layout and callable-fact checkpoint
+
+- [x] Preserve class identity as MIR nominal data 2 and explicit direct-parent type records, with parent-first flattened field types and inherited-field ordinals.
+- [x] Lower the named inherited shared/mutable receiver methods through class-prefix reference upcasts; validate parent identity, acyclic/unique parent records, field-type/offset prefixes and compatible size/alignment.
+- [x] Reject the named unrelated class reference, shared-to-mutable upgrade, mismatched parent field layout/offset and cyclic-parent MIR mutations.
+- [x] Give internal ADT/impl/trait methods distinct symbols within the current resolved module and verify the named two-ADT same-method-name fixture.
+- [x] Include inherited owned fields and enum payload fields in needs-Drop analysis; verify repeated use after moving either aggregate is rejected, and inherited-field partial cleanup emits the two expected drops with one field projection.
+- [x] Require complete builtin callable signatures in schema-2 HIR and roundtrip the named print/sleep builtin facts while rejecting a removed callable signature.
+
+Evidence: `target/selfhost/m3-class/checkpoint/evidence.json`, SHA-256
+`04b28fd57accda9583cab4dba45820df90aa349ecdad3468cad4a54463cbc819`.
+Both starting and ending revisions are
+`def09df340fffae2b0e32c8841b7d199f032e4da`, Windows 11 AMD64. All 175
+declared frontend/stdlib/runtime/test/runner input records and verified tool
+identities were unchanged. The forced ownership build/native and MIR
+build/native commands exited zero (23.57 s, 7.39 s, 32.35 s, 7.05 s).
+The ownership regressions ran fifty resource rounds; class, builtin-HIR,
+generic, poisoned-image, observed-ABI and typed-source/cleanup regressions ran
+ten rounds, with thirty raw MIR CFG/SSA/ABI rounds. String/Buffer/opaque counts
+recovered exactly. Artifact SHA-256 values are
+`951e27c73e9de613429a88203b4d380bfc9056d23e1f05da32f93b5d12d1bb17`
+(ownership) and
+`dcb3e21704e963e42fe9f02fea2255b46f90e51e6c20c8da5f525a0f452bc3af`
+(HIR/MIR).
+
+These upcasts implement the documented internal receiver adjustment only.
+The independent qualified-reference oracle rejects passing `&Leaf` directly
+to a free function expecting `&Base`; that source rejection remains
+`5104`. The qualified reference also rejects generic arguments in the class
+inheritance path (`Parent<T>`, expected LBrace/found Lt). A named parser
+`3001` regression retains that boundary; the positive generic class fixture
+uses a legal generic class without that inheritance syntax.
+
+Builtin signatures are HIR facts in this checkpoint; their existence does not
+qualify builtin native lowering. Method symbol identity is unique only within
+the current resolved module; a module-qualified source identity and cross-module
+collision/ABI gates remain open under M7. Complete owned patterns and
+variant-aware/conditional field cleanup, error propagation, closures/async and
+concurrency/cancellation remain open. `m3_complete` remains `false`.
+
 ## Additional semantic and ownership checkpoint
 
 - [x] Verify the named 107 semantic fixtures and 100 exact resource scopes for numeric inference, associated projection normalization, callable/closure owner identities, core trait/FFI contracts and inherited class field facts (`target/selfhost/m3-semantic/evidence.json`).
@@ -194,3 +234,23 @@ revision `94946f71f133e0ec28fd9bcf725e69dec45d9173`, Windows 11 AMD64.
 All four build/native commands passed, with empty source/tool change lists.
 This final run supersedes the earlier `ddb676...` source snapshot for the
 whitespace-normalized source; earlier reports remain preserved.
+
+## Future local and dynamic association semantic checkpoint
+
+- [x] Correct the supported direct Future local binding rule and verify the named Pending wakeup, Poll/AsyncContext layout/receiver and opaque-value contract cases.
+- [x] Preserve fixed dynamic associated type bindings in explicit type roles; reject the tested unknown/missing/duplicate bindings and object-unsafe methods, and validate structural arena flags and arguments.
+
+The 147-fixture semantic report is `target/selfhost/m3-semantic/evidence.json`,
+SHA-256 `d39e95430808ffd35ff61ae7ac406d59465c60993e5df14a7726f483d1cdf1ec`.
+It records identical start/end revision
+`cb3277bcfdaf55ce10c04adcb053517f011fba70`, Windows 11 AMD64, unchanged
+sources/tools, 100 semantic resource scopes, 100 structural-type resource
+scopes, formatting/build/CLI checks and the fresh 49-case comparison retaining
+the same five reviewed differences. The earlier overbroad Future-local
+rejection is corrected in this snapshot; it is not an approved exception.
+
+Full-corpus discovery still finds seven supported positive gaps and remaining
+negative gaps; the typed-only discovery CLI does not yet apply borrowing.
+Path function calls, remaining Hash/operator/contract/supertrait and pattern
+rules and the complete M3 gate remain open. These discovery results are not
+treated as a complete corpus pass.

@@ -41,7 +41,10 @@ def sh_type_shape(kind: i64, data: i64, flags: i64, nominal: i64, count: i64) ->
     if kind == 8 { return data >= 0 and flags == 0 and count == 1; };
     if kind == 9 or kind == 16 { return data == 0 and flags == 0 and count == 1; };
     if kind == 11 { return data >= 0 and data <= 1 and flags <= 1 and count >= 1; };
-    if kind == 12 or kind == 13 or kind == 14 or kind == 15 { return nominal >= 0; };
+    if kind == 12 { return nominal >= 0 and data >= 0 and data <= 2 and flags == 0; };
+    if kind == 13 { return nominal >= 0 and data >= 0 and flags == 0 and count == 0; };
+    if kind == 14 { return nominal >= 0 and data == 0 and flags <= 1; };
+    if kind == 15 { return nominal >= 0 and data >= 0 and flags <= 1 and count == 1; };
     if kind == 10 { return data == 0 and flags == 0; };
     if kind == 19 { return data >= 0 and flags == 0 and count == 0; };
     data == 0 and flags == 0 and count == 0;
@@ -53,6 +56,8 @@ def sh_type_intern(types: &ShTypes, kind: i64, data: i64, flags: i64, nominal: i
     if not sh_type_shape(kind, data, flags, nominal, count) { return sh_i64_error(4003); };
     let mut index = 0;
     while index < count { let argument = sh_type_input_argument(arguments, index); if argument < 0 or argument >= sh_type_count(types) { return sh_i64_error(4002); }; index = index + 1; };
+    if kind == 14 and flags == 1 { index = 0; while index < count { let entry = sh_type_input_argument(arguments, index); if sh_type_word(types, entry, 0)? != 15 or sh_type_word(types, entry, 2)? != 1 or sh_type_word(types, entry, 1)? != nominal { return sh_i64_error(4003); }; let mut previous = 0; while previous < index { let other = sh_type_input_argument(arguments, previous); if sh_type_word(types, other, 3)? == sh_type_word(types, entry, 3)? { return sh_i64_error(4003); }; previous = previous + 1; }; index = index + 1; }; };
+    if kind == 15 and flags == 1 { let value = sh_type_input_argument(arguments, 0); if sh_type_word(types, value, 0)? == 15 and sh_type_word(types, value, 2)? == 1 { return sh_i64_error(4003); }; };
     let mut id = 0;
     while id < sh_type_count(types) { let mut matches = sh_type_word(types, id, 0)? == kind and sh_type_word(types, id, 1)? == data and sh_type_word(types, id, 2)? == flags and sh_type_word(types, id, 3)? == nominal and sh_type_word(types, id, 5)? == count; index = 0; while matches and index < count { matches = sh_type_argument(types, id, index)? == sh_type_input_argument(arguments, index); index = index + 1; }; if matches { return sh_i64_ok(id); }; id = id + 1; };
     if id >= types.limit { return sh_i64_error(4001); };
