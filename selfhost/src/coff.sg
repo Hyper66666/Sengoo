@@ -1,0 +1,34 @@
+import selfhost_binary;
+
+def sh_coff_error(code: i64) -> Result<ShBinary, i64> {
+    let bytes: Vec<i64> = Vec { handle: 0, marker: 0 };
+    let invalid = ShBinary { bytes: bytes, limit: 0 };
+    Result { is_ok: false, value: invalid, error: code };
+}
+
+def sh_coff_symbol_bytes(symbol: &String) -> Result<Buffer, i64> {
+    let buffer = ffi_buffer_new(symbol.len())?;
+    symbol.copy_to_buffer(buffer)?;
+    Result { is_ok: true, value: buffer, error: 0 };
+}
+
+def sh_coff_text(code: &ShBinary, symbol: &String, maximum: i64) -> Result<ShBinary, i64> {
+    let output = sh_binary_new(maximum);
+    let copied = sh_coff_symbol_bytes(symbol);
+    if not copied.is_ok() or symbol.len() < 1 or symbol.len() > 1048576 or sh_binary_len(code) < 1 { return sh_coff_error(6201); };
+    let name = copied.value;
+    let mut index = 0;
+    while index < symbol.len() { if name.get_u8(index).unwrap_or(0) == 0 { return sh_coff_error(6201); }; index = index + 1; };
+    let code_size = sh_binary_len(code);
+    if code_size > 4294967235 { return sh_coff_error(6201); };
+    let mut valid = sh_binary_unsigned(&output, 34404, 2).is_ok() and sh_binary_unsigned(&output, 1, 2).is_ok() and sh_binary_unsigned(&output, 0, 4).is_ok() and sh_binary_unsigned(&output, 60 + code_size, 4).is_ok() and sh_binary_unsigned(&output, 1, 4).is_ok() and sh_binary_unsigned(&output, 0, 2).is_ok() and sh_binary_unsigned(&output, 0, 2).is_ok();
+    valid = valid and sh_binary_unsigned(&output, 500236121134, 8).is_ok();
+    valid = valid and sh_binary_unsigned(&output, 0, 4).is_ok() and sh_binary_unsigned(&output, 0, 4).is_ok() and sh_binary_unsigned(&output, code_size, 4).is_ok() and sh_binary_unsigned(&output, 60, 4).is_ok() and sh_binary_unsigned(&output, 0, 4).is_ok() and sh_binary_unsigned(&output, 0, 4).is_ok() and sh_binary_unsigned(&output, 0, 2).is_ok() and sh_binary_unsigned(&output, 0, 2).is_ok() and sh_binary_unsigned(&output, 1615855648, 4).is_ok();
+    index = 0;
+    while valid and index < code_size { let byte = sh_binary_get(code, index); valid = byte.is_ok() and sh_binary_byte(&output, byte.value).is_ok(); index = index + 1; };
+    if symbol.len() > 8 { valid = valid and sh_binary_unsigned(&output, 0, 4).is_ok() and sh_binary_unsigned(&output, 4, 4).is_ok(); } else { index = 0; while valid and index < 8 { let byte = if index < symbol.len() { name.get_u8(index).unwrap_or(0); } else { 0; }; valid = sh_binary_byte(&output, byte).is_ok(); index = index + 1; }; };
+    valid = valid and sh_binary_unsigned(&output, 0, 4).is_ok() and sh_binary_unsigned(&output, 1, 2).is_ok() and sh_binary_unsigned(&output, 32, 2).is_ok() and sh_binary_byte(&output, 2).is_ok() and sh_binary_byte(&output, 0).is_ok();
+    if symbol.len() > 8 { valid = valid and sh_binary_unsigned(&output, 5 + symbol.len(), 4).is_ok(); index = 0; while valid and index < symbol.len() { valid = sh_binary_byte(&output, name.get_u8(index).unwrap_or(0)).is_ok(); index = index + 1; }; valid = valid and sh_binary_byte(&output, 0).is_ok(); } else { valid = valid and sh_binary_unsigned(&output, 4, 4).is_ok(); };
+    if not valid { return sh_coff_error(6202); };
+    Result { is_ok: true, value: output, error: 0 };
+}

@@ -1,0 +1,66 @@
+import selfhost_types;
+
+import std::assert;
+
+extern "C" {
+    fn sengoo_string_live_handle_count() -> i64;
+    fn sengoo_buffer_live_handle_count() -> i64;
+    fn sengoo_opaque_live_handle_count() -> i64;
+}
+
+def sh_test_types() -> Result<bool, i64> {
+    let types = sh_types_new(12);
+    let unit = sh_type_primitive(&types, 0, 0, 0)?;
+    let signed = sh_type_primitive(&types, 2, 64, 1)?;
+    let unsigned = sh_type_primitive(&types, 2, 64, 0)?;
+    assert_eq_i64(sh_type_primitive(&types, 2, 64, 1)?, signed, "types.sg", 17);
+    assert_true(signed != unsigned, "types.sg", 18);
+    let pointer_signed = sh_type_primitive(&types, 2, 64, 3)?;
+    let pointer_unsigned = sh_type_primitive(&types, 2, 64, 2)?;
+    assert_true(pointer_signed != signed and pointer_unsigned != unsigned, "types.sg", 19);
+    assert_true(pointer_signed != pointer_unsigned, "types.sg", 20);
+    let arguments = vec_new_i64();
+    arguments.push(signed);
+    let reference = sh_type_intern(&types, 6, 0, 0, -1, &arguments)?;
+    let mutable = sh_type_intern(&types, 6, 0, 1, -1, &arguments)?;
+    assert_true(reference != mutable, "types.sg", 23);
+    assert_eq_i64(sh_type_argument(&types, reference, 0)?, signed, "types.sg", 24);
+    arguments.push(unsigned);
+    let pair = sh_type_intern(&types, 10, 0, 0, -1, &arguments)?;
+    arguments.set(0, unsigned);
+    arguments.set(1, signed);
+    let reversed = sh_type_intern(&types, 10, 0, 0, -1, &arguments)?;
+    assert_true(pair != reversed, "types.sg", 30);
+    let nominal = sh_type_intern(&types, 12, 0, 0, 42, &arguments)?;
+    let other_nominal = sh_type_intern(&types, 12, 0, 0, 43, &arguments)?;
+    assert_true(nominal != other_nominal, "types.sg", 33);
+    arguments.push(unit);
+    let function = sh_type_intern(&types, 11, 0, 0, -1, &arguments)?;
+    assert_eq_i64(sh_type_argument(&types, function, 2)?, unit, "types.sg", 36);
+    assert_eq_i64(sh_type_count(&types), 12, "types.sg", 37);
+    assert_eq_i64(sh_type_primitive(&types, 2, 64, 1)?, signed, "types.sg", 38);
+    assert_eq_i64(sh_type_primitive(&types, 1, 0, 0).error, 4001, "types.sg", 39);
+    assert_eq_i64(sh_type_word(&types, 9223372036854775807, 0).error, 4002, "types.sg", 40);
+    assert_eq_i64(sh_type_argument(&types, function, -1).error, 4002, "types.sg", 41);
+    let absent = vec_new_i64();
+    absent.push(999);
+    assert_eq_i64(sh_type_intern(&types, 6, 0, 0, -1, &absent).error, 4002, "types.sg", 44);
+    assert_eq_i64(sh_type_primitive(&types, 2, 65, 1).error, 4003, "types.sg", 45);
+    assert_eq_i64(sh_type_count(&types), 12, "types.sg", 46);
+    let negative = sh_types_new(-1);
+    assert_eq_i64(sh_type_primitive(&negative, 0, 0, 0).error, 4001, "types.sg", 48);
+    Result { is_ok: true, value: true, error: 0 };
+}
+
+def main() -> i64 {
+    let strings = sengoo_string_live_handle_count();
+    let buffers = sengoo_buffer_live_handle_count();
+    let opaque = sengoo_opaque_live_handle_count();
+    let mut round = 0;
+    while round < 100 { let result = sh_test_types(); if not result.is_ok() { println(result.error); return 1; }; round = round + 1; };
+    assert_eq_i64(sengoo_string_live_handle_count(), strings, "types.sg", 64);
+    assert_eq_i64(sengoo_buffer_live_handle_count(), buffers, "types.sg", 65);
+    assert_eq_i64(sengoo_opaque_live_handle_count(), opaque, "types.sg", 66);
+    println("selfhost types: ok");
+    0;
+}

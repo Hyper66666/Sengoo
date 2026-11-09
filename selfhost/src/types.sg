@@ -1,0 +1,72 @@
+import selfhost_core;
+
+struct ShTypes {
+    words: Vec<i64>,
+    arguments: Vec<i64>,
+    limit: i64,
+}
+
+def sh_type_input_argument(arguments: &Vec<i64>, index: i64) -> i64 {
+    sengoo_vec_get_or_default_i64(arguments.handle, index, -1);
+}
+
+def sh_types_new(limit: i64) -> ShTypes {
+    ShTypes { words: vec_new_i64(), arguments: vec_new_i64(), limit: limit };
+}
+
+def sh_type_count(types: &ShTypes) -> i64 {
+    types.words.len() / 6;
+}
+
+def sh_type_word(types: &ShTypes, id: i64, field: i64) -> Result<i64, i64> {
+    if id < 0 or id >= sh_type_count(types) or field < 0 or field >= 6 { return sh_i64_error(4002); };
+    let value = types.words.get(id * 6 + field);
+    if value.is_some { sh_i64_ok(value.value); } else { sh_i64_error(4002); };
+}
+
+def sh_type_argument(types: &ShTypes, id: i64, index: i64) -> Result<i64, i64> {
+    let start = sh_type_word(types, id, 4)?;
+    let count = sh_type_word(types, id, 5)?;
+    if index < 0 or index >= count or start < 0 or start > types.arguments.len() or index >= types.arguments.len() - start { return sh_i64_error(4002); };
+    let value = types.arguments.get(start + index);
+    if value.is_some { sh_i64_ok(value.value); } else { sh_i64_error(4002); };
+}
+
+def sh_type_shape(kind: i64, data: i64, flags: i64, nominal: i64, count: i64) -> bool {
+    if kind < 0 or kind > 19 or flags < 0 or nominal < -1 { return false; };
+    if (kind < 12 or kind > 15) and nominal != -1 { return false; };
+    if kind == 2 { return (data == 8 or data == 16 or data == 32 or data == 64) and flags <= 3 and (flags < 2 or data == 64) and count == 0; };
+    if kind == 3 { return (data == 32 or data == 64) and flags == 0 and count == 0; };
+    if kind == 6 or kind == 7 { return data == 0 and flags <= 1 and count == 1; };
+    if kind == 8 { return data >= 0 and flags == 0 and count == 1; };
+    if kind == 9 or kind == 16 { return data == 0 and flags == 0 and count == 1; };
+    if kind == 11 { return data >= 0 and data <= 1 and flags <= 1 and count >= 1; };
+    if kind == 12 or kind == 13 or kind == 14 or kind == 15 { return nominal >= 0; };
+    if kind == 10 { return data == 0 and flags == 0; };
+    if kind == 19 { return data >= 0 and flags == 0 and count == 0; };
+    data == 0 and flags == 0 and count == 0;
+}
+
+def sh_type_intern(types: &ShTypes, kind: i64, data: i64, flags: i64, nominal: i64, arguments: &Vec<i64>) -> Result<i64, i64> {
+    if types.limit < 0 or types.limit > 1000000 { return sh_i64_error(4001); };
+    let count = arguments.len();
+    if not sh_type_shape(kind, data, flags, nominal, count) { return sh_i64_error(4003); };
+    let mut index = 0;
+    while index < count { let argument = sh_type_input_argument(arguments, index); if argument < 0 or argument >= sh_type_count(types) { return sh_i64_error(4002); }; index = index + 1; };
+    let mut id = 0;
+    while id < sh_type_count(types) { let mut matches = sh_type_word(types, id, 0)? == kind and sh_type_word(types, id, 1)? == data and sh_type_word(types, id, 2)? == flags and sh_type_word(types, id, 3)? == nominal and sh_type_word(types, id, 5)? == count; index = 0; while matches and index < count { matches = sh_type_argument(types, id, index)? == sh_type_input_argument(arguments, index); index = index + 1; }; if matches { return sh_i64_ok(id); }; id = id + 1; };
+    if id >= types.limit { return sh_i64_error(4001); };
+    let start = types.arguments.len();
+    let before = types.words.len();
+    index = 0;
+    let mut stored = true;
+    while stored and index < count { stored = types.arguments.push(sh_type_input_argument(arguments, index)); index = index + 1; };
+    stored = stored and types.words.push(kind) and types.words.push(data) and types.words.push(flags) and types.words.push(nominal) and types.words.push(start) and types.words.push(count);
+    if not stored { while types.arguments.len() > start { types.arguments.pop(); }; while types.words.len() > before { types.words.pop(); }; return sh_i64_error(4001); };
+    sh_i64_ok(id);
+}
+
+def sh_type_primitive(types: &ShTypes, kind: i64, data: i64, flags: i64) -> Result<i64, i64> {
+    let arguments = vec_new_i64();
+    sh_type_intern(types, kind, data, flags, -1, &arguments);
+}

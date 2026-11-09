@@ -1,0 +1,78 @@
+import selfhost_core;
+
+struct ShBinary {
+    bytes: Vec<i64>,
+    limit: i64,
+}
+
+def sh_binary_new(limit: i64) -> ShBinary {
+    ShBinary { bytes: vec_new_i64(), limit: limit };
+}
+
+def sh_binary_len(output: &ShBinary) -> i64 {
+    output.bytes.len();
+}
+
+def sh_binary_get(output: &ShBinary, index: i64) -> Result<i64, i64> {
+    if index < 0 or index >= output.bytes.len() { return sh_i64_error(6003); };
+    sh_i64_ok(sengoo_vec_get_or_default_i64(output.bytes.handle, index, -1));
+}
+
+def sh_binary_room(output: &ShBinary, count: i64) -> bool {
+    output.limit >= 0 and output.limit <= 67108864 and count >= 0 and output.bytes.len() <= output.limit and count <= output.limit - output.bytes.len();
+}
+
+def sh_binary_byte(output: &ShBinary, value: i64) -> Result<i64, i64> {
+    if value < 0 or value > 255 { return sh_i64_error(6002); };
+    if not sh_binary_room(output, 1) { return sh_i64_error(6001); };
+    let offset = output.bytes.len();
+    if not output.bytes.push(value) { return sh_i64_error(6001); };
+    sh_i64_ok(offset);
+}
+
+def sh_binary_unsigned(output: &ShBinary, value: i64, width: i64) -> Result<i64, i64> {
+    if width != 1 and width != 2 and width != 4 and width != 8 { return sh_i64_error(6002); };
+    if width == 1 and (value < 0 or value > 255) { return sh_i64_error(6002); };
+    if width == 2 and (value < 0 or value > 65535) { return sh_i64_error(6002); };
+    if width == 4 and (value < 0 or value > 4294967295) { return sh_i64_error(6002); };
+    if not sh_binary_room(output, width) { return sh_i64_error(6001); };
+    let offset = output.bytes.len();
+    let mut index = 0;
+    while index < width { let byte = (value >> (index * 8)) & 255; if not output.bytes.push(byte) { while output.bytes.len() > offset { output.bytes.pop(); }; return sh_i64_error(6001); }; index = index + 1; };
+    sh_i64_ok(offset);
+}
+
+def sh_binary_i32(output: &ShBinary, value: i64) -> Result<i64, i64> {
+    if value < -2147483648 or value > 2147483647 { return sh_i64_error(6002); };
+    sh_binary_unsigned(output, value & 4294967295, 4);
+}
+
+def sh_binary_patch(output: &ShBinary, offset: i64, value: i64, width: i64) -> Result<i64, i64> {
+    if width != 1 and width != 2 and width != 4 and width != 8 { return sh_i64_error(6002); };
+    if offset < 0 or offset > output.bytes.len() or width > output.bytes.len() - offset { return sh_i64_error(6003); };
+    if width == 1 and (value < 0 or value > 255) { return sh_i64_error(6002); };
+    if width == 2 and (value < 0 or value > 65535) { return sh_i64_error(6002); };
+    if width == 4 and (value < 0 or value > 4294967295) { return sh_i64_error(6002); };
+    let mut index = 0;
+    while index < width { if not output.bytes.set(offset + index, (value >> (index * 8)) & 255) { return sh_i64_error(6003); }; index = index + 1; };
+    sh_i64_ok(offset);
+}
+
+def sh_binary_align(output: &ShBinary, alignment: i64, padding: i64) -> Result<i64, i64> {
+    if alignment < 1 or alignment > 65536 or (alignment & (alignment - 1)) != 0 or padding < 0 or padding > 255 { return sh_i64_error(6002); };
+    let count = (alignment - output.bytes.len() % alignment) % alignment;
+    if not sh_binary_room(output, count) { return sh_i64_error(6001); };
+    let offset = output.bytes.len();
+    let mut index = 0;
+    while index < count { if not output.bytes.push(padding) { while output.bytes.len() > offset { output.bytes.pop(); }; return sh_i64_error(6001); }; index = index + 1; };
+    sh_i64_ok(output.bytes.len());
+}
+
+def sh_binary_buffer(output: &ShBinary) -> Result<Buffer, i64> {
+    let allocated = ffi_buffer_new(output.bytes.len());
+    if not allocated.is_ok() { return Result { is_ok: false, value: Buffer { handle: 0 }, error: 6001 }; };
+    let bytes = allocated.value;
+    let mut index = 0;
+    while index < output.bytes.len() { let byte = sh_binary_get(output, index); if not byte.is_ok() { return Result { is_ok: false, value: Buffer { handle: 0 }, error: 6003 }; }; let appended = bytes.push_u8(byte.value); if not appended.is_ok() { return Result { is_ok: false, value: Buffer { handle: 0 }, error: 6001 }; }; index = index + 1; };
+    Result { is_ok: true, value: bytes, error: 0 };
+}

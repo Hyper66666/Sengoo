@@ -1,0 +1,88 @@
+import selfhost_binary;
+
+def sh_x64_register(reg: i64) -> bool {
+    reg >= 0 and reg < 16;
+}
+
+def sh_x64_rewind(output: &ShBinary, start: i64, code: i64) -> Result<i64, i64> {
+    while output.bytes.len() > start { output.bytes.pop(); };
+    sh_i64_error(code);
+}
+
+def sh_x64_mov_imm(output: &ShBinary, register: i64, bits: i64) -> Result<i64, i64> {
+    if not sh_x64_register(register) { return sh_i64_error(6101); };
+    let start = sh_binary_len(output);
+    if not sh_binary_byte(output, 72 | (register >> 3)).is_ok() or not sh_binary_byte(output, 184 + (register & 7)).is_ok() or not sh_binary_unsigned(output, bits, 8).is_ok() { return sh_x64_rewind(output, start, 6001); };
+    sh_i64_ok(start);
+}
+
+def sh_x64_registers(output: &ShBinary, opcode: i64, second: i64, reg_field: i64, rm_field: i64) -> Result<i64, i64> {
+    if not sh_x64_register(reg_field) or not sh_x64_register(rm_field) or opcode < 0 or opcode > 255 or second < -1 or second > 255 { return sh_i64_error(6101); };
+    let start = sh_binary_len(output);
+    let prefix = 72 | ((reg_field >> 3) << 2) | (rm_field >> 3);
+    let mut valid = sh_binary_byte(output, prefix).is_ok() and sh_binary_byte(output, opcode).is_ok();
+    if second >= 0 { valid = valid and sh_binary_byte(output, second).is_ok(); };
+    valid = valid and sh_binary_byte(output, 192 | ((reg_field & 7) << 3) | (rm_field & 7)).is_ok();
+    if not valid { return sh_x64_rewind(output, start, 6001); };
+    sh_i64_ok(start);
+}
+
+def sh_x64_mov(output: &ShBinary, destination: i64, source: i64) -> Result<i64, i64> {
+    sh_x64_registers(output, 137, -1, source, destination);
+}
+
+def sh_x64_binary(output: &ShBinary, operation: i64, destination: i64, source: i64) -> Result<i64, i64> {
+    if operation == 0 { return sh_x64_registers(output, 1, -1, source, destination); };
+    if operation == 1 { return sh_x64_registers(output, 41, -1, source, destination); };
+    if operation == 2 { return sh_x64_registers(output, 33, -1, source, destination); };
+    if operation == 3 { return sh_x64_registers(output, 9, -1, source, destination); };
+    if operation == 4 { return sh_x64_registers(output, 49, -1, source, destination); };
+    if operation == 5 { return sh_x64_registers(output, 57, -1, source, destination); };
+    if operation == 6 { return sh_x64_registers(output, 15, 175, destination, source); };
+    sh_i64_error(6101);
+}
+
+def sh_x64_memory(output: &ShBinary, operation: i64, register: i64, base: i64, displacement: i64) -> Result<i64, i64> {
+    if not sh_x64_register(register) or not sh_x64_register(base) or displacement < -2147483648 or displacement > 2147483647 or operation < 0 or operation > 2 { return sh_i64_error(6101); };
+    let start = sh_binary_len(output);
+    let opcode = if operation == 0 { 139; } else { if operation == 1 { 137; } else { 141; }; };
+    let mut valid = sh_binary_byte(output, 72 | ((register >> 3) << 2) | (base >> 3)).is_ok() and sh_binary_byte(output, opcode).is_ok() and sh_binary_byte(output, 128 | ((register & 7) << 3) | (base & 7)).is_ok();
+    if (base & 7) == 4 { valid = valid and sh_binary_byte(output, 36).is_ok(); };
+    valid = valid and sh_binary_i32(output, displacement).is_ok();
+    if not valid { return sh_x64_rewind(output, start, 6001); };
+    sh_i64_ok(start);
+}
+
+def sh_x64_stack_register(output: &ShBinary, register: i64, pop: bool) -> Result<i64, i64> {
+    if not sh_x64_register(register) { return sh_i64_error(6101); };
+    let start = sh_binary_len(output);
+    let mut valid = true;
+    if register >= 8 { valid = sh_binary_byte(output, 65).is_ok(); };
+    valid = valid and sh_binary_byte(output, (if pop { 88; } else { 80; }) + (register & 7)).is_ok();
+    if not valid { return sh_x64_rewind(output, start, 6001); };
+    sh_i64_ok(start);
+}
+
+def sh_x64_branch(output: &ShBinary, kind: i64, condition: i64) -> Result<i64, i64> {
+    if kind < 0 or kind > 2 or condition < 0 or condition > 15 { return sh_i64_error(6101); };
+    let start = sh_binary_len(output);
+    let mut valid = true;
+    if kind == 2 { valid = sh_binary_byte(output, 15).is_ok(); };
+    let opcode = if kind == 0 { 233; } else { if kind == 1 { 232; } else { 128 + condition; }; };
+    valid = valid and sh_binary_byte(output, opcode).is_ok();
+    let offset = sh_binary_len(output);
+    valid = valid and sh_binary_unsigned(output, 0, 4).is_ok();
+    if not valid { return sh_x64_rewind(output, start, 6001); };
+    sh_i64_ok(offset);
+}
+
+def sh_x64_fix_branch(output: &ShBinary, patch: i64, target: i64) -> Result<i64, i64> {
+    if patch < 0 or patch > sh_binary_len(output) or 4 > sh_binary_len(output) - patch or target < 0 or target > sh_binary_len(output) { return sh_i64_error(6102); };
+    let displacement = target - patch - 4;
+    if displacement < -2147483648 or displacement > 2147483647 { return sh_i64_error(6102); };
+    sh_binary_patch(output, patch, displacement & 4294967295, 4);
+}
+
+def sh_x64_ret(output: &ShBinary) -> Result<i64, i64> {
+    sh_binary_byte(output, 195);
+}

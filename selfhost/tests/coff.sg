@@ -1,0 +1,72 @@
+import selfhost_coff;
+
+import selfhost_x64;
+
+import std::assert;
+
+import std::args;
+
+import std::file;
+
+extern "C" {
+    fn sengoo_string_live_handle_count() -> i64;
+    fn sengoo_buffer_live_handle_count() -> i64;
+    fn sengoo_opaque_live_handle_count() -> i64;
+}
+
+def sh_test_coff() -> Result<bool, i64> {
+    let code = sh_binary_new(16);
+    sh_x64_mov_imm(&code, 0, 42)?;
+    sh_x64_ret(&code)?;
+    let symbol = string_from_str("sgprobe")?;
+    let object = sh_coff_text(&code, &symbol, 128)?;
+    assert_eq_i64(sh_binary_len(&object), 93, "coff.sg", 24);
+    assert_eq_i64(sh_binary_get(&object, 0)?, 100, "coff.sg", 25);
+    assert_eq_i64(sh_binary_get(&object, 1)?, 134, "coff.sg", 26);
+    assert_eq_i64(sh_binary_get(&object, 8)?, 71, "coff.sg", 27);
+    assert_eq_i64(sh_binary_get(&object, 20)?, 46, "coff.sg", 28);
+    assert_eq_i64(sh_binary_get(&object, 23)?, 120, "coff.sg", 29);
+    assert_eq_i64(sh_binary_get(&object, 36)?, 11, "coff.sg", 30);
+    assert_eq_i64(sh_binary_get(&object, 40)?, 60, "coff.sg", 31);
+    assert_eq_i64(sh_binary_get(&object, 71)?, 115, "coff.sg", 32);
+    assert_eq_i64(sh_binary_get(&object, 89)?, 4, "coff.sg", 33);
+    let long = string_from_str("sengoo_native_probe_long")?;
+    let long_object = sh_coff_text(&code, &long, 256)?;
+    assert_eq_i64(sh_binary_get(&long_object, 71)?, 0, "coff.sg", 36);
+    assert_eq_i64(sh_binary_get(&long_object, 75)?, 4, "coff.sg", 37);
+    assert_eq_i64(sh_binary_len(&long_object), 94 + long.len(), "coff.sg", 38);
+    let empty_name = string_new();
+    let empty = sh_coff_text(&code, &empty_name, 128);
+    assert_eq_i64(empty.error, 6201, "coff.sg", 41);
+    let too_small = sh_coff_text(&code, &symbol, 10);
+    assert_eq_i64(too_small.error, 6202, "coff.sg", 43);
+    Result { is_ok: true, value: true, error: 0 };
+}
+
+def sh_coff_emit() -> Result<bool, i64> {
+    let path_bytes = ffi_buffer_new(arg_len(0).unwrap_or(0))?;
+    let copied = arg_copy(0, path_bytes)?;
+    let path = string_from_utf8(path_bytes, copied)?;
+    let code = sh_binary_new(16);
+    sh_x64_mov_imm(&code, 0, 42)?;
+    sh_x64_ret(&code)?;
+    let name = if args_len() == 2 { string_from_str("sengoo_native_probe_long")?; } else { string_from_str("sgprobe")?; };
+    let object = sh_coff_text(&code, &name, 256)?;
+    let bytes = sh_binary_buffer(&object)?;
+    file_write_str_raw(sengoo_stdlib_str_ptr(path.as_str()), bytes.ptr(), bytes.used_len())?;
+    Result { is_ok: true, value: true, error: 0 };
+}
+
+def main() -> i64 {
+    if args_len() > 0 { let emitted = sh_coff_emit(); return if emitted.is_ok() { 0; } else { 1; }; };
+    let strings = sengoo_string_live_handle_count();
+    let buffers = sengoo_buffer_live_handle_count();
+    let opaque = sengoo_opaque_live_handle_count();
+    let mut round = 0;
+    while round < 100 { let result = sh_test_coff(); if not result.is_ok() { println(result.error); return 1; }; round = round + 1; };
+    assert_eq_i64(sengoo_string_live_handle_count(), strings, "coff.sg", 77);
+    assert_eq_i64(sengoo_buffer_live_handle_count(), buffers, "coff.sg", 78);
+    assert_eq_i64(sengoo_opaque_live_handle_count(), opaque, "coff.sg", 79);
+    println("selfhost COFF: ok");
+    0;
+}

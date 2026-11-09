@@ -1,0 +1,67 @@
+import selfhost_x64;
+
+import std::assert;
+
+import std::args;
+
+import std::file;
+
+extern "C" {
+    fn sengoo_string_live_handle_count() -> i64;
+    fn sengoo_buffer_live_handle_count() -> i64;
+    fn sengoo_opaque_live_handle_count() -> i64;
+}
+
+def sh_test_x64() -> Result<bool, i64> {
+    let code = sh_binary_new(128);
+    sh_x64_mov_imm(&code, 8, 42)?;
+    assert_eq_i64(sh_binary_get(&code, 0)?, 73, "x64.sg", 18);
+    assert_eq_i64(sh_binary_get(&code, 1)?, 184, "x64.sg", 19);
+    sh_x64_mov(&code, 0, 8)?;
+    assert_eq_i64(sh_binary_get(&code, 10)?, 76, "x64.sg", 21);
+    assert_eq_i64(sh_binary_get(&code, 11)?, 137, "x64.sg", 22);
+    assert_eq_i64(sh_binary_get(&code, 12)?, 192, "x64.sg", 23);
+    let memory = sh_x64_memory(&code, 0, 9, 12, -8)?;
+    assert_eq_i64(sh_binary_get(&code, memory)?, 77, "x64.sg", 25);
+    assert_eq_i64(sh_binary_get(&code, memory + 2)?, 140, "x64.sg", 26);
+    assert_eq_i64(sh_binary_get(&code, memory + 3)?, 36, "x64.sg", 27);
+    assert_eq_i64(sh_binary_get(&code, memory + 4)?, 248, "x64.sg", 28);
+    let branch = sh_x64_branch(&code, 2, 4)?;
+    sh_x64_ret(&code)?;
+    sh_x64_fix_branch(&code, branch, 0)?;
+    assert_eq_i64(sh_binary_get(&code, branch)?, (0 - branch - 4) & 255, "x64.sg", 32);
+    let before = sh_binary_len(&code);
+    assert_eq_i64(sh_x64_mov_imm(&code, 16, 0).error, 6101, "x64.sg", 34);
+    assert_eq_i64(sh_x64_memory(&code, 0, 0, 0, 2147483648).error, 6101, "x64.sg", 35);
+    assert_eq_i64(sh_x64_fix_branch(&code, 9223372036854775807, 0).error, 6102, "x64.sg", 36);
+    assert_eq_i64(sh_binary_len(&code), before, "x64.sg", 37);
+    let tiny = sh_binary_new(2);
+    assert_eq_i64(sh_x64_mov_imm(&tiny, 0, 42).error, 6001, "x64.sg", 39);
+    assert_eq_i64(sh_binary_len(&tiny), 0, "x64.sg", 40);
+    Result { is_ok: true, value: true, error: 0 };
+}
+
+def sh_x64_emit(path: &str) -> Result<bool, i64> {
+    let code = sh_binary_new(64);
+    sh_x64_mov_imm(&code, 0, 40)?;
+    sh_x64_mov_imm(&code, 1, 2)?;
+    sh_x64_binary(&code, 0, 0, 1)?;
+    sh_x64_ret(&code)?;
+    let bytes = sh_binary_buffer(&code)?;
+    file_write_str_raw(sengoo_stdlib_str_ptr(path), bytes.ptr(), bytes.used_len())?;
+    Result { is_ok: true, value: true, error: 0 };
+}
+
+def main() -> i64 {
+    if args_len() == 1 { let buffer = ffi_buffer_new(arg_len(0).unwrap_or(0)); if not buffer.is_ok() { return 64; }; let count = arg_copy(0, buffer.value); if not count.is_ok() { return 64; }; let path = string_from_utf8(buffer.value, count.value); if not path.is_ok() { return 64; }; let result = sh_x64_emit(path.value.as_str()); return if result.is_ok() { 0; } else { 1; }; };
+    let strings = sengoo_string_live_handle_count();
+    let buffers = sengoo_buffer_live_handle_count();
+    let opaque = sengoo_opaque_live_handle_count();
+    let mut round = 0;
+    while round < 100 { let result = sh_test_x64(); if not result.is_ok() { println(result.error); return 1; }; round = round + 1; };
+    assert_eq_i64(sengoo_string_live_handle_count(), strings, "x64.sg", 76);
+    assert_eq_i64(sengoo_buffer_live_handle_count(), buffers, "x64.sg", 77);
+    assert_eq_i64(sengoo_opaque_live_handle_count(), opaque, "x64.sg", 78);
+    println("selfhost x64 encoding: ok");
+    0;
+}
