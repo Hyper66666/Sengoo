@@ -110,6 +110,7 @@ def sh_semantic_positive() -> Result<bool, i64> {
 }
 
 def sh_semantic_negative() -> Result<bool, i64> {
+    sh_semantic_case("class Counter{n:i64;def bump(&mut self){self.n=self.n+1;true}}", 5104)?;
     sh_semantic_case("def main()->i64{match 42{a|b=>a,_=>0}}", 5110)?;
     sh_semantic_case("def main()->i64{match (1,2){(a,_)|(_,b)=>a,_=>0}}", 5110)?;
     sh_semantic_case("trait Greet{} trait Loud:Greet{} impl Loud for i64{}", 5115)?;

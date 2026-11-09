@@ -1,6 +1,8 @@
 import selfhost_semantic;
 
-import selfhost_frontend;
+import selfhost_semantic_modules;
+
+import std::env;
 
 import selfhost_borrow;
 
@@ -44,8 +46,52 @@ def sh_semantic_header(checked: &ShChecked, ok: bool, phase: &str) -> Result<Str
     string_result_ok(output);
 }
 
-def sh_semantic_diagnostic(output: &String, mapping: &ShSourceMap, diagnostic: &ShDiagnostic, index: i64) -> Result<bool, i64> {
-    let original = sh_exp_map(mapping, diagnostic.start, diagnostic.end);
+def sh_semantic_environment(name: &str) -> Result<String, i64> {
+    if not env_has_var(name) { return string_result_ok(string_new()); };
+    let length = env_var_len(name)?;
+    let buffer = ffi_buffer_new(length)?;
+    let copied = env_var_copy(name, buffer)?;
+    string_from_utf8(buffer, copied);
+}
+
+def sh_semantic_json_string(output: &String, value: &String) -> Result<bool, i64> {
+    let bytes = sh_lex_bytes(value)?;
+    output.push_str("\"")?;
+    let mut index = 0;
+    let mut begin = 0;
+    while index < value.len() { let byte = sh_lex_byte(&bytes, index); if byte == 34 or byte == 92 or byte < 32 { let prefix = value.get(begin, index)?; if not sh_module_append(output, &prefix) { return Result { is_ok: false, value: false, error: 5204 }; }; if byte == 34 { output.push_str("\\\"")?; (); } else if byte == 92 { output.push_str("\\\\")?; (); } else { output.push_str("\\u00")?; let digits = string_from_str("0123456789abcdef")?; let high = digits.get(byte / 16, byte / 16 + 1)?; let low = digits.get(byte % 16, byte % 16 + 1)?; if not sh_module_append(output, &high) or not sh_module_append(output, &low) { return Result { is_ok: false, value: false, error: 5204 }; }; }; begin = index + 1; }; index = index + 1; };
+    let suffix = value.get(begin, value.len())?;
+    if not sh_module_append(output, &suffix) { return Result { is_ok: false, value: false, error: 5204 }; };
+    output.push_str("\"")?;
+    Result { is_ok: true, value: true, error: 0 };
+}
+
+def sh_semantic_location(output: &String, graph: &ShModules, site: ShSpan) -> Result<bool, i64> {
+    output.push_str(",\"source\":")?;
+    output.push_i64(site.source)?;
+    output.push_str(",\"path\":")?;
+    if site.source >= 0 and site.source < sh_module_count(graph) { sh_semantic_json_string(output, &graph.units.get(site.source).path)?; } else { output.push_str("\"\"")?; };
+    output.push_str(",\"start\":")?;
+    output.push_i64(site.start)?;
+    output.push_str(",\"end\":")?;
+    output.push_i64(site.end)?;
+    Result { is_ok: true, value: true, error: 0 };
+}
+
+def sh_semantic_module_error(graph: &ShModules, code: i64, site: ShSpan, phase: &str) -> Result<i64, i64> {
+    let output = string_from_str("{\"schema_version\":1,\"ok\":false,\"phase\":\"")?;
+    output.push_str(phase)?;
+    output.push_str("\",\"diagnostics\":[{\"code\":")?;
+    output.push_i64(code)?;
+    output.push_str(",\"severity\":1")?;
+    sh_semantic_location(&output, graph, site)?;
+    output.push_str("}]}\n")?;
+    io_stdout_write(output.as_str())?;
+    sh_i64_ok(65);
+}
+
+def sh_semantic_diagnostic(output: &String, graph: &ShModules, front: &ShFrontend, diagnostic: &ShDiagnostic, index: i64) -> Result<bool, i64> {
+    let original = sh_module_expanded_span(graph, front, diagnostic.start, diagnostic.end);
     if index > 0 { output.push_str(",")?; (); };
     output.push_str("{\"code\":")?;
     output.push_i64(diagnostic.code)?;
@@ -53,10 +99,7 @@ def sh_semantic_diagnostic(output: &String, mapping: &ShSourceMap, diagnostic: &
     output.push_i64(diagnostic.severity)?;
     output.push_str(",\"node\":")?;
     output.push_i64(diagnostic.node)?;
-    output.push_str(",\"start\":")?;
-    output.push_i64(original.start)?;
-    output.push_str(",\"end\":")?;
-    output.push_i64(original.end)?;
+    sh_semantic_location(output, graph, original)?;
     output.push_str(",\"expected\":")?;
     output.push_i64(diagnostic.expected)?;
     output.push_str(",\"actual\":")?;
@@ -66,20 +109,25 @@ def sh_semantic_diagnostic(output: &String, mapping: &ShSourceMap, diagnostic: &
 }
 
 def sh_semantic_file(path: &str) -> Result<i64, i64> {
-    let sources = sh_sources_new(1, 16777216);
-    let source = sh_source_load(&sources, path)?;
-    let length = sh_source_len(&sources, source)?;
-    let text = sh_span_text(&sources, ShSpan { source: source, start: 0, end: length })?;
-    let features = sh_symbols_new(0);
-    let front = sh_frontend(&text, source, &features, 16777216, 1000000);
-    if front.error != 0 { sh_semantic_json_error(front.error, front.start, front.end, "frontend")?; return sh_i64_ok(65); };
-    let checked = sh_check(&front.expanded.text, &front.parsed.ast, 1000);
-    if checked.error != 0 { let output = sh_semantic_header(&checked, false, "typecheck")?; let mut index = 0; while index < checked.diagnostics.len() { let diagnostic = checked.diagnostics.get(index); sh_semantic_diagnostic(&output, &front.expanded.mapping, diagnostic, index)?; index = index + 1; }; output.push_str("]}\n")?; io_stdout_write(output.as_str())?; return sh_i64_ok(65); };
-    let ownership = sh_ownership(&front.expanded.text, &front.parsed.ast, &checked, 1000);
-    let output = sh_semantic_header(&checked, ownership.error == 0, "ownership")?;
+    let library = sh_semantic_environment("SENGOO_STDLIB")?;
+    if library.len() == 0 { library.push_str("tools/stdlib")?; (); };
+    let map = sh_semantic_environment("SENGOO_MODULE_MAP")?;
+    let graph = sh_modules_load(path, library.as_str(), &map, 1024, 16777216);
+    if graph.error != 0 { return sh_semantic_module_error(&graph, graph.error, ShSpan { source: graph.source, start: graph.start, end: graph.end }, "modules"); };
+    let analyzed = sh_modules_check(&graph, 1000000, 1000);
+    if analyzed.front.error != 0 { return sh_semantic_module_error(&graph, analyzed.error, ShSpan { source: analyzed.source, start: analyzed.start, end: analyzed.end }, "frontend"); };
+    let checked = &analyzed.checked;
+    let front = &analyzed.front;
+    if checked.error != 0 { let output = sh_semantic_header(checked, false, "typecheck")?; let mut index = 0; while index < checked.diagnostics.len() { let diagnostic = checked.diagnostics.get(index); sh_semantic_diagnostic(&output, &graph, front, diagnostic, index)?; index = index + 1; }; output.push_str("]}\n")?; io_stdout_write(output.as_str())?; return sh_i64_ok(65); };
+    let ownership = sh_ownership(&front.expanded.text, &front.parsed.ast, checked, 1000);
+    let stable = sh_modules_unchanged(&graph);
+    if not stable { return sh_semantic_module_error(&graph, 5206, ShSpan { source: graph.root, start: 0, end: 0 }, "modules"); };
+    let output = sh_semantic_header(checked, ownership.error == 0, "ownership")?;
     let mut index = 0;
-    while index < ownership.diagnostics.len() { let diagnostic = ownership.diagnostics.get(index); sh_semantic_diagnostic(&output, &front.expanded.mapping, diagnostic, index)?; index = index + 1; };
-    output.push_str("],\"cleanup_actions\":")?;
+    while index < ownership.diagnostics.len() { let diagnostic = ownership.diagnostics.get(index); sh_semantic_diagnostic(&output, &graph, front, diagnostic, index)?; index = index + 1; };
+    output.push_str("],\"modules\":")?;
+    output.push_i64(sh_module_count(&graph))?;
+    output.push_str(",\"cleanup_actions\":")?;
     output.push_i64(sh_ownership_action_count(&ownership))?;
     output.push_str(",\"ownership_paths\":")?;
     output.push_i64(ownership.paths.len() / 4)?;

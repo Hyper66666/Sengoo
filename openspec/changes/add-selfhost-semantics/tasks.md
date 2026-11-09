@@ -337,3 +337,68 @@ selfhost/stdlib files and records all diagnostics. Its imports do not load
 modules; this is an explicit missing capability, not a completed module graph.
 Full shared-module resolution, standard-library/intrinsic coverage and all
 remaining semantic, ownership and lowering obligations remain unchecked.
+
+## Unsafe byte movement, nested destructors and reborrow checkpoint
+
+- [x] Define opcode 22 as unsafe overlap-safe byte movement with a u64/usize byte count, equal-pointee raw pointers, mutable destination, unit result and fixed reserved metadata; reject signed counts, reference operands, immutable destinations, mismatched pointees and missing unsafe flags.
+- [x] Mark a source destructor that explicitly or transitively invokes another destructor as pending glue kind four until field-inactivation facts exist; reject forged resolved glue and legacy layout metadata that would permit nested or projected destruction followed by recursive cleanup.
+- [x] Preserve exclusive loans in returned aggregates containing mutable references and reject moved-field reads in unreachable tails without manufacturing runtime cleanup actions.
+- [x] Authorize method receiver and explicit receiver reborrows through the existing loan parent, preserving same-field conflict diagnostics and disjoint-field acceptance; retain borrowed scalar handle projections as reads.
+- [x] Replay the seven named canonical positive fixtures 300/741/802/810/812/815/1200, the three negative reproductions 507/768/769 and independent conflict/reinitialization cases inside the native ownership resource gate.
+
+The final report is
+`target/selfhost/m3-memory-drop/final-checkpoint/evidence.json`, SHA-256
+`7d52495abec4a2ac77fee371e6f3bb72aafed075c918588714689a4f36dbf28d`.
+It records identical start/end revision
+`94c7a24fc99053c220fb6c4d36849de6451c9eea`, Windows 11 AMD64,
+Python 3.12.14, 175 mapped input hashes and empty source/tool change lists.
+All four build/native commands passed: 50 ownership rounds, 10 typed HIR/MIR
+roundtrip/lowering/cleanup rounds and 30 raw CFG/SSA/ABI/byte-movement rounds
+with exact String, Buffer and opaque handle counts. The earlier failed
+`checkpoint` and `receiver-checkpoint` reports are preserved; they exposed the
+field receiver rejection and the incorrect class implicit-unit test fixture.
+The corrected positive fixture uses struct/impl, matching the frozen reference;
+class effect tails retain the semantic rejection rule.
+
+This is a partial correctness checkpoint, with `m3_complete: false`.
+Opcode 22's runtime byte extents remain an unsafe producer obligation and its
+native implementation is a separate backend gate. Pending destructor glue does
+not authorize any actual free. Complete closure/Send, owned-pattern and
+conditional field cleanup, projected-only wrapper ABI specialization, runtime
+drop ABI, async/cancellation and full supported-corpus parity remain open.
+
+
+## Physical module graph and class-tail correction checkpoint
+
+- [x] Verify the named physical-identity alias, dependency-first diamond graph, relative/mapped Unicode paths, cycle and missing import, malformed module map, module/byte limits, invalid UTF-8, standard import and cross-file diagnostic cases through SG native execution.
+- [x] Retain exact String/Buffer/opaque/FileSnapshot handle and snapshot-byte resource recovery across ten complete graph/check lifecycles.
+- [x] Preserve node/binding/scope ModuleIds, explicit module scope/export rows and original SourceId byte maps in the owning module result; route the semantic CLI through real local/stdlib dependency loading.
+- [x] Correct the class boolean-tail acceptance: only impl methods use the implicit-unit discard rule; class methods remain strict.
+
+Source-bound report: `target/selfhost/m3-semantic/evidence.json`, SHA-256
+`af1458175c50bf61f7495fc2faec9ae468cc35cf61a303afeecc23a7bea23bec`.
+The full start/end revision is
+`94c7a24fc99053c220fb6c4d36849de6451c9eea`; source/tool changes are empty.
+The Windows 11 AMD64 replay includes 179 semantic fixtures, 100 semantic and
+100 structural type resource scopes, ten native module lifecycle/resource
+rounds, all mapped module source/fixture hashes, native CLI build and a fresh
+49-case Rust comparison with the same five reviewed differences. Earlier
+178-case evidence is preserved separately.
+
+The module-aware actual entry discovery remains partial: std::assert,
+std::option and std::result entry wrappers pass; std::string has ownership gaps,
+and core/lexer/semantic still hit the located collections typing obligations.
+The module provenance wrapper is not yet serialized through HIR schema 2.
+Complete module-aware typing, stdlib intrinsic/specialization coverage,
+ownership compatibility and self-compilation gates remain open.
+
+
+Independent qualified reference check: all ten module/import cases agree on
+acceptance and rejection with the frozen source-qualified release sgc
+`c70400a9cae30edc666dcccfdfc867155875853b` (binary SHA-256
+`c07e02be19ebb82a33927851dab6224f444477f0b8dc0aab93f1c83adbdde279`).
+Report `target/selfhost/m3-semantic/module-reference-evidence.json` has SHA-256
+`8f16d0edf0418a9a67dd5d22e91b260d69ff04e40bd0d216e09be26b93e14e5e` and identical actual start/end revision
+`94c7a24fc99053c220fb6c4d36849de6451c9eea`. It includes source/module-map inputs and complete
+qualified-reference/candidate outputs for each case. This evidence proves only
+the named physical import cases, not full namespace or stdlib compatibility.

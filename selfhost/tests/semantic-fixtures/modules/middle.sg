@@ -1,0 +1,2 @@
+import leaf;
+def middle_value()->i64{imported_value()}

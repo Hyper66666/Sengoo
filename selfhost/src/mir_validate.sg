@@ -30,9 +30,9 @@ def sh_mir_use_valid(mir: &ShMir, value: i64, function: i64, block: i64, before:
     if value < 0 or value >= sh_mir_inst_count(mir) or sh_mir_inst(mir, value, 0) != function { return 5005; };
     let defined = sh_mir_inst(mir, value, 1);
     if defined == block { if value >= before { return 5005; }; return 0; };
-    // Unreachable blocks cannot import arbitrary unrelated SSA definitions.
     let accessible = sh_mir_reachable(mir, sh_mir_fn(mir, function, 2), block, -1);
-    if accessible < 0 { return 5004; }; if accessible == 0 { return 5005; };
+    if accessible < 0 { return 5004; };
+    if accessible == 0 { return 5005; };
     let reaches = sh_mir_reachable(mir, sh_mir_fn(mir, function, 2), block, defined);
     if reaches < 0 { return 5004; };
     if reaches == 1 { return 5005; };
@@ -44,30 +44,17 @@ def sh_mir_pointer(mir: &ShMir, ty: i64) -> bool {
     kind == 6 or kind == 7;
 }
 
-def sh_mir_layout_id(mir: &ShMir, ty: i64) -> i64 { let mut row = 0; while row < sh_mir_count(&mir.layouts, 7) { if sh_mir_word(&mir.layouts, 7, row, 0) == ty and sh_mir_word(&mir.layouts, 7, row, 1) == -1 { return row; }; row = row + 1; }; -1; }
+def sh_mir_layout_id(mir: &ShMir, ty: i64) -> i64 {
+    let mut row = 0;
+    while row < sh_mir_count(&mir.layouts, 7) { if sh_mir_word(&mir.layouts, 7, row, 0) == ty and sh_mir_word(&mir.layouts, 7, row, 1) == -1 { return row; }; row = row + 1; };
+    -1;
+}
 
 def sh_mir_validate_parents(mir: &ShMir) -> i64 {
     let count = sh_mir_count(&mir.parents, 2);
     if count < 0 or count > mir.limit { return 5001; };
     let mut row = 0;
-    while row < count {
-        let child = sh_mir_word(&mir.parents, 2, row, 0); let parent = sh_mir_word(&mir.parents, 2, row, 1);
-        if child == parent or sh_mir_type_word(mir, child, 0) != 12 or sh_mir_type_word(mir, parent, 0) != 12 or sh_mir_type_word(mir, child, 1) != 2 or sh_mir_type_word(mir, parent, 1) != 2 or sh_mir_type_word(mir, child, 3) == sh_mir_type_word(mir, parent, 3) { return 5003; };
-        let mut previous = 0; while previous < row { if sh_mir_word(&mir.parents, 2, previous, 0) == child { return 5003; }; previous = previous + 1; };
-        if sh_mir_class_ancestor(mir, parent, child) { return 5003; };
-        let child_layout = sh_mir_layout_id(mir, child); let parent_layout = sh_mir_layout_id(mir, parent);
-        if child_layout < 0 or parent_layout < 0 or sh_mir_field_count(mir, child, -1) < sh_mir_field_count(mir, parent, -1) { return 5003; };
-        let mut field = 0;
-        while field < sh_mir_field_count(mir, parent, -1) {
-            if sh_mir_field_type(mir, child, -1, field) != sh_mir_field_type(mir, parent, -1, field) { return 5003; };
-            let child_offset = sh_mir_word(&mir.fields, 2, sh_mir_word(&mir.layouts, 7, child_layout, 2) + field, 1); let parent_offset = sh_mir_word(&mir.fields, 2, sh_mir_word(&mir.layouts, 7, parent_layout, 2) + field, 1);
-            if child_offset != parent_offset { return 5003; };
-            field = field + 1;
-        };
-        let child_size = sh_mir_word(&mir.layouts, 7, child_layout, 5); let parent_size = sh_mir_word(&mir.layouts, 7, parent_layout, 5); let child_align = sh_mir_word(&mir.layouts, 7, child_layout, 6); let parent_align = sh_mir_word(&mir.layouts, 7, parent_layout, 6);
-        if child_size >= 0 and parent_size >= 0 and child_size < parent_size or child_align >= 0 and parent_align >= 0 and child_align < parent_align { return 5003; };
-        row = row + 1;
-    };
+    while row < count { let child = sh_mir_word(&mir.parents, 2, row, 0); let parent = sh_mir_word(&mir.parents, 2, row, 1); if child == parent or sh_mir_type_word(mir, child, 0) != 12 or sh_mir_type_word(mir, parent, 0) != 12 or sh_mir_type_word(mir, child, 1) != 2 or sh_mir_type_word(mir, parent, 1) != 2 or sh_mir_type_word(mir, child, 3) == sh_mir_type_word(mir, parent, 3) { return 5003; }; let mut previous = 0; while previous < row { if sh_mir_word(&mir.parents, 2, previous, 0) == child { return 5003; }; previous = previous + 1; }; if sh_mir_class_ancestor(mir, parent, child) { return 5003; }; let child_layout = sh_mir_layout_id(mir, child); let parent_layout = sh_mir_layout_id(mir, parent); if child_layout < 0 or parent_layout < 0 or sh_mir_field_count(mir, child, -1) < sh_mir_field_count(mir, parent, -1) { return 5003; }; let mut field = 0; while field < sh_mir_field_count(mir, parent, -1) { if sh_mir_field_type(mir, child, -1, field) != sh_mir_field_type(mir, parent, -1, field) { return 5003; }; let child_offset = sh_mir_word(&mir.fields, 2, sh_mir_word(&mir.layouts, 7, child_layout, 2) + field, 1); let parent_offset = sh_mir_word(&mir.fields, 2, sh_mir_word(&mir.layouts, 7, parent_layout, 2) + field, 1); if child_offset != parent_offset { return 5003; }; field = field + 1; }; let child_size = sh_mir_word(&mir.layouts, 7, child_layout, 5); let parent_size = sh_mir_word(&mir.layouts, 7, parent_layout, 5); let child_align = sh_mir_word(&mir.layouts, 7, child_layout, 6); let parent_align = sh_mir_word(&mir.layouts, 7, parent_layout, 6); if child_size >= 0 and parent_size >= 0 and child_size < parent_size or child_align >= 0 and parent_align >= 0 and child_align < parent_align { return 5003; }; row = row + 1; };
     0;
 }
 
@@ -78,14 +65,7 @@ def sh_mir_validate_types(mir: &ShMir) -> i64 {
     let mut layout = 0;
     while layout < sh_mir_count(&mir.layouts, 7) { let layout_type = sh_mir_word(&mir.layouts, 7, layout, 0); let variant = sh_mir_word(&mir.layouts, 7, layout, 1); let first = sh_mir_word(&mir.layouts, 7, layout, 2); let count = sh_mir_word(&mir.layouts, 7, layout, 3); let destructor = sh_mir_word(&mir.layouts, 7, layout, 4); let size = sh_mir_word(&mir.layouts, 7, layout, 5); let alignment = sh_mir_word(&mir.layouts, 7, layout, 6); if sh_mir_type_word(mir, layout_type, 0) != 12 or variant < -1 or (sh_mir_type_word(mir, layout_type, 1) == 1) != (variant >= 0) or first < 0 or count < 0 or first > sh_mir_count(&mir.fields, 2) or count > sh_mir_count(&mir.fields, 2) - first or destructor < -2 or destructor >= sh_mir_fn_count(mir) or size < -1 or alignment < -1 or (size >= 0 and alignment <= 0) or alignment > 4096 { return 5003; }; let mut power = 1; while power < alignment { power = power * 2; }; if alignment > 0 and power != alignment { return 5003; }; let mut previous = 0; while previous < layout { if sh_mir_word(&mir.layouts, 7, previous, 0) == layout_type and sh_mir_word(&mir.layouts, 7, previous, 1) == variant { return 5003; }; previous = previous + 1; }; let mut field = 0; while field < count { let field_type = sh_mir_word(&mir.fields, 2, first + field, 0); let offset = sh_mir_word(&mir.fields, 2, first + field, 1); if not sh_mir_valid_type(mir, field_type) or offset < -1 or size >= 0 and (offset < 0 or offset > size) { return 5003; }; field = field + 1; }; if destructor >= 0 { let signature = sh_mir_fn(mir, destructor, 1); let parameter = sh_mir_type_arg(mir, signature, 0); let result = sh_mir_type_arg(mir, signature, 1); if sh_mir_type_word(mir, signature, 0) != 11 or sh_mir_type_word(mir, signature, 1) != 0 or sh_mir_type_word(mir, signature, 5) != 2 or sh_mir_type_word(mir, parameter, 0) != 6 or sh_mir_type_word(mir, parameter, 2) != 1 or sh_mir_type_arg(mir, parameter, 0) != layout_type or sh_mir_type_word(mir, result, 0) != 0 { return 5007; }; }; layout = layout + 1; };
     let mut field = 0;
-    while field < sh_mir_count(&mir.fields, 2) {
-        if not sh_mir_valid_type(mir, sh_mir_word(&mir.fields, 2, field, 0)) or sh_mir_word(&mir.fields, 2, field, 1) < -1 { return 5003; };
-        let mut owners = 0;
-        layout = 0;
-        while layout < sh_mir_count(&mir.layouts, 7) { let first = sh_mir_word(&mir.layouts, 7, layout, 2); if field >= first and field - first < sh_mir_word(&mir.layouts, 7, layout, 3) { owners = owners + 1; }; layout = layout + 1; };
-        if owners != 1 { return 5003; };
-        field = field + 1;
-    };
+    while field < sh_mir_count(&mir.fields, 2) { if not sh_mir_valid_type(mir, sh_mir_word(&mir.fields, 2, field, 0)) or sh_mir_word(&mir.fields, 2, field, 1) < -1 { return 5003; }; let mut owners = 0; layout = 0; while layout < sh_mir_count(&mir.layouts, 7) { let first = sh_mir_word(&mir.layouts, 7, layout, 2); if field >= first and field - first < sh_mir_word(&mir.layouts, 7, layout, 3) { owners = owners + 1; }; layout = layout + 1; }; if owners != 1 { return 5003; }; field = field + 1; };
     0;
 }
 
@@ -128,45 +108,19 @@ def sh_mir_inst_typecheck(mir: &ShMir, id: i64) -> i64 {
     if opcode == 19 { if count != 2 or not sh_mir_pointer(mir, a) or not sh_mir_pointer(mir, ty) or sh_mir_type_word(mir, b, 0) != 2 or sh_mir_type_word(mir, a, 0) != kind { return 5007; }; let base = sh_mir_type_arg(mir, a, 0); let base_kind = sh_mir_type_word(mir, base, 0); let element = if base_kind == 8 or base_kind == 9 { sh_mir_type_arg(mir, base, 0); } else { base; }; if base_kind != 8 and base_kind != 9 and sh_mir_type_word(mir, a, 0) != 7 { return 5007; }; return if element == sh_mir_type_arg(mir, ty, 0) and sh_mir_type_word(mir, ty, 2) <= sh_mir_type_word(mir, a, 2) { 0; } else { 5007; }; };
     if opcode == 20 { let signature = if aux >= 0 and aux < sh_mir_fn_count(mir) { sh_mir_fn(mir, aux, 1); } else { a; }; let prefix = if aux == -1 { 1; } else { 0; }; if aux < -1 or aux >= sh_mir_fn_count(mir) or sh_mir_type_word(mir, signature, 0) != 11 or extra != sh_mir_type_word(mir, signature, 1) { return 5006; }; let parameters = sh_mir_type_word(mir, signature, 5) - 1; let variadic = sh_mir_type_word(mir, signature, 2) % 2 == 1; if count - prefix < parameters or not variadic and count - prefix != parameters or variadic and extra != 1 or ty != sh_mir_type_arg(mir, signature, parameters) { return 5006; }; let mut i = 0; while i < parameters { if sh_mir_value_type(mir, sh_mir_inst_arg(mir, id, i + prefix)) != sh_mir_type_arg(mir, signature, i) { return 5006; }; i = i + 1; }; while i < count - prefix { let promoted = sh_mir_value_type(mir, sh_mir_inst_arg(mir, id, i + prefix)); let promoted_kind = sh_mir_type_word(mir, promoted, 0); if not (promoted_kind == 2 and sh_mir_type_word(mir, promoted, 1) >= 32 or promoted_kind == 3 and sh_mir_type_word(mir, promoted, 1) == 64 or promoted_kind == 7 or promoted_kind == 11) { return 5006; }; i = i + 1; }; return 0; };
     if opcode == 21 { if count != 1 or kind != 0 or not sh_mir_pointer(mir, a) or sh_mir_type_word(mir, a, 2) != 1 or extra != sh_mir_type_arg(mir, a, 0) or flags < 0 or flags > 1 { return 5007; }; if aux >= 0 and (aux >= sh_mir_local_count(mir) or sh_mir_local(mir, aux, 0) != function or sh_mir_local(mir, aux, 1) != extra or sh_mir_local(mir, aux, 4) < 2 or sh_mir_inst(mir, first, 2) != 13 or sh_mir_inst(mir, first, 6) != aux) { return 5007; }; if aux < -1 { return 5007; }; return 0; };
-    if opcode == 22 { return if count == 3 and kind == 0 and sh_mir_pointer(mir, a) and sh_mir_pointer(mir, b) and sh_mir_type_word(mir, a, 2) == 1 and sh_mir_type_arg(mir, a, 0) == sh_mir_type_arg(mir, b, 0) and sh_mir_type_word(mir, sh_mir_value_type(mir, sh_mir_inst_arg(mir, id, 2)), 0) == 2 { 0; } else { 5007; }; };
+    if opcode == 22 { let length = sh_mir_value_type(mir, sh_mir_inst_arg(mir, id, 2)); return if count == 3 and kind == 0 and sh_mir_type_word(mir, a, 0) == 7 and sh_mir_type_word(mir, b, 0) == 7 and sh_mir_type_word(mir, a, 2) == 1 and sh_mir_type_arg(mir, a, 0) == sh_mir_type_arg(mir, b, 0) and sh_mir_type_word(mir, length, 0) == 2 and sh_mir_type_word(mir, length, 1) == 64 and sh_mir_type_word(mir, length, 2) % 2 == 0 and flags == 1 and aux == 0 and extra == 0 { 0; } else { 5007; }; };
     if opcode == 23 { return if count == 1 and kind == 2 and sh_mir_type_word(mir, a, 0) == 12 and sh_mir_type_word(mir, a, 1) == 1 { 0; } else { 5003; }; };
     if opcode == 25 { return if count == 0 and kind == 0 and aux >= 0 and aux < sh_mir_local_count(mir) and sh_mir_local(mir, aux, 0) == function and (extra == 0 or extra == 1) { 0; } else { 5007; }; };
     5003;
 }
 
 def sh_mir_validate_ownership(mir: &ShMir) -> ShMirValidation {
-    // Every flat edge and block parameter must belong to exactly one declared range.
     let mut edge = 0;
-    while edge < sh_mir_edge_count(mir) {
-        let term = sh_mir_edge(mir, edge, 0);
-        if term < 0 or term >= sh_mir_term_count(mir) { return sh_mir_problem(mir, 5004, -1, -1, -1); };
-        let first = sh_mir_term(mir, term, 4);
-        if edge < first or edge - first >= sh_mir_term(mir, term, 5) { return sh_mir_problem(mir, 5004, sh_mir_term(mir, term, 0), sh_mir_term(mir, term, 1), -1); };
-        edge = edge + 1;
-    };
+    while edge < sh_mir_edge_count(mir) { let term = sh_mir_edge(mir, edge, 0); if term < 0 or term >= sh_mir_term_count(mir) { return sh_mir_problem(mir, 5004, -1, -1, -1); }; let first = sh_mir_term(mir, term, 4); if edge < first or edge - first >= sh_mir_term(mir, term, 5) { return sh_mir_problem(mir, 5004, sh_mir_term(mir, term, 0), sh_mir_term(mir, term, 1), -1); }; edge = edge + 1; };
     let mut slot = 0;
-    while slot < mir.parameters.len() {
-        let instruction = mir.parameters.get(slot).unwrap_or(-1);
-        let block = sh_mir_inst(mir, instruction, 1);
-        let first = sh_mir_block(mir, block, 2);
-        if instruction < 0 or instruction >= sh_mir_inst_count(mir) or block < 0 or block >= sh_mir_block_count(mir) or slot < first or slot - first >= sh_mir_block(mir, block, 3) or sh_mir_inst(mir, instruction, 2) != 2 or sh_mir_inst(mir, instruction, 6) != slot - first { return sh_mir_problem(mir, 5004, -1, block, instruction); };
-        slot = slot + 1;
-    };
+    while slot < mir.parameters.len() { let instruction = mir.parameters.get(slot).unwrap_or(-1); let block = sh_mir_inst(mir, instruction, 1); let first = sh_mir_block(mir, block, 2); if instruction < 0 or instruction >= sh_mir_inst_count(mir) or block < 0 or block >= sh_mir_block_count(mir) or slot < first or slot - first >= sh_mir_block(mir, block, 3) or sh_mir_inst(mir, instruction, 2) != 2 or sh_mir_inst(mir, instruction, 6) != slot - first { return sh_mir_problem(mir, 5004, -1, block, instruction); }; slot = slot + 1; };
     let mut function = 0;
-    while function < sh_mir_fn_count(mir) {
-        let root = sh_mir_fn(mir, function, 7);
-        let external = sh_mir_fn(mir, function, 3) % 2 == 1;
-        if external and root != -1 or not external and (root < 0 or root >= sh_mir_scope_count(mir) or sh_mir_scope(mir, root, 0) != function or sh_mir_scope(mir, root, 1) != -1) { return sh_mir_problem(mir, 5002, function, -1, -1); };
-        let mut parameter = 0;
-        while not external and parameter < sh_mir_type_word(mir, sh_mir_fn(mir, function, 1), 5) - 1 {
-            let mut matches = 0;
-            let mut instruction = 0;
-            while instruction < sh_mir_inst_count(mir) { if sh_mir_inst(mir, instruction, 0) == function and sh_mir_inst(mir, instruction, 2) == 1 and sh_mir_inst(mir, instruction, 6) == parameter { matches = matches + 1; }; instruction = instruction + 1; };
-            if matches != 1 { return sh_mir_problem(mir, 5006, function, sh_mir_fn(mir, function, 2), -1); };
-            parameter = parameter + 1;
-        };
-        function = function + 1;
-    };
+    while function < sh_mir_fn_count(mir) { let root = sh_mir_fn(mir, function, 7); let external = sh_mir_fn(mir, function, 3) % 2 == 1; if external and root != -1 or not external and (root < 0 or root >= sh_mir_scope_count(mir) or sh_mir_scope(mir, root, 0) != function or sh_mir_scope(mir, root, 1) != -1) { return sh_mir_problem(mir, 5002, function, -1, -1); }; let mut parameter = 0; while not external and parameter < sh_mir_type_word(mir, sh_mir_fn(mir, function, 1), 5) - 1 { let mut matches = 0; let mut instruction = 0; while instruction < sh_mir_inst_count(mir) { if sh_mir_inst(mir, instruction, 0) == function and sh_mir_inst(mir, instruction, 2) == 1 and sh_mir_inst(mir, instruction, 6) == parameter { matches = matches + 1; }; instruction = instruction + 1; }; if matches != 1 { return sh_mir_problem(mir, 5006, function, sh_mir_fn(mir, function, 2), -1); }; parameter = parameter + 1; }; function = function + 1; };
     sh_mir_problem(mir, 0, -1, -1, -1);
 }
 
@@ -175,21 +129,15 @@ def sh_mir_instance_type(mir: &ShMir, template: i64, actual: i64, first: i64, co
     let kind = sh_mir_type_word(mir, template, 0);
     if kind == 13 { let mut pair = 0; while pair < count { if sh_mir_word(&mir.substitutions, 2, first + pair, 0) == template { return sh_mir_word(&mir.substitutions, 2, first + pair, 1) == actual; }; pair = pair + 1; }; return false; };
     if kind != sh_mir_type_word(mir, actual, 0) or sh_mir_type_word(mir, template, 1) != sh_mir_type_word(mir, actual, 1) or sh_mir_type_word(mir, template, 2) != sh_mir_type_word(mir, actual, 2) or sh_mir_type_word(mir, template, 3) != sh_mir_type_word(mir, actual, 3) or sh_mir_type_word(mir, template, 5) != sh_mir_type_word(mir, actual, 5) { return false; };
-    let mut index = 0; while index < sh_mir_type_word(mir, template, 5) { if not sh_mir_instance_type(mir, sh_mir_type_arg(mir, template, index), sh_mir_type_arg(mir, actual, index), first, count, depth + 1) { return false; }; index = index + 1; }; true;
+    let mut index = 0;
+    while index < sh_mir_type_word(mir, template, 5) { if not sh_mir_instance_type(mir, sh_mir_type_arg(mir, template, index), sh_mir_type_arg(mir, actual, index), first, count, depth + 1) { return false; }; index = index + 1; };
+    true;
 }
 
 def sh_mir_validate_instances(mir: &ShMir) -> i64 {
     if sh_mir_instance_count(mir) < 0 or sh_mir_instance_count(mir) > mir.limit or sh_mir_count(&mir.substitutions, 2) < 0 or sh_mir_count(&mir.substitutions, 2) > mir.limit { return 5001; };
     let mut instance = 0;
-    while instance < sh_mir_instance_count(mir) {
-        let function = sh_mir_instance(mir, instance, 0); let symbol = sh_mir_instance(mir, instance, 1); let template = sh_mir_instance(mir, instance, 2); let first = sh_mir_instance(mir, instance, 3); let count = sh_mir_instance(mir, instance, 4);
-        if function < 0 or function >= sh_mir_fn_count(mir) or symbol < 0 or symbol >= sh_symbol_count(&mir.symbols) or sh_mir_type_word(mir, template, 0) != 11 or first < 0 or count < 0 or first > sh_mir_count(&mir.substitutions, 2) or count > sh_mir_count(&mir.substitutions, 2) - first { return 5009; };
-        let mut previous = 0; while previous < instance { if sh_mir_instance(mir, previous, 0) == function { return 5009; }; previous = previous + 1; };
-        let mut pair = 0;
-        while pair < count { let key = sh_mir_word(&mir.substitutions, 2, first + pair, 0); let value = sh_mir_word(&mir.substitutions, 2, first + pair, 1); if sh_mir_type_word(mir, key, 0) != 13 or not sh_mir_concrete_type(mir, value, 0) { return 5009; }; previous = 0; while previous < pair { if sh_mir_word(&mir.substitutions, 2, first + previous, 0) == key { return 5009; }; previous = previous + 1; }; pair = pair + 1; };
-        if not sh_mir_instance_type(mir, template, sh_mir_fn(mir, function, 1), first, count, 0) { return 5009; };
-        instance = instance + 1;
-    };
+    while instance < sh_mir_instance_count(mir) { let function = sh_mir_instance(mir, instance, 0); let symbol = sh_mir_instance(mir, instance, 1); let template = sh_mir_instance(mir, instance, 2); let first = sh_mir_instance(mir, instance, 3); let count = sh_mir_instance(mir, instance, 4); if function < 0 or function >= sh_mir_fn_count(mir) or symbol < 0 or symbol >= sh_symbol_count(&mir.symbols) or sh_mir_type_word(mir, template, 0) != 11 or first < 0 or count < 0 or first > sh_mir_count(&mir.substitutions, 2) or count > sh_mir_count(&mir.substitutions, 2) - first { return 5009; }; let mut previous = 0; while previous < instance { if sh_mir_instance(mir, previous, 0) == function { return 5009; }; previous = previous + 1; }; let mut pair = 0; while pair < count { let key = sh_mir_word(&mir.substitutions, 2, first + pair, 0); let value = sh_mir_word(&mir.substitutions, 2, first + pair, 1); if sh_mir_type_word(mir, key, 0) != 13 or not sh_mir_concrete_type(mir, value, 0) { return 5009; }; previous = 0; while previous < pair { if sh_mir_word(&mir.substitutions, 2, first + previous, 0) == key { return 5009; }; previous = previous + 1; }; pair = pair + 1; }; if not sh_mir_instance_type(mir, template, sh_mir_fn(mir, function, 1), first, count, 0) { return 5009; }; instance = instance + 1; };
     let mut pair = 0;
     while pair < sh_mir_count(&mir.substitutions, 2) { let mut owners = 0; instance = 0; while instance < sh_mir_instance_count(mir) { let first = sh_mir_instance(mir, instance, 3); if pair >= first and pair - first < sh_mir_instance(mir, instance, 4) { owners = owners + 1; }; instance = instance + 1; }; if owners != 1 { return 5009; }; pair = pair + 1; };
     0;
@@ -197,48 +145,45 @@ def sh_mir_validate_instances(mir: &ShMir) -> i64 {
 
 def sh_mir_concrete_type(mir: &ShMir, ty: i64, depth: i64) -> bool {
     if depth >= 128 or not sh_mir_valid_type(mir, ty) { return false; };
-    let kind = sh_mir_type_word(mir, ty, 0); if kind == 13 or kind == 15 or kind == 19 { return false; };
-    let mut index = 0; while index < sh_mir_type_word(mir, ty, 5) { if not sh_mir_concrete_type(mir, sh_mir_type_arg(mir, ty, index), depth + 1) { return false; }; index = index + 1; }; true;
+    let kind = sh_mir_type_word(mir, ty, 0);
+    if kind == 13 or kind == 15 or kind == 19 { return false; };
+    let mut index = 0;
+    while index < sh_mir_type_word(mir, ty, 5) { if not sh_mir_concrete_type(mir, sh_mir_type_arg(mir, ty, index), depth + 1) { return false; }; index = index + 1; };
+    true;
 }
 
 def sh_mir_owned_type(mir: &ShMir, ty: i64, depth: i64) -> bool {
     if depth >= 128 or not sh_mir_valid_type(mir, ty) { return true; };
     let kind = sh_mir_type_word(mir, ty, 0);
     if kind == 8 or kind == 10 { let mut field = 0; while field < sh_mir_field_count(mir, ty, -1) { if sh_mir_owned_type(mir, sh_mir_field_type(mir, ty, -1, field), depth + 1) { return true; }; field = field + 1; }; return false; };
-    if kind == 12 {
-        let glue = sh_mir_drop_kind(mir, ty);
-        if glue >= 0 { return glue != 0; };
-        let mut layout = 0; while layout < sh_mir_count(&mir.layouts, 7) { if sh_mir_word(&mir.layouts, 7, layout, 0) == ty { if sh_mir_word(&mir.layouts, 7, layout, 4) != -1 { return true; }; let count = sh_mir_word(&mir.layouts, 7, layout, 3); let mut field = 0; while field < count { if sh_mir_owned_type(mir, sh_mir_word(&mir.fields, 2, sh_mir_word(&mir.layouts, 7, layout, 2) + field, 0), depth + 1) { return true; }; field = field + 1; }; }; layout = layout + 1; }; return false;
-    };
+    if kind == 12 { let glue = sh_mir_drop_kind(mir, ty); if glue >= 0 { return glue != 0; }; let mut layout = 0; while layout < sh_mir_count(&mir.layouts, 7) { if sh_mir_word(&mir.layouts, 7, layout, 0) == ty { if sh_mir_word(&mir.layouts, 7, layout, 4) != -1 { return true; }; let count = sh_mir_word(&mir.layouts, 7, layout, 3); let mut field = 0; while field < count { if sh_mir_owned_type(mir, sh_mir_word(&mir.fields, 2, sh_mir_word(&mir.layouts, 7, layout, 2) + field, 0), depth + 1) { return true; }; field = field + 1; }; }; layout = layout + 1; }; return false; };
     kind == 14 or kind == 16;
+}
+
+def sh_mir_drop_function_target(mir: &ShMir, function: i64) -> bool {
+    let mut layout = 0;
+    while layout < sh_mir_count(&mir.layouts, 7) { if sh_mir_word(&mir.layouts, 7, layout, 4) == function { return true; }; layout = layout + 1; };
+    false;
+}
+
+def sh_mir_drop_nested(mir: &ShMir, function: i64) -> bool {
+    let seen = vec_new_i64();
+    let queue = vec_new_i64();
+    let mut index = 0;
+    while index < sh_mir_fn_count(mir) { if not seen.push(0) { return true; }; index = index + 1; };
+    if function < 0 or function >= seen.len() or not seen.set(function, 1) or not queue.push(function) { return true; };
+    index = 0;
+    while index < queue.len() { let owner = queue.get(index).unwrap_or(-1); let mut instruction = 0; while instruction < sh_mir_inst_count(mir) { if sh_mir_inst(mir, instruction, 0) == owner and sh_mir_inst(mir, instruction, 2) == 21 and sh_mir_inst(mir, instruction, 6) < 0 { return true; }; if sh_mir_inst(mir, instruction, 0) == owner and sh_mir_inst(mir, instruction, 2) == 20 { let callee = sh_mir_inst(mir, instruction, 6); if callee < 0 or sh_mir_drop_function_target(mir, callee) { return true; }; if callee >= sh_mir_fn_count(mir) { return true; }; if seen.get(callee).unwrap_or(0) == 0 { if not seen.set(callee, 1) or not queue.push(callee) { return true; }; }; }; instruction = instruction + 1; }; index = index + 1; };
+    false;
 }
 
 def sh_mir_validate_drop_glues(mir: &ShMir) -> i64 {
     let count = sh_mir_count(&mir.drop_glues, 3);
     if count < 0 or count > mir.limit { return 5001; };
     let mut row = 0;
-    while row < count {
-        let ty = sh_mir_word(&mir.drop_glues, 3, row, 0); let kind = sh_mir_word(&mir.drop_glues, 3, row, 1); let target = sh_mir_word(&mir.drop_glues, 3, row, 2);
-        if sh_mir_type_word(mir, ty, 0) != 12 or kind < 0 or kind > 4 or kind != 1 and target != -1 or kind == 1 and (target < 0 or target >= sh_mir_fn_count(mir)) { return 5007; };
-        let mut previous = 0; while previous < row { if sh_mir_word(&mir.drop_glues, 3, previous, 0) == ty { return 5007; }; previous = previous + 1; };
-        let mut layouts = 0; let mut members = false; let mut layout = 0;
-        while layout < sh_mir_count(&mir.layouts, 7) {
-            if sh_mir_word(&mir.layouts, 7, layout, 0) == ty {
-                layouts = layouts + 1;
-                let destructor = sh_mir_word(&mir.layouts, 7, layout, 4);
-                if kind == 1 and destructor != target or kind == 4 and destructor != -2 or (kind == 0 or kind == 2 or kind == 3) and destructor != -1 { return 5007; };
-                let mut field = 0;
-                while field < sh_mir_word(&mir.layouts, 7, layout, 3) { let member = sh_mir_word(&mir.fields, 2, sh_mir_word(&mir.layouts, 7, layout, 2) + field, 0); if sh_mir_owned_type(mir, member, 0) { members = true; }; field = field + 1; };
-            };
-            layout = layout + 1;
-        };
-        if layouts == 0 and kind != 4 or kind == 0 and members or (kind == 2 or kind == 3) and not members or kind == 2 and sh_mir_type_word(mir, ty, 1) == 1 or kind == 3 and sh_mir_type_word(mir, ty, 1) != 1 { return 5007; };
-        if kind == 1 {
-            let signature = sh_mir_fn(mir, target, 1); let parameter = sh_mir_type_arg(mir, signature, 0);
-            if sh_mir_type_word(mir, signature, 0) != 11 or sh_mir_type_word(mir, signature, 1) != 0 or sh_mir_type_word(mir, signature, 5) != 2 or sh_mir_type_word(mir, parameter, 0) != 6 or sh_mir_type_word(mir, parameter, 2) != 1 or sh_mir_type_arg(mir, parameter, 0) != ty or sh_mir_type_word(mir, sh_mir_type_arg(mir, signature, 1), 0) != 0 { return 5007; };
-        };
-        row = row + 1;
-    };
+    while row < count { let ty = sh_mir_word(&mir.drop_glues, 3, row, 0); let kind = sh_mir_word(&mir.drop_glues, 3, row, 1); let target = sh_mir_word(&mir.drop_glues, 3, row, 2); if sh_mir_type_word(mir, ty, 0) != 12 or kind < 0 or kind > 4 or kind != 1 and target != -1 or kind == 1 and (target < 0 or target >= sh_mir_fn_count(mir)) { return 5007; }; let mut previous = 0; while previous < row { if sh_mir_word(&mir.drop_glues, 3, previous, 0) == ty { return 5007; }; previous = previous + 1; }; let mut layouts = 0; let mut members = false; let mut layout = 0; while layout < sh_mir_count(&mir.layouts, 7) { if sh_mir_word(&mir.layouts, 7, layout, 0) == ty { layouts = layouts + 1; let destructor = sh_mir_word(&mir.layouts, 7, layout, 4); if kind == 1 and destructor != target or kind == 4 and destructor != -2 or (kind == 0 or kind == 2 or kind == 3) and destructor != -1 { return 5007; }; let mut field = 0; while field < sh_mir_word(&mir.layouts, 7, layout, 3) { let member = sh_mir_word(&mir.fields, 2, sh_mir_word(&mir.layouts, 7, layout, 2) + field, 0); if sh_mir_owned_type(mir, member, 0) { members = true; }; field = field + 1; }; }; layout = layout + 1; }; if layouts == 0 and kind != 4 or kind == 0 and members or (kind == 2 or kind == 3) and not members or kind == 2 and sh_mir_type_word(mir, ty, 1) == 1 or kind == 3 and sh_mir_type_word(mir, ty, 1) != 1 { return 5007; }; if kind == 1 { let signature = sh_mir_fn(mir, target, 1); let parameter = sh_mir_type_arg(mir, signature, 0); if sh_mir_type_word(mir, signature, 0) != 11 or sh_mir_type_word(mir, signature, 1) != 0 or sh_mir_type_word(mir, signature, 5) != 2 or sh_mir_type_word(mir, parameter, 0) != 6 or sh_mir_type_word(mir, parameter, 2) != 1 or sh_mir_type_arg(mir, parameter, 0) != ty or sh_mir_type_word(mir, sh_mir_type_arg(mir, signature, 1), 0) != 0 { return 5007; }; if sh_mir_drop_nested(mir, target) { return 5007; }; }; row = row + 1; };
+    let mut layout = 0;
+    while layout < sh_mir_count(&mir.layouts, 7) { let target = sh_mir_word(&mir.layouts, 7, layout, 4); if target >= 0 and sh_mir_drop_nested(mir, target) { return 5007; }; layout = layout + 1; };
     0;
 }
 

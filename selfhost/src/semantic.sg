@@ -1284,7 +1284,7 @@ def sh_s_check_function(checked: &mut ShChecked, text: &String, ast: &ShAst, bin
     let mut has_return_type = false;
     let mut child_at = 0;
     while child_at < sh_ast_word(ast, declaration, 6) { let child = sh_ast_child(ast, declaration, child_at); let kind = sh_ast_word(ast, child, 0); if kind >= 70 and kind <= 76 { has_return_type = true; }; child_at = child_at + 1; };
-    let effect_tail = (owner_kind == 14 or owner_kind == 3) and not has_return_type and sh_s_kind(checked, result) == 0;
+    let effect_tail = owner_kind == 14 and not has_return_type and sh_s_kind(checked, result) == 0;
     let actual = sh_s_block(checked, text, ast, body, if effect_tail { -1; } else { result; });
     let function_name = sh_s_symbol_text(checked, sh_binding_word(checked, binding, 0));
     let implicit_main = function_name.is_ok() and sh_s_text_equal(&function_name.value, "main") and sh_binding_word(checked, binding, 6) < 0 and sh_s_kind(checked, actual) == 0 and sh_s_kind(checked, result) == 2;

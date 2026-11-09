@@ -1,24 +1,5 @@
 import selfhost_types;
 
-// MIR schema 1: Runtime ABI 1, x86_64 Windows, 64-bit pointers.
-// IDs index their own flat table; -1 means absent, never a valid instruction.
-// function[8]: symbol, signature, entry, flags(external=1/template=2), file,start,end,rootScope
-// local[10]: function,type,symbol,kind(user=0,param=1,temp=2,return=3),flags(mut=1/drop=2),scope,ordinal,file,start,end
-// scope[3]: function,parent,flags; block[8]: function,scope,paramFirst,paramCount,terminator,flags(cleanup=1),span,reserved
-// instruction[12]: function,block,opcode,type,operandFirst,operandCount,aux,extra,flags,file,start,end
-// terminator[10]: function,block,kind,value,edgeFirst,edgeCount,instructionWatermark,file,start,end
-// edge[6]: terminator,target,operandFirst,operandCount,caseBits,flags(default=1)
-// layout[7]: type,variant(-1=struct),fieldFirst,fieldCount,dropFunction(-2=pending),size,align
-// field[2]: type,offset; -1 size/align/offset explicitly means physical layout is pending.
-// source[2]: file,length; span[3]: file,start,end. Spans use byte offsets.
-// Opcodes: 1 ABI parameter,2 block parameter,3 unit,4 integer bits,5 float(bits or flags=1 literal symbol),
-// 6 bool,7 char,8 string symbol,9 function address,10 unary,11 binary,12 cast(flags=1 unsafe,2 class-prefix ref upcast),
-// 13 local address,14 load,15 store,16 aggregate,17 field address,18 extract field,19 element address,
-// 20 call(aux=function or -1 indirect; extra=SG0/C1),21 drop(aux=local or -1 projection; extra=pointee type),
-// 22 typed memory move,23 enum discriminant,24 enum variant,25 local initialization flag(aux=local,extra=0/1).
-// A conditional root drop tests the local flag; every executed root drop clears it.
-// Terminators: 1 goto,2 bool branch,3 return,4 unreachable,5 integer switch.
-
 struct ShMir {
     schema: i64,
     target: i64,
@@ -397,16 +378,35 @@ def sh_mir_field_type(mir: &ShMir, ty: i64, variant: i64, field: i64) -> i64 {
     -1;
 }
 
-// instance[5]: concreteFunction, templateSymbol, templateSignature, substitutionFirst, pairCount.
-// substitution[2]: abstract type parameter, concrete type. No abstract function body is emitted.
-def sh_mir_instance_count(mir: &ShMir) -> i64 { sh_mir_count(&mir.instances, 5); }
-def sh_mir_instance(mir: &ShMir, instance: i64, field: i64) -> i64 { sh_mir_word(&mir.instances, 5, instance, field); }
+def sh_mir_instance_count(mir: &ShMir) -> i64 {
+    sh_mir_count(&mir.instances, 5);
+}
 
-// parent[2]: class type,direct parent; layouts flatten parent members first.
-def sh_mir_parent(mir: &ShMir, ty: i64) -> i64 { let mut row = 0; while row < sh_mir_count(&mir.parents, 2) { if sh_mir_word(&mir.parents, 2, row, 0) == ty { return sh_mir_word(&mir.parents, 2, row, 1); }; row = row + 1; }; -1; }
-def sh_mir_class_ancestor(mir: &ShMir, child: i64, ancestor: i64) -> bool { let mut current = child; let mut steps = 0; while current >= 0 and steps <= sh_type_count(&mir.types) { if current == ancestor { return true; }; current = sh_mir_parent(mir, current); steps = steps + 1; }; false; }
+def sh_mir_instance(mir: &ShMir, instance: i64, field: i64) -> i64 {
+    sh_mir_word(&mir.instances, 5, instance, field);
+}
 
-// drop_glue[3]: type,kind,targetFunction. 0=trivial,1=userDrop,2=structural,
-// 3=enum(tag-selected),4=pending. A pending entry never authorizes a runtime free.
-def sh_mir_drop_kind(mir: &ShMir, ty: i64) -> i64 { let mut row = 0; while row < sh_mir_count(&mir.drop_glues, 3) { if sh_mir_word(&mir.drop_glues, 3, row, 0) == ty { return sh_mir_word(&mir.drop_glues, 3, row, 1); }; row = row + 1; }; -1; }
-def sh_mir_drop_target(mir: &ShMir, ty: i64) -> i64 { let mut row = 0; while row < sh_mir_count(&mir.drop_glues, 3) { if sh_mir_word(&mir.drop_glues, 3, row, 0) == ty { return sh_mir_word(&mir.drop_glues, 3, row, 2); }; row = row + 1; }; -1; }
+def sh_mir_parent(mir: &ShMir, ty: i64) -> i64 {
+    let mut row = 0;
+    while row < sh_mir_count(&mir.parents, 2) { if sh_mir_word(&mir.parents, 2, row, 0) == ty { return sh_mir_word(&mir.parents, 2, row, 1); }; row = row + 1; };
+    -1;
+}
+
+def sh_mir_class_ancestor(mir: &ShMir, child: i64, ancestor: i64) -> bool {
+    let mut current = child;
+    let mut steps = 0;
+    while current >= 0 and steps <= sh_type_count(&mir.types) { if current == ancestor { return true; }; current = sh_mir_parent(mir, current); steps = steps + 1; };
+    false;
+}
+
+def sh_mir_drop_kind(mir: &ShMir, ty: i64) -> i64 {
+    let mut row = 0;
+    while row < sh_mir_count(&mir.drop_glues, 3) { if sh_mir_word(&mir.drop_glues, 3, row, 0) == ty { return sh_mir_word(&mir.drop_glues, 3, row, 1); }; row = row + 1; };
+    -1;
+}
+
+def sh_mir_drop_target(mir: &ShMir, ty: i64) -> i64 {
+    let mut row = 0;
+    while row < sh_mir_count(&mir.drop_glues, 3) { if sh_mir_word(&mir.drop_glues, 3, row, 0) == ty { return sh_mir_word(&mir.drop_glues, 3, row, 2); }; row = row + 1; };
+    -1;
+}

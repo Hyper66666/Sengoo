@@ -147,7 +147,7 @@ against declarations; associated entries are type metadata, not runtime payload
 fields.
 
 
-## Operator, contract and unit method compatibility
+## Operator, contract and unit impl method compatibility
 
 Arithmetic operator nodes retain a resolved method binding and an instantiated
 `call_types` signature, including the declared Rhs and Output types. Generic
@@ -165,11 +165,11 @@ ensures expressions are boolean; ensures exposes a scoped result binding. Code
 5127 identifies directly contradictory literal postconditions, while arbitrary
 contract verification remains a separate obligation.
 
-For compatibility with the actual reference, an impl or class method with no
+For compatibility with the actual reference, an impl method with no
 written return type has a declared unit return and may discard its body tail
 value. The complete body is still checked, and explicit return statements obey
 that declared unit contract. This rule does not apply to ordinary functions or
-methods with an explicit return type. Named cases use Counter.bump with a boolean
+methods with an explicit return type. Class methods retain strict unit tail checking. Named cases use Counter.bump with a boolean
 tail and reject an ordinary boolean-tail unit function, explicit `->()` boolean
 tail, and explicit `return true` in an implicit-unit method. MIR must discard the
 tail according to the declaration and return unit; the source-to-native gate
@@ -195,3 +195,49 @@ and five accepted files out of the initial 96-file scan do not establish module
 resolution or self-compilation. Shared module graphs, canonical module identity,
 source ownership, standard-library signatures and intrinsic validation remain
 required before M3/M7 closure.
+
+
+The subsequent class source-native comparison caught an overbroad implementation
+of the impl-only effect-tail rule. A class Counter.bump with implicit unit and a
+boolean tail is rejected by both the fresh standalone Rust checker and qualified
+sgc check. The SG implementation is corrected to owner kind 14 (impl) only;
+class owner kind 3 remains strict. This is an SG bug correction, not a reference
+phase inconsistency. The original 178-case report remains historical evidence;
+the named class negative is included in the next source-bound replay.
+
+
+## Physical module graph and transparent import scopes
+
+`ShModules` retains a FileSnapshot for every physical input. Stable file identity
+deduplicates aliases before publishing ModuleIds; the matching SourceId owns the
+strict UTF-8 bytes. DFS rejects a visiting dependency, records located import
+edges, respects source-relative candidates before module-map entries, and emits
+local dependencies before their importers. Standard modules follow the current
+reference dependency policy and fixed source order. Limits bound module count,
+combined input bytes and joined output. Input snapshots are revalidated before
+publishing a result. Missing imports, cycles, malformed maps, limits, I/O,
+changed inputs and invalid UTF-8 have distinct 5201 through 5207 diagnostics.
+
+Joined-source mappings retain each original SourceId and byte interval and
+compose with macro/attribute/derive/protocol mappings before CLI diagnostics.
+Import discovery performs macro/attribute processing without running external
+derive commands; the final joined frontend executes derive once. The module
+checker records node, binding and lexical-scope provenance, explicit module
+bindings/scopes and exported symbol-to-binding rows. ShChecked and HIR schema 2
+are unchanged; these module facts belong to the owning ShModuleChecked wrapper.
+They must be included by a future module-aware HIR serialization version before
+claiming cross-process preservation.
+
+Current reference source imports are transparent: imported declarations enter a
+shared environment. Real qualified sgc probes accept `import worker; child()`
+but reject `worker::child()` and an alias-qualified spelling when worker declares
+only `child`. Module scopes therefore explicitly record provenance alongside the
+shared import scope; they do not invent qualified source namespaces. Existing
+qualified symbols and associated calls retain their checked binding identity.
+
+The first module-aware actual-source discovery accepts std::assert, std::option
+and std::result entry wrappers through ownership. std::string passes typing but
+has ownership gaps. core, lexer and semantic entry modules reach the same
+collections generic/type obligations after their real dependencies are loaded.
+Those located failures remain required work, not a successful self-compilation
+or complete module/stdlib milestone.

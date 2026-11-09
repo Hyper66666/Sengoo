@@ -1,0 +1,3 @@
+import middle;
+import leaf;
+def main()->i64{middle_value()}

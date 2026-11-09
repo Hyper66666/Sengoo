@@ -1,0 +1,2 @@
+import std::assert;
+def main()->i64{42}

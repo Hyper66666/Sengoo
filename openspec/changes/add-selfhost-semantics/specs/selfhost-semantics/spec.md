@@ -40,3 +40,15 @@ frontend state.
 - **WHEN** a supported program branches, returns, propagates an error, moves an owner or cancels a task
 - **THEN** the typed representation preserves the required result and exactly-once ownership cleanup
 - **AND** malformed MIR is rejected before native emission
+
+#### Scenario: A destructor explicitly destroys a contained owner
+- **WHEN** a resolved user destructor directly or transitively calls another destructor, or performs a projected drop, without a verified field-inactivation mask
+- **THEN** its type SHALL carry pending Drop glue kind four and SHALL NOT authorize recursive field destruction
+- **AND** forging resolved glue kind one for that destructor SHALL be rejected by MIR validation before native emission
+
+#### Scenario: Low-level MIR moves overlapping byte ranges
+- **WHEN** MIR opcode 22 requests an unsafe overlapping memory move
+- **THEN** its third operand SHALL be a u64/usize byte count, and the operation SHALL use byte alignment one and preserve memmove overlap behavior
+- **AND** mutable destination and source SHALL be raw pointers with the same pointee type, the result SHALL be unit, flags SHALL equal one, and reserved auxiliary words SHALL equal zero
+- **AND** signed counts, typed references, immutable destinations, incompatible pointees or a missing unsafe flag SHALL be rejected by MIR validation
+- **AND** the unsafe producer SHALL guarantee the validity of both complete byte extents; the operation SHALL NOT implicitly transfer owned values or discharge their Drop obligations

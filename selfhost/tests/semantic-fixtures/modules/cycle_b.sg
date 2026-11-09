@@ -1,0 +1,2 @@
+import cycle_a;
+def b()->i64{2}

@@ -1,0 +1,92 @@
+import selfhost_semantic_modules;
+
+import std::assert;
+
+extern "C" {
+    fn sengoo_string_live_handle_count() -> i64;
+    fn sengoo_buffer_live_handle_count() -> i64;
+    fn sengoo_opaque_live_handle_count() -> i64;
+}
+
+def sh_modules_test() -> Result<bool, i64> {
+    let config = string_new();
+    let graph = sh_modules_load("selfhost/tests/semantic-fixtures/modules/root.sg", "tools/stdlib", &config, 32, 1048576);
+    assert_eq_i64(graph.error, 0, "semantic_modules.sg", 1);
+    assert_eq_i64(sh_module_count(&graph), 3, "semantic_modules.sg", 2);
+    assert_eq_i64(sh_module_edge_count(&graph), 3, "semantic_modules.sg", 3);
+    assert_eq_i64(graph.order.len(), 3, "semantic_modules.sg", 4);
+    assert_eq_i64(graph.order.get(0).unwrap_or(-1), 2, "semantic_modules.sg", 5);
+    let front = sh_frontend(&graph.text, graph.root, &graph.features, 1048576, 100000);
+    assert_eq_i64(front.error, 0, "semantic_modules.sg", 6);
+    let checked = sh_check(&front.expanded.text, &front.parsed.ast, 100);
+    assert_eq_i64(checked.error, 0, "semantic_modules.sg", 7);
+    let resolved = sh_modules_check(&graph, 100000, 100);
+    assert_eq_i64(resolved.error, 0, "semantic_modules.sg", 26);
+    assert_eq_i64(resolved.module_scopes.len(), 3, "semantic_modules.sg", 27);
+    let name = string_from_str("imported_value")?;
+    let symbol = sh_module_symbol(&resolved.checked.symbols, &name);
+    let exported = sh_module_export(&resolved, 2, symbol, false);
+    assert_true(exported >= 0, "semantic_modules.sg", 28);
+    assert_eq_i64(sh_module_binding_source(&resolved, exported), 2, "semantic_modules.sg", 29);
+    assert_true(sh_module_scope(&resolved, 2) > 0, "semantic_modules.sg", 30);
+    let span = sh_modules_span(&graph, 0, 3);
+    assert_eq_i64(span.source, 2, "semantic_modules.sg", 8);
+    assert_eq_i64(span.start, 0, "semantic_modules.sg", 9);
+    assert_true(sh_modules_unchanged(&graph), "semantic_modules.sg", 10);
+    Result { is_ok: true, value: true, error: 0 };
+}
+
+def sh_modules_failure() -> Result<bool, i64> {
+    let config = string_new();
+    let cycle = sh_modules_load("selfhost/tests/semantic-fixtures/modules/cycle_a.sg", "tools/stdlib", &config, 32, 1048576);
+    assert_eq_i64(cycle.error, 5202, "semantic_modules.sg", 11);
+    let missing = sh_modules_load("selfhost/tests/semantic-fixtures/modules/missing.sg", "tools/stdlib", &config, 32, 1048576);
+    assert_eq_i64(missing.error, 5201, "semantic_modules.sg", 12);
+    assert_true(missing.end > missing.start, "semantic_modules.sg", 13);
+    let limited = sh_modules_load("selfhost/tests/semantic-fixtures/modules/root.sg", "tools/stdlib", &config, 1, 1048576);
+    assert_eq_i64(limited.error, 5204, "semantic_modules.sg", 14);
+    let bytes = sh_modules_load("selfhost/tests/semantic-fixtures/modules/root.sg", "tools/stdlib", &config, 32, 1);
+    assert_eq_i64(bytes.error, 5204, "semantic_modules.sg", 15);
+    let mapped = string_from_str("remote=selfhost/tests/semantic-fixtures/modules/中文.sg")?;
+    let graph = sh_modules_load("selfhost/tests/semantic-fixtures/modules/mapped.sg", "tools/stdlib", &mapped, 32, 1048576);
+    assert_eq_i64(graph.error, 0, "semantic_modules.sg", 16);
+    assert_eq_i64(sh_module_count(&graph), 2, "semantic_modules.sg", 17);
+    let standard = sh_modules_load("selfhost/tests/semantic-fixtures/modules/standard.sg", "tools/stdlib", &config, 32, 1048576);
+    assert_eq_i64(standard.error, 0, "semantic_modules.sg", 18);
+    assert_eq_i64(sh_module_count(&standard), 2, "semantic_modules.sg", 19);
+    let invalid = sh_modules_load("selfhost/tests/semantic-fixtures/modules/invalid_utf8.sg", "tools/stdlib", &config, 32, 1048576);
+    assert_eq_i64(invalid.error, 5207, "semantic_modules.sg", 31);
+    let bad_map = string_from_str("broken-map")?;
+    let malformed = sh_modules_load("selfhost/tests/semantic-fixtures/modules/root.sg", "tools/stdlib", &bad_map, 32, 1048576);
+    assert_eq_i64(malformed.error, 5203, "semantic_modules.sg", 32);
+    let aliases = string_from_str("first=selfhost/tests/semantic-fixtures/modules/leaf.sg;second=selfhost/tests/semantic-fixtures/modules/leaf.sg")?;
+    let identity = sh_modules_load("selfhost/tests/semantic-fixtures/modules/identity.sg", "tools/stdlib", &aliases, 32, 1048576);
+    assert_eq_i64(identity.error, 0, "semantic_modules.sg", 33);
+    assert_eq_i64(sh_module_count(&identity), 2, "semantic_modules.sg", 34);
+    assert_eq_i64(sh_module_edge_count(&identity), 2, "semantic_modules.sg", 35);
+    let error_graph = sh_modules_load("selfhost/tests/semantic-fixtures/modules/error_root.sg", "tools/stdlib", &config, 32, 1048576);
+    let error_checked = sh_modules_check(&error_graph, 100000, 100);
+    assert_eq_i64(error_checked.error, 5104, "semantic_modules.sg", 36);
+    assert_eq_i64(error_checked.source, 1, "semantic_modules.sg", 37);
+    assert_true(error_checked.end > error_checked.start, "semantic_modules.sg", 38);
+    let missing_std = sh_modules_load("selfhost/tests/semantic-fixtures/modules/standard_missing.sg", "tools/stdlib", &config, 32, 1048576);
+    assert_eq_i64(missing_std.error, 5201, "semantic_modules.sg", 39);
+    Result { is_ok: true, value: true, error: 0 };
+}
+
+def main() -> i64 {
+    let strings = sengoo_string_live_handle_count();
+    let buffers = sengoo_buffer_live_handle_count();
+    let opaque = sengoo_opaque_live_handle_count();
+    let snapshots = sengoo_file_snapshot_live_handle_count();
+    let snapshot_bytes = sengoo_file_snapshot_live_bytes();
+    let mut index = 0;
+    while index < 10 { let first = sh_modules_test(); if not first.is_ok() { return 1; }; let second = sh_modules_failure(); if not second.is_ok() { return 2; }; index = index + 1; };
+    assert_eq_i64(sengoo_string_live_handle_count(), strings, "semantic_modules.sg", 21);
+    assert_eq_i64(sengoo_buffer_live_handle_count(), buffers, "semantic_modules.sg", 22);
+    assert_eq_i64(sengoo_opaque_live_handle_count(), opaque, "semantic_modules.sg", 23);
+    assert_eq_i64(sengoo_file_snapshot_live_handle_count(), snapshots, "semantic_modules.sg", 24);
+    assert_eq_i64(sengoo_file_snapshot_live_bytes(), snapshot_bytes, "semantic_modules.sg", 25);
+    println("selfhost modules: ok");
+    0;
+}

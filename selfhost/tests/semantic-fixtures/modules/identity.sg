@@ -1,0 +1,1 @@
+import first;import second;def main()->i64{imported_value()}

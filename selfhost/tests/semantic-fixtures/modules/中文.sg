@@ -1,0 +1,1 @@
+def imported_value()->i64{42}

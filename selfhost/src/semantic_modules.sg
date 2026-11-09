@@ -1,0 +1,368 @@
+import selfhost_frontend;
+
+import selfhost_semantic;
+
+import std::path;
+
+import std::file;
+
+import std::env;
+
+struct ShModuleUnit {
+    snapshot: FileSnapshot,
+    path: String,
+    identity: String,
+    source: i64,
+    standard: i64,
+}
+
+struct ShModuleConfig {
+    names: ShSymbols,
+    paths: Vec<ShText>,
+    keys: Vec<i64>,
+    error: i64,
+}
+
+struct ShModules {
+    sources: ShSources,
+    units: Vec<ShModuleUnit>,
+    states: Vec<i64>,
+    edges: Vec<i64>,
+    order: Vec<i64>,
+    local_order: Vec<i64>,
+    requested: ShSymbols,
+    requests: Vec<i64>,
+    standard_ids: Vec<i64>,
+    config: ShModuleConfig,
+    features: ShSymbols,
+    text: String,
+    mapping: Vec<i64>,
+    stdlib: String,
+    root: i64,
+    bytes: i64,
+    maximum: i64,
+    error: i64,
+    source: i64,
+    start: i64,
+    end: i64,
+}
+
+def sh_module_count(graph: &ShModules) -> i64 {
+    graph.units.len();
+}
+
+def sh_module_edge_count(graph: &ShModules) -> i64 {
+    graph.edges.len() / 4;
+}
+
+def sh_module_word(values: &Vec<i64>, index: i64) -> i64 {
+    sengoo_vec_get_or_default_i64(values.handle, index, -1);
+}
+
+def sh_module_fail(graph: &mut ShModules, error: i64, source: i64, start: i64, end: i64) {
+    if graph.error == 0 { graph.error = error; graph.source = source; graph.start = start; graph.end = end; };
+    ();
+}
+
+def sh_module_symbol(symbols: &ShSymbols, value: &String) -> i64 {
+    let mut index = 0;
+    while index < sh_symbol_count(symbols) { if sengoo_string_eq(symbols.names.get(index).text.handle, value.handle) != 0 { return index; }; index = index + 1; };
+    -1;
+}
+
+def sh_module_append(output: &String, input: &String) -> bool {
+    sengoo_string_push_padded_string_status(output.handle, input.handle, 1, 0) == 0;
+}
+
+def sh_module_config(raw: &String, limit: i64) -> ShModuleConfig {
+    let paths: Vec<ShText> = vec_new();
+    let mut output = ShModuleConfig { names: sh_symbols_new(limit), paths: paths, keys: vec_new_i64(), error: 0 };
+    let bytes = sh_lex_bytes(raw);
+    if not bytes.is_ok() { output.error = 5203; return output; };
+    let mut begin = 0;
+    let mut index = 0;
+    let mut quote = false;
+    let separator = if env_is_windows() { 59; } else { 58; };
+    while index <= raw.len() { let byte = sh_lex_byte(&bytes.value, index); if byte == 34 { quote = not quote; }; if index == raw.len() or byte == separator and not quote { if index == begin { output.error = 5203; return output; }; let entry = string_new(); let mut cursor = begin; let mut chunk = begin; while cursor <= index { if cursor == index or sh_lex_byte(&bytes.value, cursor) == 34 { let part = raw.get(chunk, cursor); if not part.is_ok() or not sh_module_append(&entry, &part.value) { output.error = 5203; return output; }; chunk = cursor + 1; }; cursor = cursor + 1; }; let entry_bytes = sh_lex_bytes(&entry); if not entry_bytes.is_ok() { output.error = 5203; return output; }; let mut split = 0; while split < entry.len() and sh_lex_byte(&entry_bytes.value, split) != 61 { split = split + 1; }; if split == 0 or split + 1 >= entry.len() { output.error = 5203; return output; }; let name = entry.get(0, split); let path = entry.get(split + 1, entry.len()); if not name.is_ok() or not path.is_ok() { output.error = 5203; return output; }; let symbol = sh_intern(&output.names, &name.value); if not symbol.is_ok() { output.error = 5204; return output; }; let item = ShText { text: path.value }; if not output.paths.push(item) or not output.keys.push(symbol.value) { output.error = 5204; return output; }; begin = index + 1; }; index = index + 1; };
+    if quote { output.error = 5203; };
+    output;
+}
+
+def sh_module_empty_config(limit: i64) -> ShModuleConfig {
+    let paths: Vec<ShText> = vec_new();
+    ShModuleConfig { names: sh_symbols_new(limit), paths: paths, keys: vec_new_i64(), error: 0 };
+}
+
+def sh_module_config_path(config: &ShModuleConfig, name: &String) -> Result<String, i64> {
+    let symbol = sh_module_symbol(&config.names, name);
+    let mut index = config.keys.len() - 1;
+    while index >= 0 { if sh_module_word(&config.keys, index) == symbol and symbol >= 0 { return config.paths.get(index).text.clone(); }; index = index - 1; };
+    string_result_err(5201);
+}
+
+def sh_module_load(graph: &mut ShModules, path: &String, standard: i64, site: ShSpan) -> i64 {
+    let opened = file_snapshot_open(path.as_str(), graph.maximum);
+    if not opened.is_ok() { let code = if opened.error == STATUS_OVERFLOW() or opened.error == STATUS_BUFFER_TOO_SMALL() or opened.error == STATUS_OUT_OF_MEMORY() { 5204; } else { 5205; }; sh_module_fail(graph, code, site.source, site.start, site.end); return -1; };
+    let snapshot = opened.value;
+    let identity = snapshot.identity();
+    let absolute = snapshot.path();
+    let length = snapshot.len();
+    if not identity.is_ok() or not absolute.is_ok() or not length.is_ok() { sh_module_fail(graph, 5205, site.source, site.start, site.end); return -1; };
+    let mut index = 0;
+    while index < graph.units.len() { if sengoo_string_eq(graph.units.get(index).identity.handle, identity.value.handle) != 0 { return index; }; index = index + 1; };
+    if graph.units.len() >= graph.sources.limit or graph.bytes > graph.maximum - length.value { sh_module_fail(graph, 5204, site.source, site.start, site.end); return -1; };
+    let allocated = ffi_buffer_new(length.value);
+    if not allocated.is_ok() { sh_module_fail(graph, 5204, site.source, site.start, site.end); return -1; };
+    let mut buffer = allocated.value;
+    let copied = snapshot.copy_bytes(&mut buffer);
+    if not copied.is_ok() or copied.value != length.value { sh_module_fail(graph, 5205, site.source, site.start, site.end); return -1; };
+    let decoded = string_from_utf8(buffer, copied.value);
+    if not decoded.is_ok() { sh_module_fail(graph, 5207, site.source, site.start, site.end); return -1; };
+    let added = sh_source_add(&graph.sources, &decoded.value);
+    if not added.is_ok() { sh_module_fail(graph, 5204, site.source, site.start, site.end); return -1; };
+    let unit = ShModuleUnit { snapshot: snapshot, path: absolute.value, identity: identity.value, source: added.value, standard: standard };
+    if not graph.units.push(unit) or not graph.states.push(0) { sh_module_fail(graph, 5204, site.source, site.start, site.end); return -1; };
+    graph.bytes = graph.bytes + length.value;
+    index;
+}
+
+def sh_module_edge(graph: &ShModules, importer: i64, target: i64, site: ShSpan) -> bool {
+    graph.edges.push(importer) and graph.edges.push(target) and graph.edges.push(site.start) and graph.edges.push(site.end);
+}
+
+def sh_module_candidate(directory: &String, joined: &String) -> Result<String, i64> {
+    let base = path_join_string(directory.as_str(), joined.as_str());
+    if not base.is_ok() { return string_result_err(5201); };
+    let direct = base.value.clone();
+    if not direct.is_ok() { return string_result_err(5204); };
+    direct.value.push_str(".sg");
+    let direct_exists = file_exists(direct.value.as_str());
+    if direct_exists { return direct; };
+    let module = path_join_string(base.value.as_str(), "mod.sg");
+    let module_exists = module.is_ok() and file_exists(module.value.as_str());
+    if module_exists { return module; };
+    let entry = path_join_string(base.value.as_str(), "index.sg");
+    let entry_exists = entry.is_ok() and file_exists(entry.value.as_str());
+    if entry_exists { return entry; };
+    string_result_err(5201);
+}
+
+def sh_module_resolve(graph: &ShModules, input: i64, text: &String, ast: &ShAst, path: i64) -> Result<String, i64> {
+    let joined = string_new();
+    let mut index = 0;
+    while index < sh_ast_word(ast, path, 6) { let piece = sh_s_name(text, ast, sh_ast_child(ast, path, index)); if not piece.is_ok() { return string_result_err(5201); }; if index > 0 { joined.push_str("/"); (); }; sh_module_append(&joined, &piece.value); index = index + 1; };
+    let directory = path_parent_string(graph.units.get(input).path.as_str());
+    if not directory.is_ok() { return string_result_err(5201); };
+    let relative = sh_module_candidate(&directory.value, &joined);
+    if relative.is_ok() { return relative; };
+    let first = sh_s_name(text, ast, sh_ast_child(ast, path, 0));
+    if not first.is_ok() { return string_result_err(5201); };
+    let mapped = sh_module_config_path(&graph.config, &first.value);
+    if not mapped.is_ok() { return mapped; };
+    if sh_ast_word(ast, path, 6) == 1 { let mapped_exists = file_exists(mapped.value.as_str()); if mapped_exists { return mapped; }; return string_result_err(5201); };
+    let parent = path_parent_string(mapped.value.as_str());
+    if not parent.is_ok() { return string_result_err(5201); };
+    let nested = string_new();
+    index = 1;
+    while index < sh_ast_word(ast, path, 6) { let piece = sh_s_name(text, ast, sh_ast_child(ast, path, index)); if not piece.is_ok() { return string_result_err(5201); }; if index > 1 { nested.push_str("/"); (); }; sh_module_append(&nested, &piece.value); index = index + 1; };
+    sh_module_candidate(&parent.value, &nested);
+}
+
+def sh_module_request(graph: &mut ShModules, name: &String, importer: i64, site: ShSpan) {
+    if sh_s_text_equal(name, "reflect") { return; };
+    let symbol = sh_intern(&graph.requested, name);
+    if not symbol.is_ok() { sh_module_fail(graph, 5204, site.source, site.start, site.end); return; };
+    while graph.standard_ids.len() <= symbol.value { graph.standard_ids.push(-1); };
+    graph.requests.push(symbol.value);
+    graph.requests.push(importer);
+    graph.requests.push(site.start);
+    graph.requests.push(site.end);
+    ();
+}
+
+def sh_module_import_front(text: &String, source: i64, features: &ShSymbols, maximum: i64) -> ShFrontend {
+    let macros = sh_expand_macros(text, maximum, 16);
+    if macros.error != 0 { return sh_frontend_failed(macros, source); };
+    let attributes = sh_expand_attributes(&macros, features, if env_is_windows() { "windows"; } else { "linux"; }, maximum);
+    if attributes.error != 0 { return sh_frontend_failed(attributes, source); };
+    let parsed = sh_parse(&attributes.text, source, 1000000);
+    let code = parsed.error;
+    let site = sh_exp_map(&attributes.mapping, parsed.start, parsed.end);
+    ShFrontend { expanded: attributes, parsed: parsed, source: source, error: code, start: site.start, end: site.end };
+}
+
+def sh_module_visit(graph: &mut ShModules, input: i64, depth: i64) {
+    if graph.error != 0 or input < 0 { return; };
+    if depth > 128 { sh_module_fail(graph, 5204, input, 0, 0); return; };
+    let state = graph.states.get(input).unwrap_or(-1);
+    if state == 2 { return; };
+    if state == 1 { sh_module_fail(graph, 5202, input, 0, 0); return; };
+    graph.states.set(input, 1);
+    let length = sh_source_len(&graph.sources, input).unwrap_or(0);
+    let raw = sh_span_text(&graph.sources, ShSpan { source: input, start: 0, end: length });
+    if not raw.is_ok() { sh_module_fail(graph, 5207, input, 0, 0); return; };
+    let front = sh_module_import_front(&raw.value, input, &graph.features, graph.maximum);
+    if front.error != 0 { sh_module_fail(graph, front.error, input, front.start, front.end); return; };
+    let ast = &front.parsed.ast;
+    let text = &front.expanded.text;
+    let mut index = 0;
+    while graph.error == 0 and index < sh_ast_word(ast, ast.root, 6) { let node = sh_ast_child(ast, ast.root, index); if sh_ast_word(ast, node, 0) == 30 { let path = sh_s_child_kind(ast, node, 12); let name = sh_s_name(text, ast, sh_ast_child(ast, path, 0)); let mapped = sh_exp_map(&front.expanded.mapping, sh_ast_word(ast, node, 2), sh_ast_word(ast, node, 3)); let site = ShSpan { source: input, start: mapped.start, end: mapped.end }; if name.is_ok() and sh_s_text_equal(&name.value, "std") { if sh_ast_word(ast, path, 6) > 1 { let module = sh_s_name(text, ast, sh_ast_child(ast, path, 1)); if module.is_ok() { sh_module_request(graph, &module.value, input, site); }; } else { let mut item = 0; while item < sh_ast_word(ast, node, 6) { let child = sh_ast_child(ast, node, item); if sh_ast_word(ast, child, 0) == 10 { let module = sh_s_name(text, ast, child); if module.is_ok() { sh_module_request(graph, &module.value, input, site); }; }; item = item + 1; }; }; } else if name.is_ok() and (sh_s_text_equal(&name.value, "reflect") or sh_s_text_equal(&name.value, "sengoo")) { let second = sh_s_name(text, ast, sh_ast_child(ast, path, 1)); let deferred = sh_s_text_equal(&name.value, "reflect") or second.is_ok() and sh_s_text_equal(&second.value, "reflect"); if not deferred { sh_module_fail(graph, 5201, input, site.start, site.end); }; } else { let resolved = sh_module_resolve(graph, input, text, ast, path); if not resolved.is_ok() { sh_module_fail(graph, resolved.error, input, site.start, site.end); } else { let target = sh_module_load(graph, &resolved.value, 0, site); if target >= 0 { if not sh_module_edge(graph, input, target, site) { sh_module_fail(graph, 5204, input, site.start, site.end); }; if graph.states.get(target).unwrap_or(-1) == 1 { sh_module_fail(graph, 5202, input, site.start, site.end); } else { sh_module_visit(graph, target, depth + 1); }; }; }; }; }; index = index + 1; };
+    graph.states.set(input, 2);
+    if graph.units.get(input).standard == 0 { graph.local_order.push(input); (); };
+    ();
+}
+
+def sh_module_csv(graph: &mut ShModules, csv: &str, importer: i64, site: ShSpan) {
+    let raw = string_from_str(csv);
+    if not raw.is_ok() { sh_module_fail(graph, 5204, site.source, site.start, site.end); return; };
+    let bytes = sh_lex_bytes(&raw.value);
+    if not bytes.is_ok() { sh_module_fail(graph, 5204, site.source, site.start, site.end); return; };
+    let mut begin = 0;
+    let mut index = 0;
+    while index <= raw.value.len() { if index == raw.value.len() or sh_lex_byte(&bytes.value, index) == 44 { if index > begin { let name = raw.value.get(begin, index); if name.is_ok() { sh_module_request(graph, &name.value, importer, site); }; }; begin = index + 1; }; index = index + 1; };
+    ();
+}
+
+def sh_module_standard_dependencies(graph: &mut ShModules, name: &String, importer: i64) {
+    let value = name.as_str();
+    let site = ShSpan { source: importer, start: 0, end: 0 };
+    if value == "terminal" or value == "ipc" or value == "pty" or value == "system" or value == "file_snapshot" or value == "media" or value == "hash" or value == "http" { sh_module_csv(graph, "ffi,string,status", importer, site); };
+    if value == "unicode" { sh_module_csv(graph, "unicode_tables,string,status", importer, site); };
+    if value == "collections" or value == "json" or value == "status" { sh_module_csv(graph, "ffi,string", importer, site); };
+    if value == "math" { sh_module_csv(graph, "option,status", importer, site); };
+    if value == "string" or value == "db" or value == "lua54" or value == "proto" { sh_module_csv(graph, "ffi", importer, site); };
+    if value == "file" or value == "io" or value == "env" or value == "process" or value == "args" or value == "strconv" or value == "time" or value == "regex" or value == "log" or value == "config" or value == "encoding" or value == "compress" or value == "fs" { sh_module_csv(graph, "status", importer, site); };
+    if value == "stream" { sh_module_csv(graph, "status,ffi,io,file,net", importer, site); };
+    if value == "path" or value == "dir" { sh_module_csv(graph, "status,string", importer, site); };
+    if value == "fmt" { sh_module_csv(graph, "strconv,status", importer, site); };
+    if value == "async" { sh_module_csv(graph, "status,result", importer, site); };
+    if value == "net" { sh_module_csv(graph, "ffi,status,string,collections", importer, site); };
+    if value == "option" or value == "result" or value == "math" or value == "collections" or value == "json" or value == "status" or value == "strconv" or value == "db" or value == "ffi" or value == "file" or value == "file_snapshot" or value == "media" or value == "dir" or value == "io" or value == "stream" or value == "env" or value == "path" or value == "process" or value == "terminal" or value == "ipc" or value == "pty" or value == "system" or value == "unicode" or value == "args" or value == "fmt" or value == "regex" or value == "log" or value == "config" or value == "hash" or value == "encoding" or value == "compress" or value == "fs" or value == "http" or value == "lua54" or value == "net" or value == "proto" or value == "async" { sh_module_csv(graph, "option,result", importer, site); };
+    ();
+}
+
+def sh_module_order(graph: &ShModules, module: i64) {
+    if module >= 0 and sengoo_vec_contains_i64(graph.order.handle, module) == 0 { graph.order.push(module); (); };
+    ();
+}
+
+def sh_module_emit(graph: &mut ShModules, module: i64) {
+    let length = sh_source_len(&graph.sources, module).unwrap_or(-1);
+    let text = sh_span_text(&graph.sources, ShSpan { source: module, start: 0, end: length });
+    if not text.is_ok() { sh_module_fail(graph, 5207, module, 0, 0); return; };
+    let start = graph.text.len();
+    if start > graph.maximum - text.value.len() or not sh_module_append(&graph.text, &text.value) { sh_module_fail(graph, 5204, module, 0, 0); return; };
+    graph.mapping.push(start);
+    graph.mapping.push(graph.text.len());
+    graph.mapping.push(module);
+    graph.mapping.push(0);
+    graph.mapping.push(length);
+    if graph.text.len() > graph.maximum - 2 { sh_module_fail(graph, 5204, module, 0, 0); return; };
+    graph.text.push_str("\n\n");
+    ();
+}
+
+def sh_modules_load(entry: &str, stdlib: &str, module_map: &String, max_modules: i64, max_bytes: i64) -> ShModules {
+    let units: Vec<ShModuleUnit> = vec_new();
+    let config = if module_map.len() == 0 { sh_module_empty_config(max_modules); } else { sh_module_config(module_map, max_modules); };
+    let root_path = string_from_str(entry);
+    let library = string_from_str(stdlib);
+    let library_ok = library.is_ok();
+    let mut graph = ShModules { sources: sh_sources_new(max_modules, max_bytes), units: units, states: vec_new_i64(), edges: vec_new_i64(), order: vec_new_i64(), local_order: vec_new_i64(), requested: sh_symbols_new(max_modules), requests: vec_new_i64(), standard_ids: vec_new_i64(), config: config, features: sh_symbols_new(0), text: string_new(), mapping: vec_new_i64(), stdlib: library.value, root: -1, bytes: 0, maximum: max_bytes, error: 0, source: -1, start: 0, end: 0 };
+    if max_modules < 1 or max_modules > 1000000 or max_bytes < 0 or not root_path.is_ok() or not library_ok { sh_module_fail(&mut graph, 5204, -1, 0, 0); return graph; };
+    if graph.config.error != 0 { let code = graph.config.error; sh_module_fail(&mut graph, code, -1, 0, 0); return graph; };
+    let root = sh_module_load(&mut graph, &root_path.value, 0, ShSpan { source: -1, start: 0, end: 0 });
+    graph.root = root;
+    sh_module_visit(&mut graph, root, 0);
+    let mut request = 0;
+    while graph.error == 0 and request < sh_symbol_count(&graph.requested) { let name = sh_symbol_text(&graph.requested, request); if not name.is_ok() { sh_module_fail(&mut graph, 5204, root, 0, 0); break; }; let filename = name.value.clone(); if not filename.is_ok() { sh_module_fail(&mut graph, 5204, root, 0, 0); break; }; filename.value.push_str(".sg"); let path = path_join_string(graph.stdlib.as_str(), filename.value.as_str()); if not path.is_ok() { sh_module_fail(&mut graph, 5201, root, 0, 0); break; }; let mut site = ShSpan { source: root, start: 0, end: 0 }; let mut row = 0; while row < graph.requests.len() { if graph.requests.get(row).unwrap_or(-1) == request { site.source = graph.requests.get(row + 1).unwrap_or(root); site.start = graph.requests.get(row + 2).unwrap_or(0); site.end = graph.requests.get(row + 3).unwrap_or(0); break; }; row = row + 4; }; if not file_exists(path.value.as_str()) { sh_module_fail(&mut graph, 5201, site.source, site.start, site.end); break; }; let module = sh_module_load(&mut graph, &path.value, 1, site); graph.standard_ids.set(request, module); if module >= 0 { sh_module_standard_dependencies(&mut graph, &name.value, module); sh_module_visit(&mut graph, module, 0); }; request = request + 1; };
+    let policy = string_from_str("option,result,math,string,unicode_tables,unicode,error,assert,ffi,status,collections,json,strconv,fmt,regex,log,config,hash,encoding,compress,file,file_snapshot,media,dir,fs,io,stream,env,time,random,path,process,terminal,ipc,pty,system,args,db,lua54,net,http,proto,async");
+    if policy.is_ok() { let bytes = sh_lex_bytes(&policy.value); if bytes.is_ok() { let mut index = 0; let mut begin = 0; while index <= policy.value.len() { if index == policy.value.len() or sh_lex_byte(&bytes.value, index) == 44 { let name = policy.value.get(begin, index); if name.is_ok() { let symbol = sh_module_symbol(&graph.requested, &name.value); let module = graph.standard_ids.get(symbol).unwrap_or(-1); sh_module_order(&graph, module); }; begin = index + 1; }; index = index + 1; }; }; };
+    request = 0;
+    while request < graph.standard_ids.len() { sh_module_order(&graph, graph.standard_ids.get(request).unwrap_or(-1)); request = request + 1; };
+    request = 0;
+    while request < graph.requests.len() { let name = graph.requests.get(request).unwrap_or(-1); let importer = graph.requests.get(request + 1).unwrap_or(-1); let target = graph.standard_ids.get(name).unwrap_or(-1); if target >= 0 { sh_module_edge(&graph, importer, target, ShSpan { source: importer, start: graph.requests.get(request + 2).unwrap_or(0), end: graph.requests.get(request + 3).unwrap_or(0) }); (); }; request = request + 4; };
+    let mut index = 0;
+    while index < graph.local_order.len() { sh_module_order(&graph, graph.local_order.get(index).unwrap_or(-1)); index = index + 1; };
+    index = 0;
+    while graph.error == 0 and index < graph.order.len() { let module = graph.order.get(index).unwrap_or(-1); sh_module_emit(&mut graph, module); index = index + 1; };
+    let unchanged = sh_modules_unchanged(&graph);
+    if not unchanged { sh_module_fail(&mut graph, 5206, root, 0, 0); };
+    graph;
+}
+
+def sh_modules_unchanged(graph: &ShModules) -> bool {
+    let mut index = 0;
+    while index < graph.units.len() { let current = graph.units.get(index).snapshot.still_matches(); if not current.is_ok() or not current.value { return false; }; index = index + 1; };
+    true;
+}
+
+def sh_modules_span(graph: &ShModules, start: i64, end: i64) -> ShSpan {
+    if start < 0 or end < start or end > graph.text.len() { return ShSpan { source: -1, start: 0, end: 0 }; };
+    let mut index = 0;
+    let mut previous = -1;
+    while index < graph.mapping.len() { let low = graph.mapping.get(index).unwrap_or(-1); let high = graph.mapping.get(index + 1).unwrap_or(-1); if start >= low and start < high or start == end and start >= low and start <= high { let bound = if end < high { end; } else { high; }; return ShSpan { source: graph.mapping.get(index + 2).unwrap_or(-1), start: graph.mapping.get(index + 3).unwrap_or(0) + start - low, end: graph.mapping.get(index + 3).unwrap_or(0) + bound - low }; }; if high <= start { previous = index; }; index = index + 5; };
+    if previous >= 0 { let edge = graph.mapping.get(previous + 4).unwrap_or(0); return ShSpan { source: graph.mapping.get(previous + 2).unwrap_or(-1), start: edge, end: edge }; };
+    ShSpan { source: -1, start: 0, end: 0 };
+}
+
+def sh_module_expanded_span(graph: &ShModules, front: &ShFrontend, start: i64, end: i64) -> ShSpan {
+    let joined = sh_exp_map(&front.expanded.mapping, start, end);
+    sh_modules_span(graph, joined.start, joined.end);
+}
+
+struct ShModuleChecked {
+    front: ShFrontend,
+    checked: ShChecked,
+    node_modules: Vec<i64>,
+    binding_modules: Vec<i64>,
+    scope_modules: Vec<i64>,
+    module_scopes: Vec<i64>,
+    module_bindings: Vec<i64>,
+    exports: Vec<i64>,
+    error: i64,
+    source: i64,
+    start: i64,
+    end: i64,
+}
+
+def sh_module_binding_source(checked: &ShModuleChecked, binding: i64) -> i64 {
+    sh_module_word(&checked.binding_modules, binding);
+}
+
+def sh_module_node_source(checked: &ShModuleChecked, node: i64) -> i64 {
+    sh_module_word(&checked.node_modules, node);
+}
+
+def sh_module_scope(checked: &ShModuleChecked, module: i64) -> i64 {
+    sh_module_word(&checked.module_scopes, module);
+}
+
+def sh_module_export(checked: &ShModuleChecked, module: i64, symbol: i64, type_namespace: bool) -> i64 {
+    let mut index = checked.exports.len() - 3;
+    while index >= 0 { if checked.exports.get(index).unwrap_or(-1) == module and checked.exports.get(index + 2).unwrap_or(-1) == symbol { let binding = checked.exports.get(index + 1).unwrap_or(-1); if sh_s_type_binding_kind(sh_binding_word(&checked.checked, binding, 2)) == type_namespace { return binding; }; }; index = index - 3; };
+    -1;
+}
+
+def sh_modules_check(graph: &ShModules, max_nodes: i64, max_diagnostics: i64) -> ShModuleChecked {
+    let front = sh_frontend(&graph.text, graph.root, &graph.features, graph.maximum, max_nodes);
+    let checked = sh_check(&front.expanded.text, &front.parsed.ast, max_diagnostics);
+    let mut output = ShModuleChecked { front: front, checked: checked, node_modules: vec_new_i64(), binding_modules: vec_new_i64(), scope_modules: vec_new_i64(), module_scopes: vec_new_i64(), module_bindings: vec_new_i64(), exports: vec_new_i64(), error: graph.error, source: graph.source, start: graph.start, end: graph.end };
+    if output.error != 0 { return output; };
+    if output.front.error != 0 { let site = sh_modules_span(graph, output.front.start, output.front.end); output.error = output.front.error; output.source = site.source; output.start = site.start; output.end = site.end; return output; };
+    let ast = &output.front.parsed.ast;
+    let mut node = 0;
+    while node < sh_ast_count(ast) { let site = sh_module_expanded_span(graph, &output.front, sh_ast_word(ast, node, 2), sh_ast_word(ast, node, 3)); output.node_modules.push(if node == ast.root { graph.root; } else { site.source; }); node = node + 1; };
+    let original_bindings = sh_binding_count(&output.checked);
+    let original_scopes = sh_scope_count(&output.checked);
+    let mut binding = 0;
+    while binding < original_bindings { let declaration = sh_binding_word(&output.checked, binding, 4); let source = sh_module_word(&output.node_modules, declaration); output.binding_modules.push(source); if source >= 0 and sh_binding_word(&output.checked, binding, 6) < 0 { output.exports.push(source); output.exports.push(binding); output.exports.push(sh_binding_word(&output.checked, binding, 0)); (); }; binding = binding + 1; };
+    binding = 0;
+    while binding < original_bindings { if output.binding_modules.get(binding).unwrap_or(-1) < 0 { let owner = sh_binding_word(&output.checked, binding, 6); let source = output.binding_modules.get(owner).unwrap_or(-1); output.binding_modules.set(binding, source); (); }; binding = binding + 1; };
+    let mut scope = 0;
+    while scope < original_scopes { let owner = sh_scope_word(&output.checked, scope, 1); output.scope_modules.push(output.binding_modules.get(owner).unwrap_or(-1)); scope = scope + 1; };
+    let mut module = 0;
+    while module < sh_module_count(graph) { let spelling = string_from_str("@module:"); if not spelling.is_ok() { output.error = 5204; return output; }; sh_module_append(&spelling.value, &graph.units.get(module).identity); let symbol = sh_intern(&output.checked.symbols, &spelling.value).unwrap_or(-1); let module_binding = sh_s_binding(&output.checked, symbol, 0, 12, output.checked.unit_type, -1, 4096, -1, -1); let module_scope = sh_s_scope(&output.checked, 0, module_binding, 4); sh_s_binding_set(&output.checked, module_binding, 7, module_scope); output.module_bindings.push(module_binding); output.module_scopes.push(module_scope); output.binding_modules.push(module); output.scope_modules.push(module); module = module + 1; };
+    if output.checked.error != 0 { let site = sh_module_expanded_span(graph, &output.front, output.checked.start, output.checked.end); output.error = output.checked.error; output.source = site.source; output.start = site.start; output.end = site.end; };
+    output;
+}

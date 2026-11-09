@@ -1,0 +1,1 @@
+import std::not_real;def main()->i64{0}
