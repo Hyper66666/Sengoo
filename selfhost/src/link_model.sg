@@ -7,6 +7,7 @@ struct ShLinker {
     symbols: Vec<i64>,
     relocations: Vec<i64>,
     groups: Vec<i64>,
+    imports: Vec<i64>,
     objects: i64,
     linked: bool,
     limit: i64,
@@ -15,7 +16,7 @@ struct ShLinker {
 }
 
 def sh_link_new(limit: i64) -> ShLinker {
-    ShLinker { names: sh_symbols_new(100000), sections: vec_new_i64(), data: vec_new_i64(), symbols: vec_new_i64(), relocations: vec_new_i64(), groups: vec_new_i64(), objects: 0, linked: false, limit: limit, error: 0, offset: 0 };
+    ShLinker { names: sh_symbols_new(100000), sections: vec_new_i64(), data: vec_new_i64(), symbols: vec_new_i64(), relocations: vec_new_i64(), groups: vec_new_i64(), imports: vec_new_i64(), objects: 0, linked: false, limit: limit, error: 0, offset: 0 };
 }
 
 def sh_link_word(words: &Vec<i64>, width: i64, row: i64, field: i64) -> i64 {

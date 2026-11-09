@@ -80,3 +80,45 @@ pointers relocate to the actual image base, and checks RtlLookupFunctionEntry
 and RtlVirtualUnwind at multiple instruction offsets. Compiler/linker failures
 preserve pre-existing output bytes. This is native executable evidence for the
 bounded subset; CodeView/PDB, archives, general SDKs and full M5 remain open.
+
+## Indexed archives and native import libraries checkpoint
+
+`link_archive.sg` reads standard COFF archives with one big-endian first
+linker member and an optional little-endian second linker member. Every
+indexed member offset must identify a complete regular member header; the
+second index must agree with the first. Long filename references identify a
+validated UTF-8 string start in the archive long-name table. Supported linker
+member NUL padding and long-name LF padding are bounded to one byte. Members
+are extracted lazily for the entry and unresolved strong externals, with
+repeated library passes supporting dependencies across archive order.
+Unused regular member bodies do not need the selected COFF subset. Unsupported
+selected auxiliary/weak/common/COMDAT/bigobj/static SDK bodies still fail.
+Limits are 128 libraries, 65,536 archive members, 100,000 indexed names, 4,096
+extractions/closure passes and 64 MiB archive/image storage.
+
+`link_imports.sg` reads real AMD64 MSVC short import objects, including ordinal,
+name, no-prefix, undecorate and export-as forms, and code/data IAT identities.
+It validates exact payload lengths and NUL-terminated nonempty UTF-8 strings.
+The SG linker groups imports stably by DLL, emits descriptors, contiguous IATs,
+lookup/hint/name records and executable code thunks, and applies their RVAs
+through ordinary checked SG relocations. Limits are 4,096 imports and 256 DLLs.
+Const import type, delay imports, full import-descriptor COFF objects, archive
+weak selection and ordinary static SDK compatibility remain unqualified.
+The fixed entry wrapper still imports KERNEL32.dll ExitProcess explicitly.
+
+The gate uses the installed Windows 10.0.26100.0 x64 kernel32.Lib unchanged;
+it reads its real first/second indices and extracts only required short import
+members for GetCurrentProcessId and GetCurrentThreadId. SG-generated machine
+code calls one through a thunk and one through its `__imp_` IAT and returns 42
+on Windows. Independent LLVM inspection verifies the selected imports. Another
+fixture loads two DLLs and all supported name transformations, including an
+ordinal obtained independently from the recorded native DLL export table.
+The type-1 IAT fixture checks loader/address behavior without claiming a
+complete SDK data-ABI corpus. Independently produced llvm-lib archives verify
+lazy selection, entry extraction and cross-archive closure. Repeated links
+must produce identical bytes and native exact-resource scopes cover both
+successful SDK linking and malformed archive/import failure paths.
+
+These are archive/import checkpoints, not complete static SDK or M5 evidence.
+Full CodeView/PDB generation, real debugger source/local gates, DLL/TLS/resource
+and native-package compatibility remain mandatory open tasks.

@@ -1,0 +1,163 @@
+import selfhost_link_model;
+
+struct ShLinkImports {
+    bytes: ShBinary,
+    entries: Vec<i64>,
+    fixups: Vec<i64>,
+    iat_first: i64,
+    iat_size: i64,
+    directory_size: i64,
+}
+
+def sh_link_import_name(link: &ShLinker, text: &str) -> Result<i64, i64> {
+    let owned = string_from_str(text)?;
+    sh_intern(&link.names, &owned);
+}
+
+def sh_link_import_ascii(output: &ShBinary, text: &String) -> Result<i64, i64> {
+    let bytes = sh_coff_symbol_bytes(text)?;
+    let mut index = 0;
+    while index < text.len() { sh_binary_byte(output, bytes.get_u8(index)?)?; index = index + 1; };
+    sh_i64_ok(text.len());
+}
+
+def sh_link_import_zeros(output: &ShBinary, count: i64) -> Result<i64, i64> {
+    let mut index = 0;
+    while index < count { sh_binary_byte(output, 0)?; index = index + 1; };
+    sh_i64_ok(count);
+}
+
+def sh_link_import_alias(link: &ShLinker, symbol: i64) -> Result<i64, i64> {
+    let original = sh_symbol_text(&link.names, symbol)?;
+    let alias = string_from_str("__imp_")?;
+    alias.push_str(original.as_str())?;
+    sh_intern(&link.names, &alias);
+}
+
+def sh_link_import_validate_name(link: &ShLinker, symbol: i64) -> Result<i64, i64> {
+    if symbol < 0 or symbol >= link.names.names.len() { return sh_i64_error(7201); };
+    let text = sh_symbol_text(&link.names, symbol)?;
+    if text.len() == 0 or text.len() > 1048576 { return sh_i64_error(7201); };
+    let bytes = sh_coff_symbol_bytes(&text)?;
+    let mut index = 0;
+    while index < text.len() { if bytes.get_u8(index)? == 0 { return sh_i64_error(7201); }; index = index + 1; };
+    sh_i64_ok(symbol);
+}
+
+def sh_link_import_add(link: &ShLinker, symbol: i64, dll: i64, export_name: i64, ordinal: i64, hint: i64, kind: i64) -> Result<i64, i64> {
+    if ordinal < -1 or ordinal > 65535 or hint < 0 or hint > 65535 or kind < 0 or kind > 1 { return sh_i64_error(7203); };
+    sh_link_import_validate_name(link, symbol)?;
+    sh_link_import_validate_name(link, dll)?;
+    sh_link_import_validate_name(link, export_name)?;
+    let mut index = 0;
+    while index < link.imports.len() / 9 { if sh_link_word(&link.imports, 9, index, 0) == symbol { if sh_link_word(&link.imports, 9, index, 1) != dll or sh_link_word(&link.imports, 9, index, 2) != export_name or sh_link_word(&link.imports, 9, index, 3) != ordinal or sh_link_word(&link.imports, 9, index, 5) != kind { return sh_i64_error(7205); }; return sh_i64_ok(index); }; index = index + 1; };
+    if index >= 4096 { return sh_i64_error(7202); };
+    let alias = sh_link_import_alias(link, symbol)?;
+    sh_link_push(&link.imports, symbol)?;
+    sh_link_push(&link.imports, dll)?;
+    sh_link_push(&link.imports, export_name)?;
+    sh_link_push(&link.imports, ordinal)?;
+    sh_link_push(&link.imports, hint)?;
+    sh_link_push(&link.imports, kind)?;
+    sh_link_push(&link.imports, -1)?;
+    sh_link_push(&link.imports, -1)?;
+    sh_link_push(&link.imports, alias)?;
+    sh_i64_ok(index);
+}
+
+def sh_link_import_find(link: &ShLinker, name: i64) -> i64 {
+    let mut index = 0;
+    while index < link.imports.len() / 9 { if sh_link_word(&link.imports, 9, index, 0) == name or sh_link_word(&link.imports, 9, index, 8) == name { return index; }; index = index + 1; };
+    -1;
+}
+
+def sh_link_import_string(link: &ShLinker, bytes: &ShBinary, at: i64, end: i64) -> Result<i64, i64> {
+    if at < 0 or at >= end or end > sh_binary_len(bytes) { return sh_i64_error(7201); };
+    let mut length = 0;
+    while at + length < end and sh_link_uint(bytes, at + length, 1)? != 0 { length = length + 1; if length > 1048576 { return sh_i64_error(7202); }; };
+    if length == 0 or at + length == end { return sh_i64_error(7201); };
+    let buffer = ffi_buffer_new(length)?;
+    let mut index = 0;
+    while index < length { buffer.push_u8(sh_link_uint(bytes, at + index, 1)?)?; index = index + 1; };
+    let decoded = string_from_utf8(buffer, length);
+    if not decoded.is_ok() { return sh_i64_error(7201); };
+    sh_intern(&link.names, &decoded.value);
+}
+
+def sh_link_import_object(link: &ShLinker, bytes: &ShBinary) -> Result<i64, i64> {
+    if sh_binary_len(bytes) < 22 or sh_link_uint(bytes, 0, 2)? != 0 or sh_link_uint(bytes, 2, 2)? != 65535 or sh_link_uint(bytes, 4, 2)? != 0 or sh_link_uint(bytes, 6, 2)? != 34404 { return sh_i64_error(7203); };
+    let size = sh_link_uint(bytes, 12, 4)?;
+    if size != sh_binary_len(bytes) - 20 { return sh_i64_error(7201); };
+    let hint = sh_link_uint(bytes, 16, 2)?;
+    let info = sh_link_uint(bytes, 18, 2)?;
+    let kind = info & 3;
+    let name_type = (info >> 2) & 7;
+    if info > 31 or kind > 1 or name_type > 4 { return sh_i64_error(7203); };
+    let symbol = sh_link_import_string(link, bytes, 20, sh_binary_len(bytes))?;
+    let symbol_text = sh_symbol_text(&link.names, symbol)?;
+    let dll_at = 21 + symbol_text.len();
+    let dll = sh_link_import_string(link, bytes, dll_at, sh_binary_len(bytes))?;
+    let dll_text = sh_symbol_text(&link.names, dll)?;
+    let mut export_name = symbol;
+    let ordinal = if name_type == 0 { hint; } else { -1; };
+    if name_type == 4 { export_name = sh_link_import_string(link, bytes, dll_at + dll_text.len() + 1, sh_binary_len(bytes))?; let export_text = sh_symbol_text(&link.names, export_name)?; if dll_at + dll_text.len() + 2 + export_text.len() != sh_binary_len(bytes) { return sh_i64_error(7201); }; } else { if dll_at + dll_text.len() + 1 != sh_binary_len(bytes) { return sh_i64_error(7201); }; if name_type == 2 or name_type == 3 { let raw = sh_coff_symbol_bytes(&symbol_text)?; let start = if raw.get_u8(0).unwrap_or(0) == 95 or raw.get_u8(0).unwrap_or(0) == 64 or raw.get_u8(0).unwrap_or(0) == 63 { 1; } else { 0; }; let mut end = symbol_text.len(); if name_type == 3 { let mut index = start; while index < end { if raw.get_u8(index).unwrap_or(0) == 64 { end = index; break; }; index = index + 1; }; }; if end == start { return sh_i64_error(7201); }; let buffer = ffi_buffer_new(end - start)?; let mut index = start; while index < end { buffer.push_u8(raw.get_u8(index)?)?; index = index + 1; }; let decoded = string_from_utf8(buffer, end - start)?; export_name = sh_intern(&link.names, &decoded)?; }; };
+    sh_link_import_add(link, symbol, dll, export_name, ordinal, if ordinal < 0 { hint; } else { 0; }, kind);
+}
+
+def sh_link_import_plan(link: &ShLinker) -> Result<ShLinkImports, i64> {
+    let dlls = vec_new_i64();
+    let ints = vec_new_i64();
+    let iats = vec_new_i64();
+    let dll_offsets = vec_new_i64();
+    let mut index = 0;
+    while index < link.imports.len() / 9 { let dll = sh_link_word(&link.imports, 9, index, 1); let mut found = 0; while found < dlls.len() and sengoo_vec_get_or_default_i64(dlls.handle, found, -1) != dll { found = found + 1; }; if found == dlls.len() { if dlls.len() >= 256 { return sh_link_import_error(7202); }; sh_link_push(&dlls, dll)?; (); }; index = index + 1; };
+    let bytes = sh_binary_new(link.limit);
+    let entries = vec_new_i64();
+    let fixups = vec_new_i64();
+    sh_link_import_zeros(&bytes, (dlls.len() + 1) * 20)?;
+    sh_binary_align(&bytes, 8, 0)?;
+    let mut group = 0;
+    while group < dlls.len() { sh_link_push(&ints, sh_binary_len(&bytes))?; index = 0; while index < link.imports.len() / 9 { if sh_link_word(&link.imports, 9, index, 1) == sengoo_vec_get_or_default_i64(dlls.handle, group, -1) { sh_binary_unsigned(&bytes, 0, 8)?; (); }; index = index + 1; }; sh_binary_unsigned(&bytes, 0, 8)?; group = group + 1; };
+    let iat_first = sh_binary_len(&bytes);
+    group = 0;
+    while group < dlls.len() { sh_link_push(&iats, sh_binary_len(&bytes))?; index = 0; let mut ordinal = 0; while index < link.imports.len() / 9 { if sh_link_word(&link.imports, 9, index, 1) == sengoo_vec_get_or_default_i64(dlls.handle, group, -1) { sh_link_push(&entries, index)?; sh_link_push(&entries, sengoo_vec_get_or_default_i64(ints.handle, group, -1) + ordinal * 8)?; sh_link_push(&entries, sh_binary_len(&bytes))?; sh_link_push(&entries, -1)?; sh_binary_unsigned(&bytes, 0, 8)?; ordinal = ordinal + 1; }; index = index + 1; }; sh_binary_unsigned(&bytes, 0, 8)?; group = group + 1; };
+    let iat_size = sh_binary_len(&bytes) - iat_first;
+    index = 0;
+    while index < entries.len() / 4 { let record = sh_link_word(&entries, 4, index, 0); let ordinal = sh_link_word(&link.imports, 9, record, 3); let int_offset = sh_link_word(&entries, 4, index, 1); let iat_offset = sh_link_word(&entries, 4, index, 2); if ordinal >= 0 { sh_binary_patch(&bytes, int_offset, (-9223372036854775807 - 1) | ordinal, 8)?; sh_binary_patch(&bytes, iat_offset, (-9223372036854775807 - 1) | ordinal, 8)?; (); } else { sh_binary_align(&bytes, 2, 0)?; let offset = sh_binary_len(&bytes); entries.set(index * 4 + 3, offset); sh_binary_unsigned(&bytes, sh_link_word(&link.imports, 9, record, 4), 2)?; let name = sh_symbol_text(&link.names, sh_link_word(&link.imports, 9, record, 2))?; sh_link_import_ascii(&bytes, &name)?; sh_binary_byte(&bytes, 0)?; sh_binary_patch(&bytes, int_offset, offset, 8)?; sh_binary_patch(&bytes, iat_offset, offset, 8)?; sh_link_push(&fixups, int_offset)?; sh_link_push(&fixups, 8)?; sh_link_push(&fixups, iat_offset)?; sh_link_push(&fixups, 8)?; (); }; index = index + 1; };
+    group = 0;
+    while group < dlls.len() { let name = sh_symbol_text(&link.names, sengoo_vec_get_or_default_i64(dlls.handle, group, -1))?; sh_link_push(&dll_offsets, sh_binary_len(&bytes))?; sh_link_import_ascii(&bytes, &name)?; sh_binary_byte(&bytes, 0)?; sh_binary_patch(&bytes, group * 20, sengoo_vec_get_or_default_i64(ints.handle, group, -1), 4)?; sh_binary_patch(&bytes, group * 20 + 12, sengoo_vec_get_or_default_i64(dll_offsets.handle, group, -1), 4)?; sh_binary_patch(&bytes, group * 20 + 16, sengoo_vec_get_or_default_i64(iats.handle, group, -1), 4)?; sh_link_push(&fixups, group * 20)?; sh_link_push(&fixups, 4)?; sh_link_push(&fixups, group * 20 + 12)?; sh_link_push(&fixups, 4)?; sh_link_push(&fixups, group * 20 + 16)?; sh_link_push(&fixups, 4)?; group = group + 1; };
+    let plan = ShLinkImports { bytes: bytes, entries: entries, fixups: fixups, iat_first: iat_first, iat_size: iat_size, directory_size: (dlls.len() + 1) * 20 };
+    Result { is_ok: true, value: plan, error: 0 };
+}
+
+def sh_link_import_error(code: i64) -> Result<ShLinkImports, i64> {
+    let bytes: Vec<i64> = Vec { handle: 0, marker: 0 };
+    let entries: Vec<i64> = Vec { handle: 0, marker: 0 };
+    let fixups: Vec<i64> = Vec { handle: 0, marker: 0 };
+    let binary = ShBinary { bytes: bytes, limit: 0 };
+    let invalid = ShLinkImports { bytes: binary, entries: entries, fixups: fixups, iat_first: 0, iat_size: 0, directory_size: 0 };
+    Result { is_ok: false, value: invalid, error: code };
+}
+
+def sh_link_import_sections(link: &ShLinker, object: i64, plan: &ShLinkImports) -> Result<i64, i64> {
+    let imports = sh_link_add_section(link, object, sh_link_import_name(link, ".idata")?, &plan.bytes, 3221225536, 8)?;
+    let thunks = sh_binary_new(link.limit);
+    let offsets = vec_new_i64();
+    let mut index = 0;
+    while index < link.imports.len() / 9 { if sh_link_word(&link.imports, 9, index, 5) == 0 { sh_binary_align(&thunks, 16, 144)?; sh_link_push(&offsets, sh_binary_len(&thunks))?; sh_binary_byte(&thunks, 255)?; sh_binary_byte(&thunks, 37)?; sh_binary_unsigned(&thunks, 0, 4)?; (); } else { sh_link_push(&offsets, -1)?; (); }; index = index + 1; };
+    let thunk_section = sh_link_add_section(link, object, sh_link_import_name(link, ".text")?, &thunks, 1610612768, 16)?;
+    let base = sh_link_add_symbol(link, object, sh_link_import_name(link, "__sg_import_base")?, 0, imports + 1, 3)?;
+    index = 0;
+    while index < plan.fixups.len() { let offset = sengoo_vec_get_or_default_i64(plan.fixups.handle, index, -1); sh_link_add_relocation(link, imports, offset, base, 3)?; index = index + 2; };
+    index = 0;
+    while index < plan.entries.len() / 4 { let record = sh_link_word(&plan.entries, 4, index, 0); let iat_offset = sh_link_word(&plan.entries, 4, index, 2); let iat_name = sh_link_word(&link.imports, 9, record, 8); let iat = sh_link_add_symbol(link, object, iat_name, iat_offset, imports + 1, 3)?; if not link.imports.set(record * 9 + 7, iat) { return sh_i64_error(7202); }; let offset = sengoo_vec_get_or_default_i64(offsets.handle, record, -1); if offset >= 0 { let direct = sh_link_add_symbol(link, object, sh_link_word(&link.imports, 9, record, 0), offset, thunk_section + 1, 3)?; if not link.imports.set(record * 9 + 6, direct) { return sh_i64_error(7202); }; sh_link_add_relocation(link, thunk_section, offset + 2, iat, 4)?; (); }; index = index + 1; };
+    sh_i64_ok(imports);
+}
+
+def sh_link_import_symbol(link: &ShLinker, name: i64) -> i64 {
+    let record = sh_link_import_find(link, name);
+    if record < 0 { return -1; };
+    if sh_link_word(&link.imports, 9, record, 8) == name { return sh_link_word(&link.imports, 9, record, 7); };
+    if sh_link_word(&link.imports, 9, record, 5) != 0 { return -1; };
+    sh_link_word(&link.imports, 9, record, 6);
+}

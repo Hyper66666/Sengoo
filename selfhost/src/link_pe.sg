@@ -1,5 +1,7 @@
 import selfhost_link_coff;
 
+import selfhost_link_imports;
+
 struct ShPePlan {
     imports: i64,
     thunk: i64,
@@ -11,6 +13,9 @@ struct ShPePlan {
     thunk_symbol: i64,
     iat_symbol: i64,
     start_symbol: i64,
+    iat_first: i64,
+    iat_size: i64,
+    directory_size: i64,
 }
 
 def sh_link_intern(link: &ShLinker, text: &str) -> Result<i64, i64> {
@@ -41,27 +46,21 @@ def sh_link_external(link: &ShLinker, name: i64) -> Result<i64, i64> {
 }
 
 def sh_link_synthetic(link: &mut ShLinker, entry: &String) -> Result<ShPePlan, i64> {
-    let invalid = ShPePlan { imports: -1, thunk: -1, start: -1, unwind: -1, pdata: -1, reloc: -1, entry_symbol: -1, thunk_symbol: -1, iat_symbol: -1, start_symbol: -1 };
+    let invalid = ShPePlan { imports: -1, thunk: -1, start: -1, unwind: -1, pdata: -1, reloc: -1, entry_symbol: -1, thunk_symbol: -1, iat_symbol: -1, start_symbol: -1, iat_first: 0, iat_size: 0, directory_size: 0 };
     let name = sh_intern(&link.names, entry)?;
     let entry_symbol = sh_link_external(link, name)?;
     if entry_symbol < 0 { return Result { is_ok: false, value: invalid, error: 7204 }; };
     let entry_section = sh_link_word(&link.symbols, 6, entry_symbol, 3) - 1;
     if entry_section < 0 or (sh_link_word(&link.sections, 10, entry_section, 4) & 536870912) == 0 or sh_link_word(&link.symbols, 6, entry_symbol, 2) >= sh_link_word(&link.sections, 10, entry_section, 3) { return Result { is_ok: false, value: invalid, error: 7207 }; };
-    let idata = sh_binary_new(link.limit);
-    sh_link_zeros(&idata, 72)?;
-    sh_binary_unsigned(&idata, 0, 2)?;
-    sh_link_ascii(&idata, "ExitProcess")?;
-    sh_binary_byte(&idata, 0)?;
-    sh_link_ascii(&idata, "KERNEL32.dll")?;
-    sh_binary_byte(&idata, 0)?;
-    sh_binary_align(&idata, 8, 0)?;
+    let exit_name = sh_link_import_name(link, "ExitProcess")?;
+    let kernel_name = sh_link_import_name(link, "KERNEL32.dll")?;
+    let exit_record = sh_link_import_add(link, exit_name, kernel_name, exit_name, -1, 0, 0)?;
+    let import_plan = sh_link_import_plan(link)?;
     let object = link.objects;
-    let imports = sh_link_add_section(link, object, sh_link_intern(link, ".idata")?, &idata, 3221225536, 8)?;
-    let thunk_bytes = sh_binary_new(6);
-    sh_binary_byte(&thunk_bytes, 255)?;
-    sh_binary_byte(&thunk_bytes, 37)?;
-    sh_binary_unsigned(&thunk_bytes, 0, 4)?;
-    let thunk = sh_link_add_section(link, object, sh_link_intern(link, ".text")?, &thunk_bytes, 1610612768, 16)?;
+    let imports = sh_link_import_sections(link, object, &import_plan)?;
+    let thunk_symbol = sh_link_word(&link.imports, 9, exit_record, 6);
+    let iat_symbol = sh_link_word(&link.imports, 9, exit_record, 7);
+    let thunk = sh_link_word(&link.symbols, 6, thunk_symbol, 3) - 1;
     let start_bytes = sh_binary_new(19);
     sh_binary_unsigned(&start_bytes, 686588744, 4)?;
     sh_binary_byte(&start_bytes, 232)?;
@@ -90,23 +89,20 @@ def sh_link_synthetic(link: &mut ShLinker, entry: &String) -> Result<ShPePlan, i
     let pdata = sh_link_add_section(link, object, sh_link_intern(link, ".pdata")?, &pdata_bytes, 1073741888, 4)?;
     let reloc_bytes = sh_binary_new(0);
     let reloc = sh_link_add_section(link, object, sh_link_intern(link, ".reloc")?, &reloc_bytes, 1107296320, 4)?;
-    let thunk_symbol = sh_link_add_symbol(link, object, sh_link_intern(link, "__sg_link_exit_thunk")?, 0, thunk + 1, 3)?;
-    let iat_symbol = sh_link_add_symbol(link, object, sh_link_intern(link, "__sg_link_exit_iat")?, 56, imports + 1, 3)?;
     let start_symbol = sh_link_add_symbol(link, object, sh_link_intern(link, "__sg_link_start")?, 0, start + 1, 3)?;
     let unwind_symbol = sh_link_add_symbol(link, object, sh_link_intern(link, "__sg_link_start_unwind")?, 0, unwind + 1, 3)?;
-    sh_link_add_relocation(link, thunk, 2, iat_symbol, 4)?;
     sh_link_add_relocation(link, start, 5, entry_symbol, 4)?;
     sh_link_add_relocation(link, start, 13, thunk_symbol, 4)?;
     sh_link_add_relocation(link, pdata, 0, start_symbol, 3)?;
     sh_link_add_relocation(link, pdata, 4, start_symbol, 3)?;
     sh_link_add_relocation(link, pdata, 8, unwind_symbol, 3)?;
-    let plan = ShPePlan { imports: imports, thunk: thunk, start: start, unwind: unwind, pdata: pdata, reloc: reloc, entry_symbol: entry_symbol, thunk_symbol: thunk_symbol, iat_symbol: iat_symbol, start_symbol: start_symbol };
+    let plan = ShPePlan { imports: imports, thunk: thunk, start: start, unwind: unwind, pdata: pdata, reloc: reloc, entry_symbol: entry_symbol, thunk_symbol: thunk_symbol, iat_symbol: iat_symbol, start_symbol: start_symbol, iat_first: import_plan.iat_first, iat_size: import_plan.iat_size, directory_size: import_plan.directory_size };
     Result { is_ok: true, value: plan, error: 0 };
 }
 
 def sh_link_resolve(link: &ShLinker, plan: &ShPePlan) -> Result<i64, i64> {
     let mut index = 0;
-    while index < link.symbols.len() / 6 { let section = sh_link_word(&link.symbols, 6, index, 3); let name = sh_link_word(&link.symbols, 6, index, 1); let mut target = index; if sh_link_word(&link.symbols, 6, index, 4) == 2 { let definition = sh_link_external(link, name)?; if section == 0 { target = definition; if target < 0 and sh_link_name_equal(link, name, "ExitProcess") { target = plan.thunk_symbol; }; if target < 0 and sh_link_name_equal(link, name, "__imp_ExitProcess") { target = plan.iat_symbol; }; if target < 0 { return sh_i64_error(7204); }; }; }; if not link.symbols.set(index * 6 + 5, target) { return sh_i64_error(7202); }; index = index + 1; };
+    while index < link.symbols.len() / 6 { let section = sh_link_word(&link.symbols, 6, index, 3); let name = sh_link_word(&link.symbols, 6, index, 1); let mut target = index; if sh_link_word(&link.symbols, 6, index, 4) == 2 { let definition = sh_link_external(link, name)?; if section == 0 { target = definition; if target < 0 { target = sh_link_import_symbol(link, name); }; if target < 0 { return sh_i64_error(7204); }; }; }; if not link.symbols.set(index * 6 + 5, target) { return sh_i64_error(7202); }; index = index + 1; };
     sh_i64_ok(0);
 }
 
@@ -202,14 +198,14 @@ def sh_link_headers(link: &ShLinker, output: &ShBinary, plan: &ShPePlan, headers
     sh_binary_patch(output, optional + 108, 16, 4)?;
     let imports = sh_link_word(&link.sections, 10, plan.imports, 8);
     sh_binary_patch(output, optional + 120, imports, 4)?;
-    sh_binary_patch(output, optional + 124, 40, 4)?;
+    sh_binary_patch(output, optional + 124, plan.directory_size, 4)?;
     let pdata = sh_link_group_named(link, ".pdata");
     sh_binary_patch(output, optional + 136, sh_link_word(&link.groups, 6, pdata, 4), 4)?;
     sh_binary_patch(output, optional + 140, sh_link_word(&link.groups, 6, pdata, 3), 4)?;
     sh_binary_patch(output, optional + 152, sh_link_word(&link.sections, 10, plan.reloc, 8), 4)?;
     sh_binary_patch(output, optional + 156, sh_link_word(&link.sections, 10, plan.reloc, 3), 4)?;
-    sh_binary_patch(output, optional + 208, imports + 56, 4)?;
-    sh_binary_patch(output, optional + 212, 16, 4)?;
+    sh_binary_patch(output, optional + 208, imports + plan.iat_first, 4)?;
+    sh_binary_patch(output, optional + 212, plan.iat_size, 4)?;
     group = 0;
     while group < count { let row = 328 + group * 40; let name = sh_symbol_text(&link.names, sh_link_word(&link.groups, 6, group, 0))?; let bytes = sh_coff_symbol_bytes(&name)?; if name.len() <= 8 { let mut index = 0; while index < name.len() { sh_binary_patch(output, row + index, bytes.get_u8(index)?, 1)?; index = index + 1; }; } else { sh_binary_patch(output, row, 46, 1)?; sh_binary_patch(output, row + 1, 115, 1)?; sh_binary_patch(output, row + 2, 103, 1)?; sh_binary_patch(output, row + 3, 48 + group / 10, 1)?; sh_binary_patch(output, row + 4, 48 + group % 10, 1)?; (); }; let size = sh_link_word(&link.groups, 6, group, 3); sh_binary_patch(output, row + 8, size, 4)?; sh_binary_patch(output, row + 12, sh_link_word(&link.groups, 6, group, 4), 4)?; sh_binary_patch(output, row + 16, sh_link_align(size, 512, link.limit)?, 4)?; sh_binary_patch(output, row + 20, if size > 0 { sh_link_word(&link.groups, 6, group, 5); } else { 0; }, 4)?; sh_binary_patch(output, row + 36, sh_link_word(&link.groups, 6, group, 1), 4)?; group = group + 1; };
     sh_i64_ok(image_size);
@@ -257,13 +253,6 @@ def sh_link_pe_inner(link: &mut ShLinker, entry: &String) -> Result<ShBinary, i6
     let reloc_raw = sh_link_word(&link.sections, 10, plan.reloc, 9);
     while index < sh_binary_len(&base) { sh_binary_patch(&output, reloc_raw + index, sh_binary_get(&base, index)?, 1)?; index = index + 1; };
     sh_link_patch_relocations(link, &output)?;
-    let imports_rva = sh_link_word(&link.sections, 10, plan.imports, 8);
-    let imports_raw = sh_link_word(&link.sections, 10, plan.imports, 9);
-    sh_binary_patch(&output, imports_raw, imports_rva + 40, 4)?;
-    sh_binary_patch(&output, imports_raw + 12, imports_rva + 86, 4)?;
-    sh_binary_patch(&output, imports_raw + 16, imports_rva + 56, 4)?;
-    sh_binary_patch(&output, imports_raw + 40, imports_rva + 72, 8)?;
-    sh_binary_patch(&output, imports_raw + 56, imports_rva + 72, 8)?;
     sh_link_headers(link, &output, &plan, headers)?;
     sh_link_validate_pdata(link, &output)?;
     Result { is_ok: true, value: output, error: 0 };

@@ -1,5 +1,7 @@
 import selfhost_link_pe;
 
+import selfhost_link_archive;
+
 import std::assert;
 
 import std::args;
@@ -36,6 +38,69 @@ def sh_lkt_object(first: bool) -> Result<ShBinary, i64> {
     let private_name = sh_lkt_name("private")?;
     sh_object_add_symbol(&object, &private_name, 0, text + 1, true, 3)?;
     if first { let helper_name = sh_lkt_name("linked_helper_世界")?; let helper = sh_object_add_symbol(&object, &helper_name, 0, 0, true, 2)?; let pointer_name = sh_lkt_name("linked_pointer_to_value")?; let pointer = sh_object_add_symbol(&object, &pointer_name, 0, 0, false, 2)?; sh_object_add_relocation(&object, text, 5, helper, 4)?; sh_object_add_relocation(&object, text, 11, pointer, 1)?; let unwind_bytes = sh_binary_new(8); sh_binary_byte(&unwind_bytes, 1)?; sh_binary_byte(&unwind_bytes, 4)?; sh_binary_byte(&unwind_bytes, 1)?; sh_binary_byte(&unwind_bytes, 0)?; sh_binary_byte(&unwind_bytes, 4)?; sh_binary_byte(&unwind_bytes, 66)?; sh_binary_unsigned(&unwind_bytes, 0, 2)?; let unwind_name = sh_lkt_name(".xdata")?; let unwind = sh_object_add_section(&object, &unwind_name, &unwind_bytes, 1073741888, 4)?; let unwind_symbol_name = sh_lkt_name("main_unwind")?; let unwind_symbol = sh_object_add_symbol(&object, &unwind_symbol_name, 0, unwind + 1, false, 3)?; let pdata_bytes = sh_binary_new(12); sh_binary_unsigned(&pdata_bytes, 0, 4)?; sh_binary_unsigned(&pdata_bytes, sh_binary_len(&code), 4)?; sh_binary_unsigned(&pdata_bytes, 0, 4)?; let pdata_name = sh_lkt_name(".pdata")?; let pdata = sh_object_add_section(&object, &pdata_name, &pdata_bytes, 1073741888, 4)?; sh_object_add_relocation(&object, pdata, 0, function, 3)?; sh_object_add_relocation(&object, pdata, 4, function, 3)?; sh_object_add_relocation(&object, pdata, 8, unwind_symbol, 3)?; (); } else { let value_name = sh_lkt_name("linked_value")?; let value = sh_object_add_symbol(&object, &value_name, 0, rdata + 1, false, 2)?; let pointer_name = sh_lkt_name("linked_pointer_to_value")?; sh_object_add_symbol(&object, &pointer_name, 8, rdata + 1, false, 2)?; let absolute_name = sh_lkt_name("absolute_1234")?; let absolute = sh_object_add_symbol(&object, &absolute_name, 1234, -1, false, 3)?; sh_object_add_relocation(&object, rdata, 8, value, 1)?; sh_object_add_relocation(&object, rdata, 16, value, 3)?; sh_object_add_relocation(&object, rdata, 20, value, 10)?; sh_object_add_relocation(&object, rdata, 24, value, 11)?; sh_object_add_relocation(&object, rdata, 28, absolute, 2)?; let mut index = 0; while index < 5 { sh_object_add_relocation(&object, rdata, 32 + index * 4, value, 5 + index)?; index = index + 1; }; let extra_name = sh_lkt_name(".rodata.extra.long")?; sh_object_add_section(&object, &extra_name, &code, 1073741888, 1)?; (); };
+    sh_object_emit(&object);
+}
+
+def sh_lkt_sdk_object() -> Result<ShBinary, i64> {
+    let object = sh_object_new(16384);
+    let code = sh_binary_new(128);
+    sh_binary_unsigned(&code, 686588744, 4)?;
+    sh_binary_byte(&code, 232)?;
+    sh_binary_unsigned(&code, 0, 4)?;
+    sh_binary_byte(&code, 133)?;
+    sh_binary_byte(&code, 192)?;
+    sh_binary_byte(&code, 15)?;
+    sh_binary_byte(&code, 132)?;
+    sh_binary_unsigned(&code, 29, 4)?;
+    sh_binary_byte(&code, 255)?;
+    sh_binary_byte(&code, 21)?;
+    sh_binary_unsigned(&code, 0, 4)?;
+    sh_binary_byte(&code, 133)?;
+    sh_binary_byte(&code, 192)?;
+    sh_binary_byte(&code, 15)?;
+    sh_binary_byte(&code, 132)?;
+    sh_binary_unsigned(&code, 15, 4)?;
+    sh_binary_byte(&code, 72)?;
+    sh_binary_byte(&code, 184)?;
+    sh_binary_unsigned(&code, 42, 8)?;
+    sh_binary_unsigned(&code, 683967304, 4)?;
+    sh_binary_byte(&code, 195)?;
+    sh_binary_byte(&code, 72)?;
+    sh_binary_byte(&code, 184)?;
+    sh_binary_unsigned(&code, 1, 8)?;
+    sh_binary_unsigned(&code, 683967304, 4)?;
+    sh_binary_byte(&code, 195)?;
+    let text_name = sh_lkt_name(".text")?;
+    let section = sh_object_add_section(&object, &text_name, &code, 1610612768, 16)?;
+    let main_name = sh_lkt_name("main")?;
+    let main_symbol = sh_object_add_symbol(&object, &main_name, 0, section + 1, true, 2)?;
+    let pid_name = sh_lkt_name("GetCurrentProcessId")?;
+    let pid = sh_object_add_symbol(&object, &pid_name, 0, 0, true, 2)?;
+    let tid_name = sh_lkt_name("__imp_GetCurrentThreadId")?;
+    let tid = sh_object_add_symbol(&object, &tid_name, 0, 0, false, 2)?;
+    sh_object_add_relocation(&object, section, 5, pid, 4)?;
+    sh_object_add_relocation(&object, section, 19, tid, 4)?;
+    let unwind_bytes = sh_binary_new(8);
+    sh_binary_byte(&unwind_bytes, 1)?;
+    sh_binary_byte(&unwind_bytes, 4)?;
+    sh_binary_byte(&unwind_bytes, 1)?;
+    sh_binary_byte(&unwind_bytes, 0)?;
+    sh_binary_byte(&unwind_bytes, 4)?;
+    sh_binary_byte(&unwind_bytes, 66)?;
+    sh_binary_unsigned(&unwind_bytes, 0, 2)?;
+    let unwind_name = sh_lkt_name(".xdata")?;
+    let unwind = sh_object_add_section(&object, &unwind_name, &unwind_bytes, 1073741888, 4)?;
+    let unwind_symbol_name = sh_lkt_name("sdk_main_unwind")?;
+    let unwind_symbol = sh_object_add_symbol(&object, &unwind_symbol_name, 0, unwind + 1, false, 3)?;
+    let pdata_bytes = sh_binary_new(12);
+    sh_binary_unsigned(&pdata_bytes, 0, 4)?;
+    sh_binary_unsigned(&pdata_bytes, sh_binary_len(&code), 4)?;
+    sh_binary_unsigned(&pdata_bytes, 0, 4)?;
+    let pdata_name = sh_lkt_name(".pdata")?;
+    let pdata = sh_object_add_section(&object, &pdata_name, &pdata_bytes, 1073741888, 4)?;
+    sh_object_add_relocation(&object, pdata, 0, main_symbol, 3)?;
+    sh_object_add_relocation(&object, pdata, 4, main_symbol, 3)?;
+    sh_object_add_relocation(&object, pdata, 8, unwind_symbol, 3)?;
     sh_object_emit(&object);
 }
 
@@ -99,8 +164,53 @@ def sh_lkt_write(path: &str, bytes: &ShBinary) -> Result<i64, i64> {
     file_write_str_raw(sengoo_stdlib_str_ptr(path), buffer.ptr(), buffer.used_len());
 }
 
+def sh_lkt_sdk_scope(object: &ShBinary, library: &ShBinary, invalid: &ShBinary) -> Result<i64, i64> {
+    let mut link = sh_link_new(67108864);
+    sh_link_coff(&mut link, object)?;
+    let libraries = sh_link_libraries_new(67108864);
+    sh_link_library_add(&libraries, library)?;
+    let entry = sh_lkt_name("main")?;
+    sh_link_libraries_resolve(&mut link, &libraries, &entry)?;
+    let image = sh_link_pe(&mut link, &entry)?;
+    if sh_binary_len(&image) < 1024 { return sh_i64_error(7291); };
+    let mut rejected = sh_link_new(67108864);
+    let result = sh_link_archive_apply(&mut rejected, invalid, &entry);
+    if result.is_ok() or result.error != 7201 { return sh_i64_error(7292); };
+    let short = sh_binary_new(24);
+    sh_link_zeros(&short, 20)?;
+    sh_binary_patch(&short, 2, 65535, 2)?;
+    sh_binary_patch(&short, 6, 34404, 2)?;
+    sh_binary_patch(&short, 12, 4, 4)?;
+    sh_binary_patch(&short, 18, 4, 2)?;
+    sh_binary_unsigned(&short, 6513249, 4)?;
+    let malformed_import = sh_link_import_object(&rejected, &short);
+    if malformed_import.is_ok() or malformed_import.error != 7201 { return sh_i64_error(7293); };
+    sh_i64_ok(0);
+}
+
+def sh_lkt_sdk_resources(object: &ShBinary, library: &ShBinary, invalid: &ShBinary) -> Result<i64, i64> {
+    let strings = sengoo_string_live_handle_count();
+    let buffers = sengoo_buffer_live_handle_count();
+    let opaque = sengoo_opaque_live_handle_count();
+    let snapshots = sengoo_file_snapshot_live_handle_count();
+    let snapshot_bytes = sengoo_file_snapshot_live_bytes();
+    let mut round = 0;
+    while round < 10 { sh_lkt_sdk_scope(object, library, invalid)?; round = round + 1; };
+    assert_eq_i64(sengoo_string_live_handle_count(), strings, "linker.sg", 211);
+    assert_eq_i64(sengoo_buffer_live_handle_count(), buffers, "linker.sg", 212);
+    assert_eq_i64(sengoo_opaque_live_handle_count(), opaque, "linker.sg", 213);
+    assert_eq_i64(sengoo_file_snapshot_live_handle_count(), snapshots, "linker.sg", 214);
+    assert_eq_i64(sengoo_file_snapshot_live_bytes(), snapshot_bytes, "linker.sg", 215);
+    println("selfhost SG archive/SDK exact resources: ok");
+    sh_i64_ok(0);
+}
+
 def sh_lkt_cli() -> Result<i64, i64> {
     let mode = sh_lkt_argument(0)?;
+    let resource_name = string_from_str("sdk-resources")?;
+    if sengoo_string_eq(mode.handle, resource_name.handle) != 0 { if args_len() != 4 { return sh_i64_ok(64); }; let object_path = sh_lkt_argument(1)?; let library_path = sh_lkt_argument(2)?; let invalid_path = sh_lkt_argument(3)?; let object = sh_link_load(object_path.as_str(), 67108864)?; let library = sh_link_load(library_path.as_str(), 67108864)?; let invalid = sh_link_load(invalid_path.as_str(), 67108864)?; return sh_lkt_sdk_resources(&object, &library, &invalid); };
+    let sdk_name = string_from_str("sdk")?;
+    if sengoo_string_eq(mode.handle, sdk_name.handle) != 0 { if args_len() != 2 { return sh_i64_ok(64); }; let path = sh_lkt_argument(1)?; let object = sh_lkt_sdk_object()?; sh_lkt_write(path.as_str(), &object)?; return sh_i64_ok(0); };
     let emit_name = string_from_str("emit")?;
     if sengoo_string_eq(mode.handle, emit_name.handle) != 0 { if args_len() != 3 { return sh_i64_ok(64); }; let first_path = sh_lkt_argument(1)?; let second_path = sh_lkt_argument(2)?; let a = sh_lkt_object(true)?; let b = sh_lkt_object(false)?; sh_lkt_write(first_path.as_str(), &a)?; sh_lkt_write(second_path.as_str(), &b)?; return sh_i64_ok(0); };
     let link_name = string_from_str("link")?;
@@ -108,8 +218,10 @@ def sh_lkt_cli() -> Result<i64, i64> {
     let output = sh_lkt_argument(1)?;
     let entry = sh_lkt_argument(2)?;
     let mut link = sh_link_new(67108864);
+    let libraries = sh_link_libraries_new(67108864);
     let mut index = 3;
-    while index < args_len() { let path = sh_lkt_argument(index)?; let bytes = sh_link_load(path.as_str(), 67108864)?; sh_link_coff(&mut link, &bytes)?; index = index + 1; };
+    while index < args_len() { let path = sh_lkt_argument(index)?; let bytes = sh_link_load(path.as_str(), 67108864)?; if sh_link_archive_magic(&bytes) { sh_link_library_add(&libraries, &bytes)?; (); } else { if sh_link_uint(&bytes, 0, 2).unwrap_or(-1) == 0 and sh_link_uint(&bytes, 2, 2).unwrap_or(-1) == 65535 and sh_link_uint(&bytes, 4, 2).unwrap_or(-1) == 0 { sh_link_import_object(&link, &bytes)?; (); } else { sh_link_coff(&mut link, &bytes)?; (); }; }; index = index + 1; };
+    sh_link_libraries_resolve(&mut link, &libraries, &entry)?;
     let image = sh_link_pe(&mut link, &entry)?;
     sh_lkt_write(output.as_str(), &image)?;
     sh_i64_ok(0);

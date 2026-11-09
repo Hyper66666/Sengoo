@@ -44,3 +44,15 @@ and final process/equality/performance gates SHALL retain their own evidence.
 - **WHEN** only a bounded object/image subset has executable evidence
 - **THEN** its limits and remaining linker/debug tasks stay visible
 - **AND** M5 remains open until its full gates pass
+
+
+#### Scenario: A supported indexed native import library is linked
+- **WHEN** a standard COFF archive index identifies required AMD64 short import members
+- **THEN** the linker validates its indices and selects required members without external link tools
+- **AND** an SG-produced executable calls named native DLL imports through both a code thunk and an IAT
+- **AND** unsupported selected regular COFF or import record forms fail explicitly
+
+#### Scenario: Lazy archive dependencies cross library order
+- **WHEN** the entry and its strong unresolved references reside in separate supported indexed archives
+- **THEN** repeated selection resolves the required closure in deterministic object order
+- **AND** unused duplicate members do not introduce false duplicate-definition failures

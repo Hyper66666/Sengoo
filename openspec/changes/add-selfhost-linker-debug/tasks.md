@@ -45,3 +45,29 @@ Its bad-pdata overflow fixture correctly reported relocation overflow 7206;
 the final gate keeps that check and separately tests an in-range RVA pointing
 outside code, which reports 7207. `m5_complete` remains `false`; full archives,
 import libraries/SDKs, DLLs, CodeView/PDB and debugger evidence remain open.
+
+
+## Indexed archive and SDK import checkpoint evidence
+
+- [x] Validate standard COFF archive first/second indices, bounded member extents, long UTF-8 filenames and supported padding; lazily select required members across library order.
+- [x] Parse AMD64 MSVC short import ordinal/name/no-prefix/undecorate/export-as records, create stable DLL groups, code thunks and contiguous IATs directly in SG.
+- [x] Link the real Windows 10.0.26100.0 x64 kernel32.Lib without modification, call GetCurrentProcessId through a thunk and GetCurrentThreadId through an IAT, and execute the SG PE with exit 42.
+- [x] Verify multiple DLLs, ordinal imports and supported import name transformations, independent import inspection, repeated identical PE bytes, lazy archive extraction and cross-archive closure.
+- [x] Verify 37 total malformed/unsupported/conflicting/overflow negatives preserve existing output, 50 foundation scopes and 10 complete SDK success/failure scopes recover resources exactly.
+
+Evidence: `target/selfhost/m5-linker-sdk-checked/evidence.json`, SHA-256
+`d6a2d672db09d27f14782a2d6be1580300580adafe9d5b31640201a0c83c6518`.
+Start/end full revision is `0acab29421d07b497cb3592f32daf9f34fcd4c08` on
+Windows 11 AMD64. All 174 source inputs and recorded tool/SDK/native-DLL hashes
+remained unchanged; all 69 commands passed. The real SDK library contains
+1,401 members including its two native index members; unused full COFF import
+descriptor records were not extracted. The gate records the installed SDK and
+native kernel32.dll paths and SHA-256 identities. Independent llvm-lib creates
+the static archives; production SG links run with an empty toolchain PATH.
+
+Earlier failed trials under `m5-linker-sdk-trial` and `trial2` exposed standard
+archive internal NUL/LF padding. `trial3` passed the earlier corpus, and the
+final checked report adds cross-library closure, ordinal/type-1 IAT cases and
+stronger malformed index/long-name checks. Full static SDK auxiliary/weak/common/
+COMDAT compatibility, DLL/TLS/resources, CodeView/PDB and real debugger gates
+remain open; `m5_complete` is `false`.
