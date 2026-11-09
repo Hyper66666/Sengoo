@@ -1,0 +1,111 @@
+import selfhost_float_literal;
+
+import std::assert;
+
+import std::args;
+
+import std::io;
+
+extern "C" {
+    fn sengoo_string_live_handle_count() -> i64;
+    fn sengoo_buffer_live_handle_count() -> i64;
+    fn sengoo_opaque_live_handle_count() -> i64;
+}
+
+def sh_flt_expect(text: &str, bits: i64, expected: i64) -> Result<bool, i64> {
+    let literal = string_from_str(text)?;
+    let result = sh_float_literal(&literal, bits);
+    assert_true(result.is_ok(), "float_literal.sg", 15);
+    assert_eq_i64(result.value, expected, "float_literal.sg", 16);
+    Result { is_ok: true, value: true, error: 0 };
+}
+
+def sh_flt_invalid(text: &str, bits: i64, expected: i64) -> Result<bool, i64> {
+    let literal = string_from_str(text)?;
+    let result = sh_float_literal(&literal, bits);
+    assert_true(not result.is_ok(), "float_literal.sg", 23);
+    assert_eq_i64(result.error, expected, "float_literal.sg", 24);
+    Result { is_ok: true, value: true, error: 0 };
+}
+
+def sh_flt_scope() -> Result<bool, i64> {
+    sh_flt_expect("0.0", 64, 0)?;
+    sh_flt_expect("-0.0e999999", 64, -9223372036854775807 - 1)?;
+    sh_flt_expect("1.0", 64, 4607182418800017408)?;
+    sh_flt_expect("42.0f64", 64, 4631107791820423168)?;
+    sh_flt_expect("0.1", 64, 4591870180066957722)?;
+    sh_flt_expect("1.00000000000000011102230246251565404236316680908203125", 64, 4607182418800017408)?;
+    sh_flt_expect("1.000000000000000111022302462515654042363166809082031251", 64, 4607182418800017409)?;
+    sh_flt_expect("4.9406564584124654e-324", 64, 1)?;
+    sh_flt_expect("2.2250738585072014e-308", 64, 4503599627370496)?;
+    sh_flt_expect("1.7976931348623157e308", 64, 9218868437227405311)?;
+    sh_flt_expect("1.8e308", 64, 9218868437227405312)?;
+    sh_flt_expect("1.0e-999999", 64, 0)?;
+    sh_flt_expect("1.0e999999", 64, 9218868437227405312)?;
+    sh_flt_expect("1.0", 32, 1065353216)?;
+    sh_flt_expect("42.0f32", 32, 1109917696)?;
+    sh_flt_expect("0.1", 32, 1036831949)?;
+    sh_flt_expect("-0.0", 32, 2147483648)?;
+    sh_flt_expect("1.000000059604644775390625", 32, 1065353216)?;
+    sh_flt_expect("1.000000059604644775390626", 32, 1065353217)?;
+    let double_round = string_from_str("1.000000059604644775390626f32")?;
+    let compatible = sh_float_literal_reference(&double_round, 32);
+    assert_true(compatible.is_ok(), "float_literal.sg", 50);
+    assert_eq_i64(compatible.value, 1065353216, "float_literal.sg", 51);
+    sh_flt_expect("1.401298464324817e-45", 32, 1)?;
+    sh_flt_expect("1.1754943508222875e-38", 32, 8388608)?;
+    sh_flt_expect("3.4028234663852886e38", 32, 2139095039)?;
+    sh_flt_expect("3.4028236e38", 32, 2139095040)?;
+    sh_flt_expect("+1_234.5_00e-0_2f64", 64, 4623139235229744497)?;
+    sh_flt_invalid("1", 64, 6801)?;
+    sh_flt_invalid("1e3", 64, 6801)?;
+    sh_flt_invalid(".1", 64, 6801)?;
+    sh_flt_invalid("1.", 64, 6801)?;
+    sh_flt_invalid("1._0", 64, 6801)?;
+    sh_flt_invalid("1.0_e3", 64, 6801)?;
+    sh_flt_invalid("1.0e_3", 64, 6801)?;
+    sh_flt_invalid("1.0e+", 64, 6801)?;
+    sh_flt_invalid("1.0f16", 64, 6801)?;
+    sh_flt_invalid("NaN", 64, 6801)?;
+    sh_flt_invalid("1.0", 16, 6801)?;
+    let too_long = string_new();
+    let mut index = 0;
+    while index < 16385 { too_long.push_str("0")?; index = index + 1; };
+    let rejected = sh_float_literal(&too_long, 64);
+    assert_eq_i64(rejected.error, 6802, "float_literal.sg", 68);
+    let too_precise = string_from_str("1.")?;
+    index = 0;
+    while index < 4096 { too_precise.push_str("1")?; index = index + 1; };
+    let precise_rejected = sh_float_literal(&too_precise, 64);
+    assert_eq_i64(precise_rejected.error, 6802, "float_literal.sg", 73);
+    Result { is_ok: true, value: true, error: 0 };
+}
+
+def sh_flt_file() -> Result<bool, i64> {
+    let path_bytes = ffi_buffer_new(arg_len(0).unwrap_or(0))?;
+    let copied = arg_copy(0, path_bytes)?;
+    let path = string_from_utf8(path_bytes, copied)?;
+    let sources = sh_sources_new(1, 16777216);
+    let source = sh_source_load(&sources, path.as_str())?;
+    let length = sh_source_len(&sources, source)?;
+    let text = sh_span_text(&sources, ShSpan { source: source, start: 0, end: length })?;
+    let bytes = ffi_buffer_new(length)?;
+    text.copy_to_buffer(bytes)?;
+    let mut line = 0;
+    while line < length { let width = if sh_fl_byte(bytes, line, length) == 51 and sh_fl_byte(bytes, line + 1, length) == 50 { 32; } else { if sh_fl_byte(bytes, line, length) == 54 and sh_fl_byte(bytes, line + 1, length) == 52 { 64; } else { 0; }; }; if width == 0 or sh_fl_byte(bytes, line + 2, length) != 9 { return Result { is_ok: false, value: false, error: 6801 }; }; let mut end = line + 3; while end < length and sh_fl_byte(bytes, end, length) != 10 { end = end + 1; }; let content_end = if end > line + 3 and sh_fl_byte(bytes, end - 1, length) == 13 { end - 1; } else { end; }; let literal = sh_span_text(&sources, ShSpan { source: source, start: line + 3, end: content_end })?; let result = if args_len() == 2 { sh_float_literal_reference(&literal, width); } else { sh_float_literal(&literal, width); }; let output = string_from_str(if result.is_ok() { "ok "; } else { "error "; })?; output.push_i64(if result.is_ok() { result.value; } else { result.error; })?; output.push_str("\n")?; io_stdout_write(output.as_str())?; line = end + 1; };
+    Result { is_ok: true, value: true, error: 0 };
+}
+
+def main() -> i64 {
+    if args_len() > 0 { let result = sh_flt_file(); if not result.is_ok() { println(result.error); return 1; }; return 0; };
+    let strings = sengoo_string_live_handle_count();
+    let buffers = sengoo_buffer_live_handle_count();
+    let opaque = sengoo_opaque_live_handle_count();
+    let mut round = 0;
+    while round < 100 { let result = sh_flt_scope(); if not result.is_ok() { println(result.error); return 1; }; round = round + 1; };
+    assert_eq_i64(sengoo_string_live_handle_count(), strings, "float_literal.sg", 117);
+    assert_eq_i64(sengoo_buffer_live_handle_count(), buffers, "float_literal.sg", 118);
+    assert_eq_i64(sengoo_opaque_live_handle_count(), opaque, "float_literal.sg", 119);
+    println("selfhost exact decimal IEEE literals: ok");
+    0;
+}

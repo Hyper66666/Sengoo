@@ -148,6 +148,19 @@ remain separate open work.
 
 Primary references:
 
+`float_literal.sg` uses bounded base-2^30 rational integers, exact remainder
+comparison and nearest-even rounding to produce IEEE bits entirely in SG. It
+handles subnormals, signed zero, overflow and underflow. `sh_float_literal`
+rounds directly to a requested target; the edition 2026 source path uses
+`sh_float_literal_reference` to preserve the reference parser's initial f64
+rounding before f32 conversion. Fifteen actual reference IR/C executions prove
+that compatibility at double-rounding boundaries. Input limits are 16,384
+bytes, 4,096 significant digits and 1,024 integer limbs; errors 6801 and 6802
+report malformed literals and bounded-resource failures. Signs are accepted
+by the reusable API although the source lexer normally represents a unary sign
+separately. Decimal fractions, exponents, separators and f32/f64 suffixes are
+supported; inf/nan/hex spellings are not parsed as decimal literals.
+
 - Intel instruction reference: https://www.intel.com/content/www/us/en/content-details/671110/intel-64-and-ia-32-architectures-software-developer-s-manual-combined-volumes-2a-2b-2c-and-2d-instruction-set-reference-a-z.html
 - Windows ABI: https://learn.microsoft.com/en-us/cpp/build/x64-calling-convention?view=msvc-170
 - Prologue/epilogue and stack probing: https://learn.microsoft.com/en-us/cpp/build/prolog-and-epilog?view=msvc-170

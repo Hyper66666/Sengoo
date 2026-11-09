@@ -11,6 +11,7 @@
 - [x] Verify bounded scalar SSE f32/f64 instruction encoding with independently specified bytes, CPU arithmetic/load/store/bit-pattern execution, damaged-byte rejection and 100 exact resource scopes (`target/selfhost/m4-sse-final/evidence.json`). Floating MIR and complete ABI/NaN/conversion behavior remain open.
 - [x] Execute scalar floating MIR arithmetic, constant bits, memory/call/return storage and ordered/unordered comparisons against independent C tests, including NaN/infinities/signed zero and mixed six-position Windows integer/float calls (`target/selfhost/m4-float/evidence.json`). Decimal literals and numeric conversions remain open.
 - [x] Classify and execute initial aggregate parameters/results with size-aware values, typed field construction/extraction, aggregate CFG edge snapshots, indirect argument copies and hidden return pointers; independently verify 3/8/16-byte structures and enum payload storage using C (`target/selfhost/m4-aggregate-abi/evidence.json`). Complete cleanup/indexing/overlap/ABI coverage remains open.
+- [x] Convert bounded decimal floating literals entirely in SG with exact rational IEEE rounding and an edition-2026-compatible f64-to-f32 path; independently verify 3,332 cases, 15 actual reference double-rounding executions and 100 resource rounds (`target/selfhost/m4-float-literal-exact/evidence.json`). Numeric casts and complete backend integration remain open.
 - [x] Emit fixed-frame Windows x64 `.pdata/.xdata` unwind records and checked `__chkstk` probes for >4 KiB frames; verify LLVM inspection, `RtlLookupFunctionEntry`, `RtlVirtualUnwind`, deterministic objects and exact resource recovery (`target/selfhost/m4-unwind-final3/evidence.json`). Exception handlers, XMM saves and CodeView remain open.
 
 ## Supported target behavior
@@ -119,3 +120,15 @@ deterministic objects, independent inspection/disassembly and all previous
 integer/float/unwind/probe regressions passed. C execution verified odd/small/
 large aggregate storage and call/return conventions, enum tag/payload values
 and both aggregate merge branches. This partial gate does not close M4.
+
+Decimal conversion evidence: `target/selfhost/m4-float-literal-exact/evidence.json`,
+SHA-256 `5989a6bc4f92e5d88e20c8ec060d621bee4e3930932339577f091510853679ee`,
+revision `cb3277bcfdaf55ce10c04adcb053517f011fba70`, Windows 11 AMD64.
+Fourteen commands passed with unchanged sources/tools; 3,332 strict and
+reference-compatible inputs plus repeated bytes and 100 exact resource rounds
+were checked. Fifteen f32 double-rounding boundaries matched actual frozen
+Rust IR compiled and observed through C. One UCRT strtod oracle discrepancy
+was retained and resolved using independent clang constants, Python builtin,
+exact Fraction and SG agreement. The initial failed comparison remains at
+`target/selfhost/m4-float-literal-final/`; no language parity exception is
+introduced by this converter.

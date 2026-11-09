@@ -1,0 +1,175 @@
+import selfhost_core;
+
+def sh_fl_word(words: &Vec<i64>, index: i64) -> i64 {
+    if index < 0 or index >= words.len() { return 0; };
+    sengoo_vec_get_or_default_i64(words.handle, index, 0);
+}
+
+def sh_fl_trim(words: &Vec<i64>) {
+    while words.len() > 0 and sh_fl_word(words, words.len() - 1) == 0 { words.pop(); };
+    ();
+}
+
+def sh_fl_mul_add(words: &Vec<i64>, multiplier: i64, addend: i64) -> bool {
+    let mut carry = addend;
+    let mut index = 0;
+    while index < words.len() { let value = sh_fl_word(words, index) * multiplier + carry; if not words.set(index, value & 1073741823) { return false; }; carry = value >> 30; index = index + 1; };
+    while carry > 0 { if words.len() >= 1024 or not words.push(carry & 1073741823) { return false; }; carry = carry >> 30; };
+    true;
+}
+
+def sh_fl_bitlen(words: &Vec<i64>) -> i64 {
+    if words.len() == 0 { return 0; };
+    let mut high = sh_fl_word(words, words.len() - 1);
+    let mut bits = (words.len() - 1) * 30;
+    while high > 0 { bits = bits + 1; high = high >> 1; };
+    bits;
+}
+
+def sh_fl_shift_word(words: &Vec<i64>, index: i64, shift: i64) -> i64 {
+    let whole = shift / 30;
+    let remainder = shift % 30;
+    let low = sh_fl_word(words, index - whole);
+    if remainder == 0 { return low; };
+    ((low << remainder) & 1073741823) | (sh_fl_word(words, index - whole - 1) >> (30 - remainder));
+}
+
+def sh_fl_compare_shift(lhs: &Vec<i64>, rhs: &Vec<i64>, shift: i64) -> i64 {
+    let left_bits = sh_fl_bitlen(lhs);
+    let right_bits = sh_fl_bitlen(rhs) + if rhs.len() > 0 { shift; } else { 0; };
+    if left_bits < right_bits { return -1; };
+    if left_bits > right_bits { return 1; };
+    let mut index = lhs.len();
+    while index > 0 { index = index - 1; let left = sh_fl_word(lhs, index); let right = sh_fl_shift_word(rhs, index, shift); if left < right { return -1; }; if left > right { return 1; }; };
+    0;
+}
+
+def sh_fl_shift(words: &Vec<i64>, shift: i64) -> bool {
+    if shift < 0 or shift > 32768 { return false; };
+    if words.len() == 0 or shift == 0 { return true; };
+    let old_count = words.len();
+    let count = (sh_fl_bitlen(words) + shift + 29) / 30;
+    if count > 1024 { return false; };
+    while words.len() < count { if not words.push(0) { return false; }; };
+    let mut index = count;
+    while index > 0 { index = index - 1; let whole = shift / 30; let remainder = shift % 30; let low = if index - whole >= 0 and index - whole < old_count { sh_fl_word(words, index - whole); } else { 0; }; let high = if index - whole - 1 >= 0 and index - whole - 1 < old_count { sh_fl_word(words, index - whole - 1); } else { 0; }; let value = if remainder == 0 { low; } else { ((low << remainder) & 1073741823) | (high >> (30 - remainder)); }; if not words.set(index, value) { return false; }; };
+    true;
+}
+
+def sh_fl_sub_shift(lhs: &Vec<i64>, rhs: &Vec<i64>, shift: i64) -> bool {
+    let mut borrow = 0;
+    let mut index = 0;
+    while index < lhs.len() { let mut value = sh_fl_word(lhs, index) - sh_fl_shift_word(rhs, index, shift) - borrow; borrow = 0; if value < 0 { value = value + 1073741824; borrow = 1; }; if not lhs.set(index, value) { return false; }; index = index + 1; };
+    if borrow != 0 { return false; };
+    sh_fl_trim(lhs);
+    true;
+}
+
+def sh_fl_rounded_quotient(numerator: &Vec<i64>, denominator: &Vec<i64>) -> Result<i64, i64> {
+    let mut shift = sh_fl_bitlen(numerator) - sh_fl_bitlen(denominator);
+    if shift > 53 or denominator.len() == 0 { return sh_i64_error(6802); };
+    let mut quotient = 0;
+    while shift >= 0 { if sh_fl_compare_shift(numerator, denominator, shift) >= 0 { if not sh_fl_sub_shift(numerator, denominator, shift) { return sh_i64_error(6802); }; quotient = quotient | (1 << shift); }; shift = shift - 1; };
+    if not sh_fl_shift(numerator, 1) { return sh_i64_error(6802); };
+    let comparison = sh_fl_compare_shift(numerator, denominator, 0);
+    if comparison > 0 or comparison == 0 and (quotient & 1) == 1 { quotient = quotient + 1; };
+    sh_i64_ok(quotient);
+}
+
+def sh_fl_byte(bytes: Buffer, index: i64, end: i64) -> i64 {
+    if index < 0 or index >= end { return -1; };
+    bytes.get_u8(index).unwrap_or(-1);
+}
+
+def sh_fl_digit(byte: i64) -> bool {
+    byte >= 48 and byte <= 57;
+}
+
+def sh_fl_decimal_trim(words: &Vec<i64>) -> i64 {
+    let mut removed = 0;
+    while words.len() > 0 and sh_fl_word(words, words.len() - 1) == 0 { words.pop(); removed = removed + 1; };
+    removed;
+}
+
+def sh_float_literal(text: &String, bits: i64) -> Result<i64, i64> {
+    if bits != 32 and bits != 64 or text.len() < 3 or text.len() > 16384 { return sh_i64_error(if text.len() > 16384 { 6802; } else { 6801; }); };
+    let bytes = ffi_buffer_new(text.len())?;
+    text.copy_to_buffer(bytes)?;
+    let mut end = text.len();
+    if end >= 3 and sh_fl_byte(bytes, end - 3, end) == 102 and sh_fl_byte(bytes, end - 2, end) == 51 and sh_fl_byte(bytes, end - 1, end) == 50 { end = end - 3; } else { if end >= 3 and sh_fl_byte(bytes, end - 3, end) == 102 and sh_fl_byte(bytes, end - 2, end) == 54 and sh_fl_byte(bytes, end - 1, end) == 52 { end = end - 3; }; };
+    let mut index = 0;
+    let mut negative = false;
+    if sh_fl_byte(bytes, index, end) == 45 or sh_fl_byte(bytes, index, end) == 43 { negative = sh_fl_byte(bytes, index, end) == 45; index = index + 1; };
+    let digits = vec_new_i64();
+    let mut dot = false;
+    let mut fraction = 0;
+    let mut significant = 0;
+    let mut seen_nonzero = false;
+    let mut previous_digit = false;
+    let mut part_digits = 0;
+    while index < end { let byte = sh_fl_byte(bytes, index, end); if sh_fl_digit(byte) { if byte != 48 { seen_nonzero = true; }; if seen_nonzero { significant = significant + 1; if significant > 4096 or not digits.push(byte - 48) { return sh_i64_error(6802); }; }; if dot { fraction = fraction + 1; }; part_digits = part_digits + 1; previous_digit = true; } else { if byte == 95 { if not previous_digit or not sh_fl_digit(sh_fl_byte(bytes, index + 1, end)) { return sh_i64_error(6801); }; previous_digit = false; } else { if byte == 46 and not dot { if not previous_digit or part_digits == 0 { return sh_i64_error(6801); }; dot = true; previous_digit = false; part_digits = 0; } else { break; }; }; }; index = index + 1; };
+    if not dot or not previous_digit or part_digits == 0 { return sh_i64_error(6801); };
+    let mut exponent = 0;
+    let mut exponent_negative = false;
+    if sh_fl_byte(bytes, index, end) == 101 or sh_fl_byte(bytes, index, end) == 69 { index = index + 1; if sh_fl_byte(bytes, index, end) == 43 or sh_fl_byte(bytes, index, end) == 45 { exponent_negative = sh_fl_byte(bytes, index, end) == 45; index = index + 1; }; previous_digit = false; part_digits = 0; while index < end { let byte = sh_fl_byte(bytes, index, end); if sh_fl_digit(byte) { if exponent < 1000000 { exponent = exponent * 10 + byte - 48; if exponent > 1000000 { exponent = 1000000; }; }; previous_digit = true; part_digits = part_digits + 1; } else { if byte != 95 or not previous_digit or not sh_fl_digit(sh_fl_byte(bytes, index + 1, end)) { return sh_i64_error(6801); }; previous_digit = false; }; index = index + 1; }; if not previous_digit or part_digits == 0 { return sh_i64_error(6801); }; };
+    if index != end { return sh_i64_error(6801); };
+    let sign = if negative { if bits == 64 { -9223372036854775807 - 1; } else { 2147483648; }; } else { 0; };
+    if not seen_nonzero { return sh_i64_ok(sign); };
+    if exponent_negative { exponent = -exponent; };
+    exponent = exponent - fraction;
+    let magnitude = significant + exponent - 1;
+    let infinity = if bits == 64 { 9218868437227405312; } else { 2139095040; };
+    if magnitude > 400 { return sh_i64_ok(sign | infinity); };
+    if magnitude < -400 { return sh_i64_ok(sign); };
+    exponent = exponent + sh_fl_decimal_trim(&digits);
+    let numerator = vec_new_i64();
+    let denominator = vec_new_i64();
+    if not denominator.push(1) { return sh_i64_error(6802); };
+    index = 0;
+    while index < digits.len() { if not sh_fl_mul_add(&numerator, 10, sh_fl_word(&digits, index)) { return sh_i64_error(6802); }; index = index + 1; };
+    index = 0;
+    while index < exponent { if not sh_fl_mul_add(&numerator, 10, 0) { return sh_i64_error(6802); }; index = index + 1; };
+    index = 0;
+    while index < -exponent { if not sh_fl_mul_add(&denominator, 10, 0) { return sh_i64_error(6802); }; index = index + 1; };
+    let mut binary_exponent = sh_fl_bitlen(&numerator) - sh_fl_bitlen(&denominator);
+    let comparison = if binary_exponent >= 0 { sh_fl_compare_shift(&numerator, &denominator, binary_exponent); } else { -sh_fl_compare_shift(&denominator, &numerator, -binary_exponent); };
+    if comparison < 0 { binary_exponent = binary_exponent - 1; };
+    let precision = if bits == 64 { 53; } else { 24; };
+    let bias = if bits == 64 { 1023; } else { 127; };
+    let minimum = 1 - bias;
+    if binary_exponent > bias { return sh_i64_ok(sign | infinity); };
+    let scale = precision - 1 - if binary_exponent < minimum { minimum; } else { binary_exponent; };
+    if scale >= 0 { if not sh_fl_shift(&numerator, scale) { return sh_i64_error(6802); }; } else { if not sh_fl_shift(&denominator, -scale) { return sh_i64_error(6802); }; };
+    let mut rounded = sh_fl_rounded_quotient(&numerator, &denominator)?;
+    if binary_exponent < minimum { return sh_i64_ok(sign | rounded); };
+    if rounded == (1 << precision) { rounded = rounded >> 1; binary_exponent = binary_exponent + 1; };
+    if binary_exponent > bias { return sh_i64_ok(sign | infinity); };
+    sh_i64_ok(sign | ((binary_exponent + bias) << (precision - 1)) | (rounded - (1 << (precision - 1))));
+}
+
+def sh_float_f64_to_f32(pattern: i64) -> i64 {
+    let sign = (pattern >> 32) & 2147483648;
+    let encoded_exponent = (pattern >> 52) & 2047;
+    let fraction = pattern & 4503599627370495;
+    if encoded_exponent == 2047 { if fraction == 0 { return sign | 2139095040; }; let payload = (fraction >> 29) | 4194304; return sign | 2139095040 | payload; };
+    if encoded_exponent == 0 { return sign; };
+    let mut exponent = encoded_exponent - 1023;
+    if exponent > 127 { return sign | 2139095040; };
+    let significand = 4503599627370496 | fraction;
+    let shift = if exponent < -126 { -exponent - 97; } else { 29; };
+    if shift > 53 { return sign; };
+    let mut rounded = significand >> shift;
+    let remainder = significand & ((1 << shift) - 1);
+    let halfway = 1 << (shift - 1);
+    if remainder > halfway or remainder == halfway and (rounded & 1) == 1 { rounded = rounded + 1; };
+    if exponent < -126 { return sign | rounded; };
+    if rounded == 16777216 { rounded = rounded >> 1; exponent = exponent + 1; };
+    if exponent > 127 { return sign | 2139095040; };
+    sign | ((exponent + 127) << 23) | (rounded - 8388608);
+}
+
+def sh_float_literal_reference(text: &String, bits: i64) -> Result<i64, i64> {
+    if bits != 32 and bits != 64 { return sh_i64_error(6801); };
+    let pattern = sh_float_literal(text, 64)?;
+    sh_i64_ok(if bits == 64 { pattern; } else { sh_float_f64_to_f32(pattern); });
+}
