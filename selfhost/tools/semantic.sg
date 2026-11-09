@@ -40,6 +40,8 @@ def sh_semantic_header(checked: &ShChecked, ok: bool, phase: &str) -> Result<Str
     output.push_i64(checked.node_types.len())?;
     output.push_str(",\"types\":")?;
     output.push_i64(sh_type_count(&checked.types))?;
+    output.push_str(",\"deferred_type_equalities\":")?;
+    output.push_i64(sh_deferred_type_count(checked))?;
     output.push_str(",\"bindings\":")?;
     output.push_i64(sh_binding_count(checked))?;
     output.push_str(",\"diagnostics\":[")?;

@@ -241,3 +241,45 @@ has ownership gaps. core, lexer and semantic entry modules reach the same
 collections generic/type obligations after their real dependencies are loaded.
 Those located failures remain required work, not a successful self-compilation
 or complete module/stdlib milestone.
+
+
+## Deferred generic association equalities
+
+`deferred_types` stores four-word rows: callable binding ID, expected type ID,
+actual type ID and the original comparison AST ID. Definition-time deferral is
+limited to impl bodies whose compatible outer type shape contains an unresolved
+associated projection based on generic parameters. Known scalar/shape errors are
+still rejected. There is no general kind-15 wildcard and no skipped impl body.
+The table is bounded by the syntax-node budget and retains located errors on
+exhaustion.
+
+Every instantiated callable rechecks these equalities after replacing its
+parameters and normalizing concrete associated types. Calls are revisited to a
+bounded fixed point after all bodies are checked, so forward declarations and
+generic wrappers cannot bypass an obligation discovered later. Unresolved
+conditions propagate to their calling generic body; concrete mismatches are
+rejected. The original comparison node need not have the actual type as its node
+type: it may be an explicit return or block whose control-flow type differs.
+HIR schema 3 preserves the table with checked owner/type/origin relationships.
+MIR must reject an unresolved or unequal concrete job rather than emit code.
+
+The native semantic regressions use Source, Iter<T> and Take<I:Source,T>:
+Take<Iter<i64>,i64> closes its result equality, while a boolean marker is rejected,
+including a forward declaration and a generic wrapper. The remaining unspecialized
+stdlib equations are explicit conditions, not evidence that all generic programs
+already lower or self-compile.
+
+Impl methods also retain a distinct discarded-expression context for non-tail
+statements and while/for bodies. Every subexpression and explicit return is
+checked, while a discarded conditional executes its branches and yields unit
+without forcing the branch values to match. Ordinary/class methods and value
+contexts retain their strict rules. Two actual qualified-reference O0 programs
+with boolean effect calls in impl while conditionals execute with result 42;
+the corresponding ordinary-function no-else form is rejected.
+
+The existing reference reserves spawn_blocking_i64 and
+spawn_blocking_future_i64 source call contracts, including their async-qualified
+forms, for Send capture checking. The SG checker applies the same constraint to
+resolved lambda capture bindings even when the source declares a wrapper with
+that name. This typing rule does not authorize backend dispatch by source
+spelling or fabricate a native runtime implementation.

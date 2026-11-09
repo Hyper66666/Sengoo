@@ -17,6 +17,7 @@ struct ShChecked {
     symbols: ShSymbols,
     node_types: Vec<i64>,
     call_types: Vec<i64>,
+    deferred_types: Vec<i64>,
     resolution: Vec<i64>,
     node_scopes: Vec<i64>,
     bindings: Vec<i64>,
@@ -246,8 +247,65 @@ def sh_s_unify(checked: &ShChecked, expected: i64, actual: i64, depth: i64) -> b
     true;
 }
 
+def sh_deferred_type_count(checked: &ShChecked) -> i64 {
+    checked.deferred_types.len() / 4;
+}
+
+def sh_deferred_type_word(checked: &ShChecked, index: i64, field: i64) -> i64 {
+    if index < 0 or index >= sh_deferred_type_count(checked) or field < 0 or field >= 4 { return -1; };
+    checked.deferred_types.get(index * 4 + field).unwrap_or(-1);
+}
+
+def sh_s_generic_type(checked: &ShChecked, ty: i64, depth: i64) -> bool {
+    if depth > 128 { return false; };
+    let value = sh_s_resolve(checked, ty);
+    let kind = sh_s_kind(checked, value);
+    if kind == 13 or kind == 19 { return true; };
+    let mut index = 0;
+    while index < sh_s_arity(checked, value) { if sh_s_generic_type(checked, sh_s_argument(checked, value, index), depth + 1) { return true; }; index = index + 1; };
+    false;
+}
+
+def sh_s_pending_projection(checked: &ShChecked, ty: i64, depth: i64) -> bool {
+    if depth > 128 { return false; };
+    let value = sh_s_resolve(checked, ty);
+    if sh_s_kind(checked, value) == 15 and sh_s_flags(checked, value) == 0 and sh_s_generic_type(checked, sh_s_argument(checked, value, 0), 0) { return true; };
+    let mut index = 0;
+    while index < sh_s_arity(checked, value) { if sh_s_pending_projection(checked, sh_s_argument(checked, value, index), depth + 1) { return true; }; index = index + 1; };
+    false;
+}
+
+def sh_s_defer_shape(checked: &ShChecked, expected: i64, actual: i64, depth: i64) -> bool {
+    if depth > 128 { return false; };
+    let left = sh_s_resolve(checked, expected);
+    let right = sh_s_resolve(checked, actual);
+    if left == right { return true; };
+    if sh_s_kind(checked, left) == 15 and sh_s_pending_projection(checked, left, 0) or sh_s_kind(checked, right) == 15 and sh_s_pending_projection(checked, right, 0) { return true; };
+    if sh_s_kind(checked, left) != sh_s_kind(checked, right) or sh_s_data(checked, left) != sh_s_data(checked, right) or sh_s_flags(checked, left) != sh_s_flags(checked, right) or sh_s_nominal(checked, left) != sh_s_nominal(checked, right) or sh_s_arity(checked, left) != sh_s_arity(checked, right) { return false; };
+    let mut index = 0;
+    while index < sh_s_arity(checked, left) { if not sh_s_defer_shape(checked, sh_s_argument(checked, left, index), sh_s_argument(checked, right, index), depth + 1) { return false; }; index = index + 1; };
+    true;
+}
+
+def sh_s_defer_record(checked: &ShChecked, owner: i64, expected: i64, actual: i64, origin: i64) -> bool {
+    let mut index = 0;
+    while index < sh_deferred_type_count(checked) { if sh_deferred_type_word(checked, index, 0) == owner and sh_deferred_type_word(checked, index, 1) == expected and sh_deferred_type_word(checked, index, 2) == actual and sh_deferred_type_word(checked, index, 3) == origin { return true; }; index = index + 1; };
+    if sh_deferred_type_count(checked) >= checked.node_types.len() { return false; };
+    checked.deferred_types.push(owner) and checked.deferred_types.push(expected) and checked.deferred_types.push(actual) and checked.deferred_types.push(origin);
+}
+
+def sh_s_defer_body_type(checked: &ShChecked, expected: i64, actual: i64, origin: i64) -> bool {
+    let owner = checked.current_owner;
+    let parent = sh_binding_word(checked, owner, 6);
+    if owner < 0 or sh_binding_word(checked, parent, 2) != 14 { return false; };
+    if not (sh_s_pending_projection(checked, expected, 0) or sh_s_pending_projection(checked, actual, 0)) or not sh_s_defer_shape(checked, expected, actual, 0) { return false; };
+    sh_s_defer_record(checked, owner, expected, actual, origin);
+}
+
 def sh_s_expect(checked: &mut ShChecked, ast: &ShAst, node: i64, expected: i64, actual: i64) -> bool {
     if sh_s_unify(checked, expected, actual, 0) { return true; };
+    if sh_s_defer_body_type(checked, expected, actual, node) { return true; };
+    if sh_deferred_type_count(checked) >= checked.node_types.len() and (sh_s_pending_projection(checked, expected, 0) or sh_s_pending_projection(checked, actual, 0)) { let limit = checked.node_types.len(); sh_s_diagnose(checked, ast, node, 5117, 1, limit, limit); return false; };
     sh_s_diagnose(checked, ast, node, 5104, 1, expected, actual);
     false;
 }
@@ -263,7 +321,7 @@ def sh_s_new(ast: &ShAst, maximum: i64) -> ShChecked {
     let never = sh_type_primitive(&types, 17, 0, 0).unwrap_or(-1);
     let error = sh_type_primitive(&types, 18, 0, 0).unwrap_or(-1);
     let diagnostics: Vec<ShDiagnostic> = vec_new();
-    let mut result = ShChecked { types: types, symbols: sh_symbols_new(1000000), node_types: vec_new_i64(), call_types: vec_new_i64(), resolution: vec_new_i64(), node_scopes: vec_new_i64(), bindings: vec_new_i64(), scopes: vec_new_i64(), diagnostics: diagnostics, substitutions: vec_new_i64(), generic_parameters: vec_new_i64(), constraints: vec_new_i64(), trait_types: vec_new_i64(), class_parents: vec_new_i64(), propagation: vec_new_i64(), loop_values: vec_new_i64(), async_depth: 0, unsafe_depth: 0, error: 0, start: 0, end: 0, diagnostic_limit: maximum, current_scope: 0, current_owner: -1, current_return: -1, loop_depth: 0, depth: 0, unit_type: unit, bool_type: boolean, integer_type: integer, float_type: floating, char_type: character, str_type: string, never_type: never, error_type: error };
+    let mut result = ShChecked { types: types, symbols: sh_symbols_new(1000000), node_types: vec_new_i64(), call_types: vec_new_i64(), deferred_types: vec_new_i64(), resolution: vec_new_i64(), node_scopes: vec_new_i64(), bindings: vec_new_i64(), scopes: vec_new_i64(), diagnostics: diagnostics, substitutions: vec_new_i64(), generic_parameters: vec_new_i64(), constraints: vec_new_i64(), trait_types: vec_new_i64(), class_parents: vec_new_i64(), propagation: vec_new_i64(), loop_values: vec_new_i64(), async_depth: 0, unsafe_depth: 0, error: 0, start: 0, end: 0, diagnostic_limit: maximum, current_scope: 0, current_owner: -1, current_return: -1, loop_depth: 0, depth: 0, unit_type: unit, bool_type: boolean, integer_type: integer, float_type: floating, char_type: character, str_type: string, never_type: never, error_type: error };
     sh_s_scope(&result, -1, -1, 0);
     let mut index = 0;
     while index < sh_ast_count(ast) { if not result.node_types.push(-1) or not result.call_types.push(-1) or not result.resolution.push(-1) or not result.node_scopes.push(-1) { result.error = 5117; return result; }; index = index + 1; };

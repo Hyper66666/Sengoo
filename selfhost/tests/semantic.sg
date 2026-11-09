@@ -23,6 +23,12 @@ def sh_semantic_case(source: &str, expected: i64) -> Result<bool, i64> {
 }
 
 def sh_semantic_positive() -> Result<bool, i64> {
+    sh_semantic_case("struct Option<T>{is_some:bool,value:T} trait Source{type Item;def next(&self)->Option<Self::Item>{}} struct Iter<T>{value:T} impl<T> Source for Iter<T>{type Item=T;def next(&self)->Option<T>{Option{is_some:true,value:self.value}}} struct Take<I:Source,T>{inner:I,marker:T} impl<I:Source,T> Take<I,T>{def next(&self)->Option<T>{self.inner.next()}} def main()->i64{let t=Take{inner:Iter{value:42},marker:0};t.next().value}", 0)?;
+    sh_semantic_case("struct Option<T>{is_some:bool,value:T} trait Source{type Item;def next(&self)->Option<Self::Item>{}} struct Iter<T>{value:T} impl<T> Source for Iter<T>{type Item=T;def next(&self)->Option<T>{Option{is_some:true,value:self.value}}} struct Take<I:Source,T>{inner:I,marker:T} impl<I:Source,T> Take<I,T>{def next(&self)->Option<T>{self.inner.next()}} def main(){let t=Take{inner:Iter{value:42},marker:true};t.next();();}", 5104)?;
+    sh_semantic_case("def main()->i64{let t=Take{inner:Iter{value:42},marker:0};t.next().value} struct Option<T>{is_some:bool,value:T} trait Source{type Item;def next(&self)->Option<Self::Item>{}} struct Iter<T>{value:T} impl<T> Source for Iter<T>{type Item=T;def next(&self)->Option<T>{Option{is_some:true,value:self.value}}} struct Take<I:Source,T>{inner:I,marker:T} impl<I:Source,T> Take<I,T>{def next(&self)->Option<T>{self.inner.next()}} ", 0)?;
+    sh_semantic_case("def main(){let t=Take{inner:Iter{value:42},marker:true};read(t);();} def read<U:Source,V>(value:Take<U,V>)->Option<V>{value.next()} struct Option<T>{is_some:bool,value:T} trait Source{type Item;def next(&self)->Option<Self::Item>{}} struct Iter<T>{value:T} impl<T> Source for Iter<T>{type Item=T;def next(&self)->Option<T>{Option{is_some:true,value:self.value}}} struct Take<I:Source,T>{inner:I,marker:T} impl<I:Source,T> Take<I,T>{def next(&self)->Option<T>{self.inner.next()}} ", 5104)?;
+    sh_semantic_case("def insert()->bool{true} struct State{} impl State{def run(&self)->i64{let mut done=false;while !done{if done{done=true}else{done=true;insert();}}42}} def main()->i64{let s=State{};s.run()}", 0)?;
+    sh_semantic_case("def insert()->bool{true} struct State{} impl State{def run(&self)->i64{let mut done=false;while !done{if !done{done=true;insert();}}42}} def main()->i64{let s=State{};s.run()}", 0)?;
     sh_semantic_case("def main(){let s=format(\"{0} {0}\",42);}", 0)?;
     sh_semantic_case("def main(){let s=format(\"{} {1:?} {0:>8.2}\",1,2);}", 0)?;
     sh_semantic_case("def main(){let s=format(\"{{{0}}}\",42);}", 0)?;
@@ -110,6 +116,9 @@ def sh_semantic_positive() -> Result<bool, i64> {
 }
 
 def sh_semantic_negative() -> Result<bool, i64> {
+    sh_semantic_case("struct LocalOnly{value:i64} impl !Send for LocalOnly{} def consume(value:LocalOnly)->i64{value.value} def spawn_blocking_i64(callback:fn()->i64)->i64{callback()} def main()->i64{let local=LocalOnly{value:42};spawn_blocking_i64(| |consume(local))}", 5115)?;
+    sh_semantic_case("def insert()->bool{true} def main()->i64{let mut done=false;while !done{if !done{done=true;insert();}}42}", 5118)?;
+    sh_semantic_case("struct State{} impl State{def run(&self)->bool{if true{42}else{true}}}", 5104)?;
     sh_semantic_case("class Counter{n:i64;def bump(&mut self){self.n=self.n+1;true}}", 5104)?;
     sh_semantic_case("def main()->i64{match 42{a|b=>a,_=>0}}", 5110)?;
     sh_semantic_case("def main()->i64{match (1,2){(a,_)|(_,b)=>a,_=>0}}", 5110)?;
@@ -207,10 +216,26 @@ def sh_semantic_negative() -> Result<bool, i64> {
     Result { is_ok: true, value: true, error: 0 };
 }
 
+def sh_semantic_deferred_facts() -> Result<bool, i64> {
+    let text = string_from_str("struct Option<T>{is_some:bool,value:T} trait Source{type Item;def next(&self)->Option<Self::Item>{}} struct Take<I:Source,T>{inner:I,marker:T} impl<I:Source,T> Take<I,T>{def next(&self)->Option<T>{self.inner.next()}}")?;
+    let parsed = sh_parse(&text, 0, 100000);
+    let checked = sh_check(&text, &parsed.ast, 1000);
+    assert_eq_i64(checked.error, 0, "semantic.sg", 140);
+    assert_true(sh_deferred_type_count(&checked) > 0, "semantic.sg", 141);
+    let owner = sh_deferred_type_word(&checked, 0, 0);
+    assert_eq_i64(sh_binding_word(&checked, owner, 2), 2, "semantic.sg", 142);
+    assert_true(sh_deferred_type_word(&checked, 0, 3) >= 0, "semantic.sg", 143);
+    assert_eq_i64(sh_deferred_type_word(&checked, -1, 0), -1, "semantic.sg", 144);
+    assert_eq_i64(sh_deferred_type_word(&checked, 0, 4), -1, "semantic.sg", 145);
+    Result { is_ok: true, value: true, error: 0 };
+}
+
 def main() -> i64 {
     let strings = sengoo_string_live_handle_count();
     let buffers = sengoo_buffer_live_handle_count();
     let opaque = sengoo_opaque_live_handle_count();
+    let deferred = sh_semantic_deferred_facts();
+    if not deferred.is_ok() { return 5; };
     let positive = sh_semantic_positive();
     if not positive.is_ok() { return 1; };
     let negative = sh_semantic_negative();

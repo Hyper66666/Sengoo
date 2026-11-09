@@ -70,10 +70,16 @@ def sh_l_has_parameter(checked: &ShChecked, input: i64, depth: i64) -> bool {
     if depth >= 128 { return true; };
     let ty = sh_s_resolve(checked, input);
     let kind = sh_s_kind(checked, ty);
-    if kind == 13 or kind == 19 or kind == 15 { return true; };
+    if kind == 13 or kind == 19 or kind == 15 and sh_s_flags(checked, ty) == 0 { return true; };
     let mut argument = 0;
     while argument < sh_s_arity(checked, ty) { if sh_l_has_parameter(checked, sh_s_argument(checked, ty, argument), depth + 1) { return true; }; argument = argument + 1; };
     false;
+}
+
+def sh_l_deferred(lower: &mut ShMirLower, checked: &ShChecked, ast: &ShAst, binding: i64) -> bool {
+    let mut row = 0;
+    while row < checked.deferred_types.len() / 4 { if checked.deferred_types.get(row * 4).unwrap_or(-1) == binding { let origin = checked.deferred_types.get(row * 4 + 3).unwrap_or(-1); let expected = sh_s_normalize(checked, sh_s_type_replace(checked, checked.deferred_types.get(row * 4 + 1).unwrap_or(-1), &lower.generic_keys, &lower.generic_values, 0)); let actual = sh_s_normalize(checked, sh_s_type_replace(checked, checked.deferred_types.get(row * 4 + 2).unwrap_or(-1), &lower.generic_keys, &lower.generic_values, 0)); if expected < 0 or actual < 0 or expected != actual or sh_l_has_parameter(checked, expected, 0) or sh_l_has_parameter(checked, actual, 0) { sh_l_fail(lower, ast, origin, 5009); return false; }; }; row = row + 1; };
+    true;
 }
 
 def sh_l_function_name(checked: &ShChecked, binding: i64) -> Result<String, i64> {
@@ -133,11 +139,16 @@ def sh_l_drop_function(lower: &ShMirLower, checked: &ShChecked, ty: i64) -> i64 
 }
 
 def sh_l_drop_nested(checked: &ShChecked, ast: &ShAst, node: i64, depth: i64) -> bool {
-    if depth >= 64 { return true; };
     if node < 0 { return false; };
-    if sh_ast_word(ast, node, 0) == 53 { let binding = sh_node_binding(checked, node); if binding < 0 { return true; }; if sh_binding_word(checked, binding, 2) == 2 { let owner = sh_binding_word(checked, binding, 6); let trait_name = sh_symbol_text(&checked.symbols, sh_s_impl_symbol(checked, owner)); let method = sh_symbol_text(&checked.symbols, sh_binding_word(checked, binding, 0)); if trait_name.is_ok() and method.is_ok() and sh_s_text_equal(&trait_name.value, "Drop") and sh_s_text_equal(&method.value, "drop") { return true; }; let body = sh_s_child_kind(ast, sh_binding_word(checked, binding, 4), 40); if body >= 0 and sh_l_drop_nested(checked, ast, body, depth + 1) { return true; }; }; };
-    let mut child = 0;
-    while child < sh_ast_word(ast, node, 6) { if sh_l_drop_nested(checked, ast, sh_ast_child(ast, node, child), depth + 1) { return true; }; child = child + 1; };
+    let count = sh_ast_count(ast);
+    if count < 0 or node >= count { return true; };
+    let seen = vec_new_i64();
+    let queue = vec_new_i64();
+    let mut index = 0;
+    while index < count { if not seen.push(0) { return true; }; index = index + 1; };
+    if not seen.set(node, 1) or not queue.push(node) { return true; };
+    index = 0;
+    while index < queue.len() { let current = queue.get(index).unwrap_or(-1); if sh_ast_word(ast, current, 0) == 53 { let binding = sh_node_binding(checked, current); if binding < 0 { return true; }; if sh_binding_word(checked, binding, 2) == 2 { let owner = sh_binding_word(checked, binding, 6); let trait_name = sh_symbol_text(&checked.symbols, sh_s_impl_symbol(checked, owner)); let method = sh_symbol_text(&checked.symbols, sh_binding_word(checked, binding, 0)); if trait_name.is_ok() and method.is_ok() and sh_s_text_equal(&trait_name.value, "Drop") and sh_s_text_equal(&method.value, "drop") { return true; }; let body = sh_s_child_kind(ast, sh_binding_word(checked, binding, 4), 40); if body >= count { return true; }; if body >= 0 and seen.get(body).unwrap_or(0) == 0 { if not seen.set(body, 1) or not queue.push(body) { return true; }; }; }; }; let mut child = 0; while child < sh_ast_word(ast, current, 6) { let next = sh_ast_child(ast, current, child); if next < 0 or next >= count { return true; }; if seen.get(next).unwrap_or(0) == 0 { if not seen.set(next, 1) or not queue.push(next) { return true; }; }; child = child + 1; }; index = index + 1; };
     false;
 }
 
@@ -369,12 +380,12 @@ def sh_l_if(lower: &mut ShMirLower, text: &String, ast: &ShAst, checked: &ShChec
     sh_l_edge(lower, ast, node, term, left, -1);
     sh_l_edge(lower, ast, node, term, right, -1);
     lower.block = left;
-    let left_value = sh_l_expr(lower, text, ast, checked, ownership, sh_ast_child(ast, node, 1));
-    if lower.block >= 0 { let leave = sh_l_term(lower, ast, node, 1, -1); sh_l_edge(lower, ast, node, leave, join, left_value); (); };
+    let mut left_value = sh_l_expr(lower, text, ast, checked, ownership, sh_ast_child(ast, node, 1));
+    if lower.block >= 0 { if sh_mir_type_word(&lower.mir, ty, 0) == 0 { left_value = sh_l_unit(lower, checked, ast, node); }; let leave = sh_l_term(lower, ast, node, 1, -1); sh_l_edge(lower, ast, node, leave, join, left_value); (); };
     lower.block = right;
     let right_node = sh_ast_child(ast, node, 2);
-    let right_value = if right_node >= 0 { sh_l_expr(lower, text, ast, checked, ownership, right_node); } else { sh_l_unit(lower, checked, ast, node); };
-    if lower.block >= 0 { let leave = sh_l_term(lower, ast, node, 1, -1); sh_l_edge(lower, ast, node, leave, join, right_value); (); };
+    let mut right_value = if right_node >= 0 { sh_l_expr(lower, text, ast, checked, ownership, right_node); } else { sh_l_unit(lower, checked, ast, node); };
+    if lower.block >= 0 { if sh_mir_type_word(&lower.mir, ty, 0) == 0 { right_value = sh_l_unit(lower, checked, ast, node); }; let leave = sh_l_term(lower, ast, node, 1, -1); sh_l_edge(lower, ast, node, leave, join, right_value); (); };
     lower.block = join;
     if merged < 0 { sh_l_term(lower, ast, node, 4, -1); lower.block = -1; };
     merged;
@@ -471,9 +482,11 @@ def sh_l_match(lower: &mut ShMirLower, text: &String, ast: &ShAst, checked: &ShC
 }
 
 def sh_l_call(lower: &mut ShMirLower, text: &String, ast: &ShAst, checked: &ShChecked, ownership: &ShOwnership, node: i64, ty: i64) -> i64 {
-    let binding = sh_node_binding(checked, node);
+    let declared = sh_node_callable_type(checked, node);
+    let concrete = if lower.generic_keys.len() > 0 { sh_s_type_replace(checked, declared, &lower.generic_keys, &lower.generic_values, 0); } else { sh_s_resolve(checked, declared); };
+    let binding = sh_l_resolved_callable(lower, checked, ast, node, concrete);
     let mut function = lower.functions.get(binding).unwrap_or(-1);
-    if function < 0 and sh_binding_word(checked, binding, 2) == 2 { let declared = sh_node_callable_type(checked, node); function = sh_l_instance(lower, text, ast, checked, node, binding, declared); };
+    if function < 0 and sh_binding_word(checked, binding, 2) == 2 { function = sh_l_instance(lower, text, ast, checked, node, binding, concrete); };
     let constructor = sh_binding_word(checked, binding, 2) == 5;
     let operands = vec_new_i64();
     let callee = sh_ast_child(ast, node, 0);
@@ -483,6 +496,39 @@ def sh_l_call(lower: &mut ShMirLower, text: &String, ast: &ShAst, checked: &ShCh
     while index < sh_ast_word(ast, node, 6) { let argument = sh_ast_child(ast, node, index); if sh_ast_word(ast, argument, 0) == 10 { return sh_l_fail(lower, ast, node, 5008); }; let raw = sh_l_expr(lower, text, ast, checked, ownership, argument); let ordinal = index - 1 + if sh_ast_word(ast, callee, 0) == 55 { 1; } else { 0; }; let required = if signature >= 0 and ordinal < sh_mir_type_word(&lower.mir, signature, 5) - 1 { sh_mir_type_arg(&lower.mir, signature, ordinal); } else { sh_mir_value_type(&lower.mir, raw); }; let value = sh_l_coerce(lower, ast, argument, raw, required); operands.push(value); index = index + 1; };
     if constructor { return sh_l_emit(lower, ast, node, 24, ty, &operands, sh_binding_word(checked, binding, 7), 0, 0); };
     sh_l_emit(lower, ast, node, 20, ty, &operands, function, sh_mir_type_word(&lower.mir, signature, 1), 0);
+}
+
+def sh_l_resolved_callable(lower: &mut ShMirLower, checked: &ShChecked, ast: &ShAst, node: i64, signature: i64) -> i64 {
+    let selected = sh_node_binding(checked, node);
+    let owner = sh_binding_word(checked, selected, 6);
+    if sh_binding_word(checked, owner, 2) != 7 { return selected; };
+    let trait_symbol = sh_binding_word(checked, owner, 0);
+    let method_symbol = sh_binding_word(checked, selected, 0);
+    let left = sh_s_argument(checked, signature, 0);
+    let actual = if sh_s_kind(checked, left) == 6 { sh_s_argument(checked, left, 0); } else { left; };
+    let mut found = -1;
+    let mut record = 0;
+    while record < checked.constraints.len() { if checked.constraints.get(record + 1).unwrap_or(-1) == trait_symbol and checked.constraints.get(record + 2).unwrap_or(0) == -2 { let implementation = checked.constraints.get(record + 3).unwrap_or(-1); let keys = vec_new_i64(); let values = vec_new_i64(); if (sh_binding_word(checked, implementation, 5) & 8) == 0 and sh_s_pattern_keys(checked, checked.constraints.get(record).unwrap_or(-1), actual, &keys, &values, 0) { let mut binding = 0; while binding < sh_binding_count(checked) { if sh_binding_word(checked, binding, 2) == 2 and sh_binding_word(checked, binding, 6) == implementation and sh_binding_word(checked, binding, 0) == method_symbol { let pattern = sh_s_type_replace(checked, sh_binding_word(checked, binding, 3), &keys, &values, 0); let fn_keys = vec_new_i64(); let fn_values = vec_new_i64(); if sh_s_pattern_keys(checked, pattern, signature, &fn_keys, &fn_values, 0) { if found >= 0 and found != binding { return sh_l_fail(lower, ast, node, 5009); }; found = binding; }; }; binding = binding + 1; }; }; }; record = record + 4; };
+    if found < 0 { sh_l_fail(lower, ast, node, 5009); } else { found; };
+}
+
+def sh_l_operator(lower: &mut ShMirLower, text: &String, ast: &ShAst, checked: &ShChecked, ownership: &ShOwnership, node: i64, ty: i64) -> i64 {
+    let declared = sh_node_callable_type(checked, node);
+    let signature = if lower.generic_keys.len() > 0 { sh_s_type_replace(checked, declared, &lower.generic_keys, &lower.generic_values, 0); } else { sh_s_resolve(checked, declared); };
+    let count = sh_ast_word(ast, node, 6);
+    let first_type = sh_l_node_type(lower, checked, ast, sh_ast_child(ast, node, 0));
+    let primitive = sh_mir_type_word(&lower.mir, first_type, 0);
+    if primitive == 2 or primitive == 3 { let operands = vec_new_i64(); let mut index = 0; while index < count { operands.push(sh_l_expr(lower, text, ast, checked, ownership, sh_ast_child(ast, node, index))); index = index + 1; }; return sh_l_emit(lower, ast, node, if count == 1 { 10; } else { 11; }, ty, &operands, sh_ast_word(ast, node, 4), 0, 0); };
+    let binding = sh_l_resolved_callable(lower, checked, ast, node, signature);
+    if binding < 0 { return -1; };
+    let mut function = lower.functions.get(binding).unwrap_or(-1);
+    if function < 0 { function = sh_l_instance(lower, text, ast, checked, node, binding, signature); };
+    if function < 0 { return -1; };
+    let mir_signature = sh_mir_fn(&lower.mir, function, 1);
+    let operands = vec_new_i64();
+    let mut index = 0;
+    while index < count { let operand = sh_ast_child(ast, node, index); let actual = sh_l_node_type(lower, checked, ast, operand); let required = sh_mir_type_arg(&lower.mir, mir_signature, index); let raw = if sh_mir_type_word(&lower.mir, required, 0) == 6 and sh_mir_type_word(&lower.mir, actual, 0) != 6 { sh_l_place(lower, text, ast, checked, ownership, operand, sh_mir_type_word(&lower.mir, required, 2) == 1); } else { sh_l_expr(lower, text, ast, checked, ownership, operand); }; operands.push(sh_l_coerce(lower, ast, operand, raw, required)); index = index + 1; };
+    sh_l_emit(lower, ast, node, 20, ty, &operands, function, sh_mir_type_word(&lower.mir, mir_signature, 1), 0);
 }
 
 def sh_l_coerce(lower: &mut ShMirLower, ast: &ShAst, node: i64, value: i64, expected: i64) -> i64 {
@@ -689,6 +735,7 @@ def sh_l_expr_inner(lower: &mut ShMirLower, text: &String, ast: &ShAst, checked:
     let ty = sh_l_node_type(lower, checked, ast, node);
     if lower.error != 0 { return -1; };
     if kind == 11 { return sh_l_literal(lower, text, ast, checked, node); };
+    if (kind == 50 or kind == 51) and sh_node_callable_type(checked, node) >= 0 { return sh_l_operator(lower, text, ast, checked, ownership, node, ty); };
     if kind == 12 { let binding = sh_node_binding(checked, node); let binding_kind = sh_binding_word(checked, binding, 2); let args = vec_new_i64(); if binding_kind == 5 and sh_mir_type_word(&lower.mir, ty, 0) == 12 { return sh_l_emit(lower, ast, node, 24, ty, &args, sh_binding_word(checked, binding, 7), 0, 0); }; if binding_kind == 2 { return sh_l_emit(lower, ast, node, 9, ty, &args, lower.functions.get(binding).unwrap_or(-1), 0, 0); (); }; let address = sh_l_place(lower, text, ast, checked, ownership, node, false); args.push(address); return sh_l_emit(lower, ast, node, 14, ty, &args, 0, 0, 0); (); };
     if kind == 40 { let old_scope = lower.scope; lower.scope = sh_l_scope(lower, checked, ast, sh_node_scope(checked, node), node, 0); let mut value = sh_l_unit(lower, checked, ast, node); let mut i = 0; while lower.error == 0 and lower.block >= 0 and i < sh_ast_word(ast, node, 6) { let statement = sh_ast_child(ast, node, i); let statement_kind = sh_ast_word(ast, statement, 0); if statement_kind == 41 or statement_kind == 44 { let mut expression = -1; let mut child = 1; while child < sh_ast_word(ast, statement, 6) { let current = sh_ast_child(ast, statement, child); let child_kind = sh_ast_word(ast, current, 0); if child_kind < 70 or child_kind > 76 { expression = current; }; child = child + 1; }; if expression >= 0 { let initializer = sh_l_expr(lower, text, ast, checked, ownership, expression); let binding = sh_node_binding(checked, sh_ast_child(ast, statement, 0)); let local = sh_l_local(lower, checked, ast, binding); let address = sh_l_address(lower, checked, ast, statement, local, true); let operands = vec_new_i64(); operands.push(address); operands.push(initializer); let unit_ty = sh_l_type(lower, checked, checked.unit_type, 0); sh_l_emit(lower, ast, statement, 15, unit_ty, &operands, 0, 0, 0); sh_l_actions(lower, checked, ast, ownership, statement, false); sh_l_actions(lower, checked, ast, ownership, statement, true); (); }; } else { value = sh_l_expr(lower, text, ast, checked, ownership, if statement_kind == 43 { sh_ast_child(ast, statement, 0); } else { statement; }); if statement_kind == 43 { sh_l_actions(lower, checked, ast, ownership, statement, true); (); }; }; i = i + 1; }; if lower.block >= 0 { sh_l_actions(lower, checked, ast, ownership, node, true); (); }; lower.scope = old_scope; return value; };
     if kind == 50 { let operation = sh_ast_word(ast, node, 4); let op = operation % 1000; let child = sh_ast_child(ast, node, 0); if op == sh_kind("&") { let child_type = sh_l_node_type(lower, checked, ast, child); if child_type == ty and sh_mir_type_word(&lower.mir, ty, 0) == 6 { return sh_l_expr(lower, text, ast, checked, ownership, child); }; return sh_l_place(lower, text, ast, checked, ownership, child, operation >= 1000); }; let input = sh_l_expr(lower, text, ast, checked, ownership, child); let args = vec_new_i64(); args.push(input); return sh_l_emit(lower, ast, node, if op == sh_kind("*") { 14; } else { 10; }, ty, &args, op, 0, 0); (); };
@@ -728,7 +775,7 @@ def sh_lower_parts(text: &String, ast: &ShAst, checked: &ShChecked, ownership: &
     i = 0;
     while lower.error == 0 and i < sh_type_count(&checked.types) { if sh_s_kind(checked, i) == 12 { let owner = sh_adt_binding(checked, i); sh_l_drop_glue(&mut lower, text, ast, checked, i); if owner >= 0 { if sh_binding_word(checked, owner, 2) == 4 { let mut variant = 0; while variant < sh_binding_count(checked) { if sh_binding_word(checked, variant, 2) == 5 and sh_binding_word(checked, variant, 6) == owner { sh_l_layout(&mut lower, checked, i, variant, sh_binding_word(checked, variant, 7)); (); }; variant = variant + 1; }; } else { sh_l_layout(&mut lower, checked, i, owner, -1); }; }; }; i = i + 1; };
     let mut job = 0;
-    while lower.error == 0 and job < lower.jobs.len() / 5 { let function = lower.jobs.get(job * 5).unwrap_or(-1); let binding = lower.jobs.get(job * 5 + 1).unwrap_or(-1); lower.generic_keys.clear(); lower.generic_values.clear(); let first = lower.jobs.get(job * 5 + 3).unwrap_or(-1); let count = lower.jobs.get(job * 5 + 4).unwrap_or(0); let mut pair = 0; while pair < count { lower.generic_keys.push(lower.job_substitutions.get((first + pair) * 2).unwrap_or(-1)); lower.generic_values.push(lower.job_substitutions.get((first + pair) * 2 + 1).unwrap_or(-1)); pair = pair + 1; }; let mut reset = 0; while reset < lower.locals.len() { lower.locals.set(reset, -1); reset = reset + 1; }; reset = 0; while reset < lower.scopes.len() { lower.scopes.set(reset, -1); reset = reset + 1; }; reset = 0; while reset < lower.temporaries.len() { lower.temporaries.set(reset, -1); reset = reset + 1; }; if sh_mir_fn(&lower.mir, function, 3) % 2 == 0 { let node = sh_binding_word(checked, binding, 4); let body = sh_s_child_kind(ast, node, 40); lower.function = function; let root_scope = sh_mir_add_scope(&lower.mir, function, -1, 0); lower.scope = sh_l_store(&mut lower, ast, node, root_scope); lower.scopes.set(sh_binding_word(checked, binding, 7), lower.scope); lower.block = sh_l_block(&mut lower, ast, node, false); let mut local_binding = 0; while lower.error == 0 and local_binding < sh_binding_count(checked) { let kind = sh_binding_word(checked, local_binding, 2); if (kind == 0 or kind == 1) and sh_binding_word(checked, local_binding, 6) == binding { let declaration = sh_binding_word(checked, local_binding, 4); let ty_input = sh_binding_word(checked, local_binding, 3); let ty = sh_l_type(&mut lower, checked, ty_input, 0); let needs_drop = sh_ownership_needs_drop(text, ast, checked, ty_input) and not sh_ownership_parameter_observed(ownership, local_binding); let local_scope = sh_l_scope(&mut lower, checked, ast, sh_binding_word(checked, local_binding, 1), declaration, 0); let added = sh_mir_add_local(&lower.mir, function, ty, sh_binding_word(checked, local_binding, 0), if kind == 1 { 1; } else { 0; }, if needs_drop { 3; } else { 1; }, local_scope, if kind == 1 { sh_binding_word(checked, local_binding, 7); } else { -1; }, sh_ast_word(ast, declaration, 1), sh_ast_word(ast, declaration, 2), sh_ast_word(ast, declaration, 3)); let local = sh_l_store(&mut lower, ast, declaration, added); lower.locals.set(local_binding, local); if kind == 1 { let operands = vec_new_i64(); let value = sh_l_emit(&mut lower, ast, declaration, 1, ty, &operands, sh_binding_word(checked, local_binding, 7), 0, 0); let address = sh_l_address(&mut lower, checked, ast, declaration, local, true); operands.push(address); operands.push(value); let unit_ty = sh_l_type(&mut lower, checked, checked.unit_type, 0); sh_l_emit(&mut lower, ast, declaration, 15, unit_ty, &operands, 0, 0, 0); operands.clear(); sh_l_emit(&mut lower, ast, declaration, 25, unit_ty, &operands, local, 1, 0); (); }; }; local_binding = local_binding + 1; }; let mut result = sh_l_expr(&mut lower, text, ast, checked, ownership, body); let signature = sh_mir_fn(&lower.mir, function, 1); let returned = sh_mir_type_arg(&lower.mir, signature, sh_mir_type_word(&lower.mir, signature, 5) - 1); if lower.error == 0 and lower.block >= 0 and sh_mir_type_word(&lower.mir, sh_mir_value_type(&lower.mir, result), 0) == 0 and sh_mir_type_word(&lower.mir, returned, 0) == 2 { let name = sh_symbol_text(&lower.mir.symbols, sh_mir_fn(&lower.mir, function, 0)); if name.is_ok() and sh_s_text_equal(&name.value, "main") and sh_binding_word(checked, binding, 1) == 0 { let empty = vec_new_i64(); result = sh_l_emit(&mut lower, ast, node, 4, returned, &empty, 0, 0, 0); }; }; let return_kind = sh_mir_type_word(&lower.mir, returned, 0); if lower.error == 0 and lower.block >= 0 { if return_kind == 0 { result = sh_l_unit(&mut lower, checked, ast, node); }; sh_l_actions(&mut lower, checked, ast, ownership, node, true); sh_l_term(&mut lower, ast, node, 3, result); (); }; }; job = job + 1; };
+    while lower.error == 0 and job < lower.jobs.len() / 5 { let function = lower.jobs.get(job * 5).unwrap_or(-1); let binding = lower.jobs.get(job * 5 + 1).unwrap_or(-1); lower.generic_keys.clear(); lower.generic_values.clear(); let first = lower.jobs.get(job * 5 + 3).unwrap_or(-1); let count = lower.jobs.get(job * 5 + 4).unwrap_or(0); let mut pair = 0; while pair < count { lower.generic_keys.push(lower.job_substitutions.get((first + pair) * 2).unwrap_or(-1)); lower.generic_values.push(lower.job_substitutions.get((first + pair) * 2 + 1).unwrap_or(-1)); pair = pair + 1; }; if not sh_l_deferred(&mut lower, checked, ast, binding) { break; }; let mut reset = 0; while reset < lower.locals.len() { lower.locals.set(reset, -1); reset = reset + 1; }; reset = 0; while reset < lower.scopes.len() { lower.scopes.set(reset, -1); reset = reset + 1; }; reset = 0; while reset < lower.temporaries.len() { lower.temporaries.set(reset, -1); reset = reset + 1; }; if sh_mir_fn(&lower.mir, function, 3) % 2 == 0 { let node = sh_binding_word(checked, binding, 4); let body = sh_s_child_kind(ast, node, 40); lower.function = function; let root_scope = sh_mir_add_scope(&lower.mir, function, -1, 0); lower.scope = sh_l_store(&mut lower, ast, node, root_scope); lower.scopes.set(sh_binding_word(checked, binding, 7), lower.scope); lower.block = sh_l_block(&mut lower, ast, node, false); let mut local_binding = 0; while lower.error == 0 and local_binding < sh_binding_count(checked) { let kind = sh_binding_word(checked, local_binding, 2); if (kind == 0 or kind == 1) and sh_binding_word(checked, local_binding, 6) == binding { let declaration = sh_binding_word(checked, local_binding, 4); let ty_input = sh_binding_word(checked, local_binding, 3); let ty = sh_l_type(&mut lower, checked, ty_input, 0); let needs_drop = sh_ownership_needs_drop(text, ast, checked, ty_input) and not sh_ownership_parameter_observed(ownership, local_binding); let local_scope = sh_l_scope(&mut lower, checked, ast, sh_binding_word(checked, local_binding, 1), declaration, 0); let added = sh_mir_add_local(&lower.mir, function, ty, sh_binding_word(checked, local_binding, 0), if kind == 1 { 1; } else { 0; }, if needs_drop { 3; } else { 1; }, local_scope, if kind == 1 { sh_binding_word(checked, local_binding, 7); } else { -1; }, sh_ast_word(ast, declaration, 1), sh_ast_word(ast, declaration, 2), sh_ast_word(ast, declaration, 3)); let local = sh_l_store(&mut lower, ast, declaration, added); lower.locals.set(local_binding, local); if kind == 1 { let operands = vec_new_i64(); let value = sh_l_emit(&mut lower, ast, declaration, 1, ty, &operands, sh_binding_word(checked, local_binding, 7), 0, 0); let address = sh_l_address(&mut lower, checked, ast, declaration, local, true); operands.push(address); operands.push(value); let unit_ty = sh_l_type(&mut lower, checked, checked.unit_type, 0); sh_l_emit(&mut lower, ast, declaration, 15, unit_ty, &operands, 0, 0, 0); operands.clear(); sh_l_emit(&mut lower, ast, declaration, 25, unit_ty, &operands, local, 1, 0); (); }; }; local_binding = local_binding + 1; }; let mut result = sh_l_expr(&mut lower, text, ast, checked, ownership, body); let signature = sh_mir_fn(&lower.mir, function, 1); let returned = sh_mir_type_arg(&lower.mir, signature, sh_mir_type_word(&lower.mir, signature, 5) - 1); if lower.error == 0 and lower.block >= 0 and sh_mir_type_word(&lower.mir, sh_mir_value_type(&lower.mir, result), 0) == 0 and sh_mir_type_word(&lower.mir, returned, 0) == 2 { let name = sh_symbol_text(&lower.mir.symbols, sh_mir_fn(&lower.mir, function, 0)); if name.is_ok() and sh_s_text_equal(&name.value, "main") and sh_binding_word(checked, binding, 1) == 0 { let empty = vec_new_i64(); result = sh_l_emit(&mut lower, ast, node, 4, returned, &empty, 0, 0, 0); }; }; let return_kind = sh_mir_type_word(&lower.mir, returned, 0); if lower.error == 0 and lower.block >= 0 { if return_kind == 0 { result = sh_l_unit(&mut lower, checked, ast, node); }; sh_l_actions(&mut lower, checked, ast, ownership, node, true); sh_l_term(&mut lower, ast, node, 3, result); (); }; }; job = job + 1; };
     if lower.error == 0 { let validation = sh_mir_validate(&lower.mir); if validation.error != 0 { lower.error = validation.error; lower.start = validation.start; lower.end = validation.end; }; };
     ShLowered { mir: lower.mir, error: lower.error, start: lower.start, end: lower.end };
 }

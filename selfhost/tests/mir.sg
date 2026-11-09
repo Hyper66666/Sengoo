@@ -346,6 +346,12 @@ def sh_mt_cleanup_case(source: &str, expected_drops: i64, expected_projections: 
 }
 
 def sh_mt_lower() -> Result<bool, i64> {
+    sh_mt_lower_case("trait Add<Rhs,Output>{def add(&self,rhs:Rhs)->Output{}} struct Value{n:i64} impl Add<i64,i64> for Value{def add(&self,rhs:i64)->i64{self.n+rhs}} def main()->i64{let value=Value{n:20};(value+1)+(value+1)}", 0)?;
+    sh_mt_lower_case("struct Counter { value:i64, } impl Counter { def bump(&mut self) { if self.value > 0 { self.value = 42; true; } else { (); }; while self.value < 42 { self.value = self.value + 1; true; }; } } def main()->i64 { let mut counter=Counter{value:1}; counter.bump(); counter.value; }", 0)?;
+    sh_mt_lower_case("trait Add<Rhs,Output>{def add(self,rhs:Rhs)->Output{}} struct Value{n:i64} impl Add<Value,Value> for Value{def add(self,rhs:Value)->Value{Value{n:self.n+rhs.n}}} def main()->i64{let a=Value{n:20};let b=Value{n:22};(a+b).n}", 0)?;
+    sh_mt_lower_case("trait Add<Rhs,Output>{def add(self,rhs:Rhs)->Output{}} struct Value{n:i64} impl Add<Value,i64> for Value{def add(self,rhs:Value)->i64{self.n+rhs.n}} def add_values<T>(a:T,b:T)->i64 where T:Add<T,i64>{a+b} def main()->i64{add_values(Value{n:20},Value{n:22})}", 0)?;
+    sh_mt_lower_case("trait Neg<Output>{def neg(self)->Output{}} struct Value{n:i64} impl Neg<i64> for Value{def neg(self)->i64{-(self.n)}} def main()->i64{-Value{n:42}}", 0)?;
+    sh_mt_lower_case("trait Add<Rhs,Output>{def add(self,rhs:Rhs)->Output{}} def sum<T>(a:T,b:T)->T where T:Add<T,T>{a+b} def main()->i64{sum(20,22)}", 0)?;
     sh_mt_lower_case("def main() -> i64 { 42; }", 0)?;
     sh_mt_lower_case("def add(x: i64, y: i64) -> i64 { x + y } def main() -> i64 { add(40, 2); }", 0)?;
     sh_mt_lower_case("def choose(x: bool) -> i64 { if x { 41; } else { 42; }; }", 0)?;
@@ -529,6 +535,13 @@ def sh_mt_nested_drop() -> Result<bool, i64> {
     let checked = sh_check(&text, &parsed.ast, 100);
     let lowered = sh_lower(&text, &parsed.ast, &checked, 10000);
     if lowered.error != 0 { println("nested drop setup"); println(checked.error); println(lowered.error); return result_err_bool(lowered.error); };
+    let cycle_text = string_from_str("struct Leaf { value: i64, } def first(value: &mut Leaf, n: i64) { if n > 0 { second(value, n - 1); }; (); } def second(value: &mut Leaf, n: i64) { if n > 0 { first(value, n - 1); }; (); } impl Drop for Leaf { def drop(&mut self) { first(self, 1); (); } } def main() -> i64 { let value = Leaf { value: 42 }; 42; }")?;
+    let cycle_parsed = sh_parse(&cycle_text, 0, 10000);
+    let cycle_checked = sh_check(&cycle_text, &cycle_parsed.ast, 100);
+    let cycle_lowered = sh_lower(&cycle_text, &cycle_parsed.ast, &cycle_checked, 10000);
+    if cycle_lowered.error != 0 { println("drop worklist cycle"); println(cycle_lowered.error); return result_err_bool(cycle_lowered.error); };
+    let leaf = sh_mt_glue_type(&cycle_lowered.mir, "Leaf");
+    assert_eq_i64(sh_mir_drop_kind(&cycle_lowered.mir, leaf), 1, "nested-drop.sg", 31);
     let parent = sh_mt_glue_type(&lowered.mir, "Parent");
     let row = sh_mt_glue_row(&lowered.mir, parent);
     let layout = sh_mir_layout_id(&lowered.mir, parent);
@@ -549,6 +562,75 @@ def sh_mt_nested_drop() -> Result<bool, i64> {
     lowered.mir.drop_glues.clear();
     lowered.mir.layouts.set(layout * 7 + 4, target);
     assert_eq_i64(sh_mir_validate(&lowered.mir).error, 5007, "nested-drop.sg", 21);
+    Result { is_ok: true, value: true, error: 0 };
+}
+
+def sh_mt_deferred_hir() -> Result<bool, i64> {
+    let text = string_from_str("struct Option<T>{is_some:bool,value:T} trait Source{type Item;def next(&self)->Option<Self::Item>{}} struct Iter<T>{value:T} impl<T> Source for Iter<T>{type Item=T;def next(&self)->Option<T>{Option{is_some:true,value:self.value}}} struct Take<I:Source,T>{inner:I,marker:T} impl<I:Source,T> Take<I,T>{def next(&self)->Option<T>{self.inner.next()}} def main()->i64{let t=Take{inner:Iter{value:42},marker:0};t.next().value}")?;
+    let parsed = sh_parse(&text, 0, 10000);
+    let checked = sh_check(&text, &parsed.ast, 100);
+    let hir = sh_hir_lift(&text, &parsed.ast, &checked, 10000);
+    if hir.error != 0 { println("deferred HIR setup"); println(checked.error); println(hir.error); return result_err_bool(hir.error); };
+    assert_true(hir.checked.deferred_types.len() > 0, "deferred.sg", 6);
+    let image = sh_hir_encode(&hir, 1000000);
+    let restored = sh_hir_decode(&image.words, 1000000);
+    assert_eq_i64(restored.error, 0, "deferred.sg", 8);
+    sh_mt_words_equal(&hir.checked.deferred_types, &restored.checked.deferred_types);
+    let direct = sh_lower_hir(&hir, 10000);
+    let decoded = sh_lower_hir(&restored, 10000);
+    if direct.error != 0 or decoded.error != 0 { println("deferred lowering"); println(direct.error); println(decoded.error); println(direct.start); println(direct.end); return result_err_bool(5009); };
+    sh_mt_words_equal(&direct.mir.instructions, &decoded.mir.instructions);
+    let owner = hir.checked.deferred_types.get(0).unwrap_or(-1);
+    let expected = hir.checked.deferred_types.get(1).unwrap_or(-1);
+    let origin = hir.checked.deferred_types.get(3).unwrap_or(-1);
+    hir.checked.deferred_types.set(0, -1);
+    assert_eq_i64(sh_hir_validate(&hir), 5504, "deferred.sg", 15);
+    hir.checked.deferred_types.set(0, owner);
+    hir.checked.deferred_types.set(1, 1000000);
+    assert_eq_i64(sh_hir_validate(&hir), 5503, "deferred.sg", 16);
+    hir.checked.deferred_types.set(1, expected);
+    hir.checked.deferred_types.set(3, hir.ast.root);
+    assert_eq_i64(sh_hir_validate(&hir), 5504, "deferred.sg", 17);
+    hir.checked.deferred_types.set(3, origin);
+    hir.checked.deferred_types.push(0);
+    assert_eq_i64(sh_hir_validate(&hir), 5503, "deferred.sg", 18);
+    hir.checked.deferred_types.pop();
+    hir.checked.deferred_types.set(1, hir.checked.bool_type);
+    assert_eq_i64(sh_hir_validate(&hir), 5503, "deferred.sg", 20);
+    let arguments = vec_new_i64();
+    arguments.push(hir.checked.bool_type);
+    let wrong = sh_type_intern(&hir.checked.types, sh_s_kind(&hir.checked, expected), sh_s_data(&hir.checked, expected), sh_s_flags(&hir.checked, expected), sh_s_nominal(&hir.checked, expected), &arguments)?;
+    hir.checked.deferred_types.set(1, wrong);
+    let poisoned = sh_lower_hir(&hir, 10000);
+    assert_eq_i64(poisoned.error, 5009, "deferred.sg", 21);
+    hir.checked.deferred_types.set(1, expected);
+    assert_eq_i64(sh_hir_validate(&hir), 0, "deferred.sg", 22);
+    Result { is_ok: true, value: true, error: 0 };
+}
+
+def sh_mt_operator_hir() -> Result<bool, i64> {
+    let text = string_from_str("trait Add<Rhs,Output>{def add(self,rhs:Rhs)->Output{}} struct Value{n:i64} impl Add<Value,i64> for Value{def add(self,rhs:Value)->i64{self.n+rhs.n}} def wrong(a:Value,b:Value)->i64{0} def main()->i64{let a=Value{n:20};let b=Value{n:22};a+b}")?;
+    let parsed = sh_parse(&text, 0, 10000);
+    let checked = sh_check(&text, &parsed.ast, 100);
+    let hir = sh_hir_lift(&text, &parsed.ast, &checked, 10000);
+    if hir.error != 0 { println("operator HIR setup"); println(hir.error); return result_err_bool(hir.error); };
+    let image = sh_hir_encode(&hir, 1000000);
+    let restored = sh_hir_decode(&image.words, 1000000);
+    assert_eq_i64(restored.schema, 3, "operator.sg", 6);
+    assert_eq_i64(restored.error, 0, "operator.sg", 7);
+    let direct = sh_lower_hir(&hir, 10000);
+    let decoded = sh_lower_hir(&restored, 10000);
+    assert_eq_i64(direct.error, 0, "operator.sg", 9);
+    assert_eq_i64(decoded.error, 0, "operator.sg", 10);
+    sh_mt_words_equal(&direct.mir.instructions, &decoded.mir.instructions);
+    let mut wrong = -1;
+    let mut binding = 0;
+    while binding < sh_binding_count(&hir.checked) { let name = sh_symbol_text(&hir.checked.symbols, sh_binding_word(&hir.checked, binding, 0)); if name.is_ok() and sh_s_text_equal(&name.value, "wrong") { wrong = binding; }; binding = binding + 1; };
+    let mut node = 0;
+    let mut poisoned = false;
+    while node < sh_ast_count(&hir.ast) { if sh_ast_word(&hir.ast, node, 0) == 51 and sh_node_callable_type(&hir.checked, node) >= 0 { let signature = sh_node_callable_type(&hir.checked, node); let target = sh_node_binding(&hir.checked, node); hir.checked.call_types.set(node, -1); assert_eq_i64(sh_hir_validate(&hir), 5503, "operator.sg", 18); hir.checked.call_types.set(node, hir.checked.bool_type); assert_eq_i64(sh_hir_validate(&hir), 5503, "operator.sg", 19); hir.checked.call_types.set(node, signature); hir.checked.resolution.set(node, wrong); assert_eq_i64(sh_hir_validate(&hir), 5504, "operator.sg", 20); hir.checked.resolution.set(node, target); poisoned = true; break; }; node = node + 1; };
+    assert_true(poisoned, "operator.sg", 25);
+    assert_eq_i64(sh_hir_validate(&hir), 0, "operator.sg", 26);
     Result { is_ok: true, value: true, error: 0 };
 }
 
@@ -686,10 +768,13 @@ def sh_mt_hir() -> Result<bool, i64> {
     sh_mt_words_equal(&direct.mir.drop_glues, &restored.mir.drop_glues);
     sh_mt_words_equal(&direct.mir.types.words, &restored.mir.types.words);
     sh_mt_words_equal(&direct.mir.types.arguments, &restored.mir.types.arguments);
+    image.words.set(1, 2);
+    let old_schema = sh_hir_decode(&image.words, 1000000);
+    assert_eq_i64(old_schema.error, 5502, "mir.sg", 435);
     image.words.set(1, 99);
     let bad_version = sh_hir_decode(&image.words, 1000000);
     assert_eq_i64(bad_version.error, 5502, "mir.sg", 436);
-    image.words.set(1, 2);
+    image.words.set(1, 3);
     image.words.push(123);
     let trailing = sh_hir_decode(&image.words, 1000000);
     assert_eq_i64(trailing.error, 5502, "mir.sg", 437);
@@ -711,7 +796,7 @@ def main() -> i64 {
     let buffers = sengoo_buffer_live_handle_count();
     let opaque = sengoo_opaque_live_handle_count();
     let mut round = 0;
-    while round < 10 { let nested_drop = sh_mt_nested_drop(); if not nested_drop.is_ok() { println(nested_drop.error); return 17; }; let propagation = sh_mt_propagation_hir(); if not propagation.is_ok() { println(propagation.error); return 15; }; let glues = sh_mt_drop_glues(); if not glues.is_ok() { println(glues.error); return 14; }; let builtin_print = sh_mt_builtin_hir("def main() { println(42); print(true); eprintln(\"hello\"); }"); if not builtin_print.is_ok() { println(builtin_print.error); return 12; }; let builtin_sleep = sh_mt_builtin_hir("async def main() -> i64 { let timer = sleep(1); await timer; 42; }"); if not builtin_sleep.is_ok() { println(builtin_sleep.error); return 13; }; let classes = sh_mt_class_bounds(); if not classes.is_ok() { println(classes.error); return 11; }; let generics = sh_mt_generics(); if not generics.is_ok() { println(generics.error); return 10; }; let observed = sh_mt_observed(); if not observed.is_ok() { println(observed.error); return 9; }; let poison = sh_mt_hir_poison(); if not poison.is_ok() { println(poison.error); return 8; }; let hir = sh_mt_hir(); if not hir.is_ok() { println(hir.error); return 7; }; let lowering = sh_mt_lower(); if not lowering.is_ok() { println(lowering.error); return 6; }; let nominal = sh_mt_nominal_indirect(); if not nominal.is_ok() { println(nominal.error); return 5; }; assert_eq_i64(sengoo_string_live_handle_count(), strings, "mir.sg", 260); assert_eq_i64(sengoo_buffer_live_handle_count(), buffers, "mir.sg", 261); assert_eq_i64(sengoo_opaque_live_handle_count(), opaque, "mir.sg", 262); round = round + 1; };
+    while round < 10 { let deferred = sh_mt_deferred_hir(); if not deferred.is_ok() { println(deferred.error); return 19; }; let operators = sh_mt_operator_hir(); if not operators.is_ok() { println(operators.error); return 18; }; let nested_drop = sh_mt_nested_drop(); if not nested_drop.is_ok() { println(nested_drop.error); return 17; }; let propagation = sh_mt_propagation_hir(); if not propagation.is_ok() { println(propagation.error); return 15; }; let glues = sh_mt_drop_glues(); if not glues.is_ok() { println(glues.error); return 14; }; let builtin_print = sh_mt_builtin_hir("def main() { println(42); print(true); eprintln(\"hello\"); }"); if not builtin_print.is_ok() { println(builtin_print.error); return 12; }; let builtin_sleep = sh_mt_builtin_hir("async def main() -> i64 { let timer = sleep(1); await timer; 42; }"); if not builtin_sleep.is_ok() { println(builtin_sleep.error); return 13; }; let classes = sh_mt_class_bounds(); if not classes.is_ok() { println(classes.error); return 11; }; let generics = sh_mt_generics(); if not generics.is_ok() { println(generics.error); return 10; }; let observed = sh_mt_observed(); if not observed.is_ok() { println(observed.error); return 9; }; let poison = sh_mt_hir_poison(); if not poison.is_ok() { println(poison.error); return 8; }; let hir = sh_mt_hir(); if not hir.is_ok() { println(hir.error); return 7; }; let lowering = sh_mt_lower(); if not lowering.is_ok() { println(lowering.error); return 6; }; let nominal = sh_mt_nominal_indirect(); if not nominal.is_ok() { println(nominal.error); return 5; }; assert_eq_i64(sengoo_string_live_handle_count(), strings, "mir.sg", 260); assert_eq_i64(sengoo_buffer_live_handle_count(), buffers, "mir.sg", 261); assert_eq_i64(sengoo_opaque_live_handle_count(), opaque, "mir.sg", 262); round = round + 1; };
     round = 0;
     while round < 30 { let bytes = sh_mt_byte_move(); if not bytes.is_ok() { println(bytes.error); return 16; }; let diamond = sh_mt_diamond(); if not diamond.is_ok() { println(diamond.error); return 1; }; let loops = sh_mt_loop(); if not loops.is_ok() { println(loops.error); return 2; }; let memory = sh_mt_memory_calls(); if not memory.is_ok() { println(memory.error); return 3; }; let limits = sh_mt_bounds(); if not limits.is_ok() { println(limits.error); return 4; }; round = round + 1; };
     assert_eq_i64(sengoo_string_live_handle_count(), strings, "mir.sg", 146);

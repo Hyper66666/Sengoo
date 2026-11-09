@@ -367,6 +367,37 @@ not authorize any actual free. Complete closure/Send, owned-pattern and
 conditional field cleanup, projected-only wrapper ABI specialization, runtime
 drop ABI, async/cancellation and full supported-corpus parity remain open.
 
+## Arithmetic calls and deferred typed HIR checkpoint
+
+- [x] Carry owned deferred associated-projection equalities in HIR schema three, including complete bridge encoding/decoding, caps and callable/type/origin/outer-shape validation; reject schema two and malformed or poisoned records without repeating semantic analysis.
+- [x] Close every concrete callable's deferred equalities after generic substitution and projection normalization, rejecting unresolved or unequal instances with 5009; verify Source/Iter/Take through semantic checking, HIR roundtrip and concrete MIR lowering.
+- [x] Lower checked arithmetic to actual user operator methods, including concrete aggregate output, generic ADT and primitive dispatch, Neg and borrowed receivers; validate operator signatures and implementation identities in saved HIR.
+- [x] Select concrete generic trait method implementations from typed constraints instead of executing abstract trait bodies; align ownership analysis with semantic analysis by omitting execution facts for those abstract bodies.
+- [x] Use a visited worklist for source destructor call traversal, preserving ordinary mutually recursive helpers without authorizing nested field destruction.
+- [x] Preserve initialized ancestor state when a field path first appears in a branch or loop, refresh descendants on complete reinitialization and retain rejection of conditional moves; discard typed unit branch tails while preserving their effects.
+
+Report: `target/selfhost/m3-operator-deferred/final-checkpoint/evidence.json`,
+SHA-256 `d8044cb6de4f411c4a5605c90a4bebb8f2921d929715c9c46cfbb90a407b2645`.
+It records Windows 11 AMD64, Python 3.12.14, 175 exact input hashes and empty
+source/tool change lists. The start revision is
+`66043a401c96350bfdd5fed2a4b1326477a52f82`; the end revision is
+`c32037ff9941ae3f10094c5b17dd8909fd63a698`, after an independent native-backend
+commit whose files are outside this gate's mapped frontend closure. All four
+build/native commands passed with 50 ownership rounds, 10 typed HIR/MIR
+roundtrip/lowering/cleanup rounds and 30 raw CFG/SSA/ABI rounds, with exact
+String, Buffer and opaque handle counts. Earlier failed trial/checkpoint
+reports remain preserved, including the initialized-field false positive and
+the source compiler's readonly Vec getter API mismatch in the first fix.
+
+This is partial correctness evidence, with `m3_complete: false`. Fresh full
+corpus discovery still exposes a borrowed temporary escaping through an
+anonymous call result (negative fixture 803), which this named checkpoint
+does not cover. Complete borrowed-result lifetime tracking, projected-only
+wrapper ABI specialization, runtime contracts, closure environments, owned
+patterns, runtime drop ABI, conditional field cleanup, async/cancellation and
+the full supported corpus remain open. No compiler self-build or performance
+qualification is claimed by this gate.
+
 
 ## Physical module graph and class-tail correction checkpoint
 
@@ -402,3 +433,29 @@ Report `target/selfhost/m3-semantic/module-reference-evidence.json` has SHA-256
 `94c7a24fc99053c220fb6c4d36849de6451c9eea`. It includes source/module-map inputs and complete
 qualified-reference/candidate outputs for each case. This evidence proves only
 the named physical import cases, not full namespace or stdlib compatibility.
+
+
+## Generic association and impl effect-context checkpoint
+
+- [x] Retain bounded per-callable deferred associated-type equalities with original AST provenance; verify concrete correctness/rejection and forward/generic-wrapper calls instead of treating projections as wildcards.
+- [x] Verify the reference-compatible impl discarded-expression context while preserving ordinary/class/value-context and explicit-return checks.
+- [x] Apply the existing reserved blocking-spawn Send capture constraint to resolved lambda captures and reject the named non-Send wrapper case.
+- [x] Verify 188 named semantic cases plus deferred-table ownership/getter bounds, 100 semantic and structural-type resource scopes, native module lifecycle resources, native CLI and a fresh 49-case comparison.
+
+The source-bound report `target/selfhost/m3-semantic/evidence.json` has SHA-256
+`0cfec7e77bc1af8f408bdac686ef4a3bc9704e544983d449f70205b1b771bf16`.
+It records identical start/end revision
+`66043a401c96350bfdd5fed2a4b1326477a52f82`, Windows 11 AMD64 and empty
+source/tool changes, retaining the same five reviewed fresh-49 differences.
+The earlier 179-case report is preserved as
+`target/selfhost/m3-semantic/evidence-179-392f122.json`.
+
+Actual module-entry development trials for std::collections, core and lexer
+now pass typing and reach ownership diagnostics. They do not pass ownership,
+MIR lowering or self-compilation; unspecialized generic equalities remain
+explicit obligations for concrete jobs. HIR schema 3 preservation and MIR
+strict concrete-job checks have a separate coordinated gate. The first
+large-corpus discovery rerun exceeded its old 20-second per-case deadline
+because imports are now genuinely analyzed. Those aborted runs remain
+incomplete development evidence; the replacement scanner saves every case,
+uses a bounded 120-second deadline and records faults separately from rejection.
