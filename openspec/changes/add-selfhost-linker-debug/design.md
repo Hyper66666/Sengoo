@@ -177,3 +177,37 @@ https://llvm.org/docs/PDB/PdbStream.html
 https://llvm.org/docs/PDB/DbiStream.html
 https://llvm.org/docs/PDB/TpiStream.html
 https://github.com/llvm/llvm-project/blob/llvmorg-19.1.7/lldb/source/Plugins/SymbolFile/NativePDB/PdbIndex.cpp
+
+
+## Relocatable COFF CodeView checkpoint
+
+`sh_link_codeview_attach(object, debug)` writes real `.debug$S` and `.debug$T`
+contributions before object emission. Function names resolve to existing COFF
+function symbols; declared input section and offset must match those symbols.
+Procedure addresses, local lifetime range addresses and source line fragments
+use ordinary AMD64 SECTION/SECREL relocations against the function symbol.
+No final PE RVA or section ordinal is baked into the input debug addresses.
+The type contribution contains a signature and the supported argument-list/
+procedure type records; symbols include compiler/module/function/frame/local
+records and C13 line/string/SHA256 checksum subsections.
+
+`sh_link_codeview_read(debug, linker, image, object_id)` reads the actual
+relocated section contributions after SG PE linking, validates types, symbol
+scope order, frame form, local lifetimes, ordered source lines, canonical UTF-8
+source pathname and complete source checksum, and maps them into the PDB model.
+Unknown debug sections/subsections/symbols/types and unsupported checksum or
+frame encodings fail explicitly. The first reader accepts one source module
+with the named no-argument i64 prototype and SP-relative i64 local subset.
+Source path bytes must match exactly, so callers choose a canonical pathname
+style consistently. Multiple modules, native compiler/SDK type merging and
+other frame/local forms remain separate supported-corpus work.
+
+The gate writes a real COFF object, independently decodes its CodeView and
+relocations with llvm-readobj, loads the same existing object back through SG,
+and requires equal PE/PDB bytes. The resulting PDB is independently inspected
+and used by real LLDB for the source breakpoint/step/answer=40 then 42/exit=42
+sequence. Nineteen malformed or unsupported COFF CodeView mutations fail while
+preserving existing PE/PDB bytes. Twenty native success/failure scopes recover
+all tracked resources exactly. Debug input contributions currently remain
+mapped in the PE; debug stripping and the public non-debug CLI policy remain
+integration work rather than implied full debug-input support.

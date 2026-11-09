@@ -106,3 +106,25 @@ Automatic native compiler debug mapping, arbitrary COFF CodeView input/type
 merging, multiple modules, aggregates/generics/async/reflection debug types and
 complete native SDK/DLL/debug support remain open. This usable debugger subset
 does not close the complete M5 tasks above; `m5_complete` remains `false`.
+
+
+## Relocatable COFF CodeView checkpoint evidence
+
+- [x] Emit real SG-owned `.debug$S/.debug$T` object contributions with SECTION/SECREL relocations for procedure/local/line addresses.
+- [x] Read the actual relocated contribution bytes, validate the named source/type/frame/local/line subset and map it to SG PDB streams.
+- [x] Independently inspect the native COFF CodeView and relocations, prove equal PE/PDB bytes when rereading the object, and use real LLDB for source/step/local/exit behavior.
+- [x] Verify 19 malformed/unsupported CodeView cases preserve both previous output files and 20 native success/failure scopes recover resources exactly.
+
+Evidence: `target/selfhost/m5-link-codeview-checked/evidence.json`, SHA-256
+`bbf35f5657649f2a785b6ab4fd0c2589614a6242d348652af197d9aab78ceb78`.
+Start/end revision `66043a401c96350bfdd5fed2a4b1326477a52f82`, Windows 11
+AMD64, all 179 source inputs and 36 recorded tool/runtime identities unchanged;
+28 commands passed. Production SG object/link/read/PDB operations use an empty
+toolchain PATH. The preceding failed trial kept a Windows slash variant in its
+negative-case source argument and correctly failed exact source-name matching;
+the checked gate consistently uses the same canonical source pathname bytes.
+
+This checkpoint does not claim arbitrary native SDK CodeView or automatic
+compiler debug-address generation. Multiple modules, aggregate/generic/async/
+reflection types, RBP/native multiple-return lifetime ranges, complete static
+SDK compatibility, debug stripping and final M5 qualification remain open.

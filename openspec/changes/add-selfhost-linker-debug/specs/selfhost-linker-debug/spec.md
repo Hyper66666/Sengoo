@@ -64,3 +64,10 @@ and final process/equality/performance gates SHALL retain their own evidence.
 - **AND** equal inputs and options yield equal PE/PDB bytes with a source-bound identity
 - **AND** an independent debugger proves source breakpoints, stepping and expected local values
 - **AND** unsupported debug type/module forms and invalid address/lifetime ranges fail explicitly
+
+
+#### Scenario: Supported relocatable CodeView reaches a PDB
+- **WHEN** supported COFF contributions contain CodeView procedure, local and source-line addresses with SECTION/SECREL relocations
+- **THEN** SG resolves those addresses and reads the relocated records into the PDB model
+- **AND** an independent COFF reader and real debugger verify the resulting debug behavior
+- **AND** unknown record forms, invalid scopes/ranges and source-checksum mismatches fail explicitly

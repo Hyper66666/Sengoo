@@ -1,0 +1,166 @@
+import selfhost_link_pdb;
+
+def sh_link_cv_object_symbol(object: &ShObject, debug: &ShLinkDebug, function: i64) -> Result<i64, i64> {
+    let name = sh_symbol_text(&debug.names, sh_link_word(&debug.functions, 8, function, 0))?;
+    let mut symbol = 0;
+    while symbol < object.symbols.len() / 5 { let text = sh_symbol_text(&object.names, sh_object_word(&object.symbols, 5, symbol, 0))?; if sengoo_string_eq(name.handle, text.handle) != 0 { if sh_object_word(&object.symbols, 5, symbol, 3) != 32 or sh_object_word(&object.symbols, 5, symbol, 2) != sh_link_word(&debug.functions, 8, function, 1) or sh_object_word(&object.symbols, 5, symbol, 1) != sh_link_word(&debug.functions, 8, function, 2) { return sh_i64_error(7301); }; return sh_i64_ok(symbol); }; symbol = symbol + 1; };
+    sh_i64_error(7301);
+}
+
+def sh_link_codeview_attach(object: &ShObject, debug: &ShLinkDebug) -> Result<i64, i64> {
+    if debug.path < 0 or debug.functions.len() == 0 { return sh_i64_error(7301); };
+    let symbols = sh_binary_new(1048576);
+    sh_link_pdb_symbols(debug, &symbols)?;
+    let data = sh_binary_new(1048576);
+    sh_binary_unsigned(&data, 4, 4)?;
+    sh_binary_unsigned(&data, 241, 4)?;
+    sh_binary_unsigned(&data, sh_binary_len(&symbols) - 4, 4)?;
+    let fixups = vec_new_i64();
+    let mut at = 4;
+    let mut function = -1;
+    let mut symbol = -1;
+    while at < sh_binary_len(&symbols) { let length = sh_link_uint(&symbols, at, 2)?; let kind = sh_link_uint(&symbols, at + 2, 2)?; if kind == 4368 { function = function + 1; symbol = sh_link_cv_object_symbol(object, debug, function)?; sh_binary_patch(&symbols, at + 8, 0, 4)?; sh_binary_patch(&symbols, at + 32, 0, 4)?; sh_binary_patch(&symbols, at + 36, 0, 2)?; sh_link_push(&fixups, at + 40)?; sh_link_push(&fixups, symbol)?; sh_link_push(&fixups, 11)?; sh_link_push(&fixups, at + 44)?; sh_link_push(&fixups, symbol)?; sh_link_push(&fixups, 10)?; (); }; if kind == 4418 { if function < 0 { return sh_i64_error(7301); }; let offset = sh_link_uint(&symbols, at + 8, 4)? - sh_link_word(&debug.functions, 8, function, 2); sh_binary_patch(&symbols, at + 8, offset, 4)?; sh_binary_patch(&symbols, at + 12, 0, 2)?; sh_link_push(&fixups, at + 16)?; sh_link_push(&fixups, symbol)?; sh_link_push(&fixups, 11)?; sh_link_push(&fixups, at + 20)?; sh_link_push(&fixups, symbol)?; sh_link_push(&fixups, 10)?; (); }; at = at + length + 2; };
+    at = 4;
+    while at < sh_binary_len(&symbols) { sh_binary_byte(&data, sh_binary_get(&symbols, at)?)?; at = at + 1; };
+    let lines_at = sh_binary_len(&data);
+    sh_link_pdb_lines(debug, &data)?;
+    at = lines_at;
+    function = 0;
+    while at < sh_binary_len(&data) { let kind = sh_link_uint(&data, at, 4)?; let length = sh_link_uint(&data, at + 4, 4)?; if kind == 242 { symbol = sh_link_cv_object_symbol(object, debug, function)?; sh_binary_patch(&data, at + 8, 0, 4)?; sh_binary_patch(&data, at + 12, 0, 2)?; sh_link_push(&fixups, at + 8)?; sh_link_push(&fixups, symbol)?; sh_link_push(&fixups, 11)?; sh_link_push(&fixups, at + 12)?; sh_link_push(&fixups, symbol)?; sh_link_push(&fixups, 10)?; function = function + 1; (); }; at = at + length + 8; };
+    let path = sh_symbol_text(&debug.names, debug.path)?;
+    sh_binary_unsigned(&data, 243, 4)?;
+    sh_binary_unsigned(&data, path.len() + 2, 4)?;
+    sh_binary_byte(&data, 0)?;
+    sh_link_debug_text(&data, &path)?;
+    sh_binary_align(&data, 4, 0)?;
+    let section_name = string_from_str(".debug$S")?;
+    let section = sh_object_add_section(object, &section_name, &data, 1107296320, 4)?;
+    at = 0;
+    while at < fixups.len() / 3 { sh_object_add_relocation(object, section, sh_link_word(&fixups, 3, at, 0), sh_link_word(&fixups, 3, at, 1), sh_link_word(&fixups, 3, at, 2))?; at = at + 1; };
+    let types = sh_link_pdb_types(true)?;
+    let type_data = sh_binary_new(28);
+    sh_binary_unsigned(&type_data, 4, 4)?;
+    at = 56;
+    while at < sh_binary_len(&types) { sh_binary_byte(&type_data, sh_binary_get(&types, at)?)?; at = at + 1; };
+    let type_name = string_from_str(".debug$T")?;
+    sh_object_add_section(object, &type_name, &type_data, 1107296320, 4)?;
+    sh_i64_ok(section);
+}
+
+def sh_link_cv_slice(bytes: &ShBinary, start: i64, size: i64) -> Result<ShBinary, i64> {
+    if start < 0 or size < 0 or size > 1048576 or start > sh_binary_len(bytes) or size > sh_binary_len(bytes) - start { return sh_coff_error(7301); };
+    let output = sh_binary_new(1048576);
+    let mut index = 0;
+    while index < size { sh_binary_byte(&output, sh_binary_get(bytes, start + index)?)?; index = index + 1; };
+    Result { is_ok: true, value: output, error: 0 };
+}
+
+def sh_link_cv_text(bytes: &ShBinary, start: i64, end: i64) -> Result<String, i64> {
+    if start < 0 or start >= end or end > sh_binary_len(bytes) { return sh_link_cv_string_error(7301); };
+    let mut length = 0;
+    while start + length < end and sh_binary_get(bytes, start + length)? != 0 { length = length + 1; };
+    if length == 0 or start + length == end { return sh_link_cv_string_error(7301); };
+    let buffer = ffi_buffer_new(length)?;
+    let mut index = 0;
+    while index < length { buffer.push_u8(sh_binary_get(bytes, start + index)?)?; index = index + 1; };
+    let text = string_from_utf8(buffer, length);
+    if not text.is_ok() { return sh_link_cv_string_error(7301); };
+    text;
+}
+
+def sh_link_cv_tail(bytes: &ShBinary, at: i64, end: i64) -> Result<i64, i64> {
+    if at > end or end - at > 3 { return sh_i64_error(7301); };
+    let mut index = at;
+    while index < end { if sh_binary_get(bytes, index)? != 0 { return sh_i64_error(7301); }; index = index + 1; };
+    sh_i64_ok(0);
+}
+
+def sh_link_cv_source(debug: &ShLinkDebug, bytes: &ShBinary, strings_at: i64, strings_size: i64, checksums_at: i64, checksums_size: i64) -> Result<i64, i64> {
+    if strings_at < 0 or checksums_at < 0 or strings_size < 2 or checksums_size != 40 or sh_binary_get(bytes, strings_at)? != 0 { return sh_i64_error(7301); };
+    let path = sh_link_cv_text(bytes, strings_at + 1, strings_at + strings_size)?;
+    let expected_path = sh_symbol_text(&debug.names, debug.path)?;
+    if sengoo_string_eq(path.handle, expected_path.handle) == 0 or strings_size != path.len() + 2 { return sh_i64_error(7301); };
+    if sh_link_uint(bytes, checksums_at, 4)? != 1 or sh_link_uint(bytes, checksums_at + 4, 1)? != 32 or sh_link_uint(bytes, checksums_at + 5, 1)? != 3 { return sh_i64_error(7303); };
+    let source = sh_binary_new(1048576);
+    let mut index = 0;
+    while index < debug.source.len() { sh_binary_byte(&source, sengoo_vec_get_or_default_i64(debug.source.handle, index, -1))?; index = index + 1; };
+    let digest = sh_link_sha256(&source)?;
+    index = 0;
+    while index < 32 { if sh_binary_get(&digest, index)? != sh_binary_get(bytes, checksums_at + 6 + index)? { return sh_i64_error(7301); }; index = index + 1; };
+    sh_link_cv_tail(bytes, checksums_at + 38, checksums_at + 40)?;
+    sh_i64_ok(0);
+}
+
+def sh_link_cv_symbols(debug: &ShLinkDebug, bytes: &ShBinary, start: i64, size: i64) -> Result<i64, i64> {
+    let end = start + size;
+    let mut at = start;
+    let mut object_seen = false;
+    let mut compile_seen = false;
+    let mut active = false;
+    let mut framed = false;
+    let mut function = -1;
+    let mut name = -1;
+    let mut segment = 0;
+    let mut offset = 0;
+    let mut code_size = 0;
+    let mut prologue = 0;
+    let mut epilogue = 0;
+    let mut local_name = -1;
+    while at < end { if end - at < 4 { return sh_i64_error(7301); }; let length = sh_link_uint(bytes, at, 2)?; let record_end = at + length + 2; let kind = sh_link_uint(bytes, at + 2, 2)?; if length < 2 or record_end > end or (length + 2) % 4 != 0 { return sh_i64_error(7301); }; if kind == 4353 { if object_seen or active or length < 7 or sh_link_uint(bytes, at + 4, 4)? != 0 { return sh_i64_error(7301); }; let text = sh_link_cv_text(bytes, at + 8, record_end)?; sh_link_cv_tail(bytes, at + 9 + text.len(), record_end)?; object_seen = true; } else { if kind == 4412 { if compile_seen or active or length < 25 or sh_link_uint(bytes, at + 4, 4)? != 0 or sh_link_uint(bytes, at + 8, 2)? != 208 { return sh_i64_error(7303); }; let text = sh_link_cv_text(bytes, at + 26, record_end)?; sh_link_cv_tail(bytes, at + 27 + text.len(), record_end)?; compile_seen = true; } else { if kind == 4368 { if active or not object_seen or not compile_seen or length < 38 { return sh_i64_error(7301); }; if sh_link_uint(bytes, at + 4, 4)? != 0 or sh_link_uint(bytes, at + 8, 4)? != 0 or sh_link_uint(bytes, at + 12, 4)? != 0 or sh_link_uint(bytes, at + 28, 4)? != 4097 or sh_link_uint(bytes, at + 38, 1)? != 192 { return sh_i64_error(7303); }; let text = sh_link_cv_text(bytes, at + 39, record_end)?; sh_link_cv_tail(bytes, at + 40 + text.len(), record_end)?; name = sh_link_debug_name(debug, &text)?; segment = sh_link_uint(bytes, at + 36, 2)?; offset = sh_link_uint(bytes, at + 32, 4)?; code_size = sh_link_uint(bytes, at + 16, 4)?; prologue = sh_link_uint(bytes, at + 20, 4)?; epilogue = sh_link_uint(bytes, at + 24, 4)?; active = true; framed = false; } else { if kind == 4114 { if not active or framed or length != 30 { return sh_i64_error(7301); }; if sh_link_uint(bytes, at + 8, 8)? != 0 or sh_link_uint(bytes, at + 16, 8)? != 0 or sh_link_uint(bytes, at + 24, 2)? != 0 or sh_link_uint(bytes, at + 26, 4)? != 90112 { return sh_i64_error(7303); }; sh_link_cv_tail(bytes, at + 30, record_end)?; let text = sh_symbol_text(&debug.names, name)?; function = sh_link_debug_function(debug, &text, segment, offset, code_size, sh_link_uint(bytes, at + 4, 4)? - 8, prologue, epilogue)?; framed = true; } else { if kind == 4414 { if not active or not framed or local_name >= 0 or length < 9 { return sh_i64_error(7301); }; if sh_link_uint(bytes, at + 4, 4)? != 19 or sh_link_uint(bytes, at + 8, 2)? != 0 { return sh_i64_error(7303); }; let text = sh_link_cv_text(bytes, at + 10, record_end)?; sh_link_cv_tail(bytes, at + 11 + text.len(), record_end)?; local_name = sh_link_debug_name(debug, &text)?; } else { if kind == 4418 { if not active or not framed or local_name < 0 or length != 14 { return sh_i64_error(7301); }; if sh_link_uint(bytes, at + 12, 2)? != segment { return sh_i64_error(7301); }; let text = sh_symbol_text(&debug.names, local_name)?; sh_link_debug_local(debug, function, &text, 19, sh_link_uint(bytes, at + 4, 4)?, sh_link_uint(bytes, at + 8, 4)? - offset, sh_link_uint(bytes, at + 14, 2)?)?; local_name = -1; } else { if kind == 6 { if not active or not framed or local_name >= 0 or length != 2 { return sh_i64_error(7301); }; active = false; framed = false; } else { return sh_i64_error(7303); }; }; }; }; }; }; }; at = record_end; };
+    if at != end or active or local_name >= 0 or not object_seen or not compile_seen or debug.functions.len() == 0 { return sh_i64_error(7301); };
+    sh_i64_ok(debug.functions.len() / 8);
+}
+
+def sh_link_cv_lines(debug: &ShLinkDebug, bytes: &ShBinary, start: i64, size: i64) -> Result<i64, i64> {
+    if size < 32 or sh_link_uint(bytes, start + 6, 2)? != 0 or sh_link_uint(bytes, start + 12, 4)? != 0 { return sh_i64_error(7303); };
+    let count = sh_link_uint(bytes, start + 16, 4)?;
+    if count > 65536 or size != 24 + count * 8 or sh_link_uint(bytes, start + 20, 4)? != 12 + count * 8 { return sh_i64_error(7301); };
+    let segment = sh_link_uint(bytes, start + 4, 2)?;
+    let offset = sh_link_uint(bytes, start, 4)?;
+    let code_size = sh_link_uint(bytes, start + 8, 4)?;
+    let mut function = 0;
+    while function < debug.functions.len() / 8 and (sh_link_word(&debug.functions, 8, function, 1) != segment or sh_link_word(&debug.functions, 8, function, 2) != offset) { function = function + 1; };
+    if function == debug.functions.len() / 8 or code_size != sh_link_word(&debug.functions, 8, function, 3) { return sh_i64_error(7301); };
+    let mut index = 0;
+    while index < debug.lines.len() / 3 { if sh_link_word(&debug.lines, 3, index, 0) == function { return sh_i64_error(7301); }; index = index + 1; };
+    index = 0;
+    while index < count { let line = sh_link_uint(bytes, start + 28 + index * 8, 4)?; if (line & 2130706432) != 0 { return sh_i64_error(7303); }; sh_link_debug_line(debug, function, sh_link_uint(bytes, start + 24 + index * 8, 4)?, line & 16777215)?; index = index + 1; };
+    sh_i64_ok(function);
+}
+
+def sh_link_codeview_read(debug: &ShLinkDebug, link: &ShLinker, image: &ShBinary, object: i64) -> Result<i64, i64> {
+    if debug.path < 0 or debug.functions.len() != 0 or not link.linked { return sh_i64_error(7303); };
+    let mut symbol_section = -1;
+    let mut type_section = -1;
+    let mut section = 0;
+    while section < link.sections.len() / 10 { if sh_link_word(&link.sections, 10, section, 0) == object { let name = sh_link_word(&link.sections, 10, section, 1); let text = sh_symbol_text(&link.names, name)?; let raw_name = sh_coff_symbol_bytes(&text)?; if text.len() >= 6 { let mut prefix = true; let expected = string_from_str(".debug")?; let prefix_bytes = sh_coff_symbol_bytes(&expected)?; let mut letter = 0; while letter < 6 { if raw_name.get_u8(letter)? != prefix_bytes.get_u8(letter)? { prefix = false; }; letter = letter + 1; }; if prefix and not sh_link_name_equal(link, name, ".debug$S") and not sh_link_name_equal(link, name, ".debug$T") { return sh_i64_error(7303); }; }; if sh_link_name_equal(link, name, ".debug$S") { if symbol_section >= 0 { return sh_i64_error(7301); }; symbol_section = section; }; if sh_link_name_equal(link, name, ".debug$T") { if type_section >= 0 { return sh_i64_error(7301); }; type_section = section; }; }; section = section + 1; };
+    if symbol_section < 0 or type_section < 0 { return sh_i64_error(7303); };
+    let types = sh_link_cv_slice(image, sh_link_word(&link.sections, 10, type_section, 9), sh_link_word(&link.sections, 10, type_section, 3))?;
+    let expected_types = sh_link_pdb_types(true)?;
+    if sh_binary_len(&types) != 28 or sh_link_uint(&types, 0, 4)? != 4 { return sh_i64_error(7303); };
+    let mut index = 0;
+    while index < 24 { if sh_binary_get(&types, index + 4)? != sh_binary_get(&expected_types, index + 56)? { return sh_i64_error(7303); }; index = index + 1; };
+    let symbols = sh_link_cv_slice(image, sh_link_word(&link.sections, 10, symbol_section, 9), sh_link_word(&link.sections, 10, symbol_section, 3))?;
+    if sh_link_uint(&symbols, 0, 4)? != 4 { return sh_i64_error(7303); };
+    let fragments = vec_new_i64();
+    let mut strings = -1;
+    let mut strings_size = 0;
+    let mut checksums = -1;
+    let mut checksums_size = 0;
+    let mut records = -1;
+    let mut records_size = 0;
+    let mut at = 4;
+    while at < sh_binary_len(&symbols) { if sh_binary_len(&symbols) - at < 8 { return sh_i64_error(7301); }; let kind = sh_link_uint(&symbols, at, 4)?; let size = sh_link_uint(&symbols, at + 4, 4)?; if size > sh_binary_len(&symbols) - at - 8 { return sh_i64_error(7301); }; if kind == 241 { if records >= 0 { return sh_i64_error(7301); }; records = at + 8; records_size = size; } else { if kind == 242 { sh_link_push(&fragments, at + 8)?; sh_link_push(&fragments, size)?; (); } else { if kind == 243 { if strings >= 0 { return sh_i64_error(7301); }; strings = at + 8; strings_size = size; } else { if kind == 244 { if checksums >= 0 { return sh_i64_error(7301); }; checksums = at + 8; checksums_size = size; } else { return sh_i64_error(7303); }; }; }; }; let next = sh_link_align(at + 8 + size, 4, 1048576)?; if next > sh_binary_len(&symbols) { return sh_i64_error(7301); }; sh_link_cv_tail(&symbols, at + 8 + size, next)?; at = next; };
+    if records < 0 or fragments.len() == 0 { return sh_i64_error(7301); };
+    sh_link_cv_source(debug, &symbols, strings, strings_size, checksums, checksums_size)?;
+    sh_link_cv_symbols(debug, &symbols, records, records_size)?;
+    index = 0;
+    while index < fragments.len() / 2 { sh_link_cv_lines(debug, &symbols, sh_link_word(&fragments, 2, index, 0), sh_link_word(&fragments, 2, index, 1))?; index = index + 1; };
+    if fragments.len() / 2 != debug.functions.len() / 8 { return sh_i64_error(7301); };
+    sh_link_debug_validate(debug, image)?;
+    sh_i64_ok(debug.functions.len() / 8);
+}
+
+def sh_link_cv_string_error(code: i64) -> Result<String, i64> {
+    Result { is_ok: false, value: String { handle: 0 }, error: code };
+}
