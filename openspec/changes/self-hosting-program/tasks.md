@@ -9,7 +9,7 @@
 
 - [x] M0: freeze explicit source/tool identity, 741-input supported corpus inventory and eight ten-sample quiet reference workloads (`freeze-selfhost-baseline`; `target/selfhost/m0-frozen/evidence.json`, independently qualified source-release tools; local artifacts, not public seed distribution).
 - [x] M1: complete and verify `add-selfhost-foundations` (Windows x64 44-step source-hashed gate, `target/selfhost/m1-run2/evidence.json`; clean committed rerun at `target/selfhost/m1-clean/evidence.json`).
-- [ ] M2: register and verify the SG syntax/formatter child.
+- [x] M2: complete and verify the SG syntax, macro/attribute/derive, protocol and formatter child (`add-selfhost-syntax`; Windows x64 grammar, expansion, transform and resource evidence; M3 semantic work remains open).
 - [ ] M3: register and verify the semantic/HIR/MIR child.
 - [ ] M4: register and verify the Windows x64 native-backend child.
 - [ ] M5: register and verify the SG linker and native-debug child.
