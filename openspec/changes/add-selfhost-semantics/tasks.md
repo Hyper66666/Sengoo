@@ -750,3 +750,34 @@ output. The valid registered-storage program returns 42 after one hundred
 exact resource scopes. This protects the non-positive status boundary; it
 does not prove that arbitrary positive pointer bits identify valid storage.
 Full SDK admission, complete M3 and native self-compilation remain open.
+
+## Audited slice and bounded status-copy inputs
+
+- [x] Prove the exact fixed signed-i64 C slice input and two bounded status-copy destination inputs without authorizing borrowed raw outputs.
+- [x] Verify source shadows, wrong arity, variadic signature flags and unaudited positions, with the complete frontend ownership/HIR/MIR resource regressions.
+- [x] Independently execute actual C providers for one hundred scopes, proving independent String storage, UTF-8 bounds, exact status bytes, retained capacity-failure storage and full resource recovery.
+
+Frontend report:
+`target/selfhost/m3-audited-copy-inputs/passed-checkpoint/evidence.json`, SHA-256
+`36764ea55fceeaa27eadbddde680094a22c2e1f8c73259777554dce71b08677f`.
+Provider report:
+`target/selfhost/m3-audited-copy-inputs/provider-final/evidence.json`, SHA-256
+`da2c8f1515b00eb4819d9be5ddc37cde0e72fa6157c658826623da8be9ed37e5`.
+Both record identical full start/end revision
+`bb21b3b96aad259215561233a40a6a6c2aee4d02`, Windows 11 AMD64, four passing
+commands each and unchanged input/tool hashes. The frontend retains fifty
+ownership/resource rounds, ten HIR roundtrip/poison rounds and thirty raw MIR
+rounds. The actual provider gate compares complete UTF-8 slice bytes, observes
+copies after the source is changed and released, rejects invalid UTF-8 boundaries
+without allocation, checks exact status text and untouched tails, and restores
+all String/Buffer/opaque resource counts. A wrong-clang identity control fails
+before compiler execution.
+
+The actual current core diagnostic ledger is
+`target/selfhost/m3-audited-copy-inputs/remaining-core-ledger.json`, SHA-256
+`59324506ac172fae3d5d23b5cc4efab5f1108bd843b6c08dd12cc7f65ffea6b8`.
+Core ownership diagnostics decrease from 230 to 226; std::string imports retain
+zero. The remaining reports are all 6101 in collections.sg at 99 distinct
+positions, with repeated CFG passes accounting for duplicates. Iterator done
+observations, borrowed next/copy results and manual handle detachment remain
+separate mechanisms. Native core compilation and complete M3 remain open.

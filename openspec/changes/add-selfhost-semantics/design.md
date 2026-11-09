@@ -32,6 +32,15 @@ fixtures and observable generated-program behavior as each behavior lands.
 Keep the entire M3 checklist open until all supported semantic and lowering
 gates pass; no scalar-only path qualifies the complete milestone.
 
+Audited native slice and bounded status-copy inputs require their exact real
+external fixed C signatures. `sengoo_string_slice_status` observes input zero
+and allocates an independent String; the status name/message copies observe
+their bounded destination at input one. These input-only facts do not authorize
+raw borrowed outputs. Independent provider checks must observe copies surviving
+source mutation/release, valid UTF-8 boundaries and preserved storage on capacity
+failure; source shadows, variadic flags and other argument positions stay
+conservative.
+
 ## Reference difference ledger
 
 Semantic comparison uses the current Rust `Parser` plus a fresh `TypeChecker`

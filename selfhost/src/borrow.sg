@@ -452,6 +452,8 @@ def sh_b_native_contract(checked: &ShChecked, function: i64, position: i64) -> b
     let name = symbol.value.as_str();
     if name == "sengoo_unicode_version_copy" or name == "sengoo_unicode_provenance_copy" or name == "sengoo_ffi_last_error_copy" { return arity == 2 and position == 0; };
     if name == "sengoo_string_eq" or name == "sengoo_string_compare" or name == "sengoo_string_copy_to_buffer" { return arity == 2 and position < 2; };
+    if name == "sengoo_string_slice_status" { return arity == 3 and position == 0; };
+    if name == "sengoo_status_name_copy" or name == "sengoo_status_message_copy" { return arity == 3 and position == 1; };
     if name == "sengoo_ffi_last_error_copy_to_buffer" { return arity == 1 and position == 0; };
     if name == "sengoo_string_len" or name == "sengoo_string_is_empty" or name == "sengoo_ffi_buffer_len" or name == "sengoo_ffi_buffer_capacity" or name == "sengoo_ffi_buffer_used_len" or name == "sengoo_ffi_buffer_is_utf8" { return arity == 1 and position == 0; };
     if name == "sengoo_string_from_buffer" or name == "sengoo_string_from_utf8" or name == "sengoo_string_from_bytes_copy" or name == "sengoo_ffi_buffer_get_u8" or name == "sengoo_ffi_buffer_commit_used_len" or name == "sengoo_ffi_buffer_consume" { return arity == 2 and position == 0; };

@@ -121,6 +121,12 @@ frontend state.
 - **THEN** native lowering SHALL fail before passing that value to a safe borrowed-view consumer
 - **AND** a successful valid-handle runtime probe SHALL NOT count as verification of this error path
 
+#### Scenario: An audited native operation copies an owned input
+- **WHEN** the exact fixed signed-i64 C slice or bounded status-copy prototype uses its independently audited non-retaining input position
+- **THEN** ownership checking SHALL preserve that input for repeated use and cleanup
+- **AND** a String slice result SHALL own independent storage rather than gain borrowed raw-output authorization
+- **AND** source-name shadows, wrong arity, variadic signatures and unaudited argument positions SHALL retain conservative transfer behavior
+
 
 #### Scenario: A borrowed receiver or scalar dereference is used repeatedly
 - **WHEN** an instantiated method self parameter is a reference, or an expression copies a non-borrow-carrying scalar through a reference
