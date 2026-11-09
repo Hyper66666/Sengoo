@@ -10,6 +10,8 @@ import selfhost_x64_sse;
 
 import selfhost_abi;
 
+import selfhost_float_literal;
+
 struct ShNative {
     code: ShBinary,
     values: Vec<i64>,
@@ -209,7 +211,7 @@ def sh_native_instruction(native: &ShNative, mir: &ShMir, id: i64) -> Result<i64
     if opcode == 1 or opcode == 2 { return sh_i64_ok(0); };
     if opcode == 25 { sh_x64_mov_imm(&native.code, 0, 0)?; return sh_native_finish(native, mir, id); };
     if opcode == 11 { return sh_native_binary(native, mir, id); };
-    if opcode == 5 { if sh_mir_inst(mir, id, 8) != 0 { return sh_i64_error(6502); }; sh_x64_mov_imm(&native.code, 0, aux)?; return sh_native_finish(native, mir, id); };
+    if opcode == 5 { let mut bits = aux; if sh_mir_inst(mir, id, 8) == 1 { let text = sh_symbol_text(&mir.symbols, aux)?; bits = sh_float_literal_reference(&text, sh_mir_type_word(mir, ty, 1))?; }; sh_x64_mov_imm(&native.code, 0, bits)?; return sh_native_finish(native, mir, id); };
     if opcode == 3 or opcode == 4 or opcode == 6 or opcode == 7 { sh_x64_mov_imm(&native.code, 0, if opcode == 3 { 0; } else { aux; })?; return sh_native_finish(native, mir, id); };
     if opcode == 9 { let patch = sh_x64_rip_address(&native.code, 0)?; if not native.calls.push(patch) or not native.calls.push(aux) { return sh_i64_error(6503); }; return sh_native_finish(native, mir, id); };
     if opcode == 10 { sh_native_load(native, first, 0)?; if sh_mir_type_word(mir, ty, 0) == 3 { if aux != sh_kind("-") { return sh_i64_error(6502); }; sh_x64_mov_imm(&native.code, 10, if sh_native_width(mir, ty) == 4 { 2147483648; } else { -9223372036854775807 - 1; })?; sh_x64_binary(&native.code, 4, 0, 10)?; return sh_native_finish(native, mir, id); }; if aux == sh_kind("-") or aux == sh_kind("~") { sh_x64_unary(&native.code, if aux == sh_kind("-") { 1; } else { 0; }, 0)?; } else { sh_x64_mov_imm(&native.code, 10, 1)?; sh_x64_binary(&native.code, 4, 0, 10)?; }; return sh_native_finish(native, mir, id); };

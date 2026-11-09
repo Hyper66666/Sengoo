@@ -12,6 +12,7 @@
 - [x] Execute scalar floating MIR arithmetic, constant bits, memory/call/return storage and ordered/unordered comparisons against independent C tests, including NaN/infinities/signed zero and mixed six-position Windows integer/float calls (`target/selfhost/m4-float/evidence.json`). Decimal literals and numeric conversions remain open.
 - [x] Classify and execute initial aggregate parameters/results with size-aware values, typed field construction/extraction, aggregate CFG edge snapshots, indirect argument copies and hidden return pointers; independently verify 3/8/16-byte structures and enum payload storage using C (`target/selfhost/m4-aggregate-abi/evidence.json`). Complete cleanup/indexing/overlap/ABI coverage remains open.
 - [x] Convert bounded decimal floating literals entirely in SG with exact rational IEEE rounding and an edition-2026-compatible f64-to-f32 path; independently verify 3,332 cases, 15 actual reference double-rounding executions and 100 resource rounds (`target/selfhost/m4-float-literal-exact/evidence.json`). Numeric casts and complete backend integration remain open.
+- [x] Connect reference-compatible decimal literals and compare 19 exact supported programs through the SG native CLI and frozen Rust/LLVM path, including generic instances, structures, float literals and class methods (`target/selfhost/m4-source-expanded/evidence.json`). Full language/tool/backend support remains open.
 - [x] Emit fixed-frame Windows x64 `.pdata/.xdata` unwind records and checked `__chkstk` probes for >4 KiB frames; verify LLVM inspection, `RtlLookupFunctionEntry`, `RtlVirtualUnwind`, deterministic objects and exact resource recovery (`target/selfhost/m4-unwind-final3/evidence.json`). Exception handlers, XMM saves and CodeView remain open.
 
 ## Supported target behavior
@@ -132,3 +133,14 @@ was retained and resolved using independent clang constants, Python builtin,
 exact Fraction and SG agreement. The initial failed comparison remains at
 `target/selfhost/m4-float-literal-final/`; no language parity exception is
 introduced by this converter.
+
+Expanded source integration evidence:
+`target/selfhost/m4-source-expanded/evidence.json`, SHA-256
+`c33560f9ef18543c7c0734d34355409568b863d0b024c2a71e9a969fe8ab3272`.
+The report records revision `def09df340fffae2b0e32c8841b7d199f032e4da`,
+Windows 11 x64 and actual input/tool hashes. All 138 commands passed with no
+input/tool changes: nineteen positive programs produced deterministic objects
+and matched reference exit 42/stdout/stderr, while three deliberate failures
+preserved prior outputs. The source CLI still rejects unimplemented numeric
+casts explicitly. The runner's later wording-only boundary update does not
+alter the recorded executed cases or results.

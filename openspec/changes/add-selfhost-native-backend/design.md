@@ -146,6 +146,13 @@ enum tag/payload storage and a branch merging aggregate values. Ownership/drop,
 full array indexing/bounds, typed overlapping moves and complete ABI behavior
 remain separate open work.
 
+The source-to-object CLI now uses the reference-compatible decimal converter
+for MIR literal symbols. Expanded exact-source comparisons cover generic
+reuse/nesting/recursion/aggregate fields, structured returns, f32/f64 literal
+arithmetic, inherited reads/mutable updates and independently mangled same-name
+methods, along with the earlier scalar subset. The native path emits COFF
+without invoking the reference; the latter is run separately by the gate.
+
 Primary references:
 
 `float_literal.sg` uses bounded base-2^30 rational integers, exact remainder

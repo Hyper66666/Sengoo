@@ -29,7 +29,7 @@ def main():
     out.mkdir(parents=True, exist_ok=True)
     paths = {name: getattr(args, name).resolve() for name in ("seed", "clang", "formatter")}
     lock = json.loads((ROOT / "selfhost/bootstrap.lock").read_text())
-    names = ("core", "types", "lexer", "mir", "mir_validate", "layout", "abi", "binary", "coff", "object", "x64", "x64_scalar", "x64_sse", "unwind", "native")
+    names = ("core", "types", "lexer", "mir", "mir_validate", "layout", "abi", "binary", "coff", "object", "x64", "x64_scalar", "x64_sse", "float_literal", "unwind", "native")
     inputs = [Path(__file__), ROOT / "selfhost/bootstrap.lock", ROOT / "selfhost/tests/native.sg", ROOT / "selfhost/tests/abi.sg", ROOT / "selfhost/tests/native_probe.c"]
     inputs += [ROOT / "selfhost/src" / (name + ".sg") for name in names]
     inputs += sorted((ROOT / "tools/stdlib").rglob("*.sg"))

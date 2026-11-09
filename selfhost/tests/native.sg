@@ -460,12 +460,12 @@ def sh_test_native() -> Result<bool, i64> {
     let function = sh_nt_fn(&unsupported_mir, "unsupported_float", &empty, floating, 0, false)?;
     let scope = sh_mir_add_scope(&unsupported_mir, function, -1, 0)?;
     let block = sh_nt_block(&unsupported_mir, function, scope)?;
-    let literal_text = string_from_str("1.0")?;
+    let literal_text = string_from_str("invalid")?;
     let literal = sh_intern(&unsupported_mir.symbols, &literal_text)?;
     let value = sh_mir_add_instruction(&unsupported_mir, block, 5, floating, &empty, literal, 0, 1, -1, 0, 0)?;
     sh_nt_return(&unsupported_mir, block, value)?;
     let unsupported = sh_native_object(&unsupported_mir, 65536, true);
-    assert_eq_i64(unsupported.error, 6502, "native.sg", 185);
+    assert_eq_i64(unsupported.error, 6801, "native.sg", 185);
     Result { is_ok: true, value: true, error: 0 };
 }
 

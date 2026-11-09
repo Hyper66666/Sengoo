@@ -21,6 +21,16 @@ CASES = {
     "narrow": "def add8(a:i8,b:i8)->i8{a+b} def main()->i64{let x=40i8;let y=2i8;let z=add8(x,y);z as i64}",
     "c-call": 'extern "C"{fn sg_native_external6(a:i64,b:i64,c:i64,d:i64,e:i64,f:i64)->i64;} def main()->i64{sg_native_external6(1,2,3,4,5,6)+21}',
     "unicode": "// 独立原生路径，UTF-8 byte spans\ndef main()->i64{let answer=40;answer+2}",
+    "generic-reuse": "def identity<T>(value:T)->T{value} def main()->i64{if identity(true){identity(40)+identity(2)}else{0}}",
+    "generic-nested": "def identity<T>(value:T)->T{value} def wrapper<U>(value:U)->U{identity(value)} def main()->i64{wrapper(42)}",
+    "generic-recursion": "def descend<T>(value:T,depth:i64)->T{if depth==0{value}else{descend(value,depth-1)}} def main()->i64{descend(42,3)}",
+    "generic-field": "struct Holder<T>{value:T} def unwrap<T>(holder:Holder<T>)->T{holder.value} def main()->i64{unwrap(Holder{value:42})}",
+    "aggregate": "struct Pair{left:i64,right:i64} def make(a:i64,b:i64)->Pair{Pair{left:a,right:b}} def main()->i64{let pair=make(40,2);pair.left+pair.right}",
+    "float-f64": "def add(a:f64,b:f64)->f64{a+b} def main()->i64{if add(40.0,2.0)==42.0{42}else{1}}",
+    "float-f32": "def add(a:f32,b:f32)->f32{a+b} def main()->i64{if add(40.0f32,2.0f32)==42.0f32{42}else{1}}",
+    "class-read": "class Parent{value:i64;def score(&self)->i64{self.value}} class Child:Parent{extra:i64;} def main()->i64{let child=Child{value:42,extra:0};child.score()}",
+    "class-write": "class Parent{value:i64;def update(&mut self){self.value=42;();}} class Child:Parent{extra:i64;} def main()->i64{let mut child=Child{value:0,extra:0};child.update();child.value}",
+    "method-names": "struct First{value:i64} struct Second{value:i64} impl First{def score(&self)->i64{self.value}} impl Second{def score(&self)->i64{self.value}} def main()->i64{let a=First{value:20};let b=Second{value:22};a.score()+b.score()}",
 }
 
 
@@ -50,10 +60,10 @@ def main():
               "revision": subprocess.check_output(["git", "rev-parse", "HEAD"], cwd=ROOT, text=True).strip(),
               "host": platform.platform(), "sources": {str(p.relative_to(ROOT)): sha(p) for p in inputs if p.is_file()},
               "tools": {}, "steps": [], "cases": [], "m4_complete": False,
-              "limits": ["single-source scalar development CLI; not sgc command/module/configuration parity",
+              "limits": ["single-source development CLI; not sgc command/module/configuration parity",
                          "SG performs frontend/semantics/HIR/MIR/x64/COFF emission; external clang only links verification artifacts",
                          "frozen qualified Rust reference separately emits LLVM IR for the exact same source bytes",
-                         "aggregate/float/ownership/async codegen and unwind/debug/linker/self-build gates remain open"]}
+                         "full ownership/async/numeric-conversion/debug/linker/self-build gates remain open"]}
     env = dict(os.environ)
     for name in list(env):
         if name.upper().startswith(("SENGOO_", "SGPLATFORM_", "SDL2_")):
