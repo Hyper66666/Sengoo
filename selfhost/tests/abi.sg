@@ -1,0 +1,65 @@
+import selfhost_abi;
+
+import std::assert;
+
+extern "C" {
+    fn sengoo_string_live_handle_count() -> i64;
+    fn sengoo_buffer_live_handle_count() -> i64;
+    fn sengoo_opaque_live_handle_count() -> i64;
+}
+
+def sh_at_test() -> Result<bool, i64> {
+    let mir = sh_mir_new(100);
+    let integer = sh_type_primitive(&mir.types, 2, 64, 1)?;
+    let float_type = sh_type_primitive(&mir.types, 3, 64, 0)?;
+    let args = vec_new_i64();
+    args.push(integer);
+    args.push(integer);
+    let large = sh_type_intern(&mir.types, 10, 0, 0, -1, &args)?;
+    args.clear();
+    args.push(integer);
+    let small = sh_type_intern(&mir.types, 10, 0, 0, -1, &args)?;
+    let array = sh_type_intern(&mir.types, 8, 1, 0, -1, &args)?;
+    args.clear();
+    args.push(integer);
+    args.push(float_type);
+    args.push(large);
+    args.push(small);
+    args.push(array);
+    args.push(large);
+    let signature = sh_type_intern(&mir.types, 11, 1, 0, -1, &args)?;
+    let abi = sh_windows_abi(&mir, signature, 1048576);
+    assert_eq_i64(abi.error, 0, "abi.sg", 26);
+    assert_eq_i64(abi.result_mode, 3, "abi.sg", 27);
+    assert_eq_i64(abi.result_size, 16, "abi.sg", 28);
+    assert_eq_i64(abi.stack_size, 48, "abi.sg", 29);
+    assert_eq_i64(sh_mir_word(&abi.parameters, 5, 0, 1), 1, "abi.sg", 30);
+    assert_eq_i64(sh_mir_word(&abi.parameters, 5, 1, 1), 2, "abi.sg", 31);
+    assert_eq_i64(sh_mir_word(&abi.parameters, 5, 2, 1), 3, "abi.sg", 32);
+    assert_eq_i64(sh_mir_word(&abi.parameters, 5, 3, 1), 1, "abi.sg", 33);
+    assert_eq_i64(sh_mir_word(&abi.parameters, 5, 4, 1), 3, "abi.sg", 34);
+    assert_eq_i64(sh_mir_word(&abi.parameters, 5, 0, 2), 1, "abi.sg", 35);
+    assert_eq_i64(sh_mir_word(&abi.parameters, 5, 1, 2), 2, "abi.sg", 36);
+    assert_eq_i64(sh_mir_word(&abi.parameters, 5, 2, 2), 3, "abi.sg", 37);
+    assert_eq_i64(sh_mir_word(&abi.parameters, 5, 3, 3), 32, "abi.sg", 38);
+    assert_eq_i64(sh_mir_word(&abi.parameters, 5, 4, 3), 40, "abi.sg", 39);
+    assert_eq_i64(sh_mir_word(&abi.parameters, 5, 2, 4), 16, "abi.sg", 40);
+    let invalid = sh_windows_abi(&mir, integer, 100);
+    assert_eq_i64(invalid.error, 6701, "abi.sg", 42);
+    let small_bound = sh_windows_abi(&mir, signature, 40);
+    assert_eq_i64(small_bound.error, 6702, "abi.sg", 44);
+    Result { is_ok: true, value: true, error: 0 };
+}
+
+def main() -> i64 {
+    let strings = sengoo_string_live_handle_count();
+    let buffers = sengoo_buffer_live_handle_count();
+    let opaque = sengoo_opaque_live_handle_count();
+    let mut round = 0;
+    while round < 100 { let result = sh_at_test(); if not result.is_ok() { println(result.error); return 1; }; round = round + 1; };
+    assert_eq_i64(sengoo_string_live_handle_count(), strings, "abi.sg", 56);
+    assert_eq_i64(sengoo_buffer_live_handle_count(), buffers, "abi.sg", 57);
+    assert_eq_i64(sengoo_opaque_live_handle_count(), opaque, "abi.sg", 58);
+    println("selfhost Windows x64 ABI classification: ok");
+    0;
+}

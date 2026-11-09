@@ -62,8 +62,8 @@ def sh_layout_visit(cache: &ShTargetLayout, mir: &ShMir, ty: i64, depth: i64) ->
     0;
 }
 
-def sh_target_layout(mir: &ShMir, ty: i64, maximum: i64) -> ShTargetLayout {
-    let mut cache = ShTargetLayout { sizes: vec_new_i64(), alignments: vec_new_i64(), states: vec_new_i64(), field_offsets: vec_new_i64(), layout_sizes: vec_new_i64(), layout_alignments: vec_new_i64(), maximum: maximum, error: 0, ty: ty };
+def sh_target_layout_cache(mir: &ShMir, maximum: i64) -> ShTargetLayout {
+    let mut cache = ShTargetLayout { sizes: vec_new_i64(), alignments: vec_new_i64(), states: vec_new_i64(), field_offsets: vec_new_i64(), layout_sizes: vec_new_i64(), layout_alignments: vec_new_i64(), maximum: maximum, error: 0, ty: -1 };
     if mir.schema != 1 or mir.target != 1 or mir.runtime_abi != 1 or mir.pointer_width != 64 or maximum < 0 or maximum > 2147483647 or not sh_mir_limit(mir) { cache.error = 6301; return cache; };
     if sh_mir_count(&mir.layouts, 7) < 0 or sh_mir_count(&mir.fields, 2) < 0 or sh_mir_count(&mir.types.words, 6) < 0 or sh_type_count(&mir.types) > mir.limit or sh_mir_count(&mir.layouts, 7) > mir.limit or sh_mir_count(&mir.fields, 2) > mir.limit or sh_mir_validate_types(mir) != 0 { cache.error = 6301; return cache; };
     let mut index = 0;
@@ -72,6 +72,13 @@ def sh_target_layout(mir: &ShMir, ty: i64, maximum: i64) -> ShTargetLayout {
     while index < sh_mir_count(&mir.fields, 2) { if not cache.field_offsets.push(-1) { cache.error = 6301; return cache; }; index = index + 1; };
     index = 0;
     while index < sh_mir_count(&mir.layouts, 7) { if not cache.layout_sizes.push(-1) or not cache.layout_alignments.push(-1) { cache.error = 6301; return cache; }; index = index + 1; };
+    cache;
+}
+
+def sh_target_layout(mir: &ShMir, ty: i64, maximum: i64) -> ShTargetLayout {
+    let mut cache = sh_target_layout_cache(mir, maximum);
+    if cache.error != 0 { return cache; };
+    cache.ty = ty;
     cache.error = sh_layout_visit(&cache, mir, ty, 0);
     cache;
 }

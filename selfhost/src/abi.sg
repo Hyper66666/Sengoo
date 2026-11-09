@@ -1,0 +1,40 @@
+import selfhost_layout;
+
+struct ShWindowsAbi {
+    result_type: i64,
+    result_mode: i64,
+    result_size: i64,
+    parameters: Vec<i64>,
+    stack_size: i64,
+    error: i64,
+}
+
+def sh_abi_mode(mir: &ShMir, layout: &ShTargetLayout, ty: i64) -> i64 {
+    if layout.error != 0 or sh_layout_at(&layout.states, ty) != 2 { return -1; };
+    let kind = sh_mir_type_word(mir, ty, 0);
+    let size = sh_layout_at(&layout.sizes, ty);
+    if kind == 0 or kind == 17 { return 0; };
+    if kind == 3 { return 2; };
+    if kind == 8 { return 3; };
+    if size == 1 or size == 2 or size == 4 or size == 8 { return 1; };
+    if kind == 10 or kind == 12 or kind == 14 or kind == 6 { return 3; };
+    -1;
+}
+
+def sh_windows_abi(mir: &ShMir, signature: i64, maximum: i64) -> ShWindowsAbi {
+    let mut abi = ShWindowsAbi { result_type: -1, result_mode: -1, result_size: -1, parameters: vec_new_i64(), stack_size: 32, error: 0 };
+    if sh_mir_type_word(mir, signature, 0) != 11 or maximum < 0 or maximum > 2147483647 { abi.error = 6701; return abi; };
+    let count = sh_mir_type_word(mir, signature, 5) - 1;
+    abi.result_type = sh_mir_type_arg(mir, signature, count);
+    let result_layout = sh_target_layout(mir, abi.result_type, maximum);
+    if result_layout.error != 0 { abi.error = result_layout.error; return abi; };
+    abi.result_mode = sh_abi_mode(mir, &result_layout, abi.result_type);
+    abi.result_size = sh_layout_at(&result_layout.sizes, abi.result_type);
+    if abi.result_mode < 0 { abi.error = 6701; return abi; };
+    let mut position = if abi.result_mode == 3 { 1; } else { 0; };
+    let mut index = 0;
+    while index < count { let ty = sh_mir_type_arg(mir, signature, index); let layout = sh_target_layout(mir, ty, maximum); if layout.error != 0 { abi.error = layout.error; return abi; }; let mode = sh_abi_mode(mir, &layout, ty); if mode < 1 { abi.error = 6701; return abi; }; let stack = if position >= 4 { 32 + (position - 4) * 8; } else { -1; }; if stack > maximum - 8 { abi.error = 6702; return abi; }; if not abi.parameters.push(ty) or not abi.parameters.push(mode) or not abi.parameters.push(position) or not abi.parameters.push(stack) or not abi.parameters.push(if mode == 3 { 16; } else { sh_layout_at(&layout.alignments, ty); }) { abi.error = 6702; return abi; }; position = position + 1; index = index + 1; };
+    if position > 4 { abi.stack_size = 32 + (position - 4) * 8; };
+    if abi.stack_size > maximum { abi.error = 6702; };
+    abi;
+}

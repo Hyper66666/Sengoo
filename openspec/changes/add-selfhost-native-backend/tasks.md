@@ -10,6 +10,7 @@
 - [x] Emit fixed-frame Windows x64 `.pdata/.xdata` unwind records and checked `__chkstk` probes for >4 KiB frames; verify LLVM inspection, `RtlLookupFunctionEntry`, `RtlVirtualUnwind`, deterministic objects and exact resource recovery (`target/selfhost/m4-unwind-final3/evidence.json`). Exception handlers, XMM saves and CodeView remain open.
 - [x] Verify bounded scalar SSE f32/f64 instruction encoding with independently specified bytes, CPU arithmetic/load/store/bit-pattern execution, damaged-byte rejection and 100 exact resource scopes (`target/selfhost/m4-sse-final/evidence.json`). Floating MIR and complete ABI/NaN/conversion behavior remain open.
 - [x] Execute scalar floating MIR arithmetic, constant bits, memory/call/return storage and ordered/unordered comparisons against independent C tests, including NaN/infinities/signed zero and mixed six-position Windows integer/float calls (`target/selfhost/m4-float/evidence.json`). Decimal literals and numeric conversions remain open.
+- [x] Classify and execute initial aggregate parameters/results with size-aware values, typed field construction/extraction, aggregate CFG edge snapshots, indirect argument copies and hidden return pointers; independently verify 3/8/16-byte structures and enum payload storage using C (`target/selfhost/m4-aggregate-abi/evidence.json`). Complete cleanup/indexing/overlap/ABI coverage remains open.
 - [x] Emit fixed-frame Windows x64 `.pdata/.xdata` unwind records and checked `__chkstk` probes for >4 KiB frames; verify LLVM inspection, `RtlLookupFunctionEntry`, `RtlVirtualUnwind`, deterministic objects and exact resource recovery (`target/selfhost/m4-unwind-final3/evidence.json`). Exception handlers, XMM saves and CodeView remain open.
 
 ## Supported target behavior
@@ -108,3 +109,13 @@ large-frame, unwind and overflow/wrapping regressions remained green. C callers
 verified scalar f32/f64 arithmetic, mixed ABI positions and NaN/infinity/zero
 comparison behavior. This does not qualify decimal parsing, numeric conversions,
 aggregates or complete M4 behavior.
+
+Initial aggregate ABI evidence: `target/selfhost/m4-aggregate-abi/evidence.json`,
+SHA-256 `2c05ab3a9ee3ead9654c04bacdf36b4fe6b8e63e4d90149eb4637f00ab9c50f7`,
+revision `cb3277bcfdaf55ce10c04adcb053517f011fba70`, Windows 11 x64.
+Twenty-six commands passed with unchanged sources/tools. The ABI classifier
+passed 100 exact resource scopes; ten MIR/native builder/resource scopes,
+deterministic objects, independent inspection/disassembly and all previous
+integer/float/unwind/probe regressions passed. C execution verified odd/small/
+large aggregate storage and call/return conventions, enum tag/payload values
+and both aggregate merge branches. This partial gate does not close M4.

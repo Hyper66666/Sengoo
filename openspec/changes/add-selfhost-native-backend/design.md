@@ -127,6 +127,25 @@ Rust reference pinned in `reference-baseline.lock`, emitting LLVM independently
 and linking both artifacts with the same C verification shim. Native SG object
 emission itself does not invoke a compiler, assembler or linker.
 
+The current aggregate consumer uses a validated reusable layout cache rather
+than treating every MIR value as eight bytes. Value/local slots and parallel
+CFG edge snapshots are sized and aligned for their actual types. Aggregate
+construction defines padding deterministically; field addresses/extraction use
+computed physical offsets, and scalar/aggregate memory loads/stores share
+typed storage. A loop emits large copies without unrolling their entire body.
+
+`abi.sg` classifies Windows parameters and results as unit, integer, SSE or
+indirect. Small aggregates of 1/2/4/8 bytes use integer storage, arrays and other
+aggregate sizes use aligned indirect copies, and indirect results insert a
+hidden first argument. The caller copies indirect arguments before assigning
+argument registers, preserving source SSA values even if an external callee
+mutates its ABI copy. The callee spills incoming registers before copying
+indirect parameters. Hidden returns copy into the caller's result slot and
+return its address in RAX. Independent C execution covers 3/8/16-byte values,
+enum tag/payload storage and a branch merging aggregate values. Ownership/drop,
+full array indexing/bounds, typed overlapping moves and complete ABI behavior
+remain separate open work.
+
 Primary references:
 
 - Intel instruction reference: https://www.intel.com/content/www/us/en/content-details/671110/intel-64-and-ia-32-architectures-software-developer-s-manual-combined-volumes-2a-2b-2c-and-2d-instruction-set-reference-a-z.html

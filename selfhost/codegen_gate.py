@@ -29,8 +29,8 @@ def main():
     out.mkdir(parents=True, exist_ok=True)
     paths = {name: getattr(args, name).resolve() for name in ("seed", "clang", "formatter")}
     lock = json.loads((ROOT / "selfhost/bootstrap.lock").read_text())
-    names = ("core", "types", "lexer", "mir", "mir_validate", "binary", "coff", "object", "x64", "x64_scalar", "x64_sse", "unwind", "native")
-    inputs = [Path(__file__), ROOT / "selfhost/bootstrap.lock", ROOT / "selfhost/tests/native.sg", ROOT / "selfhost/tests/native_probe.c"]
+    names = ("core", "types", "lexer", "mir", "mir_validate", "layout", "abi", "binary", "coff", "object", "x64", "x64_scalar", "x64_sse", "unwind", "native")
+    inputs = [Path(__file__), ROOT / "selfhost/bootstrap.lock", ROOT / "selfhost/tests/native.sg", ROOT / "selfhost/tests/abi.sg", ROOT / "selfhost/tests/native_probe.c"]
     inputs += [ROOT / "selfhost/src" / (name + ".sg") for name in names]
     inputs += sorted((ROOT / "tools/stdlib").rglob("*.sg"))
     inputs += [ROOT / "tools/stdlib/runtime.c", ROOT / "tools/stdlib/runtime_abi.h"]
@@ -38,7 +38,7 @@ def main():
               "revision": subprocess.check_output(["git", "rev-parse", "HEAD"], cwd=ROOT, text=True).strip(),
               "host": platform.platform(), "sources": {str(p.relative_to(ROOT)): sha(p) for p in inputs if p.is_file()},
               "tools": {}, "steps": [], "m4_complete": False,
-              "limits": ["validated scalar MIR only; float decimal literals/conversions, aggregates/ownership/async/string data remain explicit unsupported errors",
+              "limits": ["validated scalar/aggregate MIR; float decimal literals/conversions, ownership/async/string data remain explicit unsupported errors",
                          "stack-slot allocation; frames over 4096 bytes call __chkstk through a checked REL32 placeholder",
                          "fixed-stack unwind records; exception cleanup handlers and CodeView remain open",
                          "division/remainder and full ABI coverage remain open; shift fixtures use defined in-width counts",
@@ -71,8 +71,12 @@ def main():
             if digest != lock[name]["sha256"]:
                 raise ValueError(f"{name} identity mismatch")
             report["tools"][name] = {"path": str(path), "sha256": digest}
-        for name in ("src/native.sg", "src/x64_scalar.sg", "src/x64_sse.sg", "src/unwind.sg", "tests/native.sg"):
+        for name in ("src/native.sg", "src/x64_scalar.sg", "src/x64_sse.sg", "src/unwind.sg", "src/layout.sg", "src/abi.sg", "tests/abi.sg", "tests/native.sg"):
             run("format-" + name.replace("/", "-"), [paths["formatter"], "--check", ROOT / "selfhost" / name])
+        abi_binary = out / "abi-tests.exe"
+        run("build-abi", [paths["seed"], "--runtime-mode", "source-development", "build",
+                          ROOT / "selfhost/tests/abi.sg", "--force-rebuild", "-O", "0", "-o", abi_binary])
+        run("native-abi", [abi_binary], b"selfhost Windows x64 ABI classification: ok")
         binary = out / "native-tests.exe"
         binary.unlink(missing_ok=True)
         run("build-sg", [paths["seed"], "--runtime-mode", "source-development", "build",
@@ -100,10 +104,12 @@ def main():
             raise AssertionError("large stack-frame probe did not execute")
         if b"native float arithmetic, NaN and mixed Windows ABI: ok" not in executed:
             raise AssertionError("float and mixed-ABI cases did not execute")
+        if b"native aggregate Windows parameters and return pointers: ok" not in executed:
+            raise AssertionError("aggregate C ABI cases did not execute")
         for case in ("overflow", "overflow8", "umul-overflow", "uadd-overflow", "mul-overflow"):
             run("reject-" + case, [probe, case], b"integer overflow", 63)
         run("execute-wrap", [wrap_probe, "wrap"], b"native wrapping arithmetic: ok")
-        report["artifacts"] = {p.name: sha(p) for p in (binary, checked, repeated, wrapping, probe, wrap_probe)}
+        report["artifacts"] = {p.name: sha(p) for p in (abi_binary, binary, checked, repeated, wrapping, probe, wrap_probe)}
         report["result"] = "passed"
     except BaseException as error:
         report.update(result="failed", error=repr(error))

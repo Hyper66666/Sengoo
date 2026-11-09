@@ -36,6 +36,18 @@ double sg_native_float_external6(int64_t a,double b,int64_t c,float d,double e,i
     if (a!=1 || b!=2 || c!=3 || d!=4 || e!=5 || f!=27) exit(71);
     return a+b+c+d+e+f;
 }
+struct Pair { int64_t x,y; };
+struct Small { int64_t x; };
+struct Odd { uint8_t a,b,c; };
+struct NativeChoice { int64_t tag; struct {int64_t x;uint8_t y;} payload; };
+extern struct Pair sg_native_pair(int64_t,int64_t);
+extern int64_t sg_native_pair_sum(struct Pair);
+extern struct Pair sg_native_pair_call(struct Pair);
+extern struct Small sg_native_small(struct Small);
+extern struct Pair sg_native_pair_select(bool,struct Pair,struct Pair);
+extern struct Odd sg_native_odd(struct Odd);
+extern struct NativeChoice sg_native_enum(void);
+struct Pair sg_native_pair_external(struct Pair p) { p.x+=2; return p; }
 static int checks;
 static int unwound;
 void sengoo_panic_integer_overflow(int64_t overflow) {
@@ -113,6 +125,15 @@ int main(int argc,char **argv) {
         sg_native_uadd(40,2)!=42 || sg_native_umul(6,7)!=42 ||
         sg_native_large(1,2,3,4,5,6)!=42 || checks<4 || unwound!=7) return 67;
     if (virtual_unwind(sg_native_add) || virtual_unwind(sg_native_swap)) return 68;
+    struct Pair pair=sg_native_pair(40,2);
+    struct Pair called_pair=sg_native_pair_call(pair);
+    struct Odd odd=sg_native_odd((struct Odd){1,2,3});
+    struct NativeChoice choice=sg_native_enum();
+    if (pair.x!=40 || pair.y!=2 || sg_native_pair_sum(pair)!=42 ||
+        called_pair.x!=42 || called_pair.y!=2 || sg_native_small((struct Small){42}).x!=42 ||
+        sg_native_pair_select(true,pair,called_pair).x!=40 ||
+        sg_native_pair_select(false,pair,called_pair).x!=42 ||
+        odd.a!=1 || odd.b!=2 || odd.c!=3 || choice.tag!=1 || choice.payload.x!=42 || choice.payload.y!=9) return 73;
     if (sg_native_fadd(40,2)!=42 || sg_native_fsub(44,2)!=42 || sg_native_fmul(6,7)!=42 ||
         sg_native_fdiv(84,2)!=42 || sg_native_f32add(40,2)!=42 || sg_native_fconstant()!=42 ||
         sg_native_float_call6(1,2,3,4,5,27)!=42 || !sg_native_feq(0.0,-0.0) ||
@@ -124,5 +145,6 @@ int main(int argc,char **argv) {
     puts("native unwind metadata: ok");
     puts("native large stack probe: ok");
     puts("native float arithmetic, NaN and mixed Windows ABI: ok");
+    puts("native aggregate Windows parameters and return pointers: ok");
     return 0;
 }
