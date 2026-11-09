@@ -170,8 +170,10 @@ precedence and physical identity rules. Full namespaces and public module
 compatibility remain open.
 Before emission, combined MIR source metadata is validated and mapped back to
 physical file IDs and original UTF-8 byte intervals. This keeps expansion and
-specialization origins available to later consumers; multiple-file PDB support
-is still a separate gate.
+specialization origins available to later consumers. `link_multi_debug_gate.py`
+qualifies multiple physical files in one SG object/compile unit, including real
+debugger source switching and local values. Independent COFF compile-unit
+merging remains open.
 It is not yet the public `sgc` command interface. Resolved root and structural
 cleanup, stack probing and unwind records have focused execution gates; pending
 runtime glue, conditional field cleanup, async, full module/tool compatibility,
@@ -200,6 +202,36 @@ test snapshot and running SG source emission, SG linking and generated programs 
 an empty PATH. It compares object and PE bytes across two fresh directories.
 The SG numeric SDK fixture only provides verification exit hooks; this gate does
 not rebuild the compiler itself or qualify the full runtime SDK.
+
+## SG runtime text foundation
+
+`runtime/utf8.sg` provides allocation-free UTF-8 validation and validated byte
+boundary queries through fixed C exports. The unsafe caller supplies a readable
+byte range; lengths are bounded to 64 MiB. Empty, negative, oversized and
+out-of-range requests follow the explicitly checked no-read rules. The C
+adapter in `runtime/memory_read.c` performs only a raw byte load.
+
+`verify_runtime_text.py --native-evidence REPORT --formatter-evidence REPORT
+--linker-evidence REPORT --output DIRECTORY` qualifies the consumed SG compiler,
+SG formatter and historical SG linker before testing immutable source copies.
+Its strict Python decoder supplies scalar, malformed-sequence and byte-boundary
+expectations. The C probe checks protected pages, input immutability and read
+coverage, including the 64 MiB limit. Two fresh builds must produce identical
+SG objects, normalized C SDK objects and SG-linked PE bytes and execute the
+actual memory adapter with exit 42.
+
+The development gate uses qualified clang to build the small adapter and its
+independent probes. Its explicit C SDK metadata conversion preserves machine
+code, data and relocation targets and records raw objects separately. A pinned
+NTDLL `__chkstk` import supplies the SG compiler's large-frame stack probe;
+this local OS dependency is outside final SDK packaging qualification.
+The gate does not replace installed String storage or qualify
+final SDK packaging, concurrency, performance or a self-building runtime.
+The locked Rust formatter rejects these unsafe C export sources; this gate
+uses the separately qualified SG formatter preview and records that boundary.
+The local checkpoint is `target/selfhost/runtime-text-final-checkpoint/evidence.json`;
+its source identities, corpus counts and remaining integration tasks are
+recorded in `openspec/changes/add-selfhost-runtime-text-core/tasks.md`.
 
 Other focused gates are `syntax_gate.py`, `transform_gate.py`, `format_gate.py`,
 `native_gate.py`, `layout_gate.py`, `object_gate.py` and `codegen_gate.py`.

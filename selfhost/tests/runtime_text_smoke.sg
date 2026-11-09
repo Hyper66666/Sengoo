@@ -1,0 +1,19 @@
+extern "C" {
+    unsafe fn sengoo_runtime_text_fixture(kind: i64) -> * const u8;
+    unsafe fn sengoo_sg_utf8_validate(source: * const u8, length: i64) -> i64;
+    unsafe fn sengoo_sg_utf8_boundary(source: * const u8, length: i64, offset: i64) -> i64;
+}
+pub unsafe extern "C" fn main() -> i64 {
+    let valid = sengoo_runtime_text_fixture(0);
+    let invalid = sengoo_runtime_text_fixture(1);
+    if sengoo_sg_utf8_validate(valid, 7) != 1 {
+        return 1;
+    };
+    if sengoo_sg_utf8_boundary(valid, 7, 3) != 1 or sengoo_sg_utf8_boundary(valid, 7, 1) != 0 {
+        return 2;
+    };
+    if sengoo_sg_utf8_validate(invalid, 3) != 0 or sengoo_sg_utf8_boundary(invalid, 3, 0) != 0 {
+        return 3;
+    };
+    42;
+}

@@ -1,0 +1,74 @@
+extern "C" {
+    unsafe fn sengoo_runtime_memory_read_u8(source: * const u8, index: i64) -> u8;
+}
+pub unsafe extern "C" fn sengoo_sg_utf8_validate(source: * const u8, length: i64) -> i64 {
+    if length < 0 or length > 67108864 {
+        return 0;
+    };
+    let mut index = 0;
+    while index < length {
+        let first = sengoo_runtime_memory_read_u8(source, index) as i64;
+        if first <= 127 {
+            index = index + 1;
+        } else {
+            let mut width = 0;
+            let mut low = 128;
+            let mut high = 191;
+            if first >= 194 and first <= 223 {
+                width = 2;
+            } else if first >= 224 and first <= 239 {
+                width = 3;
+                if first == 224 {
+                    low = 160;
+                };
+                if first == 237 {
+                    high = 159;
+                };
+            } else if first >= 240 and first <= 244 {
+                width = 4;
+                if first == 240 {
+                    low = 144;
+                };
+                if first == 244 {
+                    high = 143;
+                };
+            } else {
+                return 0;
+            };
+            if length - index < width {
+                return 0;
+            };
+            let second = sengoo_runtime_memory_read_u8(source, index + 1) as i64;
+            if second < low or second > high {
+                return 0;
+            };
+            let mut continuation = 2;
+            while continuation < width {
+                let byte = sengoo_runtime_memory_read_u8(source, index + continuation) as i64;
+                if byte < 128 or byte > 191 {
+                    return 0;
+                };
+                continuation = continuation + 1;
+            };
+            index = index + width;
+        };
+    };
+    1;
+}
+pub unsafe extern "C" fn sengoo_sg_utf8_boundary(source: * const u8, length: i64, offset: i64) -> i64 {
+    if length < 0 or length > 67108864 or offset < 0 or offset > length {
+        return 0;
+    };
+    if sengoo_sg_utf8_validate(source, length) == 0 {
+        return 0;
+    };
+    if offset == 0 or offset == length {
+        return 1;
+    };
+    let byte = sengoo_runtime_memory_read_u8(source, offset) as i64;
+    if byte >= 128 and byte <= 191 {
+        0;
+    } else {
+        1;
+    };
+}
