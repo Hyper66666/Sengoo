@@ -1,0 +1,348 @@
+import selfhost_semantic_modules;
+
+struct ShOriginFacts {
+    schema: i64,
+    limit: i64,
+    module: i64,
+    error: i64,
+    partial: i64,
+    identity: String,
+    digest: String,
+    prototype: String,
+    text: String,
+    canonical: Vec<i64>,
+    factories: Vec<i64>,
+    nodes: Vec<i64>,
+    bindings: Vec<i64>,
+    returns: Vec<i64>,
+    obligations: Vec<i64>,
+    calls: Vec<i64>,
+    diagnostics: Vec<i64>,
+    input: Vec<i64>,
+    function: i64,
+    return_node: i64,
+    flow: i64,
+    depth: i64,
+}
+
+def sh_origin_new(limit: i64) -> ShOriginFacts {
+    ShOriginFacts { schema: 1, limit: limit, module: -1, error: 0, partial: 1, identity: string_new(), digest: string_new(), prototype: string_new(), text: string_new(), canonical: vec_new_i64(), factories: vec_new_i64(), nodes: vec_new_i64(), bindings: vec_new_i64(), returns: vec_new_i64(), obligations: vec_new_i64(), calls: vec_new_i64(), diagnostics: vec_new_i64(), input: vec_new_i64(), function: -1, return_node: -1, flow: 0, depth: 0 };
+}
+
+def sh_origin_at(values: &Vec<i64>, index: i64) -> i64 {
+    sengoo_vec_get_or_default_i64(values.handle, index, -1);
+}
+
+def sh_origin_word(values: &Vec<i64>, row: i64, width: i64, field: i64) -> i64 {
+    if row < 0 or width < 1 or field < 0 or field >= width or row >= values.len() / width { return -1; };
+    sengoo_vec_get_or_default_i64(values.handle, row * width + field, -1);
+}
+
+def sh_origin_node(facts: &ShOriginFacts, node: i64, field: i64) -> i64 {
+    sh_origin_word(&facts.nodes, node, 8, field);
+}
+
+def sh_origin_return(facts: &ShOriginFacts, binding: i64, field: i64) -> i64 {
+    sh_origin_word(&facts.returns, binding, 5, field);
+}
+
+def sh_origin_obligation_count(facts: &ShOriginFacts) -> i64 {
+    facts.obligations.len() / 5;
+}
+
+def sh_origin_factory_count(facts: &ShOriginFacts) -> i64 {
+    facts.factories.len() / 6;
+}
+
+def sh_origin_concrete_iterator(facts: &ShOriginFacts, node: i64, element: i64) -> bool {
+    facts.error == 0 and sh_origin_node(facts, node, 0) == 1 and (sh_origin_node(facts, node, 1) == 2 or sh_origin_node(facts, node, 1) == 3) and sh_origin_node(facts, node, 2) == element;
+}
+
+def sh_o_push(values: &Vec<i64>, word: i64, limit: i64) -> bool {
+    values.len() < limit * 64 and values.push(word);
+}
+
+def sh_o_name(checked: &ShChecked, binding: i64, name: &str) -> bool {
+    let label = sh_symbol_text(&checked.symbols, sh_binding_word(checked, binding, 0));
+    label.is_ok() and label.value.as_str() == name;
+}
+
+def sh_o_unique(analyzed: &ShModuleChecked, module: i64, name: &str, kind: i64) -> i64 {
+    let mut found = -1;
+    let mut binding = 0;
+    while binding < sh_binding_count(&analyzed.checked) { if sh_binding_word(&analyzed.checked, binding, 2) == kind and sh_o_name(&analyzed.checked, binding, name) { if found >= 0 or sh_module_binding_source(analyzed, binding) != module { return -1; }; found = binding; }; binding = binding + 1; };
+    found;
+}
+
+def sh_o_i64(checked: &ShChecked, ty: i64) -> bool {
+    let actual = sh_s_resolve(checked, ty);
+    sh_s_kind(checked, actual) == 2 and sh_s_data(checked, actual) == 64 and sh_s_flags(checked, actual) == 1;
+}
+
+def sh_o_base(checked: &ShChecked, ty: i64) -> i64 {
+    let mut actual = sh_s_resolve(checked, ty);
+    let mut depth = 0;
+    while sh_s_kind(checked, actual) == 6 and depth < 8 { actual = sh_s_resolve(checked, sh_s_argument(checked, actual, 0)); depth = depth + 1; };
+    actual;
+}
+
+def sh_o_role(facts: &ShOriginFacts, checked: &ShChecked, ty: i64) -> i64 {
+    let actual = sh_o_base(checked, ty);
+    if sh_s_kind(checked, actual) != 12 or sh_s_arity(checked, actual) != 1 { return 0; };
+    let binding = sh_adt_binding(checked, actual);
+    let mut role = 1;
+    while role <= 3 { if binding == sh_origin_at(&facts.canonical, role - 1) { return role; }; role = role + 1; };
+    0;
+}
+
+def sh_o_element(checked: &ShChecked, ty: i64) -> i64 {
+    sh_s_resolve(checked, sh_s_argument(checked, sh_o_base(checked, ty), 0));
+}
+
+def sh_o_source(graph: &ShModules, analyzed: &ShModuleChecked, binding: i64, module: i64) -> bool {
+    let declaration = sh_binding_word(&analyzed.checked, binding, 4);
+    binding >= 0 and declaration >= 0 and sh_module_binding_source(analyzed, binding) == module and sh_module_node_source(analyzed, declaration) == module and sh_ast_word(&analyzed.front.parsed.ast, declaration, 2) >= 0;
+}
+
+def sh_o_pin(graph: &ShModules, analyzed: &ShModuleChecked, identity: &str, digest: &str) -> i64 {
+    if graph.error != 0 or analyzed.error != 0 or analyzed.front.error != 0 or analyzed.checked.error != 0 or not sh_modules_unchanged(graph) { return -1; };
+    let mut module = 0;
+    let mut found = -1;
+    while module < sh_module_count(graph) { if graph.units.get(module).identity.as_str() == identity { if found >= 0 { return -1; }; let hash = graph.units.get(module).snapshot.sha256(); let length = graph.units.get(module).snapshot.len(); if not hash.is_ok() or not length.is_ok() or hash.value.as_str() != digest or graph.units.get(module).source != module { return -1; }; let allocated = ffi_buffer_new(length.value); if not allocated.is_ok() { return -1; }; let bytes = allocated.value; let copied = sengoo_file_snapshot_copy_bytes(graph.units.get(module).snapshot.handle, bytes.handle); if copied != length.value { return -1; }; let graph_length = sh_source_len(&graph.sources, module); if not graph_length.is_ok() or graph_length.value != length.value { return -1; }; let decoded = string_from_utf8(bytes, copied); let source = sh_span_text(&graph.sources, ShSpan { source: module, start: 0, end: length.value }); if not decoded.is_ok() or not source.is_ok() or sengoo_string_eq(decoded.value.handle, source.value.handle) == 0 { return -1; }; found = module; }; module = module + 1; };
+    found;
+}
+
+def sh_o_body_value(ast: &ShAst, binding: i64, checked: &ShChecked) -> i64 {
+    let body = sh_s_child_kind(ast, sh_binding_word(checked, binding, 4), 40);
+    if sh_ast_word(ast, body, 6) != 1 { return -1; };
+    let statement = sh_ast_child(ast, body, 0);
+    if sh_ast_word(ast, statement, 0) == 43 { return sh_ast_child(ast, statement, 0); };
+    statement;
+}
+
+def sh_o_constructor_body(facts: &ShOriginFacts, analyzed: &ShModuleChecked, binding: i64) -> bool {
+    let ast = &analyzed.front.parsed.ast;
+    let checked = &analyzed.checked;
+    let value = sh_o_body_value(ast, binding, checked);
+    if sh_ast_word(ast, value, 0) != 60 or sh_ast_word(ast, value, 6) != 3 or sh_o_role(facts, checked, sh_node_type(checked, value)) != 1 { return false; };
+    let mut index = 1;
+    let mut fields = 0;
+    while index < 3 { let field = sh_ast_child(ast, value, index); let mut target = sh_node_binding(checked, field); if target < 0 { target = sh_node_binding(checked, sh_ast_child(ast, field, 0)); }; if sh_binding_word(checked, target, 6) != sh_origin_at(&facts.canonical, 0) or not sh_o_zero(&analyzed.front.expanded.text, ast, sh_ast_child(ast, field, 1)) { return false; }; let ordinal = sh_binding_word(checked, target, 7); if ordinal < 0 or ordinal > 1 { return false; }; fields = fields | (1 << ordinal); index = index + 1; };
+    fields == 3;
+}
+
+def sh_o_factory_body(facts: &ShOriginFacts, analyzed: &ShModuleChecked, binding: i64, role: i64) -> bool {
+    let ast = &analyzed.front.parsed.ast;
+    let checked = &analyzed.checked;
+    let record = sh_o_body_value(ast, binding, checked);
+    if sh_ast_word(ast, record, 0) != 60 or sh_ast_word(ast, record, 6) != 3 or sh_o_role(facts, checked, sh_node_type(checked, record)) != role { return false; };
+    let mut found = 0;
+    let mut index = 1;
+    while index < 3 { let field = sh_ast_child(ast, record, index); let mut target = sh_node_binding(checked, field); if target < 0 { target = sh_node_binding(checked, sh_ast_child(ast, field, 0)); }; let value = sh_ast_child(ast, field, 1); let ordinal = sh_binding_word(checked, target, 7); if sh_binding_word(checked, target, 6) != sh_origin_at(&facts.canonical, role - 1) { return false; }; if ordinal == 1 { if not sh_o_zero(&analyzed.front.expanded.text, ast, value) { return false; }; found = found | 2; } else if ordinal == 0 { if sh_ast_word(ast, value, 0) != 53 or sh_ast_word(ast, value, 6) != 2 or sh_node_binding(checked, value) != sh_origin_at(&facts.canonical, 4) { return false; }; let projection = sh_ast_child(ast, value, 1); let handle = sh_node_binding(checked, projection); let receiver = sh_node_binding(checked, sh_ast_child(ast, projection, 0)); if sh_ast_word(ast, projection, 0) != 55 or sh_binding_word(checked, handle, 6) != sh_origin_at(&facts.canonical, 0) or sh_binding_word(checked, handle, 7) != 0 or sh_binding_word(checked, receiver, 2) != 1 or sh_binding_word(checked, receiver, 6) != binding or sh_binding_word(checked, receiver, 7) != 0 { return false; }; found = found | 1; } else { return false; }; index = index + 1; };
+    found == 3;
+}
+
+def sh_o_admit(facts: &mut ShOriginFacts, graph: &ShModules, analyzed: &ShModuleChecked, identity: &str, digest: &str, prototype: &str) {
+    facts.module = sh_o_pin(graph, analyzed, identity, digest);
+    if facts.module < 0 { facts.error = 5701; return; };
+    let copied_identity = string_from_str(identity);
+    let copied_digest = string_from_str(digest);
+    let copied_prototype = string_from_str(prototype);
+    let copied_text = analyzed.front.expanded.text.clone();
+    if not copied_identity.is_ok() or not copied_digest.is_ok() or not copied_prototype.is_ok() or not copied_text.is_ok() { facts.error = 5700; return; };
+    facts.identity = copied_identity.value;
+    facts.digest = copied_digest.value;
+    facts.prototype = copied_prototype.value;
+    facts.text = copied_text.value;
+    let vector = sh_o_unique(analyzed, facts.module, "Vec", 3);
+    let raw = sh_o_unique(analyzed, facts.module, "RawVecIter", 3);
+    let iterator = sh_o_unique(analyzed, facts.module, "VecIter", 3);
+    let constructor = sh_o_unique(analyzed, facts.module, "vec_new", 2);
+    let runtime = sh_o_unique(analyzed, facts.module, "sengoo_raw_vec_iter_new", 2);
+    if vector < 0 or raw < 0 or iterator < 0 or constructor < 0 or runtime < 0 { facts.error = 5701; return; };
+    facts.canonical.push(vector);
+    facts.canonical.push(raw);
+    facts.canonical.push(iterator);
+    facts.canonical.push(constructor);
+    facts.canonical.push(runtime);
+    let checked = &analyzed.checked;
+    let ast = &analyzed.front.parsed.ast;
+    let mut role = 1;
+    while role <= 3 { let owner = sh_origin_at(&facts.canonical, role - 1); if not sh_o_source(graph, analyzed, owner, facts.module) or sh_ast_word(ast, sh_binding_word(checked, owner, 4), 0) != 22 { facts.error = 5701; return; }; let mut field = 0; let mut count = 0; while field < sh_binding_count(checked) { if sh_binding_word(checked, field, 2) == 6 and sh_binding_word(checked, field, 6) == owner { let ordinal = sh_binding_word(checked, field, 7); if not sh_o_i64(checked, sh_binding_word(checked, field, 3)) or ordinal < 0 or ordinal > 1 or not sh_o_name(checked, field, if ordinal == 0 { "handle"; } else { "marker"; }) { facts.error = 5701; return; }; count = count + 1; }; field = field + 1; }; if count != 2 { facts.error = 5701; return; }; role = role + 1; };
+    let signature = sh_s_resolve(checked, sh_binding_word(checked, runtime, 3));
+    let declaration = sh_binding_word(checked, runtime, 4);
+    if not sh_o_source(graph, analyzed, runtime, facts.module) or (sh_binding_word(checked, runtime, 5) & 8) == 0 or sh_s_kind(checked, signature) != 11 or sh_s_data(checked, signature) != 1 or sh_s_flags(checked, signature) != 0 or sh_s_arity(checked, signature) != 2 or not sh_o_i64(checked, sh_s_argument(checked, signature, 0)) or not sh_o_i64(checked, sh_s_argument(checked, signature, 1)) or sh_s_child_kind(ast, declaration, 40) >= 0 { facts.error = 5701; return; };
+    let site = sh_module_expanded_span(graph, &analyzed.front, sh_ast_word(ast, declaration, 2), sh_ast_word(ast, declaration, 3));
+    let actual = sh_span_text(&graph.sources, site);
+    if site.source != facts.module or not actual.is_ok() or actual.value.as_str() != prototype { facts.error = 5701; return; };
+    let ctor = sh_s_resolve(checked, sh_binding_word(checked, constructor, 3));
+    if not sh_o_source(graph, analyzed, constructor, facts.module) or sh_s_kind(checked, ctor) != 11 or sh_s_data(checked, ctor) != 0 or sh_s_arity(checked, ctor) != 1 or sh_o_role(facts, checked, sh_s_argument(checked, ctor, 0)) != 1 or sh_s_kind(checked, sh_o_element(checked, sh_s_argument(checked, ctor, 0))) != 13 or not sh_o_constructor_body(facts, analyzed, constructor) { facts.error = 5701; return; };
+    let mut binding = 0;
+    let mut groups = 0;
+    while binding < sh_binding_count(checked) { if sh_binding_word(checked, binding, 2) == 2 and sh_module_binding_source(analyzed, binding) == facts.module and sh_o_name(checked, binding, "iter") { let fn_type = sh_s_resolve(checked, sh_binding_word(checked, binding, 3)); let receiver = sh_s_resolve(checked, sh_s_argument(checked, fn_type, 0)); let returned = sh_s_resolve(checked, sh_s_argument(checked, fn_type, 1)); let result_role = sh_o_role(facts, checked, returned); if sh_s_kind(checked, fn_type) == 11 and sh_s_data(checked, fn_type) == 0 and sh_s_arity(checked, fn_type) == 2 and sh_s_kind(checked, receiver) == 6 and sh_s_flags(checked, receiver) == 0 and sh_o_role(facts, checked, receiver) == 1 and (result_role == 2 or result_role == 3) { let element = sh_o_element(checked, receiver); let group = if sh_s_kind(checked, element) == 13 and result_role == 2 { 1; } else { if sh_o_i64(checked, element) and result_role == 3 { 2; } else { if sh_s_kind(checked, element) == 1 and result_role == 3 { 4; } else { 0; }; }; }; if group == 0 or (groups & group) != 0 or element != sh_o_element(checked, returned) or not sh_o_factory_body(facts, analyzed, binding, result_role) { facts.error = 5701; return; }; groups = groups | group; facts.factories.push(binding); facts.factories.push(result_role); facts.factories.push(element); facts.factories.push(sh_binding_word(checked, binding, 4)); facts.factories.push(fn_type); facts.factories.push(facts.module); (); }; }; binding = binding + 1; };
+    if groups != 7 or sh_origin_factory_count(facts) != 3 { facts.error = 5701; };
+}
+
+def sh_o_write(facts: &mut ShOriginFacts, node: i64, state: i64, role: i64, element: i64, root: i64, producer: i64, parent: i64, parameter: i64) {
+    if node < 0 or node >= facts.nodes.len() / 8 { return; };
+    facts.nodes.set(node * 8, state);
+    facts.nodes.set(node * 8 + 1, role);
+    facts.nodes.set(node * 8 + 2, element);
+    facts.nodes.set(node * 8 + 3, root);
+    facts.nodes.set(node * 8 + 4, producer);
+    facts.nodes.set(node * 8 + 5, parent);
+    facts.nodes.set(node * 8 + 6, facts.function);
+    facts.nodes.set(node * 8 + 7, parameter);
+    ();
+}
+
+def sh_o_copy(facts: &mut ShOriginFacts, node: i64, parent: i64) {
+    sh_o_write(facts, node, sh_origin_node(facts, parent, 0), sh_origin_node(facts, parent, 1), sh_origin_node(facts, parent, 2), sh_origin_node(facts, parent, 3), sh_origin_node(facts, parent, 4), parent, sh_origin_node(facts, parent, 7));
+}
+
+def sh_o_obligation(facts: &mut ShOriginFacts, parameter: i64, role: i64, element: i64, site: i64) {
+    if parameter < 0 { return; };
+    if facts.obligations.len() / 5 >= facts.limit { facts.error = 5700; return; };
+    let mut row = 0;
+    while row < sh_origin_obligation_count(facts) { if sh_origin_word(&facts.obligations, row, 5, 0) == facts.function and sh_origin_word(&facts.obligations, row, 5, 1) == parameter and sh_origin_word(&facts.obligations, row, 5, 2) == role and sh_origin_word(&facts.obligations, row, 5, 3) == element and sh_origin_word(&facts.obligations, row, 5, 4) == site { return; }; row = row + 1; };
+    facts.obligations.push(facts.function);
+    facts.obligations.push(parameter);
+    facts.obligations.push(role);
+    facts.obligations.push(element);
+    facts.obligations.push(site);
+    ();
+}
+
+def sh_o_invalidate(facts: &mut ShOriginFacts, root: i64) {
+    let mut binding = 0;
+    while binding < facts.bindings.len() { let node = sh_origin_at(&facts.bindings, binding); if root < 0 or sh_origin_node(facts, node, 3) == root { facts.bindings.set(binding, -1); (); }; binding = binding + 1; };
+}
+
+def sh_o_diagnostic(facts: &mut ShOriginFacts, code: i64, node: i64, extra: i64) {
+    if facts.diagnostics.len() / 3 >= facts.limit { facts.error = 5700; return; };
+    let mut i = 0;
+    while i < facts.diagnostics.len() { if sh_origin_at(&facts.diagnostics, i) == code and sh_origin_at(&facts.diagnostics, i + 1) == node and sh_origin_at(&facts.diagnostics, i + 2) == extra { return; }; i = i + 3; };
+    facts.diagnostics.push(code);
+    facts.diagnostics.push(node);
+    facts.diagnostics.push(extra);
+    ();
+}
+
+def sh_origin_call_eligibility(facts: &ShOriginFacts, node: i64) -> i64 {
+    let mut row = 0;
+    let mut result = -1;
+    while row < facts.calls.len() / 5 { if sh_origin_word(&facts.calls, row, 5, 0) == node { let state = sh_origin_word(&facts.calls, row, 5, 3); if state == 0 { return 0; }; if result < 0 or state == 2 { result = state; }; }; row = row + 1; };
+    if result < 0 { 0; } else { result; };
+}
+
+def sh_o_zero(text: &String, ast: &ShAst, node: i64) -> bool {
+    if sh_ast_word(ast, node, 0) != 11 { return false; };
+    let raw = sh_s_name(text, ast, node);
+    raw.is_ok() and raw.value.as_str() == "0";
+}
+
+def sh_o_expr(facts: &mut ShOriginFacts, analyzed: &ShModuleChecked, node: i64, moving: bool) -> i64 {
+    if node < 0 or facts.error != 0 { return -1; };
+    facts.depth = facts.depth + 1;
+    if facts.depth > 128 { facts.error = 5700; facts.depth = facts.depth - 1; return -1; };
+    let ast = &analyzed.front.parsed.ast;
+    let checked = &analyzed.checked;
+    let kind = sh_ast_word(ast, node, 0);
+    let ty = sh_node_type(checked, node);
+    let role = sh_o_role(facts, checked, ty);
+    let element = if role > 0 { sh_o_element(checked, ty); } else { -1; };
+    if kind == 12 { let binding = sh_node_binding(checked, node); let source = sh_origin_at(&facts.bindings, binding); if source >= 0 { sh_o_copy(facts, node, source); if moving and sh_s_kind(checked, sh_s_resolve(checked, ty)) == 12 { facts.bindings.set(binding, -1); (); }; }; } else if kind == 50 and (sh_ast_word(ast, node, 4) % 1000 == sh_kind("&") or sh_ast_word(ast, node, 4) % 1000 == sh_kind("*")) { let child = sh_o_expr(facts, analyzed, sh_ast_child(ast, node, 0), false); sh_o_copy(facts, node, child); } else if kind == 41 { let binding = sh_node_binding(checked, sh_ast_child(ast, node, 0)); let child = sh_o_expr(facts, analyzed, sh_ast_child(ast, node, sh_ast_word(ast, node, 6) - 1), true); if sh_origin_node(facts, child, 0) > 0 { if sh_origin_node(facts, child, 1) == 1 and sh_origin_node(facts, child, 0) == 1 { facts.nodes.set(child * 8 + 3, binding); (); }; facts.bindings.set(binding, child); (); }; } else if kind == 43 { let child = sh_o_expr(facts, analyzed, sh_ast_child(ast, node, 0), moving); sh_o_copy(facts, node, child); } else if kind == 42 { let child = sh_o_expr(facts, analyzed, sh_ast_child(ast, node, 0), true); facts.return_node = child; facts.flow = 1; sh_o_copy(facts, node, child); } else if kind == 40 { let mut child = 0; let mut last = -1; while child < sh_ast_word(ast, node, 6) and facts.flow == 0 { last = sh_o_expr(facts, analyzed, sh_ast_child(ast, node, child), true); child = child + 1; }; if last >= 0 { sh_o_copy(facts, node, last); }; } else if kind == 60 and role > 0 { let mut child = 1; let mut zeros = 0; while child < sh_ast_word(ast, node, 6) { let field = sh_ast_child(ast, node, child); let value = sh_ast_child(ast, field, 1); sh_o_expr(facts, analyzed, value, true); if not sh_o_zero(&analyzed.front.expanded.text, ast, value) { zeros = -1000; }; zeros = zeros + 1; child = child + 1; }; if zeros == 2 { sh_o_write(facts, node, 3, role, element, -1, -1, -1, -1); }; } else if kind == 53 { sh_o_call(facts, analyzed, node); } else if kind == 55 { let base = sh_ast_child(ast, node, 0); sh_o_expr(facts, analyzed, base, false); if moving and sh_o_name(checked, sh_node_binding(checked, node), "handle") { sh_o_invalidate(facts, sh_origin_node(facts, base, 3)); }; (); } else if kind == 52 { let value = sh_o_expr(facts, analyzed, sh_ast_child(ast, node, 1), true); let target = sh_ast_child(ast, node, 0); let binding = sh_node_binding(checked, target); if sh_ast_word(ast, target, 0) == 12 { facts.bindings.set(binding, value); (); } else { sh_o_invalidate(facts, -1); }; } else if kind == 61 or kind == 62 or kind == 63 or kind == 64 or kind == 65 or kind == 66 or kind == 67 { facts.partial = facts.partial | 2; sh_o_invalidate(facts, -1); } else if role > 0 { facts.partial = facts.partial | 2; };
+    facts.depth = facts.depth - 1;
+    node;
+}
+
+def sh_o_call(facts: &mut ShOriginFacts, analyzed: &ShModuleChecked, node: i64) {
+    let ast = &analyzed.front.parsed.ast;
+    let checked = &analyzed.checked;
+    let binding = sh_node_binding(checked, node);
+    let callee = sh_ast_child(ast, node, 0);
+    let signature = sh_s_resolve(checked, sh_node_callable_type(checked, node));
+    let returned = sh_s_resolve(checked, sh_node_type(checked, node));
+    if sh_s_kind(checked, signature) != 11 or sh_node_type(checked, callee) != signature or sh_s_resolve(checked, sh_s_argument(checked, signature, sh_s_arity(checked, signature) - 1)) != returned { return; };
+    let arguments = vec_new_i64();
+    let mut ordinal = 0;
+    if sh_ast_word(ast, callee, 0) == 55 { let argument = sh_ast_child(ast, callee, 0); sh_o_expr(facts, analyzed, argument, sh_s_kind(checked, sh_s_argument(checked, signature, 0)) != 6); arguments.push(argument); ordinal = 1; };
+    let mut child = 1;
+    while child < sh_ast_word(ast, node, 6) { let argument = sh_ast_child(ast, node, child); sh_o_expr(facts, analyzed, argument, sh_s_kind(checked, sh_s_argument(checked, signature, ordinal)) != 6); arguments.push(argument); ordinal = ordinal + 1; child = child + 1; };
+    let role = sh_o_role(facts, checked, returned);
+    let element = if role > 0 { sh_o_element(checked, returned); } else { -1; };
+    if binding == sh_origin_at(&facts.canonical, 3) and role == 1 and arguments.len() == 0 { sh_o_write(facts, node, 1, 1, element, -node - 1, node, -1, -1); return; };
+    let mut factory = 0;
+    while factory < sh_origin_factory_count(facts) { if sh_origin_word(&facts.factories, factory, 6, 0) == binding { let receiver = sh_origin_at(&arguments, 0); let state = sh_origin_node(facts, receiver, 0); if role != sh_origin_word(&facts.factories, factory, 6, 1) or sh_origin_node(facts, receiver, 1) != 1 or sh_origin_node(facts, receiver, 2) != element { return; }; if state == 1 or state == 2 or state == 3 { let parameter = sh_origin_node(facts, receiver, 7); sh_o_write(facts, node, state, role, element, sh_origin_node(facts, receiver, 3), node, receiver, parameter); if state == 2 { sh_o_obligation(facts, parameter, 1, element, node); }; }; return; }; factory = factory + 1; };
+    let mut gate = 1;
+    let requirements = sh_origin_obligation_count(facts);
+    let mut requirement = 0;
+    while requirement < requirements { if sh_origin_word(&facts.obligations, requirement, 5, 0) == binding { let parameter = sh_origin_word(&facts.obligations, requirement, 5, 1); let ordinal = sh_binding_word(checked, parameter, 7); let argument = sh_origin_at(&arguments, ordinal); let actual_state = sh_origin_node(facts, argument, 0); let required = sh_s_argument(checked, signature, ordinal); let expected_role = sh_origin_word(&facts.obligations, requirement, 5, 2); let actual_element = sh_o_element(checked, required); let valid = sh_origin_node(facts, argument, 1) == expected_role and sh_origin_node(facts, argument, 2) == actual_element and (actual_state == 1 or actual_state == 2); let status = if valid { actual_state; } else { 0; }; if facts.calls.len() / 5 >= facts.limit { facts.error = 5700; return; }; facts.calls.push(node); facts.calls.push(parameter); facts.calls.push(argument); facts.calls.push(status); facts.calls.push(sh_origin_node(facts, argument, 7)); if status == 0 { gate = 0; sh_o_diagnostic(facts, 5703, node, parameter); } else if status == 2 { if gate != 0 { gate = 2; }; sh_o_obligation(facts, sh_origin_node(facts, argument, 7), expected_role, actual_element, node); }; }; requirement = requirement + 1; };
+    let state = sh_origin_return(facts, binding, 0);
+    if role == 0 or state < 1 { let mut argument = 0; while argument < arguments.len() { let value = sh_origin_at(&arguments, argument); if sh_origin_node(facts, value, 0) > 0 { sh_o_invalidate(facts, sh_origin_node(facts, value, 3)); }; argument = argument + 1; }; return; };
+    if gate == 0 { return; };
+    let parameter = sh_origin_return(facts, binding, 3);
+    let site = sh_origin_return(facts, binding, 4);
+    if parameter >= 0 { let argument = sh_origin_at(&arguments, parameter); let actual_state = sh_origin_node(facts, argument, 0); if gate == 2 and actual_state == 1 { facts.partial = facts.partial | 4; return; }; if sh_origin_node(facts, argument, 2) != element or actual_state < 1 { facts.diagnostics.push(5703); facts.diagnostics.push(node); facts.diagnostics.push(binding); return; }; let root = sh_origin_node(facts, argument, 3); let origin_parameter = sh_origin_node(facts, argument, 7); sh_o_write(facts, node, actual_state, role, element, root, site, argument, origin_parameter); if actual_state == 2 { sh_o_obligation(facts, origin_parameter, sh_origin_node(facts, argument, 1), element, node); }; } else if state == 1 and role == 1 and gate == 1 { sh_o_write(facts, node, 1, role, element, -node - 1, site, -1, -1); } else if state == 3 { sh_o_write(facts, node, 3, role, element, -1, site, -1, -1); };
+}
+
+def sh_o_collect(facts: &mut ShOriginFacts, values: &Vec<i64>) {
+    if not sh_o_push(&facts.input, values.len(), facts.limit) { facts.error = 5700; return; };
+    let mut index = 0;
+    while index < values.len() { if not sh_o_push(&facts.input, sh_origin_at(values, index), facts.limit) { facts.error = 5700; return; }; index = index + 1; };
+}
+
+def sh_origins_analyze(graph: &ShModules, analyzed: &ShModuleChecked, identity: &str, digest: &str, prototype: &str, limit: i64) -> ShOriginFacts {
+    let mut facts = sh_origin_new(limit);
+    let ast = &analyzed.front.parsed.ast;
+    let checked = &analyzed.checked;
+    if limit < 1 or limit > 100000 or sh_ast_count(ast) > limit or sh_binding_count(checked) > limit { facts.error = 5700; return facts; };
+    sh_o_admit(&mut facts, graph, analyzed, identity, digest, prototype);
+    if facts.error != 0 { return facts; };
+    let mut node = 0;
+    while node < sh_ast_count(ast) * 8 { facts.nodes.push(if node % 8 == 0 { 0; } else { -1; }); node = node + 1; };
+    let mut binding = 0;
+    while binding < sh_binding_count(checked) { facts.bindings.push(-1); let mut f = 0; while f < 5 { facts.returns.push(if f == 0 { 0; } else { -1; }); f = f + 1; }; binding = binding + 1; };
+    let mut iteration = 0;
+    let mut changed = true;
+    while changed and iteration < 16 and facts.error == 0 { changed = false; let old_obligations = facts.obligations.len(); facts.calls.clear(); facts.diagnostics.clear(); node = 0; while node < facts.nodes.len() { facts.nodes.set(node, if node % 8 == 0 { 0; } else { -1; }); node = node + 1; }; binding = 0; while binding < sh_binding_count(checked) { if sh_binding_word(checked, binding, 2) == 2 and sh_module_binding_source(analyzed, binding) == graph.root { let body = sh_s_child_kind(ast, sh_binding_word(checked, binding, 4), 40); if body >= 0 { facts.function = binding; facts.return_node = -1; facts.flow = 0; facts.depth = 0; let mut local = 0; while local < facts.bindings.len() { facts.bindings.set(local, -1); local = local + 1; }; local = 0; while local < sh_binding_count(checked) { if sh_binding_word(checked, local, 2) == 1 and sh_binding_word(checked, local, 6) == binding { let ty = sh_binding_word(checked, local, 3); let role = sh_o_role(&facts, checked, ty); if role > 0 { let declaration = sh_binding_word(checked, local, 4); sh_o_write(&mut facts, declaration, 2, role, sh_o_element(checked, ty), local, -1, -1, local); facts.bindings.set(local, declaration); (); }; }; local = local + 1; }; let result = sh_o_expr(&mut facts, analyzed, body, true); let returned = if facts.return_node >= 0 { facts.return_node; } else { result; }; let mut state = sh_origin_node(&facts, returned, 0); let role = sh_origin_node(&facts, returned, 1); let element = sh_origin_node(&facts, returned, 2); let root = sh_origin_node(&facts, returned, 3); let mut parameter = -1; if root >= 0 and sh_binding_word(checked, root, 2) == 1 and sh_binding_word(checked, root, 6) == binding { parameter = sh_binding_word(checked, root, 7); }; if state == 2 { let required_role = sh_o_role(&facts, checked, sh_binding_word(checked, root, 3)); sh_o_obligation(&mut facts, root, required_role, element, returned); }; if state == 1 and (role == 2 or role == 3) and parameter < 0 { facts.diagnostics.push(5705); facts.diagnostics.push(returned); facts.diagnostics.push(root); state = 0; }; let summary = vec_new_i64(); summary.push(state); summary.push(role); summary.push(element); summary.push(parameter); summary.push(returned); let mut field = 0; while field < 5 { let value = sh_origin_at(&summary, field); let previous = sh_origin_return(&facts, binding, field); if previous != value { facts.returns.set(binding * 5 + field, value); changed = true; }; field = field + 1; }; }; }; binding = binding + 1; }; if facts.obligations.len() != old_obligations { changed = true; }; iteration = iteration + 1; };
+    if changed { facts.error = 5704; };
+    sh_o_collect(&mut facts, &checked.substitutions);
+    sh_o_collect(&mut facts, &checked.scopes);
+    sh_o_collect(&mut facts, &checked.generic_parameters);
+    sh_o_collect(&mut facts, &checked.constraints);
+    sh_o_collect(&mut facts, &graph.mapping);
+    sh_o_collect(&mut facts, &analyzed.front.expanded.mapping.words);
+    sh_o_collect(&mut facts, &checked.types.words);
+    sh_o_collect(&mut facts, &checked.types.arguments);
+    sh_o_collect(&mut facts, &checked.bindings);
+    sh_o_collect(&mut facts, &checked.node_types);
+    sh_o_collect(&mut facts, &checked.call_types);
+    sh_o_collect(&mut facts, &checked.resolution);
+    sh_o_collect(&mut facts, &checked.node_scopes);
+    sh_o_collect(&mut facts, &ast.words);
+    sh_o_collect(&mut facts, &ast.edges);
+    sh_o_collect(&mut facts, &analyzed.node_modules);
+    sh_o_collect(&mut facts, &analyzed.binding_modules);
+    facts.bindings.clear();
+    facts.function = -1;
+    facts.return_node = -1;
+    facts.flow = 0;
+    facts.depth = 0;
+    facts;
+}
+
+def sh_o_equal(left: &Vec<i64>, right: &Vec<i64>) -> bool {
+    if left.len() != right.len() { return false; };
+    let mut i = 0;
+    while i < left.len() { if sh_origin_at(left, i) != sh_origin_at(right, i) { return false; }; i = i + 1; };
+    true;
+}
+
+def sh_origins_validate(facts: &ShOriginFacts, graph: &ShModules, analyzed: &ShModuleChecked, identity: &str, digest: &str, prototype: &str) -> i64 {
+    if facts.schema != 1 or facts.error != 0 or facts.partial < 1 or facts.bindings.len() != 0 or facts.function != -1 or facts.return_node != -1 or facts.flow != 0 or facts.depth != 0 { return 5702; };
+    let expected = sh_origins_analyze(graph, analyzed, identity, digest, prototype, facts.limit);
+    if expected.error != 0 { return expected.error; };
+    if facts.module != expected.module or facts.partial != expected.partial or facts.identity.as_str() != identity or facts.digest.as_str() != digest or facts.prototype.as_str() != prototype or sengoo_string_eq(facts.text.handle, expected.text.handle) == 0 or not sh_o_equal(&facts.canonical, &expected.canonical) or not sh_o_equal(&facts.factories, &expected.factories) or not sh_o_equal(&facts.nodes, &expected.nodes) or not sh_o_equal(&facts.returns, &expected.returns) or not sh_o_equal(&facts.obligations, &expected.obligations) or not sh_o_equal(&facts.calls, &expected.calls) or not sh_o_equal(&facts.diagnostics, &expected.diagnostics) or not sh_o_equal(&facts.input, &expected.input) { return 5702; };
+    0;
+}

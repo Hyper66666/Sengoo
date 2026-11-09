@@ -1,0 +1,152 @@
+import selfhost_semantic_origins;
+
+import std::args;
+
+import std::assert;
+
+extern "C" {
+    fn sengoo_string_live_handle_count() -> i64;
+    fn sengoo_buffer_live_handle_count() -> i64;
+    fn sengoo_opaque_live_handle_count() -> i64;
+    fn sengoo_file_snapshot_live_handle_count() -> i64;
+    fn sengoo_file_snapshot_live_bytes() -> i64;
+}
+
+def sh_it_argument(index: i64) -> Result<String, i64> {
+    let buffer = ffi_buffer_new(arg_len(index)?)?;
+    let copied = arg_copy(index, buffer)?;
+    string_from_utf8(buffer, copied);
+}
+
+def sh_it_find(analyzed: &ShModuleChecked, function: &str, name: &str) -> i64 {
+    let checked = &analyzed.checked;
+    let mut owner = -1;
+    let mut binding = 0;
+    while binding < sh_binding_count(checked) { if sh_binding_word(checked, binding, 2) == 2 and sh_o_name(checked, binding, function) { owner = binding; }; binding = binding + 1; };
+    if name == "" { return owner; };
+    binding = 0;
+    while binding < sh_binding_count(checked) { if sh_binding_word(checked, binding, 6) == owner and sh_o_name(checked, binding, name) { return binding; }; binding = binding + 1; };
+    -1;
+}
+
+def sh_it_initializer(analyzed: &ShModuleChecked, function: &str, name: &str) -> i64 {
+    let binding = sh_it_find(analyzed, function, name);
+    let declaration = sh_binding_word(&analyzed.checked, binding, 4);
+    if sh_binding_word(&analyzed.checked, binding, 2) == 1 { return declaration; };
+    sh_ast_child(&analyzed.front.parsed.ast, declaration, sh_ast_word(&analyzed.front.parsed.ast, declaration, 6) - 1);
+}
+
+def sh_it_state(facts: &ShOriginFacts, analyzed: &ShModuleChecked, function: &str, name: &str, expected: i64) {
+    let node = sh_it_initializer(analyzed, function, name);
+    let actual = sh_origin_node(facts, node, 0);
+    if actual != expected { println(function); println(name); println(actual); println(expected); };
+    assert_true(node >= 0, "iterator_origins.sg", 1);
+    assert_eq_i64(actual, expected, "iterator_origins.sg", 2);
+    ();
+}
+
+def sh_it_call_state(facts: &ShOriginFacts, analyzed: &ShModuleChecked, function: &str, target: &str, expected: i64) {
+    let owner = sh_it_find(analyzed, function, "");
+    let called = sh_it_find(analyzed, target, "");
+    let mut node = 0;
+    let mut found = 0;
+    while node < sh_ast_count(&analyzed.front.parsed.ast) { if sh_ast_word(&analyzed.front.parsed.ast, node, 0) == 53 and sh_node_binding(&analyzed.checked, node) == called { let mut scope = sh_node_scope(&analyzed.checked, node); let mut actual_owner = -1; let mut depth = 0; while scope >= 0 and depth < 128 { let binding = sh_scope_word(&analyzed.checked, scope, 1); if sh_binding_word(&analyzed.checked, binding, 2) == 2 { actual_owner = binding; break; }; scope = sh_scope_word(&analyzed.checked, scope, 0); depth = depth + 1; }; if actual_owner == owner { let actual = sh_origin_call_eligibility(facts, node); if actual != expected { println(function); println(target); println(actual); println(expected); }; assert_eq_i64(actual, expected, "iterator_origins.sg", 3); found = found + 1; }; }; node = node + 1; };
+    assert_eq_i64(found, 1, "iterator_origins.sg", 4);
+    ();
+}
+
+def sh_it_copy_words(values: &Vec<i64>) -> Vec<i64> {
+    let output = vec_new_i64();
+    let mut i = 0;
+    while i < values.len() { output.push(sh_origin_at(values, i)); i = i + 1; };
+    output;
+}
+
+def sh_it_scope(root: &String, stdlib: &String, collections: &String, digest: &String, shadow: bool, poisons: bool) -> Result<bool, i64> {
+    let pin = file_snapshot_open(collections.as_str(), 1048576)?;
+    let identity = pin.identity()?;
+    let pinned = pin.sha256()?;
+    assert_true(pinned.as_str() == digest.as_str(), "iterator_origins.sg", 5);
+    let config = string_new();
+    let graph = sh_modules_load(root.as_str(), stdlib.as_str(), &config, 64, 1048576);
+    assert_eq_i64(graph.error, 0, "iterator_origins.sg", 6);
+    let analyzed = sh_modules_check(&graph, 100000, 1000);
+    if shadow and analyzed.error != 0 { assert_eq_i64(analyzed.error, 5103, "iterator_origins.sg", 50); return result_ok_bool(true); };
+    if analyzed.error != 0 { println(analyzed.error); println(analyzed.start); };
+    assert_eq_i64(analyzed.error, 0, "iterator_origins.sg", 7);
+    let before_types = sh_type_count(&analyzed.checked.types);
+    let before_words = analyzed.checked.types.words.len();
+    let before_args = analyzed.checked.types.arguments.len();
+    let original_words = sh_it_copy_words(&analyzed.checked.types.words);
+    let original_args = sh_it_copy_words(&analyzed.checked.types.arguments);
+    let prototype = "fn sengoo_raw_vec_iter_new(handle: i64) -> i64;";
+    let mut facts = sh_origins_analyze(&graph, &analyzed, identity.as_str(), digest.as_str(), prototype, 100000);
+    if shadow { assert_eq_i64(facts.error, 5701, "iterator_origins.sg", 8); return result_ok_bool(true); };
+    if facts.error != 0 { println("admission"); println(facts.error); };
+    assert_eq_i64(facts.error, 0, "iterator_origins.sg", 9);
+    assert_eq_i64(sh_origin_factory_count(&facts), 3, "iterator_origins.sg", 10);
+    assert_eq_i64(sh_origins_validate(&facts, &graph, &analyzed, identity.as_str(), digest.as_str(), prototype), 0, "iterator_origins.sg", 11);
+    sh_it_state(&facts, &analyzed, "positive", "values", 1);
+    sh_it_state(&facts, &analyzed, "positive", "iterator", 1);
+    sh_it_state(&facts, &analyzed, "positive", "moved", 1);
+    sh_it_state(&facts, &analyzed, "positive", "alias", 1);
+    sh_it_state(&facts, &analyzed, "positive", "dead", 0);
+    sh_it_state(&facts, &analyzed, "positive", "raw", 0);
+    sh_it_state(&facts, &analyzed, "positive", "fake", 0);
+    sh_it_state(&facts, &analyzed, "positive", "bad_alias", 0);
+    sh_it_state(&facts, &analyzed, "caller", "iterator", 1);
+    sh_it_state(&facts, &analyzed, "unknown_caller", "iterator", 0);
+    sh_it_state(&facts, &analyzed, "forged", "fake", 0);
+    sh_it_state(&facts, &analyzed, "owned_caller", "iterator", 1);
+    sh_it_state(&facts, &analyzed, "branch_boundary", "iterator", 0);
+    sh_it_state(&facts, &analyzed, "loop_boundary", "iterator", 0);
+    sh_it_state(&facts, &analyzed, "unknown_effect", "iterator", 0);
+    let forward = sh_it_find(&analyzed, "forward", "");
+    assert_eq_i64(sh_origin_return(&facts, forward, 0), 2, "iterator_origins.sg", 12);
+    assert_eq_i64(sh_origin_return(&facts, forward, 3), 0, "iterator_origins.sg", 13);
+    let generic = sh_it_find(&analyzed, "generic", "");
+    assert_eq_i64(sh_origin_return(&facts, generic, 0), 2, "iterator_origins.sg", 14);
+    let escape = sh_it_find(&analyzed, "escape", "");
+    assert_eq_i64(sh_origin_return(&facts, escape, 0), 0, "iterator_origins.sg", 15);
+    assert_true(sh_origin_obligation_count(&facts) >= 5, "iterator_origins.sg", 16);
+    sh_it_call_state(&facts, &analyzed, "scalar_good", "needs", 1);
+    sh_it_call_state(&facts, &analyzed, "scalar_bad", "needs", 0);
+    sh_it_call_state(&facts, &analyzed, "scalar_conditional", "needs", 2);
+    sh_it_call_state(&facts, &analyzed, "two_bad", "needs2", 0);
+    sh_it_call_state(&facts, &analyzed, "two_good", "needs2", 1);
+    sh_it_call_state(&facts, &analyzed, "two_pending", "needs2", 2);
+    let mut index = 0;
+    while index < 8 { let name = string_from_str("z")?; name.push_i64(index)?; sh_it_state(&facts, &analyzed, "zeros", name.as_str(), 3); index = index + 1; };
+    let concrete = sh_it_initializer(&analyzed, "caller", "iterator");
+    let owned = sh_it_initializer(&analyzed, "owned_caller", "iterator");
+    let fake = sh_it_initializer(&analyzed, "forged", "fake");
+    assert_true(sh_origin_concrete_iterator(&facts, concrete, analyzed.checked.integer_type), "iterator_origins.sg", 17);
+    assert_true(sh_origin_concrete_iterator(&facts, owned, sh_origin_node(&facts, owned, 2)), "iterator_origins.sg", 18);
+    assert_false(sh_origin_concrete_iterator(&facts, fake, analyzed.checked.integer_type), "iterator_origins.sg", 19);
+    if poisons { let saved_nodes = sh_it_copy_words(&facts.nodes); facts.nodes.clear(); assert_eq_i64(sh_origins_validate(&facts, &graph, &analyzed, identity.as_str(), digest.as_str(), prototype), 5702, "iterator_origins.sg", 56); let mut restored = 0; while restored < saved_nodes.len() { facts.nodes.push(sh_origin_at(&saved_nodes, restored)); restored = restored + 1; }; let limited = sh_origins_analyze(&graph, &analyzed, identity.as_str(), digest.as_str(), prototype, 1); assert_eq_i64(limited.error, 5700, "iterator_origins.sg", 57); let field = sh_origin_word(&facts.factories, 0, 6, 0); facts.factories.set(0, -1); assert_eq_i64(sh_origins_validate(&facts, &graph, &analyzed, identity.as_str(), digest.as_str(), prototype), 5702, "iterator_origins.sg", 20); facts.factories.set(0, field); let state = sh_origin_node(&facts, concrete, 0); facts.nodes.set(concrete * 8, 2); assert_eq_i64(sh_origins_validate(&facts, &graph, &analyzed, identity.as_str(), digest.as_str(), prototype), 5702, "iterator_origins.sg", 21); facts.nodes.set(concrete * 8, state); facts.bindings.push(123); assert_eq_i64(sh_origins_validate(&facts, &graph, &analyzed, identity.as_str(), digest.as_str(), prototype), 5702, "iterator_origins.sg", 22); facts.bindings.clear(); let node_type = sh_node_type(&analyzed.checked, concrete); analyzed.checked.node_types.set(concrete, analyzed.checked.bool_type); assert_eq_i64(sh_origins_validate(&facts, &graph, &analyzed, identity.as_str(), digest.as_str(), prototype), 5702, "iterator_origins.sg", 23); analyzed.checked.node_types.set(concrete, node_type); let obligation = sh_origin_at(&facts.obligations, 0); facts.obligations.set(0, -1); assert_eq_i64(sh_origins_validate(&facts, &graph, &analyzed, identity.as_str(), digest.as_str(), prototype), 5702, "iterator_origins.sg", 24); facts.obligations.set(0, obligation); let ctor = sh_origin_at(&facts.canonical, 3); let origin_module = sh_module_binding_source(&analyzed, ctor); analyzed.binding_modules.set(ctor, graph.root); assert_eq_i64(sh_origins_validate(&facts, &graph, &analyzed, identity.as_str(), digest.as_str(), prototype), 5701, "iterator_origins.sg", 51); analyzed.binding_modules.set(ctor, origin_module); let integer_data = sh_origin_word(&analyzed.checked.types.words, analyzed.checked.integer_type, 6, 1); analyzed.checked.types.words.set(analyzed.checked.integer_type * 6 + 1, 32); assert_eq_i64(sh_origins_validate(&facts, &graph, &analyzed, identity.as_str(), digest.as_str(), prototype), 5701, "iterator_origins.sg", 52); analyzed.checked.types.words.set(analyzed.checked.integer_type * 6 + 1, integer_data); let wrong = sh_origins_analyze(&graph, &analyzed, identity.as_str(), "bad", prototype, 100000); assert_eq_i64(wrong.error, 5701, "iterator_origins.sg", 25); let wrong_prototype = sh_origins_analyze(&graph, &analyzed, identity.as_str(), digest.as_str(), "fn sengoo_raw_vec_iter_new(handle: bool) -> i64;", 100000); assert_eq_i64(wrong_prototype.error, 5701, "iterator_origins.sg", 26); assert_eq_i64(sh_origins_validate(&facts, &graph, &analyzed, identity.as_str(), digest.as_str(), prototype), 0, "iterator_origins.sg", 27); let corrupt = graph.sources.texts.get(facts.module).text; corrupt.push_str(" ")?; let observed = sh_source_len(&graph.sources, facts.module)?; assert_eq_i64(observed, corrupt.len(), "iterator_origins.sg", 55); assert_eq_i64(sh_origins_validate(&facts, &graph, &analyzed, identity.as_str(), digest.as_str(), prototype), 5701, "iterator_origins.sg", 28); (); };
+    assert_true(sh_o_equal(&original_words, &analyzed.checked.types.words), "iterator_origins.sg", 53);
+    assert_true(sh_o_equal(&original_args, &analyzed.checked.types.arguments), "iterator_origins.sg", 54);
+    assert_eq_i64(sh_type_count(&analyzed.checked.types), before_types, "iterator_origins.sg", 29);
+    assert_eq_i64(analyzed.checked.types.words.len(), before_words, "iterator_origins.sg", 30);
+    assert_eq_i64(analyzed.checked.types.arguments.len(), before_args, "iterator_origins.sg", 31);
+    result_ok_bool(true);
+}
+
+def main() -> i64 {
+    if args_len() != 4 and args_len() != 5 { return 64; };
+    let root = sh_it_argument(0);
+    let stdlib = sh_it_argument(1);
+    let collections = sh_it_argument(2);
+    let digest = sh_it_argument(3);
+    if not root.is_ok() or not stdlib.is_ok() or not collections.is_ok() or not digest.is_ok() { return 64; };
+    let shadow = args_len() == 5;
+    let strings = sengoo_string_live_handle_count();
+    let buffers = sengoo_buffer_live_handle_count();
+    let opaque = sengoo_opaque_live_handle_count();
+    let snapshots = sengoo_file_snapshot_live_handle_count();
+    let bytes = sengoo_file_snapshot_live_bytes();
+    let mut round = 0;
+    while round < 5 { let result = sh_it_scope(&root.value, &stdlib.value, &collections.value, &digest.value, shadow, round == 0); if not result.is_ok() { println(result.error); return 1; }; assert_eq_i64(sengoo_string_live_handle_count(), strings, "iterator_origins.sg", 40); assert_eq_i64(sengoo_buffer_live_handle_count(), buffers, "iterator_origins.sg", 41); assert_eq_i64(sengoo_opaque_live_handle_count(), opaque, "iterator_origins.sg", 42); assert_eq_i64(sengoo_file_snapshot_live_handle_count(), snapshots, "iterator_origins.sg", 43); assert_eq_i64(sengoo_file_snapshot_live_bytes(), bytes, "iterator_origins.sg", 44); round = round + 1; };
+    println(if shadow { "iterator origin shadow: rejected"; } else { "iterator origins: five exact resource scopes passed"; });
+    0;
+}
