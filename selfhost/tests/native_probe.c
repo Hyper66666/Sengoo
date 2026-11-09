@@ -61,6 +61,47 @@ struct DropChoice { int64_t tag,value; };
 extern int64_t sg_native_enum_cleanup(struct DropChoice);
 extern const uint8_t *sg_native_string_utf8(void), *sg_native_string_same(void);
 extern const uint8_t *sg_native_string_empty(void), *sg_native_string_nul(void);
+extern int64_t sg_native_phi_bool(bool,bool,bool);
+extern int64_t sg_native_phi_i8(bool,int8_t,int8_t), sg_native_phi_i16(bool,int16_t,int16_t);
+extern int64_t sg_native_phi_i32(bool,int32_t,int32_t);
+extern int64_t sg_native_phi_u8(bool,uint8_t,uint8_t), sg_native_phi_u16(bool,uint16_t,uint16_t);
+extern int64_t sg_native_phi_u32(bool,uint32_t,uint32_t);
+struct NarrowFields { int8_t byte; int16_t short_value; int32_t word; };
+extern int64_t sg_native_narrow_fields(struct NarrowFields);
+
+__declspec(noinline) static void poison_stack(void) {
+    volatile uint8_t bytes[8192];
+    for (unsigned index=0;index<sizeof(bytes);++index) bytes[index]=0xA5;
+}
+
+static int test_narrow_copies(void) {
+    for (unsigned round=0;round<20;++round) {
+        for (unsigned choose=0;choose<2;++choose) {
+            for (unsigned left=0;left<2;++left) {
+                for (unsigned right=0;right<2;++right) {
+                    poison_stack();
+                    int64_t expected=(choose ? left : right) ? 2 : 42;
+                    if (sg_native_phi_bool(choose!=0,left!=0,right!=0)!=expected) return 1;
+                }
+            }
+            poison_stack();
+            if (sg_native_phi_i8(choose!=0,INT8_MIN,INT8_MAX)!=(choose ? INT8_MIN : INT8_MAX)) return 2;
+            poison_stack();
+            if (sg_native_phi_i16(choose!=0,INT16_MIN,INT16_MAX)!=(choose ? INT16_MIN : INT16_MAX)) return 3;
+            poison_stack();
+            if (sg_native_phi_i32(choose!=0,INT32_MIN,INT32_MAX)!=(choose ? INT32_MIN : INT32_MAX)) return 4;
+            poison_stack();
+            if (sg_native_phi_u8(choose!=0,UINT8_MAX,0)!=(choose ? UINT8_MAX : 0)) return 5;
+            poison_stack();
+            if (sg_native_phi_u16(choose!=0,UINT16_MAX,0)!=(choose ? UINT16_MAX : 0)) return 6;
+            poison_stack();
+            if (sg_native_phi_u32(choose!=0,UINT32_MAX,0)!=(choose ? (int64_t)UINT32_MAX : 0)) return 7;
+        }
+        poison_stack();
+        if (sg_native_narrow_fields((struct NarrowFields){-7,-300,-100000})!=-100307) return 8;
+    }
+    return 0;
+}
 typedef void (*move_fn)(void *,const void *,uint64_t);
 extern void sg_native_memmove_u8(void *,const void *,uint64_t);
 extern void sg_native_memmove_u64(void *,const void *,uint64_t);
@@ -268,6 +309,7 @@ int main(int argc,char **argv) {
     if (test_casts()) return 74;
     if (test_memory_ranges()) return 79;
     if (test_string_data()) return 80;
+    if (test_narrow_copies()) return 81;
     if (sg_native_cleanup(false)!=42 || drop_count!=0 ||
         sg_native_cleanup(true)!=42 || drop_count!=1 ||
         sg_native_cleanup(true)!=42 || drop_count!=2) return 76;
@@ -303,5 +345,6 @@ int main(int argc,char **argv) {
     puts("native active enum payload cleanup: ok");
     puts("native overlapping byte memmove and typed index strides: ok");
     puts("native readonly UTF-8 string data, NUL and literal relocations: ok");
+    puts("native dirty-stack bool and narrow integer phi/field reads: ok");
     return 0;
 }

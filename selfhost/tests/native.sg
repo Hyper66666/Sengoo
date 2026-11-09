@@ -389,6 +389,73 @@ def sh_nt_strings(mir: &ShMir) -> Result<bool, i64> {
     Result { is_ok: true, value: true, error: 0 };
 }
 
+def sh_nt_narrow_phi(mir: &ShMir, name: &str, ty: i64, boolean: i64, integer: i64) -> Result<i64, i64> {
+    let types = vec_new_i64();
+    types.push(boolean);
+    types.push(ty);
+    types.push(ty);
+    let function = sh_nt_fn(mir, name, &types, integer, 0, false)?;
+    let scope = sh_mir_add_scope(mir, function, -1, 0)?;
+    let entry = sh_nt_block(mir, function, scope)?;
+    let left = sh_nt_block(mir, function, scope)?;
+    let right = sh_nt_block(mir, function, scope)?;
+    let join = sh_nt_block(mir, function, scope)?;
+    let empty = vec_new_i64();
+    let condition = sh_nt_inst(mir, entry, 1, boolean, &empty, 0, 0)?;
+    let first = sh_nt_inst(mir, entry, 1, ty, &empty, 1, 0)?;
+    let second = sh_nt_inst(mir, entry, 1, ty, &empty, 2, 0)?;
+    let selected = sh_nt_inst(mir, join, 2, ty, &empty, 0, 0)?;
+    let branch = sh_mir_add_terminator(mir, entry, 2, condition, -1, 0, 0)?;
+    sh_mir_add_edge(mir, branch, left, &empty, 0, 0)?;
+    sh_mir_add_edge(mir, branch, right, &empty, 0, 0)?;
+    let leave_left = sh_mir_add_terminator(mir, left, 1, -1, -1, 0, 0)?;
+    types.clear();
+    types.push(first);
+    sh_mir_add_edge(mir, leave_left, join, &types, 0, 0)?;
+    let leave_right = sh_mir_add_terminator(mir, right, 1, -1, -1, 0, 0)?;
+    types.clear();
+    types.push(second);
+    sh_mir_add_edge(mir, leave_right, join, &types, 0, 0)?;
+    if ty == boolean { let yes = sh_nt_block(mir, function, scope)?; let no = sh_nt_block(mir, function, scope)?; let tested = sh_mir_add_terminator(mir, join, 2, selected, -1, 0, 0)?; sh_mir_add_edge(mir, tested, yes, &empty, 0, 0)?; sh_mir_add_edge(mir, tested, no, &empty, 0, 0)?; let bad = sh_nt_inst(mir, yes, 4, integer, &empty, 2, 0)?; sh_nt_return(mir, yes, bad)?; let good = sh_nt_inst(mir, no, 4, integer, &empty, 42, 0)?; sh_nt_return(mir, no, good)?; return sh_i64_ok(function); };
+    types.clear();
+    types.push(selected);
+    let widened = sh_nt_inst(mir, join, 12, integer, &types, 0, 0)?;
+    sh_nt_return(mir, join, widened);
+}
+
+def sh_nt_narrow_copies(mir: &ShMir, integer: i64, boolean: i64) -> Result<bool, i64> {
+    sh_nt_narrow_phi(mir, "sg_native_phi_bool", boolean, boolean, integer)?;
+    let mut width = 8;
+    while width <= 32 { let signed = sh_type_primitive(&mir.types, 2, width, 1)?; let unsigned = sh_type_primitive(&mir.types, 2, width, 0)?; sh_nt_narrow_phi(mir, if width == 8 { "sg_native_phi_i8"; } else { if width == 16 { "sg_native_phi_i16"; } else { "sg_native_phi_i32"; }; }, signed, boolean, integer)?; sh_nt_narrow_phi(mir, if width == 8 { "sg_native_phi_u8"; } else { if width == 16 { "sg_native_phi_u16"; } else { "sg_native_phi_u32"; }; }, unsigned, boolean, integer)?; width = width * 2; };
+    let byte = sh_type_primitive(&mir.types, 2, 8, 1)?;
+    let short = sh_type_primitive(&mir.types, 2, 16, 1)?;
+    let word = sh_type_primitive(&mir.types, 2, 32, 1)?;
+    let empty = vec_new_i64();
+    let name = string_from_str("NarrowFields")?;
+    let symbol = sh_intern(&mir.symbols, &name)?;
+    let record = sh_type_intern(&mir.types, 12, 0, 0, symbol, &empty)?;
+    let fields = vec_new_i64();
+    fields.push(byte);
+    fields.push(short);
+    fields.push(word);
+    let offsets = vec_new_i64();
+    offsets.push(-1);
+    offsets.push(-1);
+    offsets.push(-1);
+    sh_mir_add_layout(mir, record, -1, &fields, &offsets, -1, -1, -1)?;
+    let args = vec_new_i64();
+    args.push(record);
+    let function = sh_nt_fn(mir, "sg_native_narrow_fields", &args, integer, 0, false)?;
+    let scope = sh_mir_add_scope(mir, function, -1, 0)?;
+    let block = sh_nt_block(mir, function, scope)?;
+    let value = sh_nt_inst(mir, block, 1, record, &empty, 0, 0)?;
+    let mut index = 0;
+    let mut sum = -1;
+    while index < 3 { args.clear(); args.push(value); let field = sh_nt_inst(mir, block, 18, sh_native_at(&fields, index), &args, index, -1)?; args.clear(); args.push(field); let widened = sh_nt_inst(mir, block, 12, integer, &args, 0, 0)?; sum = if sum < 0 { widened; } else { sh_nt_binary(mir, block, integer, sum, widened, "+")?; }; index = index + 1; };
+    sh_nt_return(mir, block, sum)?;
+    Result { is_ok: true, value: true, error: 0 };
+}
+
 def sh_nt_cleanup(mir: &ShMir, integer: i64, boolean: i64, unit: i64) -> Result<bool, i64> {
     let name = string_from_str("TestOwner")?;
     let symbol = sh_intern(&mir.symbols, &name)?;
@@ -661,6 +728,7 @@ def sh_nt_fixture(mir: &ShMir) -> Result<bool, i64> {
     sh_nt_cleanup(mir, integer, boolean, unit)?;
     sh_nt_memory_ranges(mir, integer, unit)?;
     sh_nt_strings(mir)?;
+    sh_nt_narrow_copies(mir, integer, boolean)?;
     Result { is_ok: true, value: true, error: 0 };
 }
 

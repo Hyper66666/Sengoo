@@ -235,6 +235,15 @@ slot, and frame metadata includes the separately saved RBP. The caller must
 discard partially built state on failure. Source/initialization/lifetime facts
 must still be proved by the external adapter before claiming debug variables.
 
+SSA stack slots retain at least eight bytes of allocation, but scalar reads
+use cached MIR widths and signedness rather than loading all eight bytes.
+This distinction is required after byte-sized CFG edge copies and field
+extraction: upper padding is not a value and must not influence a boolean
+branch, comparison, widening cast or returned integer. Byte/word/dword loads
+zero-extend unsigned values and sign-extend signed values; floating and
+aggregate storage retain their declared ABI access paths. This avoids a
+whole-stack initialization dependency and preserves parallel edge copying.
+
 Primary references:
 
 - Intel instruction reference: https://www.intel.com/content/www/us/en/content-details/671110/intel-64-and-ia-32-architectures-software-developer-s-manual-combined-volumes-2a-2b-2c-and-2d-instruction-set-reference-a-z.html

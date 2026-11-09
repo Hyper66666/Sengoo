@@ -21,6 +21,7 @@
 - [x] Emit decoded string literals into readonly `.rdata` with private symbols and checked RIP-relative relocations; independently verify UTF-8, escapes, empty/interior-NUL strings, repeated storage identity and Windows page permissions (`target/selfhost/m4-string-data-checked/evidence.json`). Owned String/runtime SDK behavior remains open.
 - [x] Replay HIR schema 3 through the native source CLI for 46 programs, including arrays, string literal ABI, impl discarded contexts and aggregate operator calls; retain 43 actual frozen-reference equal executions and three explicitly unequal reference gaps (`target/selfhost/m4-source-hir3-qualified/evidence.json`). Full parity remains open.
 - [x] Separate validated native object construction from serialization and optionally collect instruction/terminator/prologue/epilogue addresses for an external debug adapter; verify all ranges, fresh-state rejection and byte-identical objects (`target/selfhost/m4-native-object-debug-api/evidence.json`). Automatic source/local/PDB integration is a separate M5 gate.
+- [x] Load scalar SSA storage at its real width with signed/unsigned extension, including values copied by CFG edges and field extraction; prove dirty-stack bool/integer correctness and reject a restored old qword-load negative control (`target/selfhost/m4-narrow-scalar-checked/evidence.json`). Complete scalar and language coverage remains open.
 
 ## Supported target behavior
 
@@ -286,3 +287,17 @@ The recorded revision interval is
 `befcfd6d1898fefc971939bd4d7565f3da119601` through
 `f1967f2f3167d3ef802f6dff17b2fcaa8d558d9f`. This is explicit pinned-tool
 provenance, not a rebuild of the changing checkout or an S2/S3 fixed point.
+
+Narrow scalar read correction:
+`target/selfhost/m4-narrow-scalar-checked/evidence.json`, SHA-256
+`178ca1ae3756fe293ce461fa83b98e0c4f3c061722dd2e234cbf3769e576ff28`,
+revision `190ef7ca9fb26656f0a2be4e9adf1c60b6b787c2`, Windows 11 AMD64.
+All 31 commands passed with unchanged inputs/tools. Twenty C rounds fill 8 KiB
+of future callee stack with A5 before each bool phi, signed/unsigned 8/16/32-bit
+phi/widening and narrow-field extraction call. All eight bool selection inputs,
+integer extrema and signed field sums remain correct. Independent disassembly
+locates the phi load; replacing only its zero-extending byte load with the old
+qword load plus padding makes the same C probe fail with the required exit 81.
+All other ABI/numeric/cleanup/string/memory/unwind/resource regressions pass.
+The preserved projection-resource discovery exposed the original error; its
+OR guard and cleanup assertions were retained.

@@ -7,6 +7,8 @@ import json
 import os
 from pathlib import Path
 import platform
+import re
+import struct
 import subprocess
 import time
 
@@ -93,7 +95,7 @@ def main():
         for name, path in (("inspector", inspector), ("disassembler", disassembler)):
             report["tools"][name] = {"path": str(path), "sha256": sha(path)}
         run("inspect", [inspector, "--file-headers", "--sections", "--symbols", "--relocations", "--unwind", checked], b"ALLOC_SMALL")
-        run("disassemble", [disassembler, "-d", checked], b"sg_native_loop")
+        assembly = run("disassemble", [disassembler, "-d", checked], b"sg_native_loop")
         probe, wrap_probe = out / "native-probe.exe", out / "wrap-probe.exe"
         for name, obj, exe in (("checked", checked, probe), ("wrap", wrapping, wrap_probe)):
             run("link-" + name, [paths["clang"], ROOT / "selfhost/tests/native_probe.c", obj, "-Werror", "-o", exe])
@@ -120,6 +122,31 @@ def main():
             raise AssertionError("overlap/byte-count/alignment/index execution did not complete")
         if b"native readonly UTF-8 string data, NUL and literal relocations: ok" not in executed:
             raise AssertionError("readonly string data/UTF-8/NUL/relocation cases did not complete")
+        if b"native dirty-stack bool and narrow integer phi/field reads: ok" not in executed:
+            raise AssertionError("dirty upper stack bytes affected scalar phi or field values")
+        function = re.search(rb"<sg_native_phi_bool>:\r?\n(.*?)(?=\r?\n[0-9a-f]+ <|\Z)", assembly, re.S)
+        if not function:
+            raise AssertionError("independent disassembly lacks the bool phi function")
+        loads = re.findall(rb"(?m)^\s*([0-9a-f]+):\s+((?:[0-9a-f]{2}\s+){8})\s*movzbq\s+[^\r\n]*\(%rbp\), %rax", function.group(1))
+        if not loads:
+            raise AssertionError("independent disassembly lacks a typed bool phi load")
+        address = int(loads[-1][0], 16)
+        original = bytes.fromhex(loads[-1][1].decode("ascii"))
+        if len(original) != 8 or original[:4] != bytes.fromhex("48 0f b6 85"):
+            raise AssertionError("unexpected bool phi load encoding")
+        raw = bytearray(checked.read_bytes())
+        text_at = struct.unpack_from("<I", raw, 20 + 20)[0]
+        if raw[text_at + address:text_at + address + 8] != original:
+            raise AssertionError("COFF text bytes disagree with independent disassembly")
+        replacement = bytes.fromhex("48 8b 85") + original[4:] + bytes([0x90])
+        raw[text_at + address:text_at + address + 8] = replacement
+        dirty_object, dirty_probe = out / "old-qword-bool-load.obj", out / "old-qword-bool-probe.exe"
+        dirty_object.write_bytes(raw)
+        run("link-old-qword-negative-control", [paths["clang"], ROOT / "selfhost/tests/native_probe.c", dirty_object, "-Werror", "-o", dirty_probe])
+        run("reject-old-qword-negative-control", [dirty_probe], code=81)
+        report["narrow_load_negative_control"] = {"function": "sg_native_phi_bool", "text_offset": address,
+            "original_bytes": original.hex(), "replacement_bytes": replacement.hex(), "expected_exit_code": 81,
+            "object_sha256": sha(dirty_object), "executable_sha256": sha(dirty_probe)}
         for case in ("overflow", "overflow8", "umul-overflow", "uadd-overflow", "mul-overflow"):
             run("reject-" + case, [probe, case], b"integer overflow", 63)
         run("reject-division-zero", [probe, "division-zero"], b"division by zero", 62)

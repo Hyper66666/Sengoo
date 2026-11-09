@@ -20,6 +20,8 @@ struct ShNative {
     strings: Vec<i64>,
     string_fixups: Vec<i64>,
     values: Vec<i64>,
+    value_widths: Vec<i64>,
+    value_signed: Vec<i64>,
     locals: Vec<i64>,
     initialized: Vec<i64>,
     functions: Vec<i64>,
@@ -104,6 +106,9 @@ def sh_native_normalize(native: &ShNative, mir: &ShMir, ty: i64, register: i64) 
 def sh_native_load(native: &ShNative, id: i64, register: i64) -> Result<i64, i64> {
     let offset = sh_native_at(&native.values, id);
     if offset < 8 { return sh_i64_error(6501); };
+    let width = sh_native_at(&native.value_widths, id);
+    if width == 0 { return sh_x64_mov_imm(&native.code, register, 0); };
+    if width == 1 or width == 2 or width == 4 { return sh_x64_scalar_memory(&native.code, false, register, 5, -offset, width, sh_native_at(&native.value_signed, id) == 1); };
     sh_x64_memory(&native.code, 0, register, 5, -offset);
 }
 
@@ -555,7 +560,7 @@ def sh_native_emit_into(native: &mut ShNative, mir: &ShMir, object: &ShObject) -
     let metadata = sh_native_debug_prepare(native, mir);
     if not metadata.is_ok() { return sh_i64_error(metadata.error); };
     let mut index = 0;
-    while index < sh_mir_inst_count(mir) { if not native.values.push(-1) { return sh_i64_error(6503); }; index = index + 1; };
+    while index < sh_mir_inst_count(mir) { if not native.values.push(-1) or not native.value_widths.push(sh_native_width(mir, sh_mir_value_type(mir, index))) or not native.value_signed.push(if sh_native_signed(mir, sh_mir_value_type(mir, index)) { 1; } else { 0; }) { return sh_i64_error(6503); }; index = index + 1; };
     index = 0;
     while index < sh_mir_local_count(mir) { if not native.initialized.push(-1) or not native.locals.push(-1) { return sh_i64_error(6503); }; index = index + 1; };
     index = 0;
@@ -591,7 +596,7 @@ def sh_native_emit(native: &mut ShNative, mir: &ShMir) -> Result<ShBinary, i64> 
 }
 
 def sh_native_new(mir: &ShMir, maximum: i64, checked: bool) -> ShNative {
-    ShNative { code: sh_binary_new(maximum), data: sh_binary_new(maximum), strings: vec_new_i64(), string_fixups: vec_new_i64(), values: vec_new_i64(), locals: vec_new_i64(), initialized: vec_new_i64(), functions: vec_new_i64(), ends: vec_new_i64(), frames: vec_new_i64(), blocks: vec_new_i64(), branches: vec_new_i64(), calls: vec_new_i64(), layout: sh_target_layout_cache(mir, 2147483647), result_mode: 0, result_pointer: 0, copies_base: 0, drop_base: 0, frame: 0, edge_base: 0, checked: checked, collect_debug: false, instruction_starts: vec_new_i64(), instruction_ends: vec_new_i64(), terminator_starts: vec_new_i64(), terminator_ends: vec_new_i64(), prologue_ends: vec_new_i64(), epilogues: vec_new_i64() };
+    ShNative { code: sh_binary_new(maximum), data: sh_binary_new(maximum), strings: vec_new_i64(), string_fixups: vec_new_i64(), values: vec_new_i64(), value_widths: vec_new_i64(), value_signed: vec_new_i64(), locals: vec_new_i64(), initialized: vec_new_i64(), functions: vec_new_i64(), ends: vec_new_i64(), frames: vec_new_i64(), blocks: vec_new_i64(), branches: vec_new_i64(), calls: vec_new_i64(), layout: sh_target_layout_cache(mir, 2147483647), result_mode: 0, result_pointer: 0, copies_base: 0, drop_base: 0, frame: 0, edge_base: 0, checked: checked, collect_debug: false, instruction_starts: vec_new_i64(), instruction_ends: vec_new_i64(), terminator_starts: vec_new_i64(), terminator_ends: vec_new_i64(), prologue_ends: vec_new_i64(), epilogues: vec_new_i64() };
 }
 
 def sh_native_object(mir: &ShMir, maximum: i64, checked: bool) -> Result<ShBinary, i64> {
