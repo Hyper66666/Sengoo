@@ -1,0 +1,231 @@
+import selfhost_lexer;
+
+import std::assert;
+
+import std::file;
+
+extern "C" {
+    fn sengoo_string_live_handle_count() -> i64;
+    fn sengoo_buffer_live_handle_count() -> i64;
+    fn sengoo_opaque_live_handle_count() -> i64;
+}
+
+def sh_lexer_read(path: &str) -> Result<String, i64> {
+    let source = sh_sources_new(1, 1048576);
+    let id = sh_source_load(&source, path)?;
+    sh_span_text(&source, sh_span_make(&source, id, 0, sh_source_len(&source, id)?)?);
+}
+
+def sh_lexer_partition(text: &String, tokens: &ShTokens) -> Result<bool, i64> {
+    let rebuilt = string_new();
+    let mut index = 0;
+    let mut end = 0;
+    while index < sh_token_count(tokens) { let token = sh_token_get(tokens, index); assert_eq_i64(token.start, end, "lexer.sg", 24); assert_true(token.end >= token.start, "lexer.sg", 25); let spelling = sh_token_text(text, token)?; rebuilt.push_str(spelling.as_str())?; end = token.end; index = index + 1; };
+    assert_eq_i64(end, text.len(), "lexer.sg", 32);
+    assert_true(sengoo_string_eq(rebuilt.handle, text.handle) != 0, "lexer.sg", 33);
+    assert_eq_i64(sh_token_get(tokens, sh_token_count(tokens) - 1).kind, 0, "lexer.sg", 34);
+    assert_eq_i64(sh_token_get(tokens, -1).kind, -1, "lexer.sg", 35);
+    assert_eq_i64(sh_token_get(tokens, sh_token_count(tokens)).kind, -1, "lexer.sg", 36);
+    Result { is_ok: true, value: true, error: 0 };
+}
+
+def sh_lexer_vocabulary() -> Result<bool, i64> {
+    let text = sh_lexer_read("selfhost/tests/lexer-fixtures/vocabulary.sg")?;
+    let lexed = sh_lex(&text, 512);
+    assert_eq_i64(lexed.error, 0, "lexer.sg", 43);
+    sh_lexer_partition(&text, &lexed.tokens)?;
+    let mut index = 0;
+    let mut seen = 0;
+    while index < sh_token_count(&lexed.tokens) { let token = sh_token_get(&lexed.tokens, index); if not sh_token_trivia(token.kind) and token.kind != 0 { let expected = if seen < 57 { 100 + seen; } else { 200 + seen - 57; }; assert_eq_i64(token.kind, expected, "lexer.sg", 52); let spelling = sh_token_text(&text, token)?; assert_eq_i64(sh_kind(spelling.as_str()), expected, "lexer.sg", 54); seen = seen + 1; }; index = index + 1; };
+    assert_eq_i64(seen, 108, "lexer.sg", 59);
+    Result { is_ok: true, value: true, error: 0 };
+}
+
+def sh_lexer_expected(input: &str, expected: &ShTokens) -> Result<bool, i64> {
+    let text = string_from_str(input)?;
+    let lexed = sh_lex(&text, 1024);
+    assert_eq_i64(lexed.error, 0, "lexer.sg", 66);
+    sh_lexer_partition(&text, &lexed.tokens)?;
+    let mut index = 0;
+    let mut seen = 0;
+    while index < sh_token_count(&lexed.tokens) { let token = sh_token_get(&lexed.tokens, index); if not sh_token_trivia(token.kind) { assert_eq_i64(token.kind, expected.words.get(seen).unwrap_or(-2), "lexer.sg", 73); seen = seen + 1; }; index = index + 1; };
+    assert_eq_i64(seen, expected.words.len(), "lexer.sg", 78);
+    Result { is_ok: true, value: true, error: 0 };
+}
+
+def sh_lexer_numbers() -> Result<bool, i64> {
+    let kinds = ShTokens { words: vec_new_i64() };
+    let mut index = 0;
+    while index < 16 { kinds.words.push(2); index = index + 1; };
+    kinds.words.push(0);
+    sh_lexer_expected("0 1_000_000 0b1010_1010 0o52 0xdead_beef 42i8 42i16 42i32 42i64 42isize 42u8 42u16 42u32 42u64 42usize 18446744073709551615u64", &kinds)?;
+    let floats = ShTokens { words: vec_new_i64() };
+    index = 0;
+    while index < 4 { floats.words.push(3); index = index + 1; };
+    floats.words.push(0);
+    sh_lexer_expected("1.0 1_000.25e+1_0f64 2.0f32 3.14E-2", &floats)?;
+    let invalid = ShTokens { words: vec_new_i64() };
+    index = 0;
+    while index < 5 { invalid.words.push(4); index = index + 1; };
+    invalid.words.push(0);
+    sh_lexer_expected("1e3 42u128 0b102 0x 1__0", &invalid)?;
+    let range = ShTokens { words: vec_new_i64() };
+    range.words.push(2);
+    range.words.push(sh_kind(".."));
+    range.words.push(2);
+    range.words.push(2);
+    range.words.push(sh_kind("."));
+    range.words.push(1);
+    range.words.push(sh_kind("("));
+    range.words.push(sh_kind("true"));
+    range.words.push(sh_kind(")"));
+    range.words.push(0);
+    sh_lexer_expected("0..3 1.wrap(true)", &range)?;
+    Result { is_ok: true, value: true, error: 0 };
+}
+
+def sh_lexer_literals() -> Result<bool, i64> {
+    let text = sh_lexer_read("selfhost/tests/lexer-fixtures/literals.sg")?;
+    let lexed = sh_lex(&text, 1024);
+    assert_eq_i64(lexed.error, 0, "lexer.sg", 111);
+    sh_lexer_partition(&text, &lexed.tokens)?;
+    let counts = vec_new_i64();
+    let mut index = 0;
+    while index < 10 { counts.push(0); index = index + 1; };
+    index = 0;
+    while index < sh_token_count(&lexed.tokens) { let token = sh_token_get(&lexed.tokens, index); if token.kind >= 5 and token.kind <= 9 { counts.set(token.kind, counts.get(token.kind).unwrap_or(0) + 1); (); }; index = index + 1; };
+    assert_eq_i64(counts.get(5).unwrap_or(0), 3, "lexer.sg", 123);
+    assert_eq_i64(counts.get(6).unwrap_or(0), 1, "lexer.sg", 124);
+    assert_eq_i64(counts.get(7).unwrap_or(0), 1, "lexer.sg", 125);
+    assert_eq_i64(counts.get(8).unwrap_or(0), 3, "lexer.sg", 126);
+    assert_eq_i64(counts.get(9).unwrap_or(0), 1, "lexer.sg", 127);
+    Result { is_ok: true, value: true, error: 0 };
+}
+
+def sh_lexer_error(input: &str, maximum: i64, error: i64, start: i64, end: i64) -> Result<bool, i64> {
+    let text = string_from_str(input)?;
+    let lexed = sh_lex(&text, maximum);
+    assert_eq_i64(lexed.error, error, "lexer.sg", 135);
+    assert_eq_i64(lexed.start, start, "lexer.sg", 136);
+    assert_eq_i64(lexed.end, end, "lexer.sg", 137);
+    Result { is_ok: true, value: true, error: 0 };
+}
+
+def sh_lexer_edges() -> Result<bool, i64> {
+    let tiny = string_from_str("f\"x\"")?;
+    let extreme = ShToken { kind: 9, start: 9223372036854775807, end: 0 };
+    let extreme_fields = sh_fstring_fields(&tiny, extreme, 10);
+    assert_eq_i64(extreme_fields.error, 1104, "lexer.sg", 114);
+    let extreme_literal = sh_literal_decode(&tiny, extreme);
+    assert_eq_i64(extreme_literal.error, 1106, "lexer.sg", 115);
+    sh_lexer_error("", 0, 1101, 0, 0)?;
+    sh_lexer_error("a", 1, 1101, 1, 1)?;
+    sh_lexer_error("a ` b", 50, 1103, 2, 3)?;
+    sh_lexer_error("中", 50, 1103, 0, 3)?;
+    sh_lexer_error("a﻿", 50, 1103, 1, 4)?;
+    sh_lexer_error("\"open", 50, 1104, 0, 5)?;
+    sh_lexer_error("/* open", 50, 1105, 0, 7)?;
+    sh_lexer_error("f\"{a + 1", 50, 1104, 0, 8)?;
+    sh_lexer_error("f\"newline\n\"", 50, 1104, 0, 11)?;
+    let text = string_from_str(" \t\r\n// 中😀\n/* block\ncomment */ def_ _ _1 xf\"nope\" 123.0e+bad")?;
+    let lexed = sh_lex(&text, 512);
+    assert_eq_i64(lexed.error, 0, "lexer.sg", 153);
+    sh_lexer_partition(&text, &lexed.tokens)?;
+    assert_eq_i64(sh_token_get(&lexed.tokens, 0).kind, 10, "lexer.sg", 155);
+    assert_eq_i64(sh_token_get(&lexed.tokens, 1).kind, 11, "lexer.sg", 156);
+    assert_eq_i64(sh_token_get(&lexed.tokens, 3).kind, 12, "lexer.sg", 157);
+    let bom = string_from_str("﻿def")?;
+    let bom_lexed = sh_lex(&bom, 4);
+    assert_eq_i64(bom_lexed.error, 0, "lexer.sg", 158);
+    sh_lexer_partition(&bom, &bom_lexed.tokens)?;
+    assert_eq_i64(sh_token_get(&bom_lexed.tokens, 0).kind, 10, "lexer.sg", 159);
+    assert_eq_i64(sh_token_get(&bom_lexed.tokens, 0).end, 3, "lexer.sg", 160);
+    assert_eq_i64(sh_token_get(&bom_lexed.tokens, 1).kind, sh_kind("def"), "lexer.sg", 161);
+    let invalid_bytes = ffi_buffer_from_bytes("中")?;
+    assert_eq_i64(string_from_bytes_raw(invalid_bytes.ptr() + 1, 1).error, 20, "lexer.sg", 160);
+    let invalid = String { handle: 0 };
+    let invalid_lexed = sh_lex(&invalid, 50);
+    assert_eq_i64(invalid_lexed.error, 1102, "lexer.sg", 161);
+    Result { is_ok: true, value: true, error: 0 };
+}
+
+def sh_lexer_source(path: &str) -> Result<bool, i64> {
+    let text = sh_lexer_read(path)?;
+    let lexed = sh_lex(&text, text.len() + 1);
+    assert_eq_i64(lexed.error, 0, "lexer.sg", 179);
+    sh_lexer_partition(&text, &lexed.tokens);
+}
+
+def sh_lexer_sources() -> Result<bool, i64> {
+    sh_lexer_source("selfhost/bootstrap.sg")?;
+    sh_lexer_source("selfhost/src/core.sg")?;
+    sh_lexer_source("selfhost/src/lexer.sg")?;
+    sh_lexer_source("selfhost/tests/core.sg")?;
+    sh_lexer_source("selfhost/tests/lexer.sg")?;
+    Result { is_ok: true, value: true, error: 0 };
+}
+
+def sh_lexer_decoded(input: &str, expected: &str) -> Result<bool, i64> {
+    let text = string_from_str(input)?;
+    let lexed = sh_lex(&text, 32);
+    assert_eq_i64(lexed.error, 0, "lexer.sg", 188);
+    let decoded = sh_literal_decode(&text, sh_token_get(&lexed.tokens, 0))?;
+    assert_eq_str(decoded.as_str(), expected, "lexer.sg", 190);
+    Result { is_ok: true, value: true, error: 0 };
+}
+
+def sh_lexer_payloads() -> Result<bool, i64> {
+    sh_lexer_decoded("\"a\\n\\t\\r\\u{4e2d}\\u{1f600}\\x41\\q\"", "a\n\t\r中😀A\\q")?;
+    sh_lexer_decoded("r\"a\\n\"", "a\\n")?;
+    sh_lexer_decoded("b\"a\\x42\"", "a\\x42")?;
+    sh_lexer_decoded("'中'", "中")?;
+    sh_lexer_decoded("'\\n'", "\n")?;
+    sh_lexer_decoded("'\\u{41}'", "\\")?;
+    sh_lexer_decoded("'abc'", "a")?;
+    sh_lexer_decoded("\"\"\"\n    alpha\n    beta\n    \"\"\"", "alpha\nbeta")?;
+    sh_lexer_decoded("\"\"\"\r\n \talpha\r\n \tbeta\r\n \t\"\"\"", "alpha\nbeta")?;
+    sh_lexer_decoded("f\"x={a + b}! {{literal}}\"", "x={}! {{literal}}")?;
+    let text = string_from_str("  f\"中{a + {b: \"}\"}}!\"")?;
+    let lexed = sh_lex(&text, 32);
+    let token = sh_token_get(&lexed.tokens, 1);
+    let fields = sh_fstring_fields(&text, token, 10);
+    assert_eq_i64(fields.error, 0, "lexer.sg", 212);
+    assert_eq_i64(sh_token_count(&fields.tokens), 1, "lexer.sg", 213);
+    let field = sh_token_get(&fields.tokens, 0);
+    assert_eq_i64(field.start, 8, "lexer.sg", 215);
+    assert_eq_str(sh_token_text(&text, field)?.as_str(), "a + {b: \"}\"}", "lexer.sg", 216);
+    let full = sh_fstring_fields(&text, token, 0);
+    assert_eq_i64(full.error, 1101, "lexer.sg", 217);
+    let nul = string_from_str("\"a\\0b\"")?;
+    let nul_lexed = sh_lex(&nul, 8);
+    let value = sh_literal_decode(&nul, sh_token_get(&nul_lexed.tokens, 0))?;
+    assert_eq_i64(value.len(), 3, "lexer.sg", 221);
+    let nul_bytes = ffi_buffer_new(3)?;
+    value.copy_to_buffer(nul_bytes)?;
+    assert_eq_i64(nul_bytes.get_u8(1)?, 0, "lexer.sg", 224);
+    assert_eq_i64(nul_bytes.get_u8(2)?, 98, "lexer.sg", 225);
+    Result { is_ok: true, value: true, error: 0 };
+}
+
+def main() -> i64 {
+    let strings = sengoo_string_live_handle_count();
+    let buffers = sengoo_buffer_live_handle_count();
+    let opaque = sengoo_opaque_live_handle_count();
+    let vocabulary = sh_lexer_vocabulary();
+    if not vocabulary.is_ok() { println(vocabulary.error); return 1; };
+    let numbers = sh_lexer_numbers();
+    if not numbers.is_ok() { println(numbers.error); return 2; };
+    let literals = sh_lexer_literals();
+    if not literals.is_ok() { println(literals.error); return 3; };
+    let sources = sh_lexer_sources();
+    if not sources.is_ok() { println(sources.error); return 4; };
+    let mut round = 0;
+    while round < 100 { let edges = sh_lexer_edges(); if not edges.is_ok() { println(edges.error); return 5; }; round = round + 1; };
+    let payloads = sh_lexer_payloads();
+    if not payloads.is_ok() { println(payloads.error); return 6; };
+    assert_eq_i64(sengoo_string_live_handle_count(), strings, "lexer.sg", 207);
+    assert_eq_i64(sengoo_buffer_live_handle_count(), buffers, "lexer.sg", 208);
+    assert_eq_i64(sengoo_opaque_live_handle_count(), opaque, "lexer.sg", 209);
+    println("selfhost lexer: ok");
+    0;
+}

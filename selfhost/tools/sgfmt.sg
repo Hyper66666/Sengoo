@@ -1,0 +1,71 @@
+import selfhost_core;
+
+import selfhost_parser;
+
+import selfhost_formatter;
+
+import std::args;
+
+import std::file;
+
+import std::io;
+
+extern "C" {
+    fn _setmode(fd: i32, mode: i32) -> i32;
+}
+
+def sh_fmt_argument(index: i64) -> Result<String, i64> {
+    let size = arg_len(index)?;
+    let bytes = ffi_buffer_new(size)?;
+    let count = arg_copy(index, bytes)?;
+    string_from_utf8(bytes, count);
+}
+
+def sh_fmt_usage() {
+    println("sgfmt [--check | --write] [-m WIDTH] [-i INDENT] FILE");
+    println("SG syntax preview; validates syntax and retains comments and literal spellings.");
+}
+
+def sh_fmt_number(text: &String) -> i64 {
+    let mut value = 0;
+    let bytes = text.bytes();
+    let mut next = bytes.next();
+    if not next.is_some() { return -1; };
+    while next.is_some() { if next.value < 48 or next.value > 57 or value > 100000 { return -1; }; value = value * 10 + next.value - 48; next = bytes.next(); };
+    value;
+}
+
+def sh_fmt_run(path: &str, check: bool, write: bool, width: i64, indent: i64) -> Result<i64, i64> {
+    let sources = sh_sources_new(1, 16777216);
+    let id = sh_source_load(&sources, path)?;
+    let length = sh_source_len(&sources, id)?;
+    let source = sh_span_text(&sources, ShSpan { source: id, start: 0, end: length })?;
+    let parsed = sh_parse(&source, id, 1000000);
+    if parsed.error != 0 { io_stderr_write("sgfmt::syntax byte "); println(parsed.start); return Result { is_ok: false, value: 0, error: parsed.error }; };
+    let formatted = sh_format_tokens(&source, width, indent)?;
+    if check { if not source.eq(formatted) { io_stderr_write("sgfmt::needs_formatting\n"); return Result { is_ok: true, value: 1, error: 0 }; }; return Result { is_ok: true, value: 0, error: 0 }; };
+    let bytes = sh_lex_bytes(&formatted)?;
+    if write { let written = file_write_str_raw(sengoo_stdlib_str_ptr(path), bytes.ptr(), formatted.len())?; if written != formatted.len() { return Result { is_ok: false, value: 0, error: 3005 }; }; return Result { is_ok: true, value: 0, error: 0 }; };
+    let previous_mode = _setmode(1 as i32, 32768 as i32) as i64;
+    if previous_mode < 0 { return Result { is_ok: false, value: 0, error: 3005 }; };
+    io_stdout_write_raw(bytes.ptr(), formatted.len())?;
+    io_stdout_flush()?;
+    Result { is_ok: true, value: 0, error: 0 };
+}
+
+def main() -> i64 {
+    if args_len() == 0 { sh_fmt_usage(); return 64; };
+    let mut index = 0;
+    let mut check = false;
+    let mut write = false;
+    let mut width = 100;
+    let mut indent = 4;
+    let mut path = string_new();
+    while index < args_len() { let argument = sh_fmt_argument(index); if not argument.is_ok() { return 64; }; let value = argument.value.as_str(); if value == "--help" or value == "-h" { sh_fmt_usage(); return 0; } else if value == "--version" or value == "-V" { println("sgfmt SG syntax preview M2"); return 0; } else if value == "--check" { check = true; } else if value == "--write" or value == "-w" { write = true; } else if value == "--max-width" or value == "-m" or value == "--indent-width" or value == "-i" { index = index + 1; if index >= args_len() { return 64; }; let raw = sh_fmt_argument(index); if not raw.is_ok() { return 64; }; let parsed = sh_fmt_number(&raw.value); if parsed < 1 { return 64; }; if value == "--max-width" or value == "-m" { width = parsed; } else { indent = parsed; }; } else { if str_starts_with(value, "-") or path.len() != 0 { return 64; }; let copied = argument.value.clone(); if not copied.is_ok() { return 66; }; path = copied.value; }; index = index + 1; };
+    if path.len() == 0 or (check and write) { return 64; };
+    let result = sh_fmt_run(path.as_str(), check, write, width, indent);
+    if result.is_ok() { return result.value; };
+    io_stderr_write("sgfmt::failed\n");
+    println(result.error);
+    65;
+}

@@ -1,0 +1,235 @@
+import selfhost_parser;
+
+import std::assert;
+
+import std::args;
+
+extern "C" {
+    fn sengoo_string_live_handle_count() -> i64;
+    fn sengoo_buffer_live_handle_count() -> i64;
+    fn sengoo_opaque_live_handle_count() -> i64;
+}
+
+def sh_test_parse_ok(raw: &str) -> Result<bool, i64> {
+    let text = string_from_str(raw)?;
+    let parsed = sh_parse(&text, 7, 10000);
+    if parsed.error != 0 { println(parsed.error); println(parsed.start); println(raw); return Result { is_ok: false, value: false, error: parsed.error }; };
+    assert_eq_i64(sh_ast_word(&parsed.ast, parsed.ast.root, 0), 1, "parser.sg", 15);
+    assert_eq_i64(sh_ast_word(&parsed.ast, parsed.ast.root, 1), 7, "parser.sg", 16);
+    Result { is_ok: true, value: true, error: 0 };
+}
+
+def sh_test_parser_tree() -> Result<bool, i64> {
+    let text = string_from_str("def main() -> i64 { 1 + 2 * 3 }")?;
+    let parsed = sh_parse(&text, 3, 1000);
+    assert_eq_i64(parsed.error, 0, "parser.sg", 23);
+    let function = sh_ast_child(&parsed.ast, parsed.ast.root, 0);
+    assert_eq_i64(sh_ast_word(&parsed.ast, function, 0), 20, "parser.sg", 25);
+    let body = sh_ast_child(&parsed.ast, function, sh_ast_word(&parsed.ast, function, 6) - 1);
+    assert_eq_i64(sh_ast_word(&parsed.ast, body, 0), 40, "parser.sg", 27);
+    let statement = sh_ast_child(&parsed.ast, body, 0);
+    let add = sh_ast_child(&parsed.ast, statement, 0);
+    assert_eq_i64(sh_ast_word(&parsed.ast, add, 0), 51, "parser.sg", 30);
+    assert_eq_i64(sh_ast_word(&parsed.ast, add, 4), sh_kind("+"), "parser.sg", 31);
+    let mul = sh_ast_child(&parsed.ast, add, 1);
+    assert_eq_i64(sh_ast_word(&parsed.ast, mul, 4), sh_kind("*"), "parser.sg", 33);
+    assert_eq_i64(sh_ast_word(&parsed.ast, mul, 6), 2, "parser.sg", 34);
+    assert_eq_i64(sh_ast_word(&parsed.ast, add, 2), 20, "parser.sg", 35);
+    assert_eq_i64(sh_ast_word(&parsed.ast, mul, 3), 29, "parser.sg", 36);
+    assert_eq_i64(sh_ast_child(&parsed.ast, -1, 0), -1, "parser.sg", 37);
+    assert_eq_i64(sh_ast_child(&parsed.ast, add, 2), -1, "parser.sg", 38);
+    let operators = string_from_str("def f() { a = b = c; 1 | 2 == 3; }")?;
+    let tree = sh_parse(&operators, 0, 1000);
+    assert_eq_i64(tree.error, 0, "parser.sg", 39);
+    let f = sh_ast_child(&tree.ast, tree.ast.root, 0);
+    let block = sh_ast_child(&tree.ast, f, sh_ast_word(&tree.ast, f, 6) - 1);
+    let assignment = sh_ast_child(&tree.ast, sh_ast_child(&tree.ast, block, 0), 0);
+    assert_eq_i64(sh_ast_word(&tree.ast, assignment, 0), 52, "parser.sg", 40);
+    assert_eq_i64(sh_ast_word(&tree.ast, sh_ast_child(&tree.ast, assignment, 1), 0), 52, "parser.sg", 41);
+    let comparison = sh_ast_child(&tree.ast, sh_ast_child(&tree.ast, block, 1), 0);
+    assert_eq_i64(sh_ast_word(&tree.ast, comparison, 4), sh_kind("=="), "parser.sg", 42);
+    assert_eq_i64(sh_ast_word(&tree.ast, sh_ast_child(&tree.ast, comparison, 0), 4), sh_kind("|"), "parser.sg", 43);
+    Result { is_ok: true, value: true, error: 0 };
+}
+
+def sh_test_parser_cases() -> Result<bool, i64> {
+    sh_test_parse_ok("")?;
+    sh_test_parse_ok("def f(shared: Arc<Mutex<i64>>, delta: i64,) -> i64 { delta }")?;
+    sh_test_parse_ok("def g(values: Map<Vec<i64>, i64>, next: i64) -> i64 { next }")?;
+    sh_test_parse_ok("// comment\nimport std::collections; struct Pair<T> { first: T, next: Vec<Vec<T>>, } enum E { A, B(i64), C { value: i64 }, D = 3, }")?;
+    sh_test_parse_ok("trait View<T>: Other { type Item; def view(&self, n: i64) -> T { self.first } } impl<T: Copy> View<T> for Pair<T> where T: Clone { type Item = T; def view(&self, n: i64) -> T { self.first } }")?;
+    sh_test_parse_ok("#[link(name = \"kernel32\")] extern \"C\" { fn Get(x: i64) -> i64; } #[no_mangle] pub extern \"C\" fn answer() -> i64 { 42 }")?;
+    sh_test_parse_ok("type Callback = fn(&mut [i64], *const i64) -> Result<i64, i64>; const ANSWER: i64 = 42; static mut STATE: i64 = 0;")?;
+    sh_test_parse_ok("def f(x: i64) -> i64 { let mut a = [1, 2, 3]; a[0] += x; let p = Point { x: x, y: 2 }; let q = call::<i64>(p.x)?.next(); if x > 0 { q } else { -x } }")?;
+    sh_test_parse_ok("async def f() -> i64 { for x in 0..10 { while x > 2 { break; } } loop { continue; } let f = |x, y| x + y; let z = await f(1, 2); match z { 0 | 1 => 7, E::B(n) if n > 0 => n, _ => { return 0; }, } }")?;
+    sh_test_parse_ok("def f<T>(x: T) -> T requires true ensures true { let y = try { x }; async { y } }")?;
+    sh_test_parse_ok("def f() -> i64 { match (1, 2) { (a, b) => 0 }; match [1, 2] { [c, ..rest] => 0 }; 1 | 2 == 3 }")?;
+    Result { is_ok: true, value: true, error: 0 };
+}
+
+def sh_test_parser_errors() -> Result<bool, i64> {
+    let bad = string_from_str("def f() { let x = ; }")?;
+    let parsed = sh_parse(&bad, 0, 1000);
+    assert_eq_i64(parsed.error, 3001, "parser.sg", 60);
+    assert_eq_i64(parsed.start, 18, "parser.sg", 61);
+    assert_eq_i64(parsed.ast.root, -1, "parser.sg", 62);
+    let unclosed = string_from_str("def f() { (1 + 2 }")?;
+    let incomplete = sh_parse(&unclosed, 0, 1000);
+    assert_eq_i64(incomplete.error, 3001, "parser.sg", 64);
+    let good = string_from_str("def f() { 1 }")?;
+    let capped = sh_parse(&good, 0, 2);
+    assert_eq_i64(capped.error, 3003, "parser.sg", 66);
+    let negative = sh_parse(&good, 0, -1);
+    assert_eq_i64(negative.error, 3003, "parser.sg", 67);
+    let overflow = sh_parse(&good, 0, 9223372036854775807);
+    assert_eq_i64(overflow.error, 3003, "parser.sg", 68);
+    let deep = string_from_str("def f() { ")?;
+    let mut index = 0;
+    while index < 200 { deep.push_str("(")?; index = index + 1; };
+    deep.push_str("1")?;
+    index = 0;
+    while index < 200 { deep.push_str(")")?; index = index + 1; };
+    deep.push_str(" }")?;
+    let nested = sh_parse(&deep, 0, 10000);
+    assert_eq_i64(nested.error, 3002, "parser.sg", 76);
+    let large = string_from_str("def f() { 9223372036854775808 }")?;
+    let overflow_literal = sh_parse(&large, 0, 1000);
+    assert_eq_i64(overflow_literal.error, 3005, "parser.sg", 77);
+    let narrow = string_from_str("def f() { 128i8 }")?;
+    let narrow_literal = sh_parse(&narrow, 0, 1000);
+    assert_eq_i64(narrow_literal.error, 3005, "parser.sg", 78);
+    let interpolation = string_from_str("def f() { f\"value={1 + }\" }")?;
+    let bad_field = sh_parse(&interpolation, 0, 1000);
+    assert_eq_i64(bad_field.error, 3001, "parser.sg", 79);
+    Result { is_ok: true, value: true, error: 0 };
+}
+
+def sh_test_parser_literals() -> Result<bool, i64> {
+    sh_test_parse_ok("def f() { -9223372036854775808; 18446744073709551615u64; -128i8; 255u8; 0xffu8; 0b1111u8 }")?;
+    let text = string_from_str("def f() { f\"value={1 + 2 * 3}\" }")?;
+    let parsed = sh_parse(&text, 5, 1000);
+    assert_eq_i64(parsed.error, 0, "parser.sg", 82);
+    let function = sh_ast_child(&parsed.ast, parsed.ast.root, 0);
+    let body = sh_ast_child(&parsed.ast, function, sh_ast_word(&parsed.ast, function, 6) - 1);
+    let statement = sh_ast_child(&parsed.ast, body, 0);
+    let formatted = sh_ast_child(&parsed.ast, statement, 0);
+    assert_eq_i64(sh_ast_word(&parsed.ast, formatted, 0), 69, "parser.sg", 83);
+    assert_eq_i64(sh_ast_word(&parsed.ast, formatted, 6), 1, "parser.sg", 84);
+    let addition = sh_ast_child(&parsed.ast, formatted, 0);
+    assert_eq_i64(sh_ast_word(&parsed.ast, addition, 4), sh_kind("+"), "parser.sg", 85);
+    assert_eq_i64(sh_ast_word(&parsed.ast, addition, 2), 19, "parser.sg", 86);
+    assert_eq_i64(sh_ast_word(&parsed.ast, addition, 3), 28, "parser.sg", 87);
+    Result { is_ok: true, value: true, error: 0 };
+}
+
+def sh_test_parser_shapes() -> Result<bool, i64> {
+    let text = string_from_str("def f() { (1); (1,); (); match (1, 2) { (a, b) => 0 }; match [1, 2] { [c, d] => 0 }; }")?;
+    let parsed = sh_parse(&text, 0, 1000);
+    assert_eq_i64(parsed.error, 0, "parser.sg", 90);
+    let mut index = 0;
+    let mut parens = 0;
+    let mut tuples = 0;
+    let mut tuple_patterns = 0;
+    let mut slice_patterns = 0;
+    while index < sh_ast_count(&parsed.ast) { let kind = sh_ast_word(&parsed.ast, index, 0); let payload = sh_ast_word(&parsed.ast, index, 4); if kind == 58 and payload == 0 { parens = parens + 1; }; if kind == 58 and payload == 1 { tuples = tuples + 1; }; if kind == 80 and payload == sh_kind("(") { tuple_patterns = tuple_patterns + 1; }; if kind == 80 and payload == sh_kind("[") { slice_patterns = slice_patterns + 1; }; index = index + 1; };
+    assert_eq_i64(parens, 1, "parser.sg", 91);
+    assert_eq_i64(tuples, 3, "parser.sg", 92);
+    assert_eq_i64(tuple_patterns, 1, "parser.sg", 93);
+    assert_eq_i64(slice_patterns, 1, "parser.sg", 94);
+    sh_test_parse_ok("struct Pair<T, U = i64> { first: T, second: U, } def f(x: Option<EnumeratedItem<i64>>) { let first: Option<EnumeratedItem<i64>> = x.next(); Point { x: 1, ..base } }")?;
+    let raw_macro = string_from_str("macro_rules")?;
+    raw_macro.push_str("! one { ($value:expr) => { $value + 1 }; } def main() { one!(41) }")?;
+    let macro_ast = sh_parse(&raw_macro, 0, 1000);
+    assert_eq_i64(macro_ast.error, 0, "parser.sg", 95);
+    assert_eq_i64(sh_ast_word(&macro_ast.ast, sh_ast_child(&macro_ast.ast, macro_ast.ast.root, 0), 0), 91, "parser.sg", 96);
+    Result { is_ok: true, value: true, error: 0 };
+}
+
+def sh_parser_file(path: &str) -> Result<bool, i64> {
+    let sources = sh_sources_new(1, 4194304);
+    let id = sh_source_load(&sources, path)?;
+    let span = sh_span_make(&sources, id, 0, sh_source_len(&sources, id)?)?;
+    let text = sh_span_text(&sources, span)?;
+    let parsed = sh_parse(&text, id, 1000000);
+    if parsed.error != 0 { println(path); println(parsed.error); println(parsed.start); println(parsed.end); return Result { is_ok: false, value: false, error: parsed.error }; };
+    println(sh_ast_count(&parsed.ast));
+    Result { is_ok: true, value: true, error: 0 };
+}
+
+def sh_test_parser_roles() -> Result<bool, i64> {
+    let text = string_from_str("import foo as bar; import foo { bar }; import legacy * from; struct Pair<T: Copy, U = i64> { pub field: T, } type A = fn(i64); type B = fn() -> i64; type C = View<Item = i64>;")?;
+    let parsed = sh_parse(&text, 0, 1000);
+    assert_eq_i64(parsed.error, 0, "parser.sg", 97);
+    let mut index = 0;
+    let mut modes = 0;
+    let mut default_param = 0;
+    let mut bound_param = 0;
+    let mut fn_no_return = 0;
+    let mut fn_return = 0;
+    let mut bindings = 0;
+    let mut public_fields = 0;
+    while index < sh_ast_count(&parsed.ast) { let kind = sh_ast_word(&parsed.ast, index, 0); let payload = sh_ast_word(&parsed.ast, index, 4); if kind == 30 { modes = modes + payload; }; if kind == 35 and payload == 1 { bound_param = bound_param + 1; }; if kind == 35 and payload == 2 { default_param = default_param + 1; }; if kind == 74 and payload == 101 { fn_no_return = fn_no_return + 1; }; if kind == 74 and payload == 1101 { fn_return = fn_return + 1; }; if kind == 76 { bindings = bindings + 1; }; if kind == 23 and payload == 2 { public_fields = public_fields + 1; }; index = index + 1; };
+    assert_eq_i64(modes, 96, "parser.sg", 98);
+    assert_eq_i64(default_param, 1, "parser.sg", 99);
+    assert_eq_i64(bound_param, 1, "parser.sg", 100);
+    assert_eq_i64(fn_no_return, 1, "parser.sg", 101);
+    assert_eq_i64(fn_return, 1, "parser.sg", 102);
+    assert_eq_i64(bindings, 1, "parser.sg", 103);
+    assert_eq_i64(public_fields, 1, "parser.sg", 104);
+    sh_test_parse_ok("class Point { pub x: i64; priv y: i64; pub def read(&self) -> i64 { self.x } }")?;
+    Result { is_ok: true, value: true, error: 0 };
+}
+
+def sh_test_parser_reject(text: &str) -> Result<bool, i64> {
+    let source = string_from_str(text)?;
+    let parsed = sh_parse(&source, 0, 1000);
+    assert_eq_i64(parsed.error, 3001, "parser.sg", 105);
+    Result { is_ok: true, value: true, error: 0 };
+}
+
+def sh_test_parser_contexts() -> Result<bool, i64> {
+    sh_test_parser_reject("def f();")?;
+    sh_test_parser_reject("def f<T>(x: T) where U: Copy { x }")?;
+    sh_test_parse_ok("def f<T>(x: T) where T: Copy { x }")?;
+    sh_test_parser_reject("fn f() {}")?;
+    sh_test_parser_reject("type T;")?;
+    sh_test_parser_reject("impl X { fn f() {} }")?;
+    sh_test_parser_reject("trait Tr { def f(); }")?;
+    sh_test_parser_reject("class C { def f(); }")?;
+    sh_test_parser_reject("extern \"C\" fn f();")?;
+    sh_test_parser_reject("extern \"C\" { def f() {} }")?;
+    sh_test_parser_reject("def f(&x: i64) {}")?;
+    sh_test_parser_reject("def f((x, y): i64) {}")?;
+    sh_test_parser_reject("def f() { let (x, y) = (1, 2); }")?;
+    sh_test_parser_reject("def f() { let x = || 1; }")?;
+    sh_test_parser_reject("def f() { none }")?;
+    sh_test_parser_reject("def f() { unsafe { 1 } }")?;
+    sh_test_parser_reject("def f() { raise 1 }")?;
+    sh_test_parse_ok("extern \"C\" { fn f(x: i64); static mut STATE: i64; } extern \"C\" fn g(x: i64) -> i64 { x }")?;
+    sh_test_parse_ok("trait Tr { type Item; def f(&self) -> i64 { 0 } } impl Tr for X { type Item = i64; def f(&self) -> i64 { 1 } }")?;
+    sh_test_parse_ok("def f(x: i64) { const X: i64 = 1; match x { 0 => return X, _ => 0, } }")?;
+    sh_test_parse_ok("def f() { async { 1 }; parallel { 2 }; }")?;
+    Result { is_ok: true, value: true, error: 0 };
+}
+
+def main() -> i64 {
+    if args_len() > 0 { let mut index = 0; while index < args_len() { let buffer = ffi_buffer_new(arg_len(index).unwrap_or(0)); if not buffer.is_ok() { return 2; }; let copied = arg_copy(index, buffer.value); if not copied.is_ok() { return 2; }; let path = string_from_utf8(buffer.value, copied.value); if not path.is_ok() { return 2; }; if not sh_parser_file(path.value.as_str()).is_ok() { return 1; }; index = index + 1; }; println("selfhost parser corpus: ok"); return 0; };
+    let strings = sengoo_string_live_handle_count();
+    let buffers = sengoo_buffer_live_handle_count();
+    let opaque = sengoo_opaque_live_handle_count();
+    if not sh_test_parser_tree().is_ok() { return 1; };
+    if not sh_test_parser_cases().is_ok() { return 2; };
+    if not sh_test_parser_errors().is_ok() { return 3; };
+    if not sh_test_parser_literals().is_ok() { return 5; };
+    if not sh_test_parser_shapes().is_ok() { return 6; };
+    if not sh_test_parser_roles().is_ok() { return 7; };
+    if not sh_test_parser_contexts().is_ok() { return 8; };
+    let mut round = 0;
+    while round < 100 { if not sh_test_parse_ok("def main() -> i64 { let x = 1 + 2 * 3; x }").is_ok() { return 4; }; round = round + 1; };
+    assert_eq_i64(sengoo_string_live_handle_count(), strings, "parser.sg", 120);
+    assert_eq_i64(sengoo_buffer_live_handle_count(), buffers, "parser.sg", 121);
+    assert_eq_i64(sengoo_opaque_live_handle_count(), opaque, "parser.sg", 122);
+    println("selfhost parser: tree, precedence, grammar, errors, depth, 100 resource rounds passed");
+    println("selfhost parser: ok");
+    0;
+}

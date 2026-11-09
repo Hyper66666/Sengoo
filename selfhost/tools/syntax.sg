@@ -1,0 +1,37 @@
+import selfhost_parser;
+
+import std::args;
+
+import std::io;
+
+def sh_syntax_argument(index: i64) -> Result<String, i64> {
+    let length = arg_len(index)?;
+    let bytes = ffi_buffer_new(length)?;
+    let size = arg_copy(index, bytes)?;
+    string_from_utf8(bytes, size);
+}
+
+def sh_syntax_run(path: &str, action: &str) -> Result<i64, i64> {
+    let sources = sh_sources_new(1, 16777216);
+    let id = sh_source_load(&sources, path)?;
+    let size = sh_source_len(&sources, id)?;
+    let text = sh_span_text(&sources, ShSpan { source: id, start: 0, end: size })?;
+    if action == "lex" { let lexed = sh_lex(&text, 1000000); if lexed.error != 0 { println(lexed.error); println(lexed.start); println(lexed.end); return Result { is_ok: true, value: 1, error: 0 }; }; let mut index = 0; while index < sh_token_count(&lexed.tokens) { let token = sh_token_get(&lexed.tokens, index); if token.kind != 0 and not sh_token_trivia(token.kind) { println(token.kind); println(token.start); println(token.end); }; index = index + 1; }; return Result { is_ok: true, value: 0, error: 0 }; };
+    let parsed = sh_parse(&text, id, 1000000);
+    if parsed.error != 0 { println(parsed.error); println(parsed.start); println(parsed.end); return Result { is_ok: true, value: 1, error: 0 }; };
+    println(sh_ast_count(&parsed.ast));
+    println(sh_ast_word(&parsed.ast, parsed.ast.root, 6));
+    Result { is_ok: true, value: 0, error: 0 };
+}
+
+def main() -> i64 {
+    if args_len() != 2 { io_stderr_write("syntax lex|parse FILE\n"); return 64; };
+    let action = sh_syntax_argument(0);
+    let path = sh_syntax_argument(1);
+    if not action.is_ok() or not path.is_ok() { return 64; };
+    if action.value.as_str() != "lex" and action.value.as_str() != "parse" { return 64; };
+    let result = sh_syntax_run(path.value.as_str(), action.value.as_str());
+    if result.is_ok() { return result.value; };
+    println(result.error);
+    66;
+}

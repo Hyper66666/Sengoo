@@ -1,0 +1,345 @@
+{
+  "schema": 1,
+  "scope": "Exact reviewed Rust-accepted incomplete-source literals; assert SG rejection and completed-program acceptance. No general EOF exemption.",
+  "cases": [
+    {
+      "source_sha256": "7879d3f5e46334aff82611e6f2879bb8f1870479c031de51e1b52d2badec3591",
+      "origins": [
+        {
+          "file": "compiler\\src\\tests\\property_tests.rs",
+          "offset": 4377,
+          "end": 4398,
+          "literal_sha256": "efecd4c4512bb274c984455a0f1dd57527ec76fd70c2236247d250e9c2e4ef43",
+          "kind": "cooked"
+        },
+        {
+          "file": "tools\\sgc\\src\\tests.rs",
+          "offset": 369031,
+          "end": 369052,
+          "literal_sha256": "efecd4c4512bb274c984455a0f1dd57527ec76fd70c2236247d250e9c2e4ef43",
+          "kind": "cooked"
+        }
+      ],
+      "reason": "Source-construction prefix literal from a Rust test; later strings append the body/closing braces. This literal alone is incomplete.",
+      "required_error": 3001,
+      "require_error_at_eof": true,
+      "unclosed_delimiters": [
+        "{"
+      ],
+      "completion_suffix": "\n}"
+    },
+    {
+      "source_sha256": "5456f3310fcd0f4f5be1369356c52f958e58a6a92ef2cf7e440d797ee84465e1",
+      "origins": [
+        {
+          "file": "compiler\\src\\tests\\property_tests.rs",
+          "offset": 4479,
+          "end": 4503,
+          "literal_sha256": "e714945451b7571f97eeb3533ba01dd7b5e3f2f0f01b14761adfd7191674596b",
+          "kind": "cooked"
+        }
+      ],
+      "reason": "Source-construction prefix literal from a Rust test; later strings append the body/closing braces. This literal alone is incomplete.",
+      "required_error": 3001,
+      "require_error_at_eof": true,
+      "unclosed_delimiters": [
+        "{"
+      ],
+      "completion_suffix": "\n}"
+    },
+    {
+      "source_sha256": "dc294237544d735a2221822577d02e75f0435aa67ed95ba7016d4e8134f40a82",
+      "origins": [
+        {
+          "file": "compiler\\src\\tests\\property_tests.rs",
+          "offset": 7180,
+          "end": 7205,
+          "literal_sha256": "4ec1b0e25aa94d0507706d15e9c25f21837850d3c4ff0a0e38a815b808f3dcec",
+          "kind": "cooked"
+        }
+      ],
+      "reason": "Source-construction prefix literal from a Rust test; later strings append the body/closing braces. This literal alone is incomplete.",
+      "required_error": 3001,
+      "require_error_at_eof": true,
+      "unclosed_delimiters": [
+        "{",
+        "{"
+      ],
+      "completion_suffix": "\n}\n}"
+    },
+    {
+      "source_sha256": "ebfeb3d0c3794563a4d6b6ad57d9ed39cd781cfe3bab6f30d3dce8136bf0439b",
+      "origins": [
+        {
+          "file": "compiler\\tests\\numeric_boundaries.rs",
+          "offset": 7043,
+          "end": 7066,
+          "literal_sha256": "26c2e05a0cfcb7de8eecd475d36e299c7b95f7283cd9f81e3744a73e5e649369",
+          "kind": "cooked"
+        }
+      ],
+      "reason": "Source-construction prefix literal from a Rust test; later strings append the body/closing braces. This literal alone is incomplete.",
+      "required_error": 3001,
+      "require_error_at_eof": true,
+      "unclosed_delimiters": [
+        "{"
+      ],
+      "completion_suffix": "\n}"
+    },
+    {
+      "source_sha256": "0878cb6a00aada4fa966228ec0612422f99d84fd7ccea016440afca56cff4c5a",
+      "origins": [
+        {
+          "file": "tools\\sgc\\src\\tests.rs",
+          "offset": 368167,
+          "end": 368198,
+          "literal_sha256": "a07cf9532ab28fb45c0efd3f023c4bee9065299845e6ed7466637b417eedb42d",
+          "kind": "cooked"
+        }
+      ],
+      "reason": "Source-construction prefix literal from a Rust test; later strings append the body/closing braces. This literal alone is incomplete.",
+      "required_error": 3001,
+      "require_error_at_eof": true,
+      "unclosed_delimiters": [
+        "{"
+      ],
+      "completion_suffix": "\n}"
+    },
+    {
+      "source_sha256": "174aaad0c6a4a176d7fec7369a4e3d9f91824ef036be4d6c23fe1b50c1873719",
+      "origins": [
+        {
+          "file": "tools\\sgc\\src\\tests.rs",
+          "offset": 368296,
+          "end": 368327,
+          "literal_sha256": "5a2f461c0082eff320c40d71aefa676df92ab8be126129f74f414e7071db3c2a",
+          "kind": "cooked"
+        }
+      ],
+      "reason": "Source-construction prefix literal from a Rust test; later strings append the body/closing braces. This literal alone is incomplete.",
+      "required_error": 3001,
+      "require_error_at_eof": true,
+      "unclosed_delimiters": [
+        "{"
+      ],
+      "completion_suffix": "\n}"
+    },
+    {
+      "source_sha256": "46d1a1fcd0ca1db8463578ebe331cfc34dd593f6a46428b2a0abb7a2a9c24110",
+      "origins": [
+        {
+          "file": "tools\\sgc\\src\\tests.rs",
+          "offset": 368423,
+          "end": 368452,
+          "literal_sha256": "4edd51a4ffc7b0ed59f0de156e403d2a83e432bc0a0836862c1744b8cbc57f14",
+          "kind": "cooked"
+        }
+      ],
+      "reason": "Source-construction prefix literal from a Rust test; later strings append the body/closing braces. This literal alone is incomplete.",
+      "required_error": 3001,
+      "require_error_at_eof": true,
+      "unclosed_delimiters": [
+        "{"
+      ],
+      "completion_suffix": "\n}"
+    },
+    {
+      "source_sha256": "5260d09a487cfefc185e34631cf9cd02637d219ca51a002a36ceca2dbd25ffdd",
+      "origins": [
+        {
+          "file": "tools\\sgc\\src\\tests.rs",
+          "offset": 368550,
+          "end": 368581,
+          "literal_sha256": "381d50d95bc65a55a9b481f827b301b16633a31c074d7fe7325bd51c72696779",
+          "kind": "cooked"
+        }
+      ],
+      "reason": "Source-construction prefix literal from a Rust test; later strings append the body/closing braces. This literal alone is incomplete.",
+      "required_error": 3001,
+      "require_error_at_eof": true,
+      "unclosed_delimiters": [
+        "{"
+      ],
+      "completion_suffix": "\n}"
+    },
+    {
+      "source_sha256": "43ecc74d357f3b869fd087799323d768c225756e17b63266e5635a4707bdbd58",
+      "origins": [
+        {
+          "file": "tools\\sgc\\src\\tests.rs",
+          "offset": 368676,
+          "end": 368704,
+          "literal_sha256": "99ae6e6164b23cde7ea5fd4bd793f3fe96fa10bce05ace3409b592f20715beba",
+          "kind": "cooked"
+        }
+      ],
+      "reason": "Source-construction prefix literal from a Rust test; later strings append the body/closing braces. This literal alone is incomplete.",
+      "required_error": 3001,
+      "require_error_at_eof": true,
+      "unclosed_delimiters": [
+        "{"
+      ],
+      "completion_suffix": "\n}"
+    },
+    {
+      "source_sha256": "70cde3c2e17eea25a4e076622ff9bcfb194ec1533ff06fe4c19b70e08b47dee6",
+      "origins": [
+        {
+          "file": "tools\\sgc\\src\\tests.rs",
+          "offset": 368800,
+          "end": 368839,
+          "literal_sha256": "6c561a88ab98870a8d02461eb17ba309bdac324ba744a9fad69c3419b4894a3a",
+          "kind": "cooked"
+        }
+      ],
+      "reason": "Source-construction prefix literal from a Rust test; later strings append the body/closing braces. This literal alone is incomplete.",
+      "required_error": 3001,
+      "require_error_at_eof": true,
+      "unclosed_delimiters": [
+        "{"
+      ],
+      "completion_suffix": "\n}"
+    },
+    {
+      "source_sha256": "88c45ad8a0f740b1a5f3debd0bcb978232d585b3202e86b1d37b630dfb45eb87",
+      "origins": [
+        {
+          "file": "tools\\sgc\\src\\tests.rs",
+          "offset": 368938,
+          "end": 368970,
+          "literal_sha256": "3e2e8d02df4788debe4fe9f1e485e6ebba088675722a0ffe01366bf3cf515c70",
+          "kind": "cooked"
+        }
+      ],
+      "reason": "Source-construction prefix literal from a Rust test; later strings append the body/closing braces. This literal alone is incomplete.",
+      "required_error": 3001,
+      "require_error_at_eof": true,
+      "unclosed_delimiters": [
+        "{"
+      ],
+      "completion_suffix": "\n}"
+    },
+    {
+      "source_sha256": "8b026d9579e12f29a47d161166e980425751f3b2971328fa83076f347bb64031",
+      "origins": [
+        {
+          "file": "tools\\sgc\\tests\\json_unicode.rs",
+          "offset": 624,
+          "end": 740,
+          "literal_sha256": "2ef0c904bb8949ebae41638d97564ccbc392143ec1ae85404c93766b56933ab0",
+          "kind": "cooked"
+        }
+      ],
+      "reason": "Source-construction prefix literal from a Rust test; later strings append the body/closing braces. This literal alone is incomplete.",
+      "required_error": 3001,
+      "require_error_at_eof": true,
+      "unclosed_delimiters": [
+        "{"
+      ],
+      "completion_suffix": "\n}"
+    },
+    {
+      "source_sha256": "3ab2a5bb923474f15359254e60ce819e0b069850cc295539497b1c0d66ed5497",
+      "origins": [
+        {
+          "file": "tools\\sgc\\tests\\json_unicode.rs",
+          "offset": 5952,
+          "end": 9318,
+          "literal_sha256": "dfcd9fbf022cbd81d416a181bcd1c1be7b7652a6ab7c8e5e235657a4964e77ce",
+          "kind": "raw"
+        }
+      ],
+      "reason": "Source-construction prefix literal from a Rust test; later strings append the body/closing braces. This literal alone is incomplete.",
+      "required_error": 3001,
+      "require_error_at_eof": true,
+      "unclosed_delimiters": [
+        "{",
+        "{"
+      ],
+      "completion_suffix": "\n}\n}"
+    },
+    {
+      "source_sha256": "230076794737c0b835eb55a829d9a1c68246c7ae810430df751b4d3590f17b39",
+      "origins": [
+        {
+          "file": "tools\\sglsp\\src\\completion.rs",
+          "offset": 47038,
+          "end": 47056,
+          "literal_sha256": "28e7fa21b1d737a530232ea7c40889dc70f5a469776f86194b838ea3fa027557",
+          "kind": "cooked"
+        }
+      ],
+      "reason": "Partial source used by LSP completion fixtures; a complete program still requires the missing closing brace.",
+      "required_error": 3001,
+      "require_error_at_eof": true,
+      "unclosed_delimiters": [
+        "{"
+      ],
+      "completion_suffix": "\n}"
+    },
+    {
+      "source_sha256": "34f688436207ffbda511ed9e4fa715acc5e610c8611a17dd7d0af039ce293e31",
+      "origins": [
+        {
+          "file": "tools\\sglsp\\src\\completion.rs",
+          "offset": 47151,
+          "end": 47167,
+          "literal_sha256": "dfe357ddad2f8d61c4f020e7f3b3415a41551186b4369fff9e85be70d3e42c3d",
+          "kind": "cooked"
+        }
+      ],
+      "reason": "Partial source used by LSP completion fixtures; a complete program still requires the missing closing brace.",
+      "required_error": 3001,
+      "require_error_at_eof": true,
+      "unclosed_delimiters": [
+        "{"
+      ],
+      "completion_suffix": "\n}"
+    },
+    {
+      "source_sha256": "3f770656e3868312590ef2e8f3e8a0b1607733dd4875a48d4faef0be08e4c2cc",
+      "origins": [
+        {
+          "file": "tools\\sglsp\\src\\completion.rs",
+          "offset": 47257,
+          "end": 47292,
+          "literal_sha256": "b380362c8531f7f8662f82990c10c3c0c12a3ca698044b58e398eae87c07c21d",
+          "kind": "cooked"
+        }
+      ],
+      "reason": "Partial source used by LSP completion fixtures; a complete program still requires the missing closing brace.",
+      "required_error": 3001,
+      "require_error_at_eof": true,
+      "unclosed_delimiters": [
+        "{"
+      ],
+      "completion_suffix": "\n}"
+    },
+    {
+      "source_sha256": "ebcd7def863a51225b0ef730f36ca6f31ca72269df51f0b5d22998cba158e190",
+      "origins": [
+        {
+          "file": "tools\\sglsp\\src\\completion.rs",
+          "offset": 71434,
+          "end": 71478,
+          "literal_sha256": "c824d7a03337832f5a121b53af5b21bfeea84be78ad435d881d620b4dbf7a4ad",
+          "kind": "cooked"
+        },
+        {
+          "file": "tools\\sglsp\\src\\completion.rs",
+          "offset": 72889,
+          "end": 72933,
+          "literal_sha256": "c824d7a03337832f5a121b53af5b21bfeea84be78ad435d881d620b4dbf7a4ad",
+          "kind": "cooked"
+        }
+      ],
+      "reason": "Partial source used by LSP completion fixtures; a complete program still requires the missing closing brace.",
+      "required_error": 3001,
+      "require_error_at_eof": true,
+      "unclosed_delimiters": [
+        "{"
+      ],
+      "completion_suffix": "\n}"
+    }
+  ]
+}

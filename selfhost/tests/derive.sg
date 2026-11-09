@@ -1,0 +1,245 @@
+import selfhost_derive;
+
+import std::args;
+
+import std::assert;
+
+import std::io;
+
+extern "C" {
+    fn sengoo_string_live_handle_count() -> i64;
+    fn sengoo_buffer_live_handle_count() -> i64;
+    fn sengoo_opaque_live_handle_count() -> i64;
+    fn sengoo_process_live_handle_count() -> i64;
+    fn sengoo_process_live_resource_count() -> i64;
+}
+
+def sh_dt_source(names: &str, body: &str) -> Result<String, i64> {
+    let source = string_from_str("#")?;
+    source.push_str("[derive(")?;
+    source.push_str(names)?;
+    source.push_str(")]\n")?;
+    source.push_str(body)?;
+    string_result_ok(source);
+}
+
+def sh_dt_count(text: &String, needle: &str) -> i64 {
+    let mut start = 0;
+    let mut count = 0;
+    while start < text.len() { let rest = text.get(start, text.len()); if not rest.is_ok() { return -1; }; let found = str_index_of(rest.value.as_str(), needle); if found < 0 { return count; }; count = count + 1; start = start + found + needle.len(); };
+    count;
+}
+
+def sh_dt_map(input: &String, output: &ShDerived) -> bool {
+    if output.mapping.len() % 5 != 0 { return false; };
+    let mut record = 0;
+    let mut cursor = 0;
+    let mut generated = 0;
+    while record < output.mapping.len() { let low = output.mapping.get(record).unwrap_or(-1); let high = output.mapping.get(record + 1).unwrap_or(-1); let begin = output.mapping.get(record + 2).unwrap_or(-1); let end = output.mapping.get(record + 3).unwrap_or(-1); let mode = output.mapping.get(record + 4).unwrap_or(-1); if low != cursor or high < low or high > output.text.len() or begin < 0 or end < begin or end > input.len() { return false; }; if mode == 0 { if high - low != end - begin { return false; }; } else { if mode != 1 { return false; }; generated = generated + 1; }; cursor = high; record = record + 5; };
+    cursor == output.text.len() and generated > 0;
+}
+
+def sh_dt_builtin() -> Result<bool, i64> {
+    let clone = sh_dt_source("Clone, PartialEq, PartialOrd, Ord", "pub(crate) struct Item { pub value: i64, text: String, nested: Vec<Vec<i64>>, }\ndef main() -> i64 { 0 }")?;
+    let expanded = sh_derive(&clone, 1048576);
+    assert_eq_i64(expanded.error, 0, "derive.sg", 40);
+    assert_true(sh_dt_map(&clone, &expanded), "derive.sg", 41);
+    assert_true(str_contains(expanded.text.as_str(), "text: self.text.clone()"), "derive.sg", 42);
+    assert_true(str_contains(expanded.text.as_str(), "nested: self.nested.clone()"), "derive.sg", 43);
+    assert_true(str_contains(expanded.text.as_str(), "value: self.value"), "derive.sg", 44);
+    assert_eq_i64(sh_dt_count(&expanded.text, "def compare(&self"), 1, "derive.sg", 45);
+    assert_eq_i64(sh_dt_count(&expanded.text, "impl Ord for Item"), 1, "derive.sg", 46);
+    assert_true(str_contains(expanded.text.as_str(), "self.value == other.value"), "derive.sg", 47);
+    let defaults = sh_dt_source("Default, Copy, Eq, Debug", "struct Defaults { yes: bool, count: u128, ratio: f32, character: char, object: Item, generic: Vec<i64>, }")?;
+    let defaulted = sh_derive(&defaults, 1048576);
+    assert_eq_i64(defaulted.error, 0, "derive.sg", 50);
+    assert_true(str_contains(defaulted.text.as_str(), "yes: false"), "derive.sg", 51);
+    assert_true(str_contains(defaulted.text.as_str(), "ratio: 0.0"), "derive.sg", 52);
+    assert_true(str_contains(defaulted.text.as_str(), "character: '\\0'"), "derive.sg", 53);
+    assert_true(str_contains(defaulted.text.as_str(), "object: Item::default()"), "derive.sg", 54);
+    assert_true(str_contains(defaulted.text.as_str(), "generic: 0"), "derive.sg", 55);
+    assert_true(str_contains(defaulted.text.as_str(), "__derived_debug_marker"), "derive.sg", 56);
+    let hash = sh_dt_source("Hash", "struct Hashed { yes: bool, count: i64, text: String, }")?;
+    let hashed = sh_derive(&hash, 1048576);
+    assert_eq_i64(hashed.error, 0, "derive.sg", 59);
+    assert_eq_i64(sh_dt_count(&hashed.text, "1469598103934665603"), 2, "derive.sg", 60);
+    assert_true(str_contains(hashed.text.as_str(), "if self.yes { 1 } else { 0 }"), "derive.sg", 61);
+    let contextual = string_from_str("import std::string;\n")?;
+    contextual.push_str(hash.as_str())?;
+    let hash_into = sh_derive(&contextual, 1048576);
+    assert_eq_i64(hash_into.error, 0, "derive.sg", 64);
+    assert_true(str_contains(hash_into.text.as_str(), "h.write_bool(self.yes)"), "derive.sg", 65);
+    assert_true(str_contains(hash_into.text.as_str(), "h.write_i64(self.count)"), "derive.sg", 66);
+    assert_true(str_contains(hash_into.text.as_str(), "self.text.hash_into(h)"), "derive.sg", 67);
+    let enumeration = sh_dt_source("Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, Default, Debug, custom::Auto", "enum Choice { One, Two(i64), }")?;
+    let enum_output = sh_derive(&enumeration, 1048576);
+    assert_eq_i64(enum_output.error, 0, "derive.sg", 70);
+    assert_true(str_contains(enum_output.text.as_str(), "impl Hash for Choice"), "derive.sg", 71);
+    assert_true(str_contains(enum_output.text.as_str(), "__derive_custom_auto"), "derive.sg", 72);
+    let sanitized = sh_dt_source("_9, __", "struct Sanitized {}")?;
+    let sanitized_output = sh_derive(&sanitized, 1048576);
+    assert_eq_i64(sanitized_output.error, 0, "derive.sg", 73);
+    assert_true(str_contains(sanitized_output.text.as_str(), "__derive_d9"), "derive.sg", 74);
+    assert_true(str_contains(sanitized_output.text.as_str(), "__derive_derived"), "derive.sg", 75);
+    let class_source = sh_dt_source("Auto", "class Service { value: i64, }")?;
+    let derived_probe_0 = sh_derive(&class_source, 1048576);
+    assert_eq_i64(derived_probe_0.error, 0, "derive.sg", 74);
+    let generic = sh_dt_source("Clone", "struct Generic<T> { item: T, }")?;
+    let derived_probe_1 = sh_derive(&generic, 1048576);
+    assert_eq_i64(derived_probe_1.error, 0, "derive.sg", 76);
+    let empty = sh_dt_source("PartialEq, PartialOrd, Default, Clone", "struct Empty {}")?;
+    let derived_probe_2 = sh_derive(&empty, 1048576);
+    assert_eq_i64(derived_probe_2.error, 0, "derive.sg", 78);
+    Result { is_ok: true, value: true, error: 0 };
+}
+
+def sh_dt_errors() -> Result<bool, i64> {
+    let missing = sh_dt_source("Auto", "const FLAG: i64 = 1;")?;
+    let invalid = sh_derive(&missing, 1048576);
+    assert_eq_i64(invalid.error, 1502, "derive.sg", 84);
+    assert_true(invalid.start == 0 and invalid.end > 0, "derive.sg", 85);
+    let empty = sh_dt_source(", ,", "struct Empty {}")?;
+    let derived_probe_3 = sh_derive(&empty, 1048576);
+    assert_eq_i64(derived_probe_3.error, 1502, "derive.sg", 87);
+    let bad_path = sh_dt_source("invalid::", "struct Bad {}")?;
+    let derived_probe_4 = sh_derive(&bad_path, 1048576);
+    assert_eq_i64(derived_probe_4.error, 1502, "derive.sg", 89);
+    let good = sh_dt_source("Clone", "struct Fine { value: i64, }")?;
+    let derived_probe_5 = sh_derive(&good, good.len());
+    assert_eq_i64(derived_probe_5.error, 1501, "derive.sg", 91);
+    let derived_probe_6 = sh_derive(&good, -1);
+    assert_eq_i64(derived_probe_6.error, 1501, "derive.sg", 92);
+    let malformed = string_from_str("#")?;
+    malformed.push_str("[derive Auto]\nstruct Fine {}")?;
+    let derived_probe_7 = sh_derive(&malformed, 1048576);
+    assert_eq_i64(derived_probe_7.error, 1502, "derive.sg", 94);
+    let identity = string_from_str("// no attribute; UTF-8 中😀\ndef main() -> i64 { 0 }")?;
+    let unchanged = sh_derive(&identity, 1048576);
+    assert_eq_i64(unchanged.error, 0, "derive.sg", 96);
+    assert_true(sengoo_string_eq(identity.handle, unchanged.text.handle) != 0, "derive.sg", 97);
+    let literal = string_from_str("def text() -> &str { \"#")?;
+    literal.push_str("[derive(Auto)] struct Imaginary {}\" }\n")?;
+    let literal_output = sh_derive(&literal, 1048576);
+    assert_eq_i64(literal_output.error, 0, "derive.sg", 99);
+    assert_true(sengoo_string_eq(literal.handle, literal_output.text.handle) != 0, "derive.sg", 100);
+    Result { is_ok: true, value: true, error: 0 };
+}
+
+def sh_dt_argument(index: i64) -> Result<String, i64> {
+    let size = arg_len(index)?;
+    let bytes = ffi_buffer_new(size)?;
+    let copied = arg_copy(index, bytes)?;
+    string_from_utf8(bytes, copied);
+}
+
+def sh_dt_environment(key: &str) -> Result<String, i64> {
+    let size = env_var_len(key)?;
+    let bytes = ffi_buffer_new(size)?;
+    let copied = env_var_copy(key, bytes)?;
+    string_from_utf8(bytes, copied);
+}
+
+def sh_dt_external_provider() -> i64 {
+    let name = sh_dt_environment("SENGOO_DERIVE_NAME");
+    let target = sh_dt_environment("SENGOO_DERIVE_TARGET");
+    let kind = sh_dt_environment("SENGOO_DERIVE_TARGET_KIND");
+    if not name.is_ok() or not target.is_ok() or not kind.is_ok() or name.value.as_str() != "External" { return 81; };
+    if target.value.as_str() == "ExternalEnum" { if kind.value.as_str() != "enum" { return 83; }; println("impl ExternalEnum { def external_marker(self) -> i64 { 42 } }"); return 0; };
+    if target.value.as_str() == "ExternalClass" { if kind.value.as_str() != "class" { return 84; }; println("impl ExternalClass { def external_marker(self) -> i64 { 42 } }"); return 0; };
+    if kind.value.as_str() != "struct" { return 81; };
+    if target.value.as_str() == "EmptyOutput" { return 0; };
+    if target.value.as_str() == "WhitespaceOutput" { io_stdout_write(" \n\t"); return 0; };
+    if target.value.as_str() == "InvalidUtf8" { io_stdout_write_raw(sengoo_stdlib_str_ptr("é"), 1); return 0; };
+    if target.value.as_str() == "Failure" { return 7; };
+    if target.value.as_str() != "ExternalTarget" { return 82; };
+    println("impl ExternalTarget { def external_marker(self) -> i64 { 42 } }");
+    0;
+}
+
+def sh_dt_external_suite() -> Result<bool, i64> {
+    let source = sh_dt_source("External", "struct ExternalTarget {}")?;
+    let expanded = sh_derive(&source, 1048576);
+    assert_eq_i64(expanded.error, 0, "derive.sg", 120);
+    assert_true(str_contains(expanded.text.as_str(), "external_marker(self)"), "derive.sg", 121);
+    let empty = sh_dt_source("External", "struct EmptyOutput {}")?;
+    let derived_probe_8 = sh_derive(&empty, 1048576);
+    assert_eq_i64(derived_probe_8.error, 1503, "derive.sg", 123);
+    let failed = sh_dt_source("External", "struct Failure {}")?;
+    let derived_probe_9 = sh_derive(&failed, 1048576);
+    assert_eq_i64(derived_probe_9.error, 1503, "derive.sg", 125);
+    let whitespace = sh_dt_source("External", "struct WhitespaceOutput {}")?;
+    let derived_probe_10 = sh_derive(&whitespace, 1048576);
+    assert_eq_i64(derived_probe_10.error, 1503, "derive.sg", 127);
+    let invalid = sh_dt_source("External", "struct InvalidUtf8 {}")?;
+    let derived_probe_11 = sh_derive(&invalid, 1048576);
+    assert_eq_i64(derived_probe_11.error, 1503, "derive.sg", 129);
+    let enumeration = sh_dt_source("External", "enum ExternalEnum { One, }")?;
+    let derived_probe_12 = sh_derive(&enumeration, 1048576);
+    assert_eq_i64(derived_probe_12.error, 0, "derive.sg", 131);
+    let class_source = sh_dt_source("External", "class ExternalClass {}")?;
+    let derived_probe_13 = sh_derive(&class_source, 1048576);
+    assert_eq_i64(derived_probe_13.error, 0, "derive.sg", 133);
+    Result { is_ok: true, value: true, error: 0 };
+}
+
+def sh_dt_launch_external(executable: &String) -> Result<bool, i64> {
+    let command = process_command(executable.as_str())?;
+    command.arg("--external-suite")?;
+    command.env_set("SENGOO_DERIVE_EXTERNAL", executable.as_str())?;
+    command.capture_stdout(true)?;
+    command.capture_stderr(true)?;
+    command.timeout_ms(30000)?;
+    let output = command.run()?;
+    if output.timed_out() or output.exit_code()? != 0 { return Result { is_ok: false, value: false, error: 88 }; };
+    Result { is_ok: true, value: true, error: 0 };
+}
+
+def sh_dt_external_entry() -> i64 {
+    let strings = sengoo_string_live_handle_count();
+    let buffers = sengoo_buffer_live_handle_count();
+    let opaque = sengoo_opaque_live_handle_count();
+    let result = sh_dt_external_suite();
+    if not result.is_ok() { return result.error; };
+    assert_eq_i64(sengoo_string_live_handle_count(), strings, "derive.sg", 140);
+    assert_eq_i64(sengoo_buffer_live_handle_count(), buffers, "derive.sg", 141);
+    assert_eq_i64(sengoo_opaque_live_handle_count(), opaque, "derive.sg", 142);
+    assert_eq_i64(sengoo_process_live_handle_count(), 0, "derive.sg", 143);
+    assert_eq_i64(sengoo_process_live_resource_count(), 0, "derive.sg", 144);
+    0;
+}
+
+def sh_dt_emit(path: &String) -> Result<bool, i64> {
+    let sources = sh_sources_new(1, 1048576);
+    let source = sh_source_load(&sources, path.as_str())?;
+    let text = sh_span_text(&sources, sh_span_make(&sources, source, 0, sh_source_len(&sources, source)?)?)?;
+    let expanded = sh_derive(&text, 1048576);
+    if expanded.error != 0 { return Result { is_ok: false, value: false, error: expanded.error }; };
+    if io_stdout_write(expanded.text.as_str())? != expanded.text.len() { return Result { is_ok: false, value: false, error: 89 }; };
+    Result { is_ok: true, value: true, error: 0 };
+}
+
+def sh_dt_all() -> Result<bool, i64> {
+    sh_dt_builtin()?;
+    sh_dt_errors()?;
+    let executable = sh_dt_argument(0)?;
+    sh_dt_launch_external(&executable)?;
+    Result { is_ok: true, value: true, error: 0 };
+}
+
+def main() -> i64 {
+    if env_has_var("SENGOO_DERIVE_NAME") { return sh_dt_external_provider(); };
+    if args_len() == 2 { let operation = sh_dt_argument(0); let path = sh_dt_argument(1); if operation.is_ok() and path.is_ok() and operation.value.as_str() == "--emit" { let emitted = sh_dt_emit(&path.value); return if emitted.is_ok() { 0; } else { emitted.error; }; }; };
+    if args_len() == 1 { let argument = sh_dt_argument(0); if argument.is_ok() and argument.value.as_str() == "--external-suite" { return sh_dt_external_entry(); }; };
+    let strings = sengoo_string_live_handle_count();
+    let buffers = sengoo_buffer_live_handle_count();
+    let opaque = sengoo_opaque_live_handle_count();
+    let mut round = 0;
+    while round < 10 { let result = sh_dt_all(); if not result.is_ok() { println(result.error); return 1; }; round = round + 1; };
+    assert_eq_i64(sengoo_string_live_handle_count(), strings, "derive.sg", 150);
+    assert_eq_i64(sengoo_buffer_live_handle_count(), buffers, "derive.sg", 151);
+    assert_eq_i64(sengoo_opaque_live_handle_count(), opaque, "derive.sg", 152);
+    assert_eq_i64(sengoo_process_live_handle_count(), 0, "derive.sg", 153);
+    assert_eq_i64(sengoo_process_live_resource_count(), 0, "derive.sg", 154);
+    println("selfhost derive: builtin families, external protocol, failures, maps and 10 exact resource rounds passed");
+    0;
+}

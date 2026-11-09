@@ -1,0 +1,66 @@
+import selfhost_formatter;
+
+import std::assert;
+
+extern "C" {
+    fn sengoo_string_live_handle_count() -> i64;
+    fn sengoo_buffer_live_handle_count() -> i64;
+    fn sengoo_opaque_live_handle_count() -> i64;
+}
+
+def sh_test_format_round(source: &str) -> Result<bool, i64> {
+    let input = string_from_str(source)?;
+    let output = sh_format_tokens(&input, 100, 4)?;
+    let twice = sh_format_tokens(&output, 100, 4)?;
+    assert_eq_str(output.as_str(), twice.as_str(), "formatter.sg", 17);
+    Result { is_ok: true, value: true, error: 0 };
+}
+
+def sh_test_format() -> Result<bool, i64> {
+    let macro_source = string_from_str("macro_")?;
+    macro_source.push_str("rules! add { ($x:expr) => {$x + 1}; } def main()->i64{add!(41)}")?;
+    let macro_formatted = sh_format_tokens(&macro_source, 100, 4)?;
+    assert_true(str_contains(macro_formatted.as_str(), "rules!"), "formatter.sg", 21);
+    assert_true(str_contains(macro_formatted.as_str(), "$x"), "formatter.sg", 22);
+    sh_test_format_round(macro_source.as_str())?;
+    let literal_bytes = ffi_buffer_new(256)?;
+    literal_bytes.append_str("def main()->i64{let s=\"a")?;
+    literal_bytes.push_u8(0)?;
+    literal_bytes.append_str("b\";0}")?;
+    let nul_source = string_from_utf8(literal_bytes, literal_bytes.used_len())?;
+    let nul_formatted = sh_format_tokens(&nul_source, 100, 4)?;
+    let nul_twice = sh_format_tokens(&nul_formatted, 100, 4)?;
+    assert_true(nul_formatted.eq(nul_twice), "formatter.sg", 23);
+    let input = string_from_str("// retained\ndef main()->i64{let x=1;/* 中 */x+2}")?;
+    let output = sh_format_tokens(&input, 100, 4)?;
+    assert_true(str_contains(output.as_str(), "// retained"), "formatter.sg", 24);
+    assert_true(str_contains(output.as_str(), "/* 中 */"), "formatter.sg", 25);
+    assert_true(str_contains(output.as_str(), "    let x = 1;"), "formatter.sg", 26);
+    sh_test_format_round(input.as_str())?;
+    sh_test_format_round("def f<T>(a: Vec<T>)->i64{if true {return 1;}else{0}}")?;
+    sh_test_format_round("#[test]\ndef sample(){assert_eq(1,1);}")?;
+    sh_test_format_round("def main()->i64{let x=[1,2,3];x[0]}")?;
+    sh_test_format_round("def main()->i64{let x=\"{ ; // literal 中😀}\";0}")?;
+    sh_test_format_round("extern \"C\"{fn f(x:i64)->i64;}def main()->i64{f(1)}")?;
+    let nested = string_from_str("def f(){ if true { let x = 1; } }")?;
+    let custom = sh_format_tokens(&nested, 20, 2)?;
+    assert_true(str_contains(custom.as_str(), "  if true"), "formatter.sg", 36);
+    assert_true(sh_format_tokens(&nested, 0, 4).is_err(), "formatter.sg", 37);
+    assert_true(sh_format_tokens(&nested, 100, 0).is_err(), "formatter.sg", 38);
+    let broken = string_from_str("def f(){")?;
+    assert_true(sh_format_tokens(&broken, 100, 4).is_err(), "formatter.sg", 40);
+    Result { is_ok: true, value: true, error: 0 };
+}
+
+def main() -> i64 {
+    let strings = sengoo_string_live_handle_count();
+    let buffers = sengoo_buffer_live_handle_count();
+    let opaque = sengoo_opaque_live_handle_count();
+    let mut round = 0;
+    while round < 50 { let result = sh_test_format(); if not result.is_ok() { println(result.error); return 1; }; round = round + 1; };
+    assert_eq_i64(sengoo_string_live_handle_count(), strings, "formatter.sg", 55);
+    assert_eq_i64(sengoo_buffer_live_handle_count(), buffers, "formatter.sg", 56);
+    assert_eq_i64(sengoo_opaque_live_handle_count(), opaque, "formatter.sg", 57);
+    println("selfhost formatter: ok");
+    0;
+}

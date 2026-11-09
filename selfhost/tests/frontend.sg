@@ -1,0 +1,42 @@
+import selfhost_frontend;
+
+import std::assert;
+
+extern "C" {
+    fn sengoo_string_live_handle_count() -> i64;
+    fn sengoo_buffer_live_handle_count() -> i64;
+    fn sengoo_opaque_live_handle_count() -> i64;
+}
+
+def sh_test_frontend() -> Result<bool, i64> {
+    let features = sh_symbols_new(0);
+    let source = string_from_str("macro_")?;
+    source.push_str("rules! answer { () => { 42 }; } def main()->i64{answer!()}")?;
+    let result = sh_frontend(&source, 7, &features, 1048576, 10000);
+    assert_eq_i64(result.error, 0, "frontend.sg", 17);
+    assert_true(result.parsed.ast.root >= 0, "frontend.sg", 18);
+    assert_true(str_contains(result.expanded.text.as_str(), "42"), "frontend.sg", 19);
+    assert_eq_i64(sh_ast_word(&result.parsed.ast, result.parsed.ast.root, 1), 7, "frontend.sg", 20);
+    let bad = string_from_str("def f(){ let x = ; }")?;
+    let failed = sh_frontend(&bad, 1, &features, 1048576, 10000);
+    assert_true(failed.error != 0 and failed.parsed.ast.root == -1, "frontend.sg", 23);
+    assert_true(failed.start >= 0 and failed.end <= bad.len(), "frontend.sg", 24);
+    let protocol = string_from_str("impl Display for P { def fmt(&self,f: &mut Formatter) {} }")?;
+    let bridged = sh_frontend(&protocol, 2, &features, 1048576, 10000);
+    assert_eq_i64(bridged.error, 0, "frontend.sg", 27);
+    assert_true(str_contains(bridged.expanded.text.as_str(), "to_string"), "frontend.sg", 28);
+    Result { is_ok: true, value: true, error: 0 };
+}
+
+def main() -> i64 {
+    let strings = sengoo_string_live_handle_count();
+    let buffers = sengoo_buffer_live_handle_count();
+    let opaque = sengoo_opaque_live_handle_count();
+    let mut index = 0;
+    while index < 100 { let result = sh_test_frontend(); if not result.is_ok() { println(result.error); return 1; }; index = index + 1; };
+    assert_eq_i64(sengoo_string_live_handle_count(), strings, "frontend.sg", 42);
+    assert_eq_i64(sengoo_buffer_live_handle_count(), buffers, "frontend.sg", 43);
+    assert_eq_i64(sengoo_opaque_live_handle_count(), opaque, "frontend.sg", 44);
+    println("selfhost frontend: ok");
+    0;
+}

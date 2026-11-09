@@ -1,0 +1,31 @@
+import selfhost_protocols;
+
+struct ShFrontend {
+    expanded: ShExpanded,
+    parsed: ShParsed,
+    source: i64,
+    error: i64,
+    start: i64,
+    end: i64,
+}
+
+def sh_frontend_failed(expanded: ShExpanded, source: i64) -> ShFrontend {
+    let error = expanded.error;
+    let start = expanded.start;
+    let end = expanded.end;
+    let ast = ShAst { words: vec_new_i64(), edges: vec_new_i64(), root: -1 };
+    ShFrontend { expanded: expanded, parsed: ShParsed { ast: ast, error: error, start: start, end: end }, source: source, error: error, start: start, end: end };
+}
+
+def sh_frontend(text: &String, source: i64, features: &ShSymbols, max_bytes: i64, max_nodes: i64) -> ShFrontend {
+    let expanded = sh_expand(text, features, max_bytes, 16);
+    if expanded.error != 0 { return sh_frontend_failed(expanded, source); };
+    let protocols = sh_protocols(&expanded, max_bytes);
+    if protocols.error != 0 { return sh_frontend_failed(protocols, source); };
+    let parsed = sh_parse(&protocols.text, source, max_nodes);
+    let error = parsed.error;
+    let mut start = parsed.start;
+    let mut end = parsed.end;
+    if error != 0 { let original = sh_exp_map(&protocols.mapping, start, end); start = original.start; end = original.end; };
+    ShFrontend { expanded: protocols, parsed: parsed, source: source, error: error, start: start, end: end };
+}

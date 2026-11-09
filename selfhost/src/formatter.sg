@@ -1,0 +1,58 @@
+import selfhost_lexer;
+
+struct ShFormatState {
+    output: String,
+    column: i64,
+    depth: i64,
+    parentheses: i64,
+    brackets: i64,
+    indent: i64,
+    width: i64,
+    line_start: bool,
+    previous: i64,
+}
+
+def sh_format_line(state: &mut ShFormatState) -> Result<bool, i64> {
+    if not state.line_start { state.output.push_str("\n")?; (); };
+    state.column = 0;
+    state.line_start = true;
+    Result { is_ok: true, value: true, error: 0 };
+}
+
+def sh_format_piece(state: &mut ShFormatState, text: &String, spaced: bool) -> Result<bool, i64> {
+    if state.line_start { let mut count = 0; while count < state.depth * state.indent { state.output.push_str(" ")?; count = count + 1; }; state.column = count; state.line_start = false; } else { if spaced { state.output.push_str(" ")?; state.column = state.column + 1; (); }; };
+    string_copy_result(sengoo_string_push_padded_string_status(state.output.handle, text.handle, 1, 0))?;
+    let bytes = text.bytes();
+    let mut next = bytes.next();
+    while next.is_some() { if next.value == 10 { state.column = 0; state.line_start = true; } else { state.column = state.column + 1; state.line_start = false; }; next = bytes.next(); };
+    Result { is_ok: true, value: true, error: 0 };
+}
+
+def sh_format_compact_before(kind: i64) -> bool {
+    kind == sh_kind(")") or kind == sh_kind("]") or kind == sh_kind(",") or kind == sh_kind(";") or kind == sh_kind(":") or kind == sh_kind(".") or kind == sh_kind("::") or kind == sh_kind("?");
+}
+
+def sh_format_compact_after(kind: i64) -> bool {
+    kind == sh_kind("(") or kind == sh_kind("[") or kind == sh_kind(".") or kind == sh_kind("::") or kind == sh_kind("#") or kind == sh_kind("$");
+}
+
+def sh_format_error(code: i64) -> Result<String, i64> {
+    Result { is_ok: false, value: String { handle: 0 }, error: code };
+}
+
+def sh_format_tokens(source: &String, width: i64, indent: i64) -> Result<String, i64> {
+    if width < 1 or width > 1000000 or indent < 1 or indent > 64 { return sh_format_error(3001); };
+    let scanned = sh_lex(source, 1000000);
+    if scanned.error != 0 { return sh_format_error(scanned.error); };
+    let mut state = ShFormatState { output: string_new(), column: 0, depth: 0, parentheses: 0, brackets: 0, indent: indent, width: width, line_start: true, previous: 0 };
+    let mut index = 0;
+    while index < sh_token_count(&scanned.tokens) { let token = sh_token_get(&scanned.tokens, index); index = index + 1; if token.kind == 0 { break; }; if token.kind == 10 { continue; }; let text = sh_token_text(source, token)?; if token.kind == 11 { let spaced = not state.line_start; sh_format_piece(&mut state, &text, spaced)?; sh_format_line(&mut state)?; continue; }; if token.kind == 12 { let spaced = not state.line_start; sh_format_piece(&mut state, &text, spaced)?; sh_format_line(&mut state)?; continue; }; if token.kind == sh_kind("}") { if state.depth < 1 { return sh_format_error(3002); }; state.depth = state.depth - 1; sh_format_line(&mut state)?; (); }; let mut spaced = state.previous != 0 and not sh_format_compact_before(token.kind) and not sh_format_compact_after(state.previous); if token.kind == sh_kind("(") and (state.previous == 1 or state.previous == sh_kind(")") or state.previous == sh_kind("]") or state.previous == sh_kind("self")) { spaced = false; }; if token.kind == sh_kind("[") and state.previous == sh_kind("#") { spaced = false; }; if token.kind == sh_kind("!") and state.previous == 1 { spaced = false; }; if state.previous == sh_kind("}") and token.kind != sh_kind(";") and token.kind != sh_kind(",") and token.kind != sh_kind(")") and token.kind != sh_kind("]") and token.kind != sh_kind(".") and token.kind != sh_kind("else") and token.kind != sh_kind("elif") { sh_format_line(&mut state)?; (); }; sh_format_piece(&mut state, &text, spaced)?; if token.kind == sh_kind("{") { state.depth = state.depth + 1; if state.depth > 1024 { return sh_format_error(3003); }; sh_format_line(&mut state)?; (); }; if token.kind == sh_kind("(") { state.parentheses = state.parentheses + 1; }; if token.kind == sh_kind(")") { if state.parentheses < 1 { return sh_format_error(3002); }; state.parentheses = state.parentheses - 1; }; if token.kind == sh_kind("[") { state.brackets = state.brackets + 1; }; if token.kind == sh_kind("]") { if state.brackets < 1 { return sh_format_error(3002); }; state.brackets = state.brackets - 1; }; if token.kind == sh_kind(";") and state.parentheses == 0 and state.brackets == 0 { sh_format_line(&mut state)?; (); }; if token.kind == sh_kind(",") and state.column >= state.width { sh_format_line(&mut state)?; (); }; state.previous = token.kind; };
+    if state.depth != 0 or state.parentheses != 0 or state.brackets != 0 { return sh_format_error(3002); };
+    sh_format_line(&mut state)?;
+    let verified = sh_lex(&state.output, 1000000);
+    if verified.error != 0 { return sh_format_error(3004); };
+    let mut original = 0;
+    let mut formatted = 0;
+    while original < sh_token_count(&scanned.tokens) { let before = sh_token_get(&scanned.tokens, original); original = original + 1; if before.kind == 10 { continue; }; let mut after = sh_token_get(&verified.tokens, formatted); while after.kind == 10 { formatted = formatted + 1; after = sh_token_get(&verified.tokens, formatted); }; formatted = formatted + 1; if before.kind != after.kind { return sh_format_error(3004); }; let before_text = sh_token_text(source, before)?; let after_text = sh_token_text(&state.output, after)?; if not before_text.eq(after_text) { return sh_format_error(3004); }; };
+    Result { is_ok: true, value: state.output, error: 0 };
+}

@@ -1,0 +1,376 @@
+import selfhost_lexer;
+
+import selfhost_derive;
+
+struct ShSourceMap {
+    words: Vec<i64>,
+}
+
+struct ShDeprecated {
+    name: String,
+    kind: i64,
+    message: String,
+    replacement: String,
+    removal: String,
+    flags: i64,
+}
+
+struct ShExpanded {
+    text: String,
+    mapping: ShSourceMap,
+    deprecated: Vec<ShDeprecated>,
+    error: i64,
+    start: i64,
+    end: i64,
+}
+
+struct ShMacroParam {
+    name: String,
+    fragment: String,
+}
+
+struct ShMacroArm {
+    params: Vec<ShMacroParam>,
+    template: String,
+}
+
+struct ShMacro {
+    name: String,
+    arms: Vec<ShMacroArm>,
+}
+
+struct ShMacroTable {
+    items: Vec<ShMacro>,
+}
+
+struct ShSplit {
+    parts: Vec<ShText>,
+    error: i64,
+}
+
+def sh_exp_empty() -> ShExpanded {
+    let deprecated: Vec<ShDeprecated> = vec_new();
+    ShExpanded { text: string_new(), mapping: ShSourceMap { words: vec_new_i64() }, deprecated: deprecated, error: 0, start: 0, end: 0 };
+}
+
+def sh_exp_fail(output: &mut ShExpanded, code: i64, start: i64, end: i64) {
+    output.error = code;
+    output.start = start;
+    output.end = end;
+}
+
+def sh_exp_error(code: i64, start: i64, end: i64) -> ShExpanded {
+    let mut failure = sh_exp_empty();
+    failure.error = code;
+    failure.start = start;
+    failure.end = end;
+    failure;
+}
+
+def sh_exp_append(output: &String, value: &String) -> bool {
+    sengoo_string_push_padded_string_status(output.handle, value.handle, 1, 0) >= 0;
+}
+
+def sh_exp_equal(value: &String, expected: &str) -> bool {
+    let owned = string_from_str(expected);
+    owned.is_ok() and sengoo_string_eq(value.handle, owned.value.handle) != 0;
+}
+
+def sh_exp_map(mapping: &ShSourceMap, start: i64, end: i64) -> ShSpan {
+    let mut index = 0;
+    let mut first = -1;
+    let mut last = -1;
+    while index < mapping.words.len() { let low = mapping.words.get(index).unwrap_or(0); let high = mapping.words.get(index + 1).unwrap_or(0); let mut origin = mapping.words.get(index + 2).unwrap_or(0); let mut limit = mapping.words.get(index + 3).unwrap_or(0); if start < high and end > low or start == end and start >= low and start <= high { if mapping.words.get(index + 4).unwrap_or(0) == 0 { let delta = if start > low { start - low; } else { 0; }; let tail = if end < high { high - end; } else { 0; }; origin = origin + delta; limit = limit - tail; }; if first < 0 or origin < first { first = origin; }; if limit > last { last = limit; }; }; index = index + 5; };
+    if first < 0 { first = start; last = end; };
+    ShSpan { source: 0, start: first, end: last };
+}
+
+def sh_exp_emit_mode(output: &ShExpanded, value: &String, origin: ShSpan, maximum: i64, mode: i64) -> bool {
+    let start = output.text.len();
+    if maximum < 0 or start > maximum - value.len() { return false; };
+    if not sh_exp_append(&output.text, value) { return false; };
+    if value.len() == 0 { return true; };
+    output.mapping.words.push(start) and output.mapping.words.push(output.text.len()) and output.mapping.words.push(origin.start) and output.mapping.words.push(origin.end) and output.mapping.words.push(mode);
+}
+
+def sh_exp_emit(output: &ShExpanded, value: &String, origin: ShSpan, maximum: i64) -> bool {
+    sh_exp_emit_mode(output, value, origin, maximum, 1);
+}
+
+def sh_exp_copy(output: &ShExpanded, input: &ShExpanded, start: i64, end: i64, maximum: i64) -> bool {
+    if start == end { return true; };
+    let mut index = 0;
+    let mut cursor = start;
+    while index < input.mapping.words.len() and cursor < end { let low = input.mapping.words.get(index).unwrap_or(0); let high = input.mapping.words.get(index + 1).unwrap_or(0); if high > cursor and low < end { let bound = if high < end { high; } else { end; }; let part = input.text.get(cursor, bound); if not part.is_ok() { return false; }; let mode = input.mapping.words.get(index + 4).unwrap_or(0); if not sh_exp_emit_mode(output, &part.value, sh_exp_map(&input.mapping, cursor, bound), maximum, mode) { return false; }; cursor = bound; }; index = index + 5; };
+    cursor == end;
+}
+
+def sh_exp_next(tokens: &ShTokens, index: i64) -> i64 {
+    let mut next = index;
+    while next < sh_token_count(tokens) and sh_token_trivia(sh_token_get(tokens, next).kind) { next = next + 1; };
+    next;
+}
+
+def sh_exp_is(text: &String, tokens: &ShTokens, index: i64, spelling: &str) -> bool {
+    let token = sh_token_get(tokens, index);
+    let value = sh_token_text(text, token);
+    if not value.is_ok() { return false; };
+    value.value.as_str() == spelling;
+}
+
+def sh_exp_close(kind: i64) -> i64 {
+    if kind == sh_kind("(") { return sh_kind(")"); };
+    if kind == sh_kind("[") { return sh_kind("]"); };
+    if kind == sh_kind("{") { return sh_kind("}"); };
+    -1;
+}
+
+def sh_exp_balanced(tokens: &ShTokens, start: i64) -> i64 {
+    let open = sh_token_get(tokens, start).kind;
+    let close = sh_exp_close(open);
+    if close < 0 { return -1; };
+    let mut depth = 1;
+    let mut index = start + 1;
+    while index < sh_token_count(tokens) { let kind = sh_token_get(tokens, index).kind; if kind == open { depth = depth + 1; }; if kind == close { depth = depth - 1; if depth == 0 { return index; }; }; index = index + 1; };
+    -1;
+}
+
+def sh_exp_trim(text: &String) -> Result<String, i64> {
+    let bytes = sh_lex_bytes(text)?;
+    let mut start = 0;
+    let mut end = text.len();
+    while start < end { let scalar = sh_lex_utf8(&bytes, start); if not sh_lex_unicode_space(scalar.value) { break; }; start = scalar.end; };
+    while end > start { let mut at = end - 1; while at > start and sh_lex_byte(&bytes, at) >= 128 and sh_lex_byte(&bytes, at) < 192 { at = at - 1; }; if not sh_lex_unicode_space(sh_lex_utf8(&bytes, at).value) { break; }; end = at; };
+    text.get(start, end);
+}
+
+def sh_exp_split(text: &String) -> ShSplit {
+    let parts: Vec<ShText> = vec_new();
+    let lexed = sh_lex(text, text.len() + 1);
+    if lexed.error != 0 { return ShSplit { parts: parts, error: 1301 }; };
+    let mut paren = 0;
+    let mut brace = 0;
+    let mut bracket = 0;
+    let mut angle = 0;
+    let mut start = 0;
+    let mut index = 0;
+    while index < sh_token_count(&lexed.tokens) { let token = sh_token_get(&lexed.tokens, index); let kind = token.kind; if kind == sh_kind("(") { paren = paren + 1; }; if kind == sh_kind(")") { paren = paren - 1; }; if kind == sh_kind("{") { brace = brace + 1; }; if kind == sh_kind("}") { brace = brace - 1; }; if kind == sh_kind("[") { bracket = bracket + 1; }; if kind == sh_kind("]") { bracket = bracket - 1; }; if kind == sh_kind("<") or kind == sh_kind("<=") { angle = angle + 1; }; if kind == sh_kind(">") or kind == sh_kind(">=") or kind == sh_kind("->") or kind == sh_kind("=>") { angle = angle - 1; }; if kind == sh_kind("<<") or kind == sh_kind("<<=") { angle = angle + 2; }; if kind == sh_kind(">>") or kind == sh_kind(">>=") { angle = angle - 2; }; if kind == sh_kind(",") and paren == 0 and brace == 0 and bracket == 0 and angle == 0 or kind == 0 { let raw = text.get(start, token.start); if not raw.is_ok() { return ShSplit { parts: parts, error: 1301 }; }; let part = sh_exp_trim(&raw.value); if not part.is_ok() { return ShSplit { parts: parts, error: 1301 }; }; if part.value.len() > 0 { let item = ShText { text: part.value }; parts.push(item); (); }; start = token.end; }; index = index + 1; };
+    let error = if paren != 0 or brace != 0 or bracket != 0 or angle != 0 { 1301; } else { 0; };
+    ShSplit { parts: parts, error: error };
+}
+
+def sh_exp_ident(text: &String) -> bool {
+    let bytes = sh_lex_bytes(text);
+    if not bytes.is_ok() or text.len() == 0 { return false; };
+    if not sh_lex_letter(sh_lex_byte(&bytes.value, 0)) { return false; };
+    let mut index = 1;
+    while index < text.len() { if not sh_lex_word(sh_lex_byte(&bytes.value, index)) { return false; }; index = index + 1; };
+    true;
+}
+
+def sh_exp_fragment(fragment: &String, argument: &String) -> bool {
+    let name = fragment.as_str();
+    if argument.len() == 0 { return false; };
+    if name == "ident" { return sh_exp_ident(argument); };
+    let bytes = sh_lex_bytes(argument);
+    if not bytes.is_ok() { return false; };
+    let first = sh_lex_byte(&bytes.value, 0);
+    if name == "literal" { return first == 34 or first == 39 or sh_lex_digit(first); };
+    if name == "block" { return first == 123 and sh_lex_byte(&bytes.value, argument.len() - 1) == 125; };
+    name == "expr" or name == "ty" or name == "path" or name == "stmt" or name == "tt" or name == "pat";
+}
+
+def sh_exp_arm_error(code: i64) -> Result<ShMacroArm, i64> {
+    let empty: Vec<ShMacroParam> = Vec { handle: 0, marker: 0 };
+    Result { is_ok: false, value: ShMacroArm { params: empty, template: String { handle: 0 } }, error: code };
+}
+
+def sh_exp_macro_error(code: i64) -> Result<ShMacro, i64> {
+    let empty: Vec<ShMacroArm> = Vec { handle: 0, marker: 0 };
+    Result { is_ok: false, value: ShMacro { name: String { handle: 0 }, arms: empty }, error: code };
+}
+
+def sh_exp_arm(pattern: &String, template: &String) -> Result<ShMacroArm, i64> {
+    let params: Vec<ShMacroParam> = vec_new();
+    let split = sh_exp_split(pattern);
+    if split.error != 0 { return sh_exp_arm_error(1301); };
+    let mut index = 0;
+    while index < split.parts.len() { let part = split.parts.get(index); let lexed = sh_lex(&part.text, part.text.len() + 1); let dollar = sh_exp_next(&lexed.tokens, 0); let name = sh_exp_next(&lexed.tokens, dollar + 1); let colon = sh_exp_next(&lexed.tokens, name + 1); let fragment = sh_exp_next(&lexed.tokens, colon + 1); let after = sh_exp_next(&lexed.tokens, fragment + 1); if sh_token_get(&lexed.tokens, dollar).kind != sh_kind("$") or sh_token_get(&lexed.tokens, colon).kind != sh_kind(":") or sh_token_get(&lexed.tokens, after).kind != 0 { return sh_exp_arm_error(1301); }; let capture = sh_token_text(&part.text, sh_token_get(&lexed.tokens, name)); let shape = sh_token_text(&part.text, sh_token_get(&lexed.tokens, fragment)); if not capture.is_ok() or not shape.is_ok() { return sh_exp_arm_error(1301); }; if not sh_exp_ident(&capture.value) or not sh_exp_ident(&shape.value) { return sh_exp_arm_error(1301); }; let param = ShMacroParam { name: capture.value, fragment: shape.value }; if not params.push(param) { return sh_exp_arm_error(1304); }; index = index + 1; };
+    let copied = template.clone();
+    if not copied.is_ok() { return sh_exp_arm_error(1304); };
+    Result { is_ok: true, value: ShMacroArm { params: params, template: copied.value }, error: 0 };
+}
+
+def sh_exp_definition(text: &String, tokens: &ShTokens, start: i64) -> Result<ShMacro, i64> {
+    let arms: Vec<ShMacroArm> = vec_new();
+    let bang = sh_exp_next(tokens, start + 1);
+    let name_at = sh_exp_next(tokens, bang + 1);
+    let open = sh_exp_next(tokens, name_at + 1);
+    let close = sh_exp_balanced(tokens, open);
+    let name = sh_token_text(text, sh_token_get(tokens, name_at));
+    if sh_token_get(tokens, bang).kind != sh_kind("!") or sh_token_get(tokens, open).kind != sh_kind("{") or close < 0 or not name.is_ok() { return sh_exp_macro_error(1301); };
+    if not sh_exp_ident(&name.value) { return sh_exp_macro_error(1301); };
+    let mut cursor = sh_exp_next(tokens, open + 1);
+    while cursor < close { let pattern_end = sh_exp_balanced(tokens, cursor); let arrow = sh_exp_next(tokens, pattern_end + 1); let body = sh_exp_next(tokens, arrow + 1); let body_end = sh_exp_balanced(tokens, body); if pattern_end < 0 or body_end < 0 or pattern_end >= close or arrow >= close or body >= close or body_end >= close or sh_token_get(tokens, arrow).kind != sh_kind("=>") { return sh_exp_macro_error(1301); }; let pattern = text.get(sh_token_get(tokens, cursor).end, sh_token_get(tokens, pattern_end).start); let template = text.get(sh_token_get(tokens, body).end, sh_token_get(tokens, body_end).start); if not pattern.is_ok() or not template.is_ok() { return sh_exp_macro_error(1301); }; let arm = sh_exp_arm(&pattern.value, &template.value); if not arm.is_ok() { return sh_exp_macro_error(arm.error); }; if not arms.push(arm.value) { return sh_exp_macro_error(1304); }; cursor = sh_exp_next(tokens, body_end + 1); if sh_token_get(tokens, cursor).kind == sh_kind(";") { cursor = sh_exp_next(tokens, cursor + 1); }; };
+    if arms.len() == 0 { return sh_exp_macro_error(1301); };
+    Result { is_ok: true, value: ShMacro { name: name.value, arms: arms }, error: 0 };
+}
+
+def sh_exp_find(table: &ShMacroTable, name: &String) -> i64 {
+    let mut index = 0;
+    while index < table.items.len() { if sengoo_string_eq(table.items.get(index).name.handle, name.handle) != 0 { return index; }; index = index + 1; };
+    -1;
+}
+
+def sh_exp_template(template: &String, params: &Vec<ShMacroParam>, args: &ShSplit, maximum: i64) -> Result<String, i64> {
+    let bytes = sh_lex_bytes(template)?;
+    let output = string_new();
+    let mut index = 0;
+    let mut plain = 0;
+    while index < template.len() { if sh_lex_byte(&bytes, index) == 36 and sh_lex_letter(sh_lex_byte(&bytes, index + 1)) { let mut end = index + 2; while sh_lex_word(sh_lex_byte(&bytes, end)) { end = end + 1; }; let key = template.get(index + 1, end)?; let mut found = -1; let mut param = 0; while param < params.len() { if sengoo_string_eq(params.get(param).name.handle, key.handle) != 0 { found = param; }; param = param + 1; }; if found >= 0 { let prefix = template.get(plain, index)?; if not sh_exp_append(&output, &prefix) or not sh_exp_append(&output, &args.parts.get(found).text) { return Result { is_ok: false, value: String { handle: 0 }, error: 1304 }; }; index = end; plain = end; } else { index = end; }; } else { index = index + 1; }; if output.len() > maximum { return Result { is_ok: false, value: String { handle: 0 }, error: 1304 }; }; };
+    let suffix = template.get(plain, template.len())?;
+    if not sh_exp_append(&output, &suffix) or output.len() > maximum { return Result { is_ok: false, value: String { handle: 0 }, error: 1304 }; };
+    Result { is_ok: true, value: output, error: 0 };
+}
+
+def sh_exp_invoke(definition: &ShMacro, args: &String, maximum: i64) -> Result<String, i64> {
+    let split = sh_exp_split(args);
+    if split.error != 0 { return Result { is_ok: false, value: String { handle: 0 }, error: split.error }; };
+    let mut index = 0;
+    while index < definition.arms.len() { let arm = definition.arms.get(index); let mut matches = arm.params.len() == split.parts.len(); let mut param = 0; while matches and param < arm.params.len() { if not sh_exp_fragment(&arm.params.get(param).fragment, &split.parts.get(param).text) { matches = false; }; param = param + 1; }; if matches { return sh_exp_template(&arm.template, &arm.params, &split, maximum); }; index = index + 1; };
+    Result { is_ok: false, value: String { handle: 0 }, error: 1302 };
+}
+
+def sh_expand_macros(text: &String, maximum: i64, passes: i64) -> ShExpanded {
+    let items: Vec<ShMacro> = vec_new();
+    let table = ShMacroTable { items: items };
+    let mut output = sh_exp_empty();
+    let initial = sh_exp_empty();
+    let origin = ShSpan { source: 0, start: 0, end: text.len() };
+    if not sh_exp_emit_mode(&initial, text, origin, maximum, 0) { return sh_exp_error(1304, 0, text.len()); };
+    let lexed = sh_lex(text, text.len() + 1);
+    if lexed.error != 0 { return sh_exp_error(lexed.error, lexed.start, lexed.end); };
+    let mut index = 0;
+    let mut copied_to = 0;
+    while index < sh_token_count(&lexed.tokens) { let token = sh_token_get(&lexed.tokens, index); if token.kind == 1 and sh_exp_is(text, &lexed.tokens, index, "macro_rules") and sh_token_get(&lexed.tokens, index + 1).kind == sh_kind("!") { let definition = sh_exp_definition(text, &lexed.tokens, index); if not definition.is_ok() { return sh_exp_error(definition.error, token.start, token.end); }; if sh_exp_find(&table, &definition.value.name) >= 0 { return sh_exp_error(1301, token.start, token.end); }; let bang = sh_exp_next(&lexed.tokens, index + 1); let name = sh_exp_next(&lexed.tokens, bang + 1); let open = sh_exp_next(&lexed.tokens, name + 1); let close = sh_exp_balanced(&lexed.tokens, open); if not sh_exp_copy(&output, &initial, copied_to, token.start, maximum) { return sh_exp_error(1304, token.start, token.end); }; copied_to = sh_token_get(&lexed.tokens, close).end; if not table.items.push(definition.value) { return sh_exp_error(1304, token.start, token.end); }; index = close + 1; } else { index = index + 1; }; };
+    if not sh_exp_copy(&output, &initial, copied_to, text.len(), maximum) { return sh_exp_error(1304, copied_to, text.len()); };
+    if table.items.len() == 0 { return output; };
+    let mut expansion_pass = 0;
+    while expansion_pass < passes and expansion_pass < 16 { let mut next = sh_exp_empty(); let lexed = sh_lex(&output.text, output.text.len() + 1); if lexed.error != 0 { let span = sh_exp_map(&output.mapping, lexed.start, lexed.end); return sh_exp_error(lexed.error, span.start, span.end); }; index = 0; copied_to = 0; let mut changed = false; while index < sh_token_count(&lexed.tokens) { let token = sh_token_get(&lexed.tokens, index); if token.kind == 1 or token.kind >= 100 and token.kind <= 156 or token.kind == sh_kind("_") { let bang = sh_exp_next(&lexed.tokens, index + 1); let open = sh_exp_next(&lexed.tokens, bang + 1); if sh_token_get(&lexed.tokens, bang).kind == sh_kind("!") and sh_exp_close(sh_token_get(&lexed.tokens, open).kind) >= 0 { let close = sh_exp_balanced(&lexed.tokens, open); let name = sh_token_text(&output.text, token); if close < 0 or not name.is_ok() { let site = sh_exp_map(&output.mapping, token.start, token.end); return sh_exp_error(1301, site.start, site.end); }; let found = sh_exp_find(&table, &name.value); let end = sh_token_get(&lexed.tokens, close).end; let site = sh_exp_map(&output.mapping, token.start, end); if found < 0 { return sh_exp_error(1302, site.start, site.end); }; let args = output.text.get(sh_token_get(&lexed.tokens, open).end, sh_token_get(&lexed.tokens, close).start); if not args.is_ok() { return sh_exp_error(1301, site.start, site.end); }; let expanded = sh_exp_invoke(table.items.get(found), &args.value, maximum); if not expanded.is_ok() { return sh_exp_error(expanded.error, site.start, site.end); }; if not sh_exp_copy(&next, &output, copied_to, token.start, maximum) or not sh_exp_emit(&next, &expanded.value, site, maximum) { return sh_exp_error(1304, site.start, site.end); }; copied_to = end; index = close + 1; changed = true; } else { index = index + 1; }; } else { index = index + 1; }; }; if not sh_exp_copy(&next, &output, copied_to, output.text.len(), maximum) { return sh_exp_error(1304, 0, text.len()); }; if not changed { return next; }; output = next; expansion_pass = expansion_pass + 1; };
+    sh_exp_error(1303, 0, text.len());
+}
+
+struct ShCfg {
+    value: bool,
+    next: i64,
+    error: i64,
+}
+
+struct ShDecl {
+    kind: i64,
+    name: i64,
+    end: i64,
+}
+
+def sh_cfg_parse(text: &String, tokens: &ShTokens, start: i64, limit: i64, features: &ShSymbols, os: &str, depth: i64) -> ShCfg {
+    if depth > 64 { return ShCfg { value: false, next: start, error: 1401 }; };
+    let name_at = sh_exp_next(tokens, start);
+    let name_token = sh_token_get(tokens, name_at);
+    if name_at >= limit or name_token.kind == 0 { return ShCfg { value: false, next: start, error: 1401 }; };
+    let spelling = sh_token_text(text, name_token);
+    if not spelling.is_ok() { return ShCfg { value: false, next: start, error: 1401 }; };
+    let name = spelling.value.as_str();
+    let mut cursor = sh_exp_next(tokens, name_at + 1);
+    if name == "target_os" or name == "target_family" or name == "feature" { if sh_token_get(tokens, cursor).kind != sh_kind("=") { return ShCfg { value: false, next: cursor, error: 1401 }; }; cursor = sh_exp_next(tokens, cursor + 1); let token = sh_token_get(tokens, cursor); if token.kind != 5 or cursor >= limit { return ShCfg { value: false, next: cursor, error: 1401 }; }; let raw = text.get(token.start + 1, token.end - 1); if not raw.is_ok() { return ShCfg { value: false, next: cursor, error: 1401 }; }; let mut enabled = false; if name == "target_os" { if not sh_exp_equal(&raw.value, "windows") and not sh_exp_equal(&raw.value, "linux") and not sh_exp_equal(&raw.value, "macos") { return ShCfg { value: false, next: cursor, error: 1401 }; }; enabled = sh_exp_equal(&raw.value, os); }; if name == "target_family" { if not sh_exp_equal(&raw.value, "windows") and not sh_exp_equal(&raw.value, "unix") { return ShCfg { value: false, next: cursor, error: 1401 }; }; enabled = if os == "windows" { sh_exp_equal(&raw.value, "windows"); } else { sh_exp_equal(&raw.value, "unix"); }; }; if name == "feature" { if raw.value.len() == 0 { return ShCfg { value: false, next: cursor, error: 1401 }; }; let mut index = 0; while index < features.names.len() { if sengoo_string_eq(features.names.get(index).text.handle, raw.value.handle) != 0 { enabled = true; }; index = index + 1; }; }; return ShCfg { value: enabled, next: sh_exp_next(tokens, cursor + 1), error: 0 }; };
+    if name != "all" and name != "any" and name != "not" { return ShCfg { value: false, next: cursor, error: 1401 }; };
+    if sh_token_get(tokens, cursor).kind != sh_kind("(") { return ShCfg { value: false, next: cursor, error: 1401 }; };
+    cursor = sh_exp_next(tokens, cursor + 1);
+    let mut count = 0;
+    let mut enabled = name == "all";
+    while cursor < limit and sh_token_get(tokens, cursor).kind != sh_kind(")") { let child = sh_cfg_parse(text, tokens, cursor, limit, features, os, depth + 1); if child.error != 0 { return child; }; if name == "all" { enabled = enabled and child.value; }; if name == "any" { enabled = enabled or child.value; }; if name == "not" { enabled = not child.value; }; count = count + 1; cursor = child.next; if sh_token_get(tokens, cursor).kind == sh_kind(",") { cursor = sh_exp_next(tokens, cursor + 1); } else { if sh_token_get(tokens, cursor).kind != sh_kind(")") { return ShCfg { value: false, next: cursor, error: 1401 }; }; }; };
+    if count == 0 or name == "not" and count != 1 or sh_token_get(tokens, cursor).kind != sh_kind(")") { return ShCfg { value: false, next: cursor, error: 1401 }; };
+    ShCfg { value: enabled, next: sh_exp_next(tokens, cursor + 1), error: 0 };
+}
+
+def sh_exp_decl(tokens: &ShTokens, start: i64) -> ShDecl {
+    let mut cursor = start;
+    if sh_token_get(tokens, cursor).kind == sh_kind("pub") or sh_token_get(tokens, cursor).kind == sh_kind("priv") { cursor = sh_exp_next(tokens, cursor + 1); if sh_token_get(tokens, cursor).kind == sh_kind("(") { let close = sh_exp_balanced(tokens, cursor); if close < 0 { return ShDecl { kind: 0, name: cursor, end: -1 }; }; cursor = sh_exp_next(tokens, close + 1); }; };
+    if sh_token_get(tokens, cursor).kind == sh_kind("unsafe") { cursor = sh_exp_next(tokens, cursor + 1); };
+    if sh_token_get(tokens, cursor).kind == sh_kind("async") { cursor = sh_exp_next(tokens, cursor + 1); };
+    let keyword = sh_token_get(tokens, cursor).kind;
+    let mut kind = 0;
+    if keyword == sh_kind("struct") { kind = 1; };
+    if keyword == sh_kind("enum") { kind = 2; };
+    if keyword == sh_kind("class") { kind = 3; };
+    if keyword == sh_kind("trait") { kind = 4; };
+    if keyword == sh_kind("impl") { kind = 5; };
+    if keyword == sh_kind("def") { kind = 6; };
+    if keyword == sh_kind("const") { kind = 7; };
+    if keyword == sh_kind("extern") or keyword == sh_kind("static") or keyword == sh_kind("type") or keyword == sh_kind("import") { kind = 8; };
+    let name = sh_exp_next(tokens, cursor + 1);
+    if kind == 0 { return ShDecl { kind: 0, name: name, end: start + 1 }; };
+    while cursor < sh_token_count(tokens) { let token = sh_token_get(tokens, cursor); if token.kind == sh_kind("{") { let close = sh_exp_balanced(tokens, cursor); return ShDecl { kind: kind, name: name, end: if close < 0 { -1; } else { close + 1; } }; }; if token.kind == sh_kind(";") { return ShDecl { kind: kind, name: name, end: cursor + 1 }; }; if token.kind == sh_kind("(") { let close = sh_exp_balanced(tokens, cursor); if close < 0 { return ShDecl { kind: kind, name: name, end: -1 }; }; cursor = close; }; cursor = cursor + 1; };
+    ShDecl { kind: kind, name: name, end: -1 };
+}
+
+def sh_deprecated_empty() -> ShDeprecated {
+    ShDeprecated { name: string_new(), kind: 0, message: string_new(), replacement: string_new(), removal: string_new(), flags: 0 };
+}
+
+def sh_deprecated_error(code: i64) -> Result<ShDeprecated, i64> {
+    Result { is_ok: false, value: ShDeprecated { name: String { handle: 0 }, kind: 0, message: String { handle: 0 }, replacement: String { handle: 0 }, removal: String { handle: 0 }, flags: 0 }, error: code };
+}
+
+def sh_deprecated_parse(text: &String, tokens: &ShTokens, name: i64, close: i64) -> Result<ShDeprecated, i64> {
+    let mut value = sh_deprecated_empty();
+    let mut cursor = sh_exp_next(tokens, name + 1);
+    if cursor == close { return Result { is_ok: true, value: value, error: 0 }; };
+    if sh_token_get(tokens, cursor).kind != sh_kind("(") { return sh_deprecated_error(1402); };
+    let end = sh_exp_balanced(tokens, cursor);
+    if end < 0 or sh_exp_next(tokens, end + 1) != close { return sh_deprecated_error(1402); };
+    cursor = sh_exp_next(tokens, cursor + 1);
+    let first = sh_token_get(tokens, cursor);
+    if first.kind == 5 { if sh_exp_next(tokens, cursor + 1) != end { return sh_deprecated_error(1402); }; let copied = text.get(first.start + 1, first.end - 1); if not copied.is_ok() { return sh_deprecated_error(1402); }; value.message = copied.value; value.flags = 1; return Result { is_ok: true, value: value, error: 0 }; };
+    while cursor < end { let key = sh_token_text(text, sh_token_get(tokens, cursor)); if not key.is_ok() { return sh_deprecated_error(1402); }; let mut flag = 0; if key.value.as_str() == "note" or key.value.as_str() == "message" { flag = 1; }; if key.value.as_str() == "replacement" { flag = 2; }; if key.value.as_str() == "removal" { flag = 4; }; if flag == 0 or (value.flags & flag) != 0 { return sh_deprecated_error(1402); }; cursor = sh_exp_next(tokens, cursor + 1); if sh_token_get(tokens, cursor).kind != sh_kind("=") { return sh_deprecated_error(1402); }; cursor = sh_exp_next(tokens, cursor + 1); let token = sh_token_get(tokens, cursor); if token.kind != 5 { return sh_deprecated_error(1402); }; let copied = text.get(token.start + 1, token.end - 1); if not copied.is_ok() { return sh_deprecated_error(1402); }; if flag == 1 { value.message = copied.value; } else { if flag == 2 { value.replacement = copied.value; } else { value.removal = copied.value; }; }; value.flags = value.flags | flag; cursor = sh_exp_next(tokens, cursor + 1); if cursor < end { if sh_token_get(tokens, cursor).kind != sh_kind(",") { return sh_deprecated_error(1402); }; cursor = sh_exp_next(tokens, cursor + 1); if cursor == end { return sh_deprecated_error(1402); }; }; };
+    if (value.flags & 6) != 6 { return sh_deprecated_error(1402); };
+    Result { is_ok: true, value: value, error: 0 };
+}
+
+def sh_exp_mask(output: &ShExpanded, input: &ShExpanded, start: i64, end: i64, maximum: i64) -> bool {
+    let mut record = 0;
+    let mut cursor = start;
+    while record < input.mapping.words.len() and cursor < end { let low = input.mapping.words.get(record).unwrap_or(0); let high = input.mapping.words.get(record + 1).unwrap_or(0); if high > cursor and low < end { let bound = if high < end { high; } else { end; }; let part = input.text.get(cursor, bound); if not part.is_ok() { return false; }; let bytes = sh_lex_bytes(&part.value); if not bytes.is_ok() { return false; }; let masked = string_new(); let mut index = 0; while index < part.value.len() { let byte = sh_lex_byte(&bytes.value, index); if byte == 10 { if not masked.push_str("\n").is_ok() { return false; }; } else { if byte == 13 { if not masked.push_str("\r").is_ok() { return false; }; } else { if not masked.push_str(" ").is_ok() { return false; }; }; }; index = index + 1; }; let mode = input.mapping.words.get(record + 4).unwrap_or(0); if not sh_exp_emit_mode(output, &masked, sh_exp_map(&input.mapping, cursor, bound), maximum, mode) { return false; }; cursor = bound; }; record = record + 5; };
+    cursor == end;
+}
+
+def sh_expand_attributes(input: &ShExpanded, features: &ShSymbols, os: &str, maximum: i64) -> ShExpanded {
+    let mut output = sh_exp_empty();
+    let lexed = sh_lex(&input.text, input.text.len() + 1);
+    if lexed.error != 0 { let site = sh_exp_map(&input.mapping, lexed.start, lexed.end); return sh_exp_error(lexed.error, site.start, site.end); };
+    let mut cursor = sh_exp_next(&lexed.tokens, 0);
+    let mut copied_to = 0;
+    while cursor < sh_token_count(&lexed.tokens) and sh_token_get(&lexed.tokens, cursor).kind != 0 { let attrs = ShTokens { words: vec_new_i64() }; let start = cursor; while sh_token_get(&lexed.tokens, cursor).kind == sh_kind("#") { let open = sh_exp_next(&lexed.tokens, cursor + 1); let name = sh_exp_next(&lexed.tokens, open + 1); let close = sh_exp_balanced(&lexed.tokens, open); if sh_token_get(&lexed.tokens, open).kind != sh_kind("[") or close < 0 { let site = sh_exp_map(&input.mapping, sh_token_get(&lexed.tokens, cursor).start, sh_token_get(&lexed.tokens, cursor).end); return sh_exp_error(1401, site.start, site.end); }; attrs.words.push(cursor); attrs.words.push(name); attrs.words.push(close); cursor = sh_exp_next(&lexed.tokens, close + 1); }; let declaration = sh_exp_decl(&lexed.tokens, cursor); if declaration.end < 0 { let site = sh_exp_map(&input.mapping, sh_token_get(&lexed.tokens, start).start, input.text.len()); return sh_exp_error(1401, site.start, site.end); }; if attrs.words.len() == 0 or declaration.kind == 0 or declaration.kind == 8 { cursor = sh_exp_next(&lexed.tokens, declaration.end); } else { let mut enabled = true; let masked = ShTokens { words: vec_new_i64() }; let mut attr = 0; while attr < attrs.words.len() { let attr_start = attrs.words.get(attr).unwrap_or(0); let name = attrs.words.get(attr + 1).unwrap_or(0); let close = attrs.words.get(attr + 2).unwrap_or(0); let first = sh_token_get(&lexed.tokens, attr_start).start; let last = sh_token_get(&lexed.tokens, close).end; let site = sh_exp_map(&input.mapping, first, last); if sh_exp_is(&input.text, &lexed.tokens, name, "derive") { if declaration.kind < 1 or declaration.kind > 3 { return sh_exp_error(1403, site.start, site.end); }; } else { if sh_exp_is(&input.text, &lexed.tokens, name, "cfg") { let open = sh_exp_next(&lexed.tokens, name + 1); let end = sh_exp_balanced(&lexed.tokens, open); if sh_token_get(&lexed.tokens, open).kind != sh_kind("(") or end < 0 or sh_exp_next(&lexed.tokens, end + 1) != close { return sh_exp_error(1401, site.start, site.end); }; let predicate = sh_cfg_parse(&input.text, &lexed.tokens, open + 1, end, features, os, 0); if predicate.error != 0 or predicate.next != end { return sh_exp_error(1401, site.start, site.end); }; enabled = enabled and predicate.value; } else { if sh_exp_is(&input.text, &lexed.tokens, name, "deprecated") { if declaration.kind == 5 { return sh_exp_error(1403, site.start, site.end); }; let metadata = sh_deprecated_parse(&input.text, &lexed.tokens, name, close); if not metadata.is_ok() { return sh_exp_error(metadata.error, site.start, site.end); }; let mut item = metadata.value; let declaration_name = sh_token_text(&input.text, sh_token_get(&lexed.tokens, declaration.name)); if not declaration_name.is_ok() { return sh_exp_error(1402, site.start, site.end); }; item.name = declaration_name.value; item.kind = declaration.kind; if not output.deprecated.push(item) { return sh_exp_error(1304, site.start, site.end); }; } else { return sh_exp_error(1403, site.start, site.end); }; }; masked.words.push(first); masked.words.push(last); (); }; attr = attr + 3; }; let declaration_end = sh_token_get(&lexed.tokens, declaration.end - 1).end; let begin = sh_token_get(&lexed.tokens, start).start; if not sh_exp_copy(&output, input, copied_to, begin, maximum) { return sh_exp_error(1304, begin, declaration_end); }; if enabled { let mut at = begin; attr = 0; while attr < masked.words.len() { let low = masked.words.get(attr).unwrap_or(0); let high = masked.words.get(attr + 1).unwrap_or(0); if not sh_exp_copy(&output, input, at, low, maximum) or not sh_exp_mask(&output, input, low, high, maximum) { return sh_exp_error(1304, low, high); }; at = high; attr = attr + 2; }; if not sh_exp_copy(&output, input, at, declaration_end, maximum) { return sh_exp_error(1304, begin, declaration_end); }; }; copied_to = declaration_end; cursor = sh_exp_next(&lexed.tokens, declaration.end); }; };
+    if not sh_exp_copy(&output, input, copied_to, input.text.len(), maximum) { return sh_exp_error(1304, copied_to, input.text.len()); };
+    output;
+}
+
+def sh_expand_with_target(text: &String, features: &ShSymbols, os: &str, maximum: i64, passes: i64) -> ShExpanded {
+    let mut output = sh_exp_empty();
+    if os != "windows" and os != "linux" and os != "macos" { return sh_exp_error(1401, 0, 0); };
+    let macros = sh_expand_macros(text, maximum, passes);
+    if macros.error != 0 { return macros; };
+    let attributes = sh_expand_attributes(&macros, features, os, maximum);
+    if attributes.error != 0 { return attributes; };
+    let derived = sh_derive(&attributes.text, maximum);
+    if derived.error != 0 { let site = sh_exp_map(&attributes.mapping, derived.start, derived.end); return sh_exp_error(derived.error, site.start, site.end); };
+    let mut index = 0;
+    while index < derived.mapping.len() { let low = derived.mapping.get(index).unwrap_or(0); let high = derived.mapping.get(index + 1).unwrap_or(0); let begin = derived.mapping.get(index + 2).unwrap_or(0); let end = derived.mapping.get(index + 3).unwrap_or(0); let mode = derived.mapping.get(index + 4).unwrap_or(0); let part = derived.text.get(low, high); if not part.is_ok() { return sh_exp_error(1304, begin, end); }; if mode == 1 { if not sh_exp_emit(&output, &part.value, sh_exp_map(&attributes.mapping, begin, end), maximum) { return sh_exp_error(1304, begin, end); }; } else { if high - low != end - begin { return sh_exp_error(1304, begin, end); }; let mut cursor = begin; let mut record = 0; while record < attributes.mapping.words.len() and cursor < end { let map_low = attributes.mapping.words.get(record).unwrap_or(0); let map_high = attributes.mapping.words.get(record + 1).unwrap_or(0); if map_high > cursor and map_low < end { let bound = if map_high < end { map_high; } else { end; }; let piece = derived.text.get(low + cursor - begin, low + bound - begin); if not piece.is_ok() { return sh_exp_error(1304, cursor, bound); }; let inherited = attributes.mapping.words.get(record + 4).unwrap_or(0); if not sh_exp_emit_mode(&output, &piece.value, sh_exp_map(&attributes.mapping, cursor, bound), maximum, inherited) { return sh_exp_error(1304, cursor, bound); }; cursor = bound; }; record = record + 5; }; if cursor != end { return sh_exp_error(1304, begin, end); }; }; index = index + 5; };
+    if output.text.len() != derived.text.len() { return sh_exp_error(1304, 0, text.len()); };
+    index = 0;
+    while index < attributes.deprecated.len() { let entry = attributes.deprecated.get(index); let name = entry.name.clone(); let message = entry.message.clone(); let replacement = entry.replacement.clone(); let removal = entry.removal.clone(); if not name.is_ok() or not message.is_ok() or not replacement.is_ok() or not removal.is_ok() { return sh_exp_error(1304, 0, text.len()); }; let copied = ShDeprecated { name: name.value, kind: entry.kind, message: message.value, replacement: replacement.value, removal: removal.value, flags: entry.flags }; if not output.deprecated.push(copied) { return sh_exp_error(1304, 0, text.len()); }; index = index + 1; };
+    output;
+}
+
+def sh_expand(text: &String, features: &ShSymbols, maximum: i64, passes: i64) -> ShExpanded {
+    sh_expand_with_target(text, features, "windows", maximum, passes);
+}

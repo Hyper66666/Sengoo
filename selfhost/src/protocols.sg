@@ -1,0 +1,68 @@
+import selfhost_parser;
+
+import selfhost_expand;
+
+def sh_protocol_named(text: &String, ast: &ShAst, node: i64, name: &str) -> bool {
+    let start = sh_ast_word(ast, node, 2);
+    let end = sh_ast_word(ast, node, 3);
+    if start < 0 or end < start { return false; };
+    let value = text.get(start, end);
+    value.is_ok() and sh_exp_equal(&value.value, name);
+}
+
+def sh_protocol_function_name(text: &String, ast: &ShAst, function: i64, name: &str) -> bool {
+    let mut index = 0;
+    while index < sh_ast_word(ast, function, 6) { let child = sh_ast_child(ast, function, index); if sh_ast_word(ast, child, 0) == 10 { return sh_protocol_named(text, ast, child, name); }; index = index + 1; };
+    false;
+}
+
+def sh_protocol_has_self(text: &String, ast: &ShAst, function: i64) -> bool {
+    let mut index = 0;
+    while index < sh_ast_word(ast, function, 6) { let child = sh_ast_child(ast, function, index); if sh_ast_word(ast, child, 0) == 21 { let name = sh_ast_child(ast, child, 0); if (sh_ast_word(ast, child, 4) & 4) != 0 and sh_protocol_named(text, ast, name, "self") { return true; }; }; index = index + 1; };
+    false;
+}
+
+def sh_protocol_bridge(text: &String, ast: &ShAst, declaration: i64) -> i64 {
+    if sh_ast_word(ast, declaration, 0) != 26 { return 0; };
+    let mut types = 0;
+    let mut first_type = -1;
+    let mut index = 0;
+    while index < sh_ast_word(ast, declaration, 6) { let child = sh_ast_child(ast, declaration, index); let kind = sh_ast_word(ast, child, 0); if kind >= 70 and kind <= 75 { if first_type < 0 { first_type = child; }; types = types + 1; }; index = index + 1; };
+    if types != 2 or sh_ast_word(ast, first_type, 0) != 70 { return 0; };
+    let path = sh_ast_child(ast, first_type, 0);
+    if sh_ast_word(ast, path, 0) != 12 or sh_ast_word(ast, path, 6) != 1 { return 0; };
+    let name = sh_ast_child(ast, path, 0);
+    let display = sh_protocol_named(text, ast, name, "Display") or sh_protocol_named(text, ast, name, "Debug");
+    let hashing = sh_protocol_named(text, ast, name, "Hash");
+    if not display and not hashing { return 0; };
+    let mut has_producer = false;
+    let mut has_bridge = false;
+    index = 0;
+    while index < sh_ast_word(ast, declaration, 6) { let method = sh_ast_child(ast, declaration, index); if sh_ast_word(ast, method, 0) == 20 { if display { if sh_protocol_function_name(text, ast, method, "to_string") { has_bridge = true; }; if sh_protocol_function_name(text, ast, method, "fmt") and sh_protocol_has_self(text, ast, method) { has_producer = true; }; } else { if sh_protocol_function_name(text, ast, method, "hash") { has_bridge = true; }; if sh_protocol_function_name(text, ast, method, "hash_into") and sh_protocol_has_self(text, ast, method) { has_producer = true; }; }; }; index = index + 1; };
+    if not has_producer or has_bridge { return 0; };
+    if display { 1; } else { 2; };
+}
+
+def sh_protocol_template(bridge: i64) -> Result<String, i64> {
+    if bridge == 1 { return string_from_str("\ndef to_string(&self) -> String {\n    let mut __formatter = formatter_new();\n    self.fmt(&mut __formatter);\n    __formatter.finish()\n}\n"); };
+    string_from_str("\ndef hash(&self) -> i64 {\n    let mut __hasher = hasher_new();\n    self.hash_into(&mut __hasher);\n    __hasher.finish()\n}\n");
+}
+
+def sh_protocol_metadata(input: &ShExpanded, output: &ShExpanded) -> bool {
+    let mut index = 0;
+    while index < input.deprecated.len() { let entry = input.deprecated.get(index); let name = entry.name.clone(); let message = entry.message.clone(); let replacement = entry.replacement.clone(); let removal = entry.removal.clone(); if not name.is_ok() or not message.is_ok() or not replacement.is_ok() or not removal.is_ok() { return false; }; let copy = ShDeprecated { name: name.value, kind: entry.kind, message: message.value, replacement: replacement.value, removal: removal.value, flags: entry.flags }; if not output.deprecated.push(copy) { return false; }; index = index + 1; };
+    true;
+}
+
+def sh_protocols(input: &ShExpanded, maximum: i64) -> ShExpanded {
+    if input.error != 0 { return sh_exp_error(input.error, input.start, input.end); };
+    if maximum < 0 or input.text.len() > maximum { return sh_exp_error(1603, 0, input.text.len()); };
+    let parsed = sh_parse(&input.text, 0, 1000000);
+    if parsed.error != 0 { let site = sh_exp_map(&input.mapping, parsed.start, parsed.end); return sh_exp_error(parsed.error, site.start, site.end); };
+    let output = sh_exp_empty();
+    let mut index = 0;
+    let mut copied = 0;
+    while index < sh_ast_word(&parsed.ast, parsed.ast.root, 6) { let declaration = sh_ast_child(&parsed.ast, parsed.ast.root, index); let kind = sh_ast_word(&parsed.ast, declaration, 0); if kind == 91 or kind == 92 { let site = sh_exp_map(&input.mapping, sh_ast_word(&parsed.ast, declaration, 2), sh_ast_word(&parsed.ast, declaration, 3)); return sh_exp_error(1601, site.start, site.end); }; let bridge = sh_protocol_bridge(&input.text, &parsed.ast, declaration); if bridge != 0 { let start = sh_ast_word(&parsed.ast, declaration, 2); let end = sh_ast_word(&parsed.ast, declaration, 3); let origin = sh_exp_map(&input.mapping, start, end); let template = sh_protocol_template(bridge); if not template.is_ok() or end <= start or not sh_exp_copy(&output, input, copied, end - 1, maximum) { return sh_exp_error(1603, origin.start, origin.end); }; if not sh_exp_emit(&output, &template.value, origin, maximum) { return sh_exp_error(1603, origin.start, origin.end); }; copied = end - 1; }; index = index + 1; };
+    if not sh_exp_copy(&output, input, copied, input.text.len(), maximum) or not sh_protocol_metadata(input, &output) { return sh_exp_error(1603, 0, input.text.len()); };
+    output;
+}

@@ -1,0 +1,219 @@
+import selfhost_lexer;
+
+import std::env;
+
+import std::process;
+
+struct ShDerived {
+    text: String,
+    mapping: Vec<i64>,
+    error: i64,
+    start: i64,
+    end: i64,
+}
+
+struct ShDField {
+    name: String,
+    ty: String,
+}
+
+struct ShDTarget {
+    name: String,
+    kind: i64,
+    after: i64,
+    fields: Vec<ShDField>,
+    error: i64,
+}
+
+struct ShDInsertion {
+    after: i64,
+    text: String,
+    start: i64,
+    end: i64,
+}
+
+def sh_d_empty() -> ShDerived {
+    ShDerived { text: string_new(), mapping: vec_new_i64(), error: 0, start: 0, end: 0 };
+}
+
+def sh_d_next(tokens: &ShTokens, begin: i64) -> i64 {
+    let mut i = begin;
+    while sh_token_trivia(sh_token_get(tokens, i).kind) { i = i + 1; };
+    i;
+}
+
+def sh_d_spells(text: &String, tokens: &ShTokens, index: i64, word: &str) -> bool {
+    let token = sh_token_get(tokens, index);
+    if token.kind < 0 { return false; };
+    let value = sh_token_text(text, token);
+    value.is_ok() and value.value.as_str() == word;
+}
+
+def sh_d_emit(output: &ShDerived, value: &String, low: i64, high: i64, mode: i64, maximum: i64) -> bool {
+    let start = output.text.len();
+    if maximum < 0 or value.len() > maximum or start > maximum - value.len() { return false; };
+    if sengoo_string_push_padded_string_status(output.text.handle, value.handle, 1, 0) < 0 { return false; };
+    if value.len() == 0 { return true; };
+    output.mapping.push(start) and output.mapping.push(output.text.len()) and output.mapping.push(low) and output.mapping.push(high) and output.mapping.push(mode);
+}
+
+def sh_d_copy(output: &ShDerived, text: &String, low: i64, high: i64, maximum: i64) -> bool {
+    let value = text.get(low, high);
+    value.is_ok() and sh_d_emit(output, &value.value, low, high, 0, maximum);
+}
+
+def sh_d_fail(output: &mut ShDerived, code: i64, start: i64, end: i64) {
+    output.error = code;
+    output.start = start;
+    output.end = end;
+}
+
+def sh_d_ident(value: &String) -> bool {
+    let bytes = sh_lex_bytes(value);
+    if not bytes.is_ok() or value.len() == 0 { return false; };
+    if not sh_lex_letter(sh_lex_byte(&bytes.value, 0)) { return false; };
+    let mut i = 1;
+    while i < value.len() { if not sh_lex_word(sh_lex_byte(&bytes.value, i)) { return false; }; i = i + 1; };
+    true;
+}
+
+def sh_d_path(value: &String) -> bool {
+    let bytes = sh_lex_bytes(value);
+    if not bytes.is_ok() or value.len() == 0 { return false; };
+    let mut i = 0;
+    while i < value.len() { if not sh_lex_letter(sh_lex_byte(&bytes.value, i)) { return false; }; i = i + 1; while sh_lex_word(sh_lex_byte(&bytes.value, i)) { i = i + 1; }; if i == value.len() { return true; }; if sh_lex_byte(&bytes.value, i) != 58 or sh_lex_byte(&bytes.value, i + 1) != 58 { return false; }; i = i + 2; if i == value.len() { return false; }; };
+    false;
+}
+
+def sh_d_close(tokens: &ShTokens, at: i64, open: i64, close: i64) -> i64 {
+    if sh_token_get(tokens, at).kind != open { return -1; };
+    let mut depth = 1;
+    let mut i = at + 1;
+    while i < sh_token_count(tokens) { let kind = sh_token_get(tokens, i).kind; if kind == open { depth = depth + 1; }; if kind == close { depth = depth - 1; }; if open == 216 and kind == sh_kind(">>") { depth = depth - 2; }; if depth <= 0 { return i; }; if kind == 0 { return -1; }; i = i + 1; };
+    -1;
+}
+
+def sh_d_target(text: &String, tokens: &ShTokens, begin: i64) -> ShDTarget {
+    let fields: Vec<ShDField> = vec_new();
+    let mut target = ShDTarget { name: String { handle: 0 }, kind: 0, after: 0, fields: fields, error: 1502 };
+    let mut i = sh_d_next(tokens, begin);
+    while sh_token_get(tokens, i).kind == 249 { let bracket = sh_d_next(tokens, i + 1); let end = sh_d_close(tokens, bracket, 235, 236); if end < 0 { return target; }; i = sh_d_next(tokens, end + 1); };
+    if sh_token_get(tokens, i).kind == 139 { i = sh_d_next(tokens, i + 1); if sh_token_get(tokens, i).kind == 231 { let end = sh_d_close(tokens, i, 231, 232); if end < 0 { return target; }; i = sh_d_next(tokens, end + 1); }; };
+    let kind = sh_token_get(tokens, i).kind;
+    if kind != 102 and kind != 103 and kind != 104 { return target; };
+    target.kind = kind;
+    i = sh_d_next(tokens, i + 1);
+    let name = sh_token_text(text, sh_token_get(tokens, i));
+    if not name.is_ok() or not sh_d_ident(&name.value) { return target; };
+    target.name = name.value;
+    i = sh_d_next(tokens, i + 1);
+    if sh_token_get(tokens, i).kind == 216 { let end = sh_d_close(tokens, i, 216, 217); if end < 0 { return target; }; i = sh_d_next(tokens, end + 1); };
+    let fields_at = i;
+    while i < sh_token_count(tokens) { let k = sh_token_get(tokens, i).kind; if k == 233 or k == 231 { let close = if k == 233 { 234; } else { 232; }; let end = sh_d_close(tokens, i, k, close); if end < 0 { return target; }; target.after = sh_token_get(tokens, end).end; let next = sh_d_next(tokens, end + 1); if k == 231 and sh_token_get(tokens, next).kind == 239 { target.after = sh_token_get(tokens, next).end; }; if kind == 103 and i == fields_at and k == 233 { let mut field = sh_d_next(tokens, i + 1); while field < end { let mut cursor = field; if sh_token_get(tokens, cursor).kind == 139 { cursor = sh_d_next(tokens, cursor + 1); }; let field_name = sh_token_text(text, sh_token_get(tokens, cursor)); let colon = sh_d_next(tokens, cursor + 1); let type_start = sh_d_next(tokens, colon + 1); let mut tail = type_start; let mut depth = 0; while tail < end { let token_kind = sh_token_get(tokens, tail).kind; if token_kind == 240 and depth == 0 { break; }; if token_kind == 216 or token_kind == 231 or token_kind == 233 or token_kind == 235 { depth = depth + 1; }; if token_kind == 217 or token_kind == 232 or token_kind == 234 or token_kind == 236 { if depth > 0 { depth = depth - 1; }; }; if token_kind == sh_kind(">>") { depth = if depth > 1 { depth - 2; } else { 0; }; }; tail = tail + 1; }; if field_name.is_ok() and sh_d_ident(&field_name.value) and sh_token_get(tokens, colon).kind == 237 { let raw_type = text.get(sh_token_get(tokens, type_start).start, sh_token_get(tokens, tail).start); if not raw_type.is_ok() { return target; }; let field_type = str_trim(raw_type.value.as_str()); if not field_type.is_ok() { return target; }; let item = ShDField { name: field_name.value, ty: field_type.value }; if not target.fields.push(item) { target.error = 1501; return target; }; }; field = sh_d_next(tokens, tail + 1); }; }; target.error = 0; return target; }; if k == 239 { target.after = sh_token_get(tokens, i).end; target.error = 0; return target; }; if k == 0 { return target; }; i = i + 1; };
+    target;
+}
+
+def sh_d_is_scalar(ty: &str) -> bool {
+    ty == "bool" or ty == "char" or ty == "f32" or ty == "f64" or ty == "i8" or ty == "i16" or ty == "i32" or ty == "i64" or ty == "i128" or ty == "isize" or ty == "u8" or ty == "u16" or ty == "u32" or ty == "u64" or ty == "u128" or ty == "usize";
+}
+
+def sh_d_suffix(name: &String) -> Result<String, i64> {
+    let bytes = sh_lex_bytes(name)?;
+    let mut i = 0;
+    let mut start = 0;
+    while i + 1 < name.len() { if sh_lex_byte(&bytes, i) == 58 and sh_lex_byte(&bytes, i + 1) == 58 { start = i + 2; }; i = i + 1; };
+    name.get(start, name.len());
+}
+
+def sh_d_sanitize(name: &String, environment: bool) -> Result<String, i64> {
+    let bytes = sh_lex_bytes(name)?;
+    let value = string_new();
+    let mut i = 0;
+    let mut underscore = false;
+    while i < name.len() { let byte = sh_lex_byte(&bytes, i); if byte >= 65 and byte <= 90 or byte >= 97 and byte <= 122 or sh_lex_digit(byte) { let part = name.get(i, i + 1)?; let changed = if environment { str_to_ascii_upper(part.as_str())?; } else { str_to_ascii_lower(part.as_str())?; }; value.push_str(changed.as_str())?; underscore = false; } else { if environment or not underscore and value.len() > 0 { value.push_str("_")?; (); }; underscore = true; }; i = i + 1; };
+    if not environment and value.len() == 0 { return string_from_str("derived"); };
+    let normalized_bytes = sh_lex_bytes(&value)?;
+    if not environment and sh_lex_digit(sh_lex_byte(&normalized_bytes, 0)) { let prefixed = string_from_str("d")?; prefixed.push_str(value.as_str())?; if str_ends_with(prefixed.as_str(), "_") { return prefixed.get(0, prefixed.len() - 1); }; return string_result_ok(prefixed); };
+    if not environment and str_ends_with(value.as_str(), "_") { return value.get(0, value.len() - 1); };
+    string_result_ok(value);
+}
+
+def sh_d_impl(output: &String, trait_name: &str, name: &str) -> Result<bool, i64> {
+    output.push_str("impl ")?;
+    output.push_str(trait_name)?;
+    output.push_str(" for ")?;
+    output.push_str(name)?;
+    output.push_str(" {}\n");
+}
+
+def sh_d_inherent(output: &String, name: &str) -> Result<bool, i64> {
+    output.push_str("impl ")?;
+    output.push_str(name)?;
+    output.push_str(" {\n");
+}
+
+def sh_d_field(output: &String, field: &str, owner: &str) -> Result<bool, i64> {
+    output.push_str(owner)?;
+    output.push_str(".")?;
+    output.push_str(field);
+}
+
+def sh_d_hash_body(output: &String, fields: &Vec<ShDField>) -> Result<bool, i64> {
+    output.push_str("let mut h = 1469598103934665603;\n")?;
+    let mut i = 0;
+    while i < fields.len() { let field = fields.get(i); output.push_str("h = (h * 1099511628211) + ")?; if field.ty.as_str() == "bool" { output.push_str("if ")?; sh_d_field(output, field.name.as_str(), "self")?; output.push_str(" { 1 } else { 0 }")?; (); } else { sh_d_field(output, field.name.as_str(), "self")?; if not sh_d_is_scalar(field.ty.as_str()) or field.ty.as_str() == "f64" or field.ty.as_str() == "f32" { output.push_str(".hash()")?; (); }; }; output.push_str(";\n")?; i = i + 1; };
+    output.push_str("h\n");
+}
+
+def sh_d_builtin(derive: &String, target: &ShDTarget, names: &Vec<ShText>, hasher: bool) -> Result<String, i64> {
+    let short = sh_d_suffix(derive)?;
+    let name = target.name.as_str();
+    let output = string_new();
+    let d = short.as_str();
+    let structure = target.kind == 103;
+    if structure and (d == "Clone" or d == "Default") { sh_d_impl(&output, d, name)?; sh_d_inherent(&output, name)?; output.push_str("def ")?; output.push_str(if d == "Clone" { "clone(&self) -> "; } else { "default() -> "; })?; output.push_str(name)?; output.push_str(" { ")?; output.push_str(name)?; output.push_str(" { ")?; let mut i = 0; while i < target.fields.len() { if i > 0 { output.push_str(", ")?; (); }; let field = target.fields.get(i); output.push_str(field.name.as_str())?; output.push_str(": ")?; if d == "Clone" { sh_d_field(&output, field.name.as_str(), "self")?; if not sh_d_is_scalar(field.ty.as_str()) { output.push_str(".clone()")?; (); }; } else { let ty = field.ty.as_str(); if ty == "bool" { output.push_str("false")?; (); } else { if ty == "f32" or ty == "f64" { output.push_str("0.0")?; (); } else { if ty == "char" { output.push_str("'\\0'")?; (); } else { if sh_d_is_scalar(ty) { output.push_str("0")?; (); } else { if sh_d_ident(&field.ty) { output.push_str(ty)?; output.push_str("::default()")?; (); } else { output.push_str("0")?; (); }; }; }; }; }; }; i = i + 1; }; output.push_str(" } }\n}\n")?; return string_result_ok(output); };
+    if structure and d == "PartialEq" { sh_d_impl(&output, d, name)?; sh_d_inherent(&output, name)?; output.push_str("def eq(&self, other: &")?; output.push_str(name)?; output.push_str(") -> bool { ")?; if target.fields.len() == 0 { output.push_str("true")?; (); }; let mut i = 0; while i < target.fields.len() { if i > 0 { output.push_str(" && ")?; (); }; let field = target.fields.get(i); sh_d_field(&output, field.name.as_str(), "self")?; output.push_str(" == ")?; sh_d_field(&output, field.name.as_str(), "other")?; i = i + 1; }; output.push_str(" }\n}\n")?; return string_result_ok(output); };
+    if structure and (d == "PartialOrd" or d == "Ord") { sh_d_impl(&output, d, name)?; let mut partial = false; let mut k = 0; while k < names.len() { let suffix = sh_d_suffix(&names.get(k).text)?; if suffix.as_str() == "PartialOrd" { partial = true; }; k = k + 1; }; if d == "Ord" and partial { return string_result_ok(output); }; sh_d_inherent(&output, name)?; output.push_str("def compare(&self, other: &")?; output.push_str(name)?; output.push_str(") -> i64 {\n")?; let mut i = 0; while i < target.fields.len() { let field = target.fields.get(i); output.push_str("if ")?; sh_d_field(&output, field.name.as_str(), "self")?; output.push_str(" < ")?; sh_d_field(&output, field.name.as_str(), "other")?; output.push_str(" { return -1; };\nif ")?; sh_d_field(&output, field.name.as_str(), "self")?; output.push_str(" > ")?; sh_d_field(&output, field.name.as_str(), "other")?; output.push_str(" { return 1; };\n")?; i = i + 1; }; output.push_str("0\n}\n")?; let methods = ["lt", "le", "gt", "ge"]; let operators = ["<", "<=", ">", ">="]; let mut method = 0; while method < 4 { output.push_str("def ")?; output.push_str(methods[method])?; output.push_str("(&self, other: &")?; output.push_str(name)?; output.push_str(") -> bool { self.compare(other) ")?; output.push_str(operators[method])?; output.push_str(" 0 }\n")?; method = method + 1; }; output.push_str("}\n")?; return string_result_ok(output); };
+    if structure and d == "Hash" { output.push_str("impl Hash for ")?; output.push_str(name)?; output.push_str(" {\n")?; if hasher { output.push_str("def hash_into(&self, h: &mut Hasher) {\n")?; if target.fields.len() == 0 { output.push_str("h.write_i64(0);\n")?; (); }; let mut i = 0; while i < target.fields.len() { let field = target.fields.get(i); let ty = field.ty.as_str(); if ty == "bool" or sh_d_is_scalar(ty) and ty != "f32" and ty != "f64" { output.push_str(if ty == "bool" { "h.write_bool("; } else { "h.write_i64("; })?; sh_d_field(&output, field.name.as_str(), "self")?; output.push_str(");\n")?; (); } else { sh_d_field(&output, field.name.as_str(), "self")?; output.push_str(".hash_into(h);\n")?; (); }; i = i + 1; }; output.push_str("}\n}\n")?; sh_d_inherent(&output, name)?; output.push_str("def hash(&self) -> i64 { let mut __hasher = hasher_new(); self.hash_into(&mut __hasher); __hasher.finish() }\n}\n")?; (); } else { output.push_str("def hash(&self) -> i64 {\n")?; sh_d_hash_body(&output, &target.fields)?; output.push_str("}\n}\n")?; sh_d_inherent(&output, name)?; output.push_str("def hash(&self) -> i64 {\n")?; sh_d_hash_body(&output, &target.fields)?; output.push_str("}\n}\n")?; (); }; return string_result_ok(output); };
+    if d == "Debug" { output.push_str("impl Debug for ")?; output.push_str(name)?; output.push_str(" { def __derived_debug_marker(&self) -> i64 { 1 } }\n")?; return string_result_ok(output); };
+    if d == "Clone" or d == "Copy" or d == "PartialEq" or d == "Eq" or d == "PartialOrd" or d == "Ord" or d == "Hash" or d == "Default" { sh_d_impl(&output, d, name)?; return string_result_ok(output); };
+    let sanitized = sh_d_sanitize(derive, false)?;
+    sh_d_inherent(&output, name)?;
+    output.push_str("def __derive_")?;
+    output.push_str(sanitized.as_str())?;
+    output.push_str("(self) -> i64 { 1 }\n}\n")?;
+    string_result_ok(output);
+}
+
+def sh_d_execute(derive: &String, target: &ShDTarget, names: &Vec<ShText>, hasher: bool, maximum: i64) -> Result<String, i64> {
+    let suffix = sh_d_sanitize(derive, true)?;
+    let key = string_from_str("SENGOO_DERIVE_")?;
+    key.push_str(suffix.as_str())?;
+    let length = env_var_len(key.as_str());
+    if length.is_ok() { if length.value > 32768 { return string_result_err(1503); }; let bytes = ffi_buffer_new(length.value)?; let count = env_var_copy(key.as_str(), bytes)?; let command_text = string_from_utf8(bytes, count)?; let trimmed = str_trim(command_text.as_str())?; if trimmed.len() > 0 { let command = process_command(command_text.as_str())?; command.capture_stdout(true)?; command.capture_stderr(true)?; command.env_set("SENGOO_DERIVE_NAME", derive.as_str())?; command.env_set("SENGOO_DERIVE_TARGET", target.name.as_str())?; command.env_set("SENGOO_DERIVE_TARGET_KIND", if target.kind == 103 { "struct"; } else { if target.kind == 104 { "enum"; } else { "class"; }; })?; let output = command.run()?; if output.timed_out() or output.exit_code()? != 0 { return string_result_err(1503); }; let size = output.stdout_len()?; if size == 0 or size > maximum { return string_result_err(1503); }; let buffer = ffi_buffer_new(size)?; let copied = output.stdout_copy(buffer)?; if copied != size or sengoo_ffi_buffer_commit_used_len(buffer.handle, copied) < 0 { return string_result_err(1503); }; let generated = string_from_utf8(buffer, copied)?; let nonempty = str_trim(generated.as_str())?; if nonempty.len() == 0 { return string_result_err(1503); }; return string_result_ok(generated); }; };
+    sh_d_builtin(derive, target, names, hasher);
+}
+
+def sh_derive(text: &String, max_bytes: i64) -> ShDerived {
+    let mut output = sh_d_empty();
+    if max_bytes < 0 or max_bytes > 16777216 or text.len() > max_bytes { sh_d_fail(&mut output, 1501, 0, text.len()); return output; };
+    let lexed = sh_lex(text, max_bytes + 1);
+    if lexed.error != 0 { sh_d_fail(&mut output, lexed.error, lexed.start, lexed.end); return output; };
+    let tokens = lexed.tokens;
+    let removals: Vec<ShSpan> = vec_new();
+    let insertions: Vec<ShDInsertion> = vec_new();
+    let hasher = str_contains(text.as_str(), "struct Hasher") or str_contains(text.as_str(), "def hasher_new") or str_contains(text.as_str(), "import std::string");
+    let mut i = 0;
+    let mut needed = text.len();
+    while i < sh_token_count(&tokens) { let token = sh_token_get(&tokens, i); if token.kind == 249 { let bracket = sh_d_next(&tokens, i + 1); let derive = sh_d_next(&tokens, bracket + 1); if sh_token_get(&tokens, bracket).kind == 235 and sh_d_spells(text, &tokens, derive, "derive") { let opening = sh_d_next(&tokens, derive + 1); let closing = sh_d_close(&tokens, opening, 231, 232); if closing < 0 { sh_d_fail(&mut output, 1502, token.start, token.end); return output; }; let end = sh_d_next(&tokens, closing + 1); if sh_token_get(&tokens, end).kind != 236 { sh_d_fail(&mut output, 1502, token.start, sh_token_get(&tokens, closing).end); return output; }; let raw = text.get(sh_token_get(&tokens, opening).end, sh_token_get(&tokens, closing).start); if not raw.is_ok() { sh_d_fail(&mut output, 1502, token.start, token.end); return output; }; let names: Vec<ShText> = vec_new(); let parts = raw.value.split(","); loop { let value = parts.next(); if not value.is_some { break; }; if value.is_some { let trimmed = str_trim(value.value.as_str()); if not trimmed.is_ok() { sh_d_fail(&mut output, 1501, token.start, token.end); return output; }; if trimmed.value.len() > 0 { if not sh_d_path(&trimmed.value) { sh_d_fail(&mut output, 1502, token.start, sh_token_get(&tokens, end).end); return output; }; let item = ShText { text: trimmed.value }; if not names.push(item) { sh_d_fail(&mut output, 1501, token.start, token.end); return output; }; }; }; }; if names.len() == 0 { sh_d_fail(&mut output, 1502, token.start, sh_token_get(&tokens, end).end); return output; }; let target = sh_d_target(text, &tokens, end + 1); if target.error != 0 { sh_d_fail(&mut output, target.error, token.start, sh_token_get(&tokens, end).end); return output; }; let mut name = 0; while name < names.len() { let generated = sh_d_execute(&names.get(name).text, &target, &names, hasher, max_bytes); if not generated.is_ok() { sh_d_fail(&mut output, 1503, token.start, sh_token_get(&tokens, end).end); return output; }; if generated.value.len() > max_bytes - needed - 2 { sh_d_fail(&mut output, 1501, token.start, sh_token_get(&tokens, end).end); return output; }; needed = needed + generated.value.len() + 2; let item = ShDInsertion { after: target.after, text: generated.value, start: token.start, end: target.after }; if not insertions.push(item) { sh_d_fail(&mut output, 1501, token.start, token.end); return output; }; name = name + 1; }; let item = ShSpan { source: 0, start: token.start, end: sh_token_get(&tokens, end).end }; if not removals.push(item) { sh_d_fail(&mut output, 1501, token.start, token.end); return output; }; i = end; }; }; i = i + 1; };
+    let order = vec_new_i64();
+    let mut sequence = 0;
+    while sequence < insertions.len() { let mut place = 0; while place < order.len() and insertions.get(order.get(place).unwrap_or(0)).after <= insertions.get(sequence).after { place = place + 1; }; if not order.insert(place, sequence) { sh_d_fail(&mut output, 1501, 0, text.len()); return output; }; sequence = sequence + 1; };
+    let bytes = sh_lex_bytes(text);
+    if not bytes.is_ok() { sh_d_fail(&mut output, 1501, 0, text.len()); return output; };
+    let mut cursor = 0;
+    let mut removal = 0;
+    let mut inserted = 0;
+    while cursor < text.len() or inserted < insertions.len() { if inserted < insertions.len() and insertions.get(order.get(inserted).unwrap_or(0)).after == cursor { let insertion = insertions.get(order.get(inserted).unwrap_or(0)); let newline = string_from_str("\n"); let emitted = newline.is_ok() and sh_d_emit(&output, &newline.value, insertion.start, insertion.end, 1, max_bytes) and sh_d_emit(&output, &insertion.text, insertion.start, insertion.end, 1, max_bytes) and sh_d_emit(&output, &newline.value, insertion.start, insertion.end, 1, max_bytes); if not emitted { sh_d_fail(&mut output, 1501, insertion.start, insertion.end); return output; }; inserted = inserted + 1; } else { if cursor >= text.len() { sh_d_fail(&mut output, 1502, cursor, cursor); return output; }; if removal < removals.len() and removals.get(removal).start == cursor { let span = removals.get(removal); let mask = string_new(); let mut at = span.start; while at < span.end { let byte = sh_lex_byte(&bytes.value, at); let pushed = mask.push_str(if byte == 10 { "\n"; } else { if byte == 13 { "\r"; } else { " "; }; }); if not pushed.is_ok() { sh_d_fail(&mut output, 1501, span.start, span.end); return output; }; at = at + 1; }; let emitted_mask = sh_d_emit(&output, &mask, span.start, span.end, 0, max_bytes); if not emitted_mask { sh_d_fail(&mut output, 1501, span.start, span.end); return output; }; cursor = span.end; removal = removal + 1; } else { let mut end = text.len(); if removal < removals.len() and removals.get(removal).start < end { end = removals.get(removal).start; }; if inserted < insertions.len() and insertions.get(order.get(inserted).unwrap_or(0)).after < end { end = insertions.get(order.get(inserted).unwrap_or(0)).after; }; let copied = end > cursor and sh_d_copy(&output, text, cursor, end, max_bytes); if not copied { sh_d_fail(&mut output, 1501, cursor, end); return output; }; cursor = end; }; }; };
+    output;
+}

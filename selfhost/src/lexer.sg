@@ -1,0 +1,346 @@
+import selfhost_core;
+
+struct ShToken {
+    kind: i64,
+    start: i64,
+    end: i64,
+}
+
+struct ShTokens {
+    words: Vec<i64>,
+}
+
+struct ShLexed {
+    tokens: ShTokens,
+    error: i64,
+    start: i64,
+    end: i64,
+}
+
+def sh_kind(spelling: &str) -> i64 {
+    if spelling == "def" { return 100; };
+    if spelling == "fn" { return 101; };
+    if spelling == "class" { return 102; };
+    if spelling == "struct" { return 103; };
+    if spelling == "enum" { return 104; };
+    if spelling == "impl" { return 105; };
+    if spelling == "trait" { return 106; };
+    if spelling == "dyn" { return 107; };
+    if spelling == "type" { return 108; };
+    if spelling == "const" { return 109; };
+    if spelling == "static" { return 110; };
+    if spelling == "let" { return 111; };
+    if spelling == "if" { return 112; };
+    if spelling == "elif" { return 113; };
+    if spelling == "else" { return 114; };
+    if spelling == "match" { return 115; };
+    if spelling == "case" { return 116; };
+    if spelling == "default" { return 117; };
+    if spelling == "for" { return 118; };
+    if spelling == "while" { return 119; };
+    if spelling == "loop" { return 120; };
+    if spelling == "break" { return 121; };
+    if spelling == "continue" { return 122; };
+    if spelling == "return" { return 123; };
+    if spelling == "yield" { return 124; };
+    if spelling == "await" { return 125; };
+    if spelling == "async" { return 126; };
+    if spelling == "parallel" { return 127; };
+    if spelling == "import" { return 128; };
+    if spelling == "from" { return 129; };
+    if spelling == "as" { return 130; };
+    if spelling == "export" { return 131; };
+    if spelling == "extern" { return 132; };
+    if spelling == "unsafe" { return 133; };
+    if spelling == "try" { return 134; };
+    if spelling == "except" { return 135; };
+    if spelling == "finally" { return 136; };
+    if spelling == "raise" { return 137; };
+    if spelling == "throw" { return 138; };
+    if spelling == "pub" { return 139; };
+    if spelling == "priv" { return 140; };
+    if spelling == "mut" { return 141; };
+    if spelling == "where" { return 142; };
+    if spelling == "requires" { return 143; };
+    if spelling == "ensures" { return 144; };
+    if spelling == "Self" { return 145; };
+    if spelling == "self" { return 146; };
+    if spelling == "true" { return 147; };
+    if spelling == "false" { return 148; };
+    if spelling == "none" { return 149; };
+    if spelling == "null" { return 150; };
+    if spelling == "in" { return 151; };
+    if spelling == "is" { return 152; };
+    if spelling == "not" { return 153; };
+    if spelling == "and" { return 154; };
+    if spelling == "or" { return 155; };
+    if spelling == "pass" { return 156; };
+    if spelling == "+" { return 200; };
+    if spelling == "-" { return 201; };
+    if spelling == "*" { return 202; };
+    if spelling == "/" { return 203; };
+    if spelling == "%" { return 204; };
+    if spelling == "&" { return 205; };
+    if spelling == "|" { return 206; };
+    if spelling == "^" { return 207; };
+    if spelling == "<<" { return 208; };
+    if spelling == ">>" { return 209; };
+    if spelling == "~" { return 210; };
+    if spelling == "&&" { return 211; };
+    if spelling == "||" { return 212; };
+    if spelling == "!" { return 213; };
+    if spelling == "==" { return 214; };
+    if spelling == "!=" { return 215; };
+    if spelling == "<" { return 216; };
+    if spelling == ">" { return 217; };
+    if spelling == "<=" { return 218; };
+    if spelling == ">=" { return 219; };
+    if spelling == "=" { return 220; };
+    if spelling == "+=" { return 221; };
+    if spelling == "-=" { return 222; };
+    if spelling == "*=" { return 223; };
+    if spelling == "/=" { return 224; };
+    if spelling == "%=" { return 225; };
+    if spelling == "&=" { return 226; };
+    if spelling == "|=" { return 227; };
+    if spelling == "^=" { return 228; };
+    if spelling == "<<=" { return 229; };
+    if spelling == ">>=" { return 230; };
+    if spelling == "(" { return 231; };
+    if spelling == ")" { return 232; };
+    if spelling == "{" { return 233; };
+    if spelling == "}" { return 234; };
+    if spelling == "[" { return 235; };
+    if spelling == "]" { return 236; };
+    if spelling == ":" { return 237; };
+    if spelling == "::" { return 238; };
+    if spelling == ";" { return 239; };
+    if spelling == "," { return 240; };
+    if spelling == "." { return 241; };
+    if spelling == ".." { return 242; };
+    if spelling == "..." { return 243; };
+    if spelling == "->" { return 244; };
+    if spelling == "=>" { return 245; };
+    if spelling == "@" { return 246; };
+    if spelling == "?" { return 247; };
+    if spelling == "$" { return 248; };
+    if spelling == "#" { return 249; };
+    if spelling == "_" { return 250; };
+    1;
+}
+
+def sh_token_count(tokens: &ShTokens) -> i64 {
+    tokens.words.len() / 3;
+}
+
+def sh_token_get(tokens: &ShTokens, index: i64) -> ShToken {
+    if index < 0 or index >= sh_token_count(tokens) { return ShToken { kind: -1, start: 0, end: 0 }; };
+    let base = index * 3;
+    ShToken { kind: tokens.words.get(base).unwrap_or(-1), start: tokens.words.get(base + 1).unwrap_or(0), end: tokens.words.get(base + 2).unwrap_or(0) };
+}
+
+def sh_token_text(text: &String, token: ShToken) -> Result<String, i64> {
+    text.get(token.start, token.end);
+}
+
+def sh_token_trivia(kind: i64) -> bool {
+    kind >= 10 and kind <= 12;
+}
+
+def sh_lex_byte(bytes: &Buffer, index: i64) -> i64 {
+    if index < 0 or index >= bytes.used_len() { return -1; };
+    bytes.get_u8(index).unwrap_or(-1);
+}
+
+def sh_lex_letter(byte: i64) -> bool {
+    byte >= 65 and byte <= 90 or byte >= 97 and byte <= 122 or byte == 95;
+}
+
+def sh_lex_digit(byte: i64) -> bool {
+    byte >= 48 and byte <= 57;
+}
+
+def sh_lex_word(byte: i64) -> bool {
+    sh_lex_letter(byte) or sh_lex_digit(byte);
+}
+
+def sh_lex_space(byte: i64) -> bool {
+    byte == 32 or byte == 9 or byte == 13 or byte == 12 or byte == 10;
+}
+
+def sh_lex_bytes(text: &String) -> Result<Buffer, i64> {
+    let bytes = ffi_buffer_new(text.len())?;
+    text.copy_to_buffer(bytes)?;
+    Result { is_ok: true, value: bytes, error: 0 };
+}
+
+def sh_lex_push(tokens: &ShTokens, maximum: i64, kind: i64, start: i64, end: i64) -> bool {
+    if sh_token_count(tokens) >= maximum { return false; };
+    let before = tokens.words.len();
+    let pushed = tokens.words.push(kind) and tokens.words.push(start) and tokens.words.push(end);
+    if not pushed { while tokens.words.len() > before { tokens.words.pop(); }; };
+    pushed;
+}
+
+def sh_lex_hex(byte: i64) -> i64 {
+    if byte >= 48 and byte <= 57 { return byte - 48; };
+    if byte >= 65 and byte <= 70 { return byte - 55; };
+    if byte >= 97 and byte <= 102 { return byte - 87; };
+    -1;
+}
+
+def sh_lex_digits(bytes: &Buffer, start: i64, base: i64) -> i64 {
+    let mut index = start;
+    let mut digit = sh_lex_hex(sh_lex_byte(bytes, index));
+    if digit < 0 or digit >= base { return start; };
+    index = index + 1;
+    while index < bytes.used_len() { digit = sh_lex_hex(sh_lex_byte(bytes, index)); if digit >= 0 and digit < base { index = index + 1; } else { if sh_lex_byte(bytes, index) != 95 { return index; }; digit = sh_lex_hex(sh_lex_byte(bytes, index + 1)); if digit < 0 or digit >= base { return index; }; index = index + 2; }; };
+    index;
+}
+
+def sh_lex_equal(bytes: &Buffer, start: i64, spelling: &str) -> bool {
+    let value = ffi_buffer_from_bytes(spelling);
+    if not value.is_ok() { return false; };
+    let mut index = 0;
+    while index < spelling.len() { if sh_lex_byte(bytes, start + index) != sh_lex_byte(&value.value, index) { return false; }; index = index + 1; };
+    true;
+}
+
+def sh_lex_integer_suffix(bytes: &Buffer, start: i64) -> i64 {
+    if sh_lex_equal(bytes, start, "isize") or sh_lex_equal(bytes, start, "usize") { return start + 5; };
+    let first = sh_lex_byte(bytes, start);
+    if first != 105 and first != 117 { return start; };
+    if sh_lex_equal(bytes, start + 1, "64") or sh_lex_equal(bytes, start + 1, "32") or sh_lex_equal(bytes, start + 1, "16") { return start + 3; };
+    if sh_lex_byte(bytes, start + 1) == 56 { return start + 2; };
+    start;
+}
+
+def sh_lex_number(bytes: &Buffer, start: i64) -> ShToken {
+    let mut word_end = start + 1;
+    while sh_lex_word(sh_lex_byte(bytes, word_end)) { word_end = word_end + 1; };
+    let decimal = sh_lex_digits(bytes, start, 10);
+    let mut integer = decimal;
+    let mut base = 10;
+    if sh_lex_byte(bytes, start) == 48 { let next = sh_lex_byte(bytes, start + 1); if next == 98 { base = 2; }; if next == 111 { base = 8; }; if next == 120 { base = 16; }; };
+    if base != 10 { let end = sh_lex_digits(bytes, start + 2, base); if end > start + 2 { integer = end; }; };
+    integer = sh_lex_integer_suffix(bytes, integer);
+    let mut float_end = 0;
+    if sh_lex_byte(bytes, decimal) == 46 and sh_lex_digit(sh_lex_byte(bytes, decimal + 1)) { float_end = sh_lex_digits(bytes, decimal + 1, 10); let exponent = sh_lex_byte(bytes, float_end); if exponent == 101 or exponent == 69 { let mut at = float_end + 1; if sh_lex_byte(bytes, at) == 43 or sh_lex_byte(bytes, at) == 45 { at = at + 1; }; let end = sh_lex_digits(bytes, at, 10); if end > at { float_end = end; }; }; if sh_lex_equal(bytes, float_end, "f32") or sh_lex_equal(bytes, float_end, "f64") { float_end = float_end + 3; }; };
+    if float_end > word_end and float_end > integer { return ShToken { kind: 3, start: start, end: float_end }; };
+    if word_end > integer { return ShToken { kind: 4, start: start, end: word_end }; };
+    ShToken { kind: 2, start: start, end: integer };
+}
+
+def sh_lex_quoted(bytes: &Buffer, quote_at: i64) -> i64 {
+    let quote = sh_lex_byte(bytes, quote_at);
+    let mut index = quote_at + 1;
+    while index < bytes.used_len() { let byte = sh_lex_byte(bytes, index); if byte == quote { return index + 1; }; if byte == 92 { if sh_lex_byte(bytes, index + 1) == 10 or sh_lex_byte(bytes, index + 1) < 0 { return -1; }; index = index + 2; } else { index = index + 1; }; };
+    -1;
+}
+
+def sh_lex_fstring(bytes: &Buffer, start: i64) -> i64 {
+    let mut index = start + 2;
+    let mut depth = 0;
+    while index < bytes.used_len() { let byte = sh_lex_byte(bytes, index); if byte == 10 { return -1; }; if depth > 0 { if byte == 34 or byte == 39 { let end = sh_lex_quoted(bytes, index); if end < 0 { return -1; }; let mut check = index; while check < end { if sh_lex_byte(bytes, check) == 10 { return -1; }; check = check + 1; }; index = end; } else { if byte == 123 { depth = depth + 1; }; if byte == 125 { depth = depth - 1; }; index = index + 1; }; } else { if byte == 34 { return index + 1; }; if byte == 92 { index = index + 2; } else { if byte == 123 and sh_lex_byte(bytes, index + 1) == 123 { index = index + 2; } else { if byte == 125 and sh_lex_byte(bytes, index + 1) == 125 { index = index + 2; } else { if byte == 123 { depth = 1; }; index = index + 1; }; }; }; }; };
+    -1;
+}
+
+def sh_lex(text: &String, max_tokens: i64) -> ShLexed {
+    let words = vec_new_i64();
+    let tokens = ShTokens { words: words };
+    if max_tokens < 1 { return ShLexed { tokens: tokens, error: 1101, start: 0, end: 0 }; };
+    if not text.char_count().is_ok() { return ShLexed { tokens: tokens, error: 1102, start: 0, end: text.len() }; };
+    let allocated = sh_lex_bytes(text);
+    if not allocated.is_ok() { return ShLexed { tokens: tokens, error: 1101, start: 0, end: text.len() }; };
+    let bytes = allocated.value;
+    let mut index = 0;
+    while index < text.len() { let start = index; let byte = sh_lex_byte(&bytes, index); let mut kind = -1; if sh_lex_space(byte) or (start == 0 and byte == 239 and sh_lex_byte(&bytes, 1) == 187 and sh_lex_byte(&bytes, 2) == 191) { kind = 10; if start == 0 and byte == 239 { index = 3; }; while sh_lex_space(sh_lex_byte(&bytes, index)) { index = index + 1; }; } else { if byte == 47 and sh_lex_byte(&bytes, index + 1) == 47 { kind = 11; while index < text.len() and sh_lex_byte(&bytes, index) != 10 { index = index + 1; }; } else { if byte == 47 and sh_lex_byte(&bytes, index + 1) == 42 { kind = 12; index = index + 2; while index < text.len() and not (sh_lex_byte(&bytes, index) == 42 and sh_lex_byte(&bytes, index + 1) == 47) { index = index + 1; }; if index >= text.len() { return ShLexed { tokens: tokens, error: 1105, start: start, end: text.len() }; }; index = index + 2; } else { if byte == 34 or byte == 39 or ((byte == 114 or byte == 98 or byte == 102) and sh_lex_byte(&bytes, index + 1) == 34) { let mut quote_at = index; kind = 5; if byte == 39 { kind = 8; }; if byte == 114 { kind = 6; quote_at = index + 1; }; if byte == 98 { kind = 7; quote_at = index + 1; }; if byte == 102 { kind = 9; quote_at = index + 1; }; if kind == 9 { index = sh_lex_fstring(&bytes, start); } else { if kind == 5 and sh_lex_byte(&bytes, index + 1) == 34 and sh_lex_byte(&bytes, index + 2) == 34 { index = index + 3; while index < text.len() and not (sh_lex_byte(&bytes, index) == 34 and sh_lex_byte(&bytes, index + 1) == 34 and sh_lex_byte(&bytes, index + 2) == 34) { index = index + 1; }; if index >= text.len() { index = -1; } else { index = index + 3; }; } else { index = sh_lex_quoted(&bytes, quote_at); }; }; if index < 0 { return ShLexed { tokens: tokens, error: 1104, start: start, end: text.len() }; }; } else { if sh_lex_letter(byte) { index = index + 1; while sh_lex_word(sh_lex_byte(&bytes, index)) { index = index + 1; }; let spelling = text.get(start, index); if not spelling.is_ok() { return ShLexed { tokens: tokens, error: 1101, start: start, end: index }; }; kind = sh_kind(spelling.value.as_str()); } else { if sh_lex_digit(byte) { let number = sh_lex_number(&bytes, start); kind = number.kind; index = number.end; } else { let mut width = 3; while width > 0 and kind < 0 { if start + width <= text.len() { let spelling = text.get(start, start + width); if spelling.is_ok() { let candidate = sh_kind(spelling.value.as_str()); if candidate >= 200 { kind = candidate; index = start + width; }; }; }; width = width - 1; }; if kind < 0 { let mut end = start + 1; while end < text.len() and sh_lex_byte(&bytes, end) >= 128 and sh_lex_byte(&bytes, end) < 192 { end = end + 1; }; return ShLexed { tokens: tokens, error: 1103, start: start, end: end }; }; }; }; }; }; }; }; if not sh_lex_push(&tokens, max_tokens, kind, start, index) { return ShLexed { tokens: tokens, error: 1101, start: start, end: index }; }; };
+    if not sh_lex_push(&tokens, max_tokens, 0, index, index) { return ShLexed { tokens: tokens, error: 1101, start: index, end: index }; };
+    ShLexed { tokens: tokens, error: 0, start: index, end: index };
+}
+
+def sh_lex_scalar(output: &String, scalar: i64) -> bool {
+    if scalar < 0 or scalar > 1114111 or (scalar >= 55296 and scalar <= 57343) { return false; };
+    let allocated = ffi_buffer_new(4);
+    if not allocated.is_ok() { return false; };
+    let bytes = allocated.value;
+    if scalar < 128 { bytes.push_u8(scalar); } else { if scalar < 2048 { bytes.push_u8(192 + scalar / 64); bytes.push_u8(128 + scalar % 64); } else { if scalar < 65536 { bytes.push_u8(224 + scalar / 4096); bytes.push_u8(128 + (scalar / 64) % 64); bytes.push_u8(128 + scalar % 64); } else { bytes.push_u8(240 + scalar / 262144); bytes.push_u8(128 + (scalar / 4096) % 64); bytes.push_u8(128 + (scalar / 64) % 64); bytes.push_u8(128 + scalar % 64); }; }; };
+    let text = string_from_utf8(bytes, bytes.used_len());
+    if not text.is_ok() { return false; };
+    sengoo_string_push_padded_string_status(output.handle, text.value.handle, 1, 0) >= 0;
+}
+
+def sh_literal_unescape(raw: &String) -> Result<String, i64> {
+    let bytes = sh_lex_bytes(raw)?;
+    let output = string_new();
+    let mut index = 0;
+    let mut plain = 0;
+    while index < raw.len() { if sh_lex_byte(&bytes, index) != 92 { index = index + 1; } else { if index > plain { let part = raw.get(plain, index)?; string_copy_result(sengoo_string_push_padded_string_status(output.handle, part.handle, 1, 0))?; (); }; index = index + 1; let escape = sh_lex_byte(&bytes, index); index = index + 1; let mut scalar = -1; if escape == 110 { scalar = 10; }; if escape == 116 { scalar = 9; }; if escape == 114 { scalar = 13; }; if escape == 48 { scalar = 0; }; if escape == 92 or escape == 34 or escape == 39 { scalar = escape; }; if scalar >= 0 { if not sh_lex_scalar(&output, scalar) { return Result { is_ok: false, value: String { handle: 0 }, error: 1101 }; }; } else { if escape == 120 { let mut first = 48; let mut second = 48; if index < raw.len() { let scalar = sh_lex_utf8(&bytes, index); first = scalar.value; index = scalar.end; }; if index < raw.len() { let scalar = sh_lex_utf8(&bytes, index); second = scalar.value; index = scalar.end; }; let mut value = 0; if sh_lex_hex(first) >= 0 and sh_lex_hex(second) >= 0 { value = sh_lex_hex(first) * 16 + sh_lex_hex(second); }; if first == 43 and sh_lex_hex(second) >= 0 { value = sh_lex_hex(second); }; if not sh_lex_scalar(&output, value) { return Result { is_ok: false, value: String { handle: 0 }, error: 1101 }; }; } else { if escape == 117 { if sh_lex_byte(&bytes, index) == 123 { index = index + 1; let mut value = 0; let mut digits = 0; let mut valid = true; if sh_lex_byte(&bytes, index) == 43 { index = index + 1; }; while index < raw.len() and sh_lex_byte(&bytes, index) != 125 { let digit = sh_lex_hex(sh_lex_byte(&bytes, index)); if digit < 0 or value > 268435455 { valid = false; }; if valid { value = value * 16 + digit; }; digits = digits + 1; index = index + 1; }; if sh_lex_byte(&bytes, index) == 125 { index = index + 1; }; if valid and digits > 0 { sh_lex_scalar(&output, value); (); }; } else { if index < raw.len() { index = sh_lex_utf8(&bytes, index).end; }; }; } else { output.push_str("\\")?; if escape >= 0 { let mut end = index; while end < raw.len() and sh_lex_byte(&bytes, end) >= 128 and sh_lex_byte(&bytes, end) < 192 { end = end + 1; }; let part = raw.get(index - 1, end)?; string_copy_result(sengoo_string_push_padded_string_status(output.handle, part.handle, 1, 0))?; index = end; }; }; }; }; plain = index; }; };
+    if plain < raw.len() { let part = raw.get(plain, raw.len())?; string_copy_result(sengoo_string_push_padded_string_status(output.handle, part.handle, 1, 0))?; (); };
+    Result { is_ok: true, value: output, error: 0 };
+}
+
+struct ShScalar {
+    value: i64,
+    end: i64,
+}
+
+def sh_lex_utf8(bytes: &Buffer, start: i64) -> ShScalar {
+    let first = sh_lex_byte(bytes, start);
+    if first < 128 { return ShScalar { value: first, end: start + 1 }; };
+    let mut value = first % 32;
+    let mut width = 2;
+    if first >= 224 { value = first % 16; width = 3; };
+    if first >= 240 { value = first % 8; width = 4; };
+    let mut index = 1;
+    while index < width { value = value * 64 + sh_lex_byte(bytes, start + index) % 64; index = index + 1; };
+    ShScalar { value: value, end: start + width };
+}
+
+def sh_lex_unicode_space(scalar: i64) -> bool {
+    scalar >= 9 and scalar <= 13 or scalar == 32 or scalar == 133 or scalar == 160 or scalar == 5760 or scalar >= 8192 and scalar <= 8202 or scalar == 8232 or scalar == 8233 or scalar == 8239 or scalar == 8287 or scalar == 12288;
+}
+
+def sh_literal_multiline(raw: &String) -> Result<String, i64> {
+    let bytes = sh_lex_bytes(raw)?;
+    let lines = ShTokens { words: vec_new_i64() };
+    let mut start = 0;
+    let mut index = 0;
+    while index < raw.len() { if sh_lex_byte(&bytes, index) == 10 { let mut end = index; if end > start and sh_lex_byte(&bytes, end - 1) == 13 { end = end - 1; }; lines.words.push(start); lines.words.push(end); start = index + 1; }; index = index + 1; };
+    if start < raw.len() { lines.words.push(start); lines.words.push(raw.len()); (); };
+    let mut first = -1;
+    let mut last = -1;
+    let mut indent = raw.len();
+    index = 0;
+    while index < lines.words.len() / 2 { let begin = lines.words.get(index * 2).unwrap_or(0); let end = lines.words.get(index * 2 + 1).unwrap_or(0); let mut at = begin; let mut blank = true; let mut leading = 0; while at < end { let scalar = sh_lex_utf8(&bytes, at); if not sh_lex_unicode_space(scalar.value) { blank = false; }; if at == begin + leading and (scalar.value == 32 or scalar.value == 9) { leading = leading + 1; }; at = scalar.end; }; if not blank { if first < 0 { first = index; }; last = index; if leading < indent { indent = leading; }; }; index = index + 1; };
+    let output = string_new();
+    if first < 0 { return Result { is_ok: true, value: output, error: 0 }; };
+    index = first;
+    while index <= last { let begin = lines.words.get(index * 2).unwrap_or(0); let end = lines.words.get(index * 2 + 1).unwrap_or(0); let mut at = begin; let mut removed = 0; while at < end and removed < indent { at = sh_lex_utf8(&bytes, at).end; removed = removed + 1; }; let line = raw.get(at, end)?; string_copy_result(sengoo_string_push_padded_string_status(output.handle, line.handle, 1, 0))?; if index < last { output.push_str("\n")?; (); }; index = index + 1; };
+    Result { is_ok: true, value: output, error: 0 };
+}
+
+def sh_fstring_fields(text: &String, token: ShToken, maximum: i64) -> ShLexed {
+    let tokens = ShTokens { words: vec_new_i64() };
+    if token.kind != 9 or token.start < 0 or token.start > text.len() or token.end < token.start or token.end > text.len() or token.end - token.start < 3 { return ShLexed { tokens: tokens, error: 1104, start: token.start, end: token.end }; };
+    let copied = sh_lex_bytes(text);
+    if not copied.is_ok() { return ShLexed { tokens: tokens, error: 1101, start: token.start, end: token.end }; };
+    let bytes = copied.value;
+    let mut index = token.start + 2;
+    let mut depth = 0;
+    let mut begin = 0;
+    while index < token.end - 1 { let byte = sh_lex_byte(&bytes, index); if depth > 0 { if byte == 34 or byte == 39 { let end = sh_lex_quoted(&bytes, index); if end < 0 or end > token.end { return ShLexed { tokens: tokens, error: 1104, start: index, end: token.end }; }; index = end; } else { if byte == 123 { depth = depth + 1; }; if byte == 125 { depth = depth - 1; if depth == 0 { if not sh_lex_push(&tokens, maximum, 1, begin, index) { return ShLexed { tokens: tokens, error: 1101, start: begin, end: index }; }; }; }; index = index + 1; }; } else { if byte == 92 { index = index + 2; } else { if (byte == 123 and sh_lex_byte(&bytes, index + 1) == 123) or (byte == 125 and sh_lex_byte(&bytes, index + 1) == 125) { index = index + 2; } else { if byte == 123 { depth = 1; begin = index + 1; }; index = index + 1; }; }; }; };
+    if token.kind != 9 or depth != 0 { return ShLexed { tokens: tokens, error: 1104, start: token.start, end: token.end }; };
+    ShLexed { tokens: tokens, error: 0, start: token.end, end: token.end };
+}
+
+def sh_literal_decode(text: &String, token: ShToken) -> Result<String, i64> {
+    if token.start < 0 or token.start > text.len() or token.end < token.start or token.end > text.len() or token.end - token.start < 2 { return Result { is_ok: false, value: String { handle: 0 }, error: 1106 }; };
+    let spelling = sh_token_text(text, token)?;
+    let bytes = sh_lex_bytes(&spelling)?;
+    if token.kind == 6 or token.kind == 7 { return spelling.get(2, spelling.len() - 1); };
+    if token.kind == 5 { if sh_lex_equal(&bytes, 0, "\"\"\"") { if spelling.len() < 6 { return Result { is_ok: false, value: String { handle: 0 }, error: 1106 }; }; let raw = spelling.get(3, spelling.len() - 3)?; return sh_literal_multiline(&raw); }; let raw = spelling.get(1, spelling.len() - 1)?; return sh_literal_unescape(&raw); };
+    if token.kind == 8 { let mut scalar = 0; if spelling.len() > 2 { scalar = sh_lex_utf8(&bytes, 1).value; }; if scalar == 92 { let escape = sh_lex_byte(&bytes, 2); if escape == 110 { scalar = 10; }; if escape == 116 { scalar = 9; }; if escape == 114 { scalar = 13; }; if escape == 48 { scalar = 0; }; if escape == 92 or escape == 39 or escape == 34 { scalar = escape; }; }; let value = string_new(); if not sh_lex_scalar(&value, scalar) { return Result { is_ok: false, value: String { handle: 0 }, error: 1101 }; }; return Result { is_ok: true, value: value, error: 0 }; };
+    if token.kind == 9 { let fields = sh_fstring_fields(text, token, token.end - token.start); if fields.error != 0 { return Result { is_ok: false, value: String { handle: 0 }, error: fields.error }; }; let raw = string_new(); let mut plain = token.start + 2; let mut index = 0; while index < sh_token_count(&fields.tokens) { let field = sh_token_get(&fields.tokens, index); let part = text.get(plain, field.start - 1)?; string_copy_result(sengoo_string_push_padded_string_status(raw.handle, part.handle, 1, 0))?; raw.push_str("{}")?; plain = field.end + 1; index = index + 1; }; let last = text.get(plain, token.end - 1)?; string_copy_result(sengoo_string_push_padded_string_status(raw.handle, last.handle, 1, 0))?; return sh_literal_unescape(&raw); };
+    Result { is_ok: false, value: String { handle: 0 }, error: 1106 };
+}

@@ -1,0 +1,222 @@
+import selfhost_expand;
+
+import std::assert;
+
+extern "C" {
+    fn sengoo_string_live_handle_count() -> i64;
+    fn sengoo_buffer_live_handle_count() -> i64;
+    fn sengoo_opaque_live_handle_count() -> i64;
+}
+
+def sh_expand_test_input(input: &str) -> Result<String, i64> {
+    let raw = string_from_str(input)?;
+    let bytes = sh_lex_bytes(&raw)?;
+    let result = string_new();
+    let mut index = 0;
+    let mut plain = 0;
+    while index < raw.len() { let macro_mark = sh_lex_equal(&bytes, index, "@macro!"); let attr_mark = sh_lex_equal(&bytes, index, "@attr["); if macro_mark or attr_mark { let part = raw.get(plain, index)?; sh_exp_append(&result, &part); if macro_mark { result.push_str("macro_rules")?; result.push_str("!")?; index = index + 7; } else { result.push_str("#")?; result.push_str("[")?; index = index + 6; }; plain = index; } else { index = index + 1; }; };
+    let last = raw.get(plain, raw.len())?;
+    sh_exp_append(&result, &last);
+    Result { is_ok: true, value: result, error: 0 };
+}
+
+def sh_expand_test_tokens(actual: &String, expected: &str) -> Result<bool, i64> {
+    let wanted = sh_expand_test_input(expected)?;
+    let left = sh_lex(actual, actual.len() + 1);
+    let right = sh_lex(&wanted, wanted.len() + 1);
+    assert_eq_i64(left.error, 0, "expand.sg", 15);
+    assert_eq_i64(right.error, 0, "expand.sg", 16);
+    let mut a = sh_exp_next(&left.tokens, 0);
+    let mut b = sh_exp_next(&right.tokens, 0);
+    while a < sh_token_count(&left.tokens) and b < sh_token_count(&right.tokens) { let first = sh_token_get(&left.tokens, a); let second = sh_token_get(&right.tokens, b); assert_eq_i64(first.kind, second.kind, "expand.sg", 22); let text = sh_token_text(actual, first)?; let reference = sh_token_text(&wanted, second)?; assert_true(sengoo_string_eq(text.handle, reference.handle) != 0, "expand.sg", 25); a = sh_exp_next(&left.tokens, a + 1); b = sh_exp_next(&right.tokens, b + 1); };
+    assert_eq_i64(a, sh_token_count(&left.tokens), "expand.sg", 29);
+    assert_eq_i64(b, sh_token_count(&right.tokens), "expand.sg", 30);
+    Result { is_ok: true, value: true, error: 0 };
+}
+
+def sh_expand_test_macro(input: &str, expected: &str) -> Result<bool, i64> {
+    let text = sh_expand_test_input(input)?;
+    let expanded = sh_expand_macros(&text, 1048576, 16);
+    assert_eq_i64(expanded.error, 0, "expand.sg", 37);
+    sh_expand_test_tokens(&expanded.text, expected);
+}
+
+def sh_expand_test_macro_error(input: &str, error: i64, maximum: i64, passes: i64) -> Result<bool, i64> {
+    let text = sh_expand_test_input(input)?;
+    let expanded = sh_expand_macros(&text, maximum, passes);
+    assert_eq_i64(expanded.error, error, "expand.sg", 44);
+    assert_true(expanded.start >= 0 and expanded.end <= text.len() and expanded.end >= expanded.start, "expand.sg", 45);
+    Result { is_ok: true, value: true, error: 0 };
+}
+
+def sh_expand_test_macros() -> Result<bool, i64> {
+    sh_expand_test_macro("@macro! make_main { ($value:expr) => { def main() -> i64 { $value } }; } make_main!(42)", "def main() -> i64 { 42 }")?;
+    sh_expand_test_macro("@macro! add { ($a:expr,$b:expr)=>{$a+$b}; } def main(){add!(20,22)}", "def main(){20+22}")?;
+    sh_expand_test_macro("@macro! choose { ($a:ident)=>{1}; ($a:literal)=>{2}; ($a:block)=>{3}; } def main(){choose!(x)+choose![42]+choose!{{1}}}", "def main(){1+2+3}")?;
+    sh_expand_test_macro("@macro! outer { ($a:expr)=>{inner!($a)}; } @macro! inner { ($b:expr)=>{$b+1}; } def main(){outer!(41)}", "def main(){41+1}")?;
+    sh_expand_test_macro("@macro! pair { ($a:expr,$b:expr)=>{($a,$b)}; } def main(){pair!((1,2),f(3,4))}", "def main(){((1,2),f(3,4))}")?;
+    sh_expand_test_macro("@macro! type_id { ($a:ty)=>{$a}; } struct X { v:type_id!(Vec<(i64,i64)>), }", "struct X {v:Vec<(i64,i64)>,}")?;
+    sh_expand_test_macro("@macro! path_id { ($a:path)=>{$a}; } def main(){path_id!(Some::value)}", "def main(){Some::value}")?;
+    sh_expand_test_macro("@macro! stmt_id { ($a:stmt)=>{$a}; } def main(){stmt_id!(let x=42;)}", "def main(){let x=42;}")?;
+    sh_expand_test_macro("@macro! token_id { ($a:tt)=>{$a}; } def main(){token_id!((20+22))}", "def main(){(20+22)}")?;
+    sh_expand_test_macro("@macro! pattern_id { ($a:pat)=>{$a}; } def main(){match 1 {pattern_id!(_)=>42}}", "def main(){match 1 {_=>42}}")?;
+    sh_expand_test_macro("@macro! plain { ()=>{1}; } def main(){ \"plain!()\"; /* plain!() */ plain!() }", "def main(){\"plain!()\"; 1}")?;
+    sh_expand_test_macro("def macro_rules() -> i64 { 1 }", "def macro_rules() -> i64 { 1 }")?;
+    sh_expand_test_macro_error("@macro! a { ($x:expr)=>{$x}; } a!()", 1302, 1000, 16)?;
+    sh_expand_test_macro_error("@macro! a { ()=>{1}; } missing!()", 1302, 1000, 16)?;
+    sh_expand_test_macro_error("@macro! a { ()=>{1}; } @macro! a { ()=>{2}; }", 1301, 1000, 16)?;
+    sh_expand_test_macro_error("@macro! a { ($($x:expr),*)=>{$($x),*}; }", 1301, 1000, 16)?;
+    sh_expand_test_macro_error("@macro! a { ()=>{a!()}; } a!()", 1303, 1000, 16)?;
+    sh_expand_test_macro_error("@macro! a { ()=>{1}; } a!()", 1303, 1000, 0)?;
+    sh_expand_test_macro_error("@macro! a { ()=>{123456}; } a!()", 1304, 10, 16)?;
+    sh_expand_test_macro_error("@macro! a { ($x:nope)=>{$x}; } a!(1)", 1302, 1000, 16)?;
+    Result { is_ok: true, value: true, error: 0 };
+}
+
+def sh_expand_test_attributes(input: &str, expected: &str, os: &str, features: &ShSymbols) -> Result<bool, i64> {
+    let text = sh_expand_test_input(input)?;
+    let macros = sh_expand_macros(&text, 1048576, 16);
+    let expanded = sh_expand_attributes(&macros, features, os, 1048576);
+    assert_eq_i64(expanded.error, 0, "expand.sg", 78);
+    sh_expand_test_tokens(&expanded.text, expected);
+}
+
+def sh_expand_test_attribute_error(input: &str, error: i64) -> Result<bool, i64> {
+    let text = sh_expand_test_input(input)?;
+    let features = sh_symbols_new(0);
+    let macros = sh_expand_macros(&text, 1048576, 16);
+    let expanded = sh_expand_attributes(&macros, &features, "windows", 1048576);
+    assert_eq_i64(expanded.error, error, "expand.sg", 88);
+    assert_true(expanded.start >= 0 and expanded.end <= text.len(), "expand.sg", 89);
+    Result { is_ok: true, value: true, error: 0 };
+}
+
+def sh_expand_test_cfg() -> Result<bool, i64> {
+    let features = sh_symbols_new(4);
+    let name = string_from_str("network-client")?;
+    sh_intern(&features, &name)?;
+    sh_expand_test_attributes("@attr[cfg(target_os=\"windows\")] struct W {} @attr[cfg(target_os=\"linux\")] struct L {}", "struct W {}", "windows", &features)?;
+    sh_expand_test_attributes("@attr[cfg(target_os=\"windows\")] struct W {} @attr[cfg(target_os=\"linux\")] struct L {}", "struct L {}", "linux", &features)?;
+    sh_expand_test_attributes("@attr[cfg(all(target_family=\"windows\",any(feature=\"network-client\",target_os=\"linux\"),not(feature=\"absent\"),))] pub /* note */ async def main(){}", "pub async def main(){}", "windows", &features)?;
+    sh_expand_test_attributes("@attr[cfg(feature=\"absent\")] @attr[derive(Clone)] struct Hidden {} def main(){}", "def main(){}", "windows", &features)?;
+    sh_expand_test_attributes("@attr[cfg(target_os=\"windows\")] @attr[derive(Clone)] struct Kept {}", "@attr[derive(Clone)] struct Kept {}", "windows", &features)?;
+    sh_expand_test_attributes("def main(){ let x=\"#\"; } async def later(){}", "def main(){let x=\"#\";} async def later(){}", "windows", &features)?;
+    sh_expand_test_attribute_error("@attr[cfg(target_os=\"unknown\")] struct X {}", 1401)?;
+    sh_expand_test_attribute_error("@attr[cfg(all())] struct X {}", 1401)?;
+    sh_expand_test_attribute_error("@attr[cfg(not(target_os=\"windows\",target_os=\"linux\"))] struct X {}", 1401)?;
+    sh_expand_test_attribute_error("@attr[cfg(feature=\"\")] struct X {}", 1401)?;
+    sh_expand_test_attribute_error("@attr[cfg(foo=\"bar\")] struct X {}", 1401)?;
+    sh_expand_test_attribute_error("@attr[derive(Clone)] def main() {}", 1403)?;
+    sh_expand_test_attribute_error("@attr[unknown] struct X {}", 1403)?;
+    Result { is_ok: true, value: true, error: 0 };
+}
+
+def sh_expand_test_deprecated() -> Result<bool, i64> {
+    let features = sh_symbols_new(0);
+    let text = sh_expand_test_input("@attr[deprecated(replacement=\"new_api\",removal=\"v0.3.0\",note=\"old\")] pub def old_api() {} @attr[deprecated(\"legacy\")] struct Old {} @attr[deprecated] enum OldEnum { A }")?;
+    let macros = sh_expand_macros(&text, 1048576, 16);
+    let expanded = sh_expand_attributes(&macros, &features, "windows", 1048576);
+    assert_eq_i64(expanded.error, 0, "expand.sg", 121);
+    assert_eq_i64(expanded.deprecated.len(), 3, "expand.sg", 122);
+    let first = expanded.deprecated.get(0);
+    assert_eq_str(first.name.as_str(), "old_api", "expand.sg", 124);
+    assert_eq_str(first.message.as_str(), "old", "expand.sg", 125);
+    assert_eq_str(first.replacement.as_str(), "new_api", "expand.sg", 126);
+    assert_eq_str(first.removal.as_str(), "v0.3.0", "expand.sg", 127);
+    assert_eq_i64(first.flags, 7, "expand.sg", 128);
+    assert_eq_i64(first.kind, 6, "expand.sg", 129);
+    assert_eq_str(expanded.deprecated.get(1).message.as_str(), "legacy", "expand.sg", 130);
+    assert_eq_i64(expanded.deprecated.get(2).flags, 0, "expand.sg", 131);
+    sh_expand_test_tokens(&expanded.text, "pub def old_api() {} struct Old {} enum OldEnum { A }")?;
+    sh_expand_test_attribute_error("@attr[deprecated(note=\"x\")] struct X {}", 1402)?;
+    sh_expand_test_attribute_error("@attr[deprecated(replacement=\"x\",replacement=\"y\",removal=\"v1\")] struct X {}", 1402)?;
+    sh_expand_test_attribute_error("@attr[deprecated(unknown=\"x\",removal=\"v1\")] struct X {}", 1402)?;
+    sh_expand_test_attribute_error("@attr[deprecated] impl X {}", 1403)?;
+    Result { is_ok: true, value: true, error: 0 };
+}
+
+def sh_expand_test_mapping() -> Result<bool, i64> {
+    let text = sh_expand_test_input("@macro! identity { ($x:expr)=>{$x}; }\ndef main(){identity!(42)}")?;
+    let expanded = sh_expand_macros(&text, 1048576, 16);
+    assert_eq_i64(expanded.error, 0, "expand.sg", 145);
+    let mut index = 0;
+    let mut cursor = 0;
+    let mut generated = false;
+    while index < expanded.mapping.words.len() { let low = expanded.mapping.words.get(index).unwrap_or(0); let high = expanded.mapping.words.get(index + 1).unwrap_or(0); let begin = expanded.mapping.words.get(index + 2).unwrap_or(0); let end = expanded.mapping.words.get(index + 3).unwrap_or(0); let mode = expanded.mapping.words.get(index + 4).unwrap_or(0); assert_eq_i64(low, cursor, "expand.sg", 155); assert_true(end >= begin and begin >= 0 and end <= text.len(), "expand.sg", 156); let source = text.get(begin, end)?; let output = expanded.text.get(low, high)?; if mode == 0 { assert_true(sengoo_string_eq(source.handle, output.handle) != 0, "expand.sg", 159); } else { generated = true; assert_eq_str(source.as_str(), "identity!(42)", "expand.sg", 160); }; cursor = high; index = index + 5; };
+    assert_true(generated, "expand.sg", 164);
+    assert_eq_i64(cursor, expanded.text.len(), "expand.sg", 165);
+    Result { is_ok: true, value: true, error: 0 };
+}
+
+def sh_expand_test_pipeline() -> Result<bool, i64> {
+    let features = sh_symbols_new(0);
+    let text = sh_expand_test_input("@macro! make { ($n:ident)=>{ @attr[cfg(target_os=\"windows\")] @attr[deprecated(replacement=\"next\",removal=\"v1\")] def $n()->i64{42} }; } make!(old)")?;
+    let expanded = sh_expand(&text, &features, 1048576, 16);
+    assert_eq_i64(expanded.error, 0, "expand.sg", 200);
+    sh_expand_test_tokens(&expanded.text, "def old()->i64{42}")?;
+    assert_eq_i64(expanded.deprecated.len(), 1, "expand.sg", 202);
+    assert_eq_str(expanded.deprecated.get(0).name.as_str(), "old", "expand.sg", 203);
+    let mut index = 0;
+    let mut copied = 0;
+    while index < expanded.mapping.words.len() { let low = expanded.mapping.words.get(index).unwrap_or(0); let high = expanded.mapping.words.get(index + 1).unwrap_or(0); assert_eq_i64(low, copied, "expand.sg", 209); let span = sh_exp_map(&expanded.mapping, low, high); let original = text.get(span.start, span.end)?; if expanded.mapping.words.get(index + 4).unwrap_or(0) == 1 { assert_eq_str(original.as_str(), "make!(old)", "expand.sg", 213); } else { let same = expanded.text.get(low, high)?; assert_true(sengoo_string_eq(same.handle, original.handle) != 0, "expand.sg", 214); }; copied = high; index = index + 5; };
+    assert_eq_i64(copied, expanded.text.len(), "expand.sg", 216);
+    Result { is_ok: true, value: true, error: 0 };
+}
+
+def sh_expand_test_cfg_nul() -> Result<bool, i64> {
+    let text = string_new();
+    text.push_str("#")?;
+    text.push_str("[cfg(target_os=\"windows")?;
+    if not sh_lex_scalar(&text, 0) { return Result { is_ok: false, value: false, error: 1304 }; };
+    text.push_str("suffix\")] struct X {}")?;
+    let features = sh_symbols_new(0);
+    let macros = sh_expand_macros(&text, 1048576, 16);
+    assert_eq_i64(macros.error, 0, "expand.sg", 230);
+    let attributes = sh_expand_attributes(&macros, &features, "windows", 1048576);
+    assert_eq_i64(attributes.error, 1401, "expand.sg", 232);
+    Result { is_ok: true, value: true, error: 0 };
+}
+
+def sh_expand_test_derive() -> Result<bool, i64> {
+    let text = sh_expand_test_input("@attr[cfg(target_os=\"windows\")] @attr[derive(Clone, PartialEq, Default)] struct Point { x:i64,y:i64 } def main()->i64{42}")?;
+    let features = sh_symbols_new(0);
+    let expanded = sh_expand(&text, &features, 1048576, 16);
+    assert_eq_i64(expanded.error, 0, "expand.sg", 242);
+    assert_true(str_contains(expanded.text.as_str(), "impl Clone for Point"), "expand.sg", 243);
+    assert_true(str_contains(expanded.text.as_str(), "impl PartialEq for Point"), "expand.sg", 244);
+    assert_true(str_contains(expanded.text.as_str(), "impl Default for Point"), "expand.sg", 245);
+    let mut cursor = 0;
+    let mut record = 0;
+    let mut generated = 0;
+    while record < expanded.mapping.words.len() { let low = expanded.mapping.words.get(record).unwrap_or(0); let high = expanded.mapping.words.get(record + 1).unwrap_or(0); let begin = expanded.mapping.words.get(record + 2).unwrap_or(0); let end = expanded.mapping.words.get(record + 3).unwrap_or(0); let mode = expanded.mapping.words.get(record + 4).unwrap_or(0); assert_eq_i64(low, cursor, "expand.sg", 255); assert_true(begin >= 0 and end <= text.len() and end >= begin, "expand.sg", 256); if mode == 0 { assert_eq_i64(high - low, end - begin, "expand.sg", 257); (); } else { generated = generated + 1; }; cursor = high; record = record + 5; };
+    assert_eq_i64(cursor, expanded.text.len(), "expand.sg", 261);
+    assert_true(generated >= 3, "expand.sg", 262);
+    Result { is_ok: true, value: true, error: 0 };
+}
+
+def main() -> i64 {
+    let strings = sengoo_string_live_handle_count();
+    let buffers = sengoo_buffer_live_handle_count();
+    let opaque = sengoo_opaque_live_handle_count();
+    let macros = sh_expand_test_macros();
+    if not macros.is_ok() { println(macros.error); return 1; };
+    let cfg = sh_expand_test_cfg();
+    if not cfg.is_ok() { println(cfg.error); return 2; };
+    let deprecated = sh_expand_test_deprecated();
+    if not deprecated.is_ok() { println(deprecated.error); return 3; };
+    let mapping = sh_expand_test_mapping();
+    if not mapping.is_ok() { println(mapping.error); return 4; };
+    let pipeline = sh_expand_test_pipeline();
+    if not pipeline.is_ok() { println(pipeline.error); return 7; };
+    let nul = sh_expand_test_cfg_nul();
+    if not nul.is_ok() { println(nul.error); return 8; };
+    let derived = sh_expand_test_derive();
+    if not derived.is_ok() { println(derived.error); return 9; };
+    let mut round = 0;
+    while round < 100 { let result = sh_expand_test_macro("@macro! a { ($x:expr)=>{$x+1}; } a!(41)", "41+1"); if not result.is_ok() { println(result.error); return 5; }; let invalid = sh_expand_test_attribute_error("@attr[cfg(not())] struct X{}", 1401); if not invalid.is_ok() { println(invalid.error); return 6; }; round = round + 1; };
+    assert_eq_i64(sengoo_string_live_handle_count(), strings, "expand.sg", 187);
+    assert_eq_i64(sengoo_buffer_live_handle_count(), buffers, "expand.sg", 188);
+    assert_eq_i64(sengoo_opaque_live_handle_count(), opaque, "expand.sg", 189);
+    println("selfhost expand: ok");
+    0;
+}

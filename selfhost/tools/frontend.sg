@@ -1,0 +1,40 @@
+import selfhost_frontend;
+
+import std::args;
+
+import std::file;
+
+import std::io;
+
+def sh_front_argument(index: i64) -> Result<String, i64> {
+    let length = arg_len(index)?;
+    let buffer = ffi_buffer_new(length)?;
+    let count = arg_copy(index, buffer)?;
+    string_from_utf8(buffer, count);
+}
+
+def sh_front_run(input: &str, output: &str) -> Result<i64, i64> {
+    let sources = sh_sources_new(1, 16777216);
+    let source = sh_source_load(&sources, input)?;
+    let length = sh_source_len(&sources, source)?;
+    let text = sh_span_text(&sources, ShSpan { source: source, start: 0, end: length })?;
+    let features = sh_symbols_new(0);
+    let result = sh_frontend(&text, source, &features, 16777216, 1000000);
+    if result.error != 0 { io_stderr_write("frontend error/start/end:\n"); println(result.error); println(result.start); println(result.end); return sh_i64_ok(65); };
+    let bytes = sh_lex_bytes(&result.expanded.text)?;
+    let written = file_write_str_raw(sengoo_stdlib_str_ptr(output), bytes.ptr(), result.expanded.text.len())?;
+    if written != result.expanded.text.len() { return sh_i64_error(1007); };
+    println("selfhost frontend syntax: ok");
+    sh_i64_ok(0);
+}
+
+def main() -> i64 {
+    if args_len() != 2 { io_stderr_write("frontend INPUT OUTPUT\n"); return 64; };
+    let input = sh_front_argument(0);
+    let output = sh_front_argument(1);
+    if not input.is_ok() or not output.is_ok() { return 64; };
+    let result = sh_front_run(input.value.as_str(), output.value.as_str());
+    if result.is_ok() { return result.value; };
+    io_stderr_write("frontend::input_or_output\n");
+    66;
+}

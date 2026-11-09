@@ -1,0 +1,447 @@
+import selfhost_core;
+
+import selfhost_lexer;
+
+struct ShAst {
+    words: Vec<i64>,
+    edges: Vec<i64>,
+    root: i64,
+}
+
+struct ShParsed {
+    ast: ShAst,
+    error: i64,
+    start: i64,
+    end: i64,
+}
+
+struct ShParser {
+    tokens: ShTokens,
+    text: String,
+    ast: ShAst,
+    pos: i64,
+    previous: i64,
+    error: i64,
+    error_start: i64,
+    error_end: i64,
+    depth: i64,
+    limit: i64,
+    source: i64,
+    pending_gt: i64,
+    condition: i64,
+    context: i64,
+}
+
+def sh_ast_count(ast: &ShAst) -> i64 {
+    ast.words.len() / 7;
+}
+
+def sh_ast_word(ast: &ShAst, id: i64, field: i64) -> i64 {
+    if id < 0 or id >= sh_ast_count(ast) or field < 0 or field >= 7 { return -1; };
+    ast.words.get(id * 7 + field).unwrap_or(-1);
+}
+
+def sh_ast_child(ast: &ShAst, id: i64, index: i64) -> i64 {
+    let count = sh_ast_word(ast, id, 6);
+    if index < 0 or index >= count { return -1; };
+    ast.edges.get(sh_ast_word(ast, id, 5) + index).unwrap_or(-1);
+}
+
+def sh_p_token(p: &ShParser) -> ShToken {
+    sh_token_get(&p.tokens, p.pos);
+}
+
+def sh_p_kind(p: &ShParser) -> i64 {
+    sh_p_token(p).kind;
+}
+
+def sh_p_at(p: &ShParser, text: &str) -> bool {
+    let kind = sh_kind(text);
+    kind != 1 and sh_p_kind(p) == kind;
+}
+
+def sh_p_peek(p: &ShParser) -> i64 {
+    let mut index = p.pos + 1;
+    while index < sh_token_count(&p.tokens) { let kind = sh_token_get(&p.tokens, index).kind; if kind < 10 or kind > 12 { return kind; }; index = index + 1; };
+    0;
+}
+
+def sh_p_bump(p: &mut ShParser) -> bool {
+    if sh_p_kind(p) <= 0 { return false; };
+    p.previous = sh_p_token(p).end;
+    p.pos = p.pos + 1;
+    while sh_p_kind(p) >= 10 and sh_p_kind(p) <= 12 { p.pos = p.pos + 1; };
+    true;
+}
+
+def sh_p_take(p: &mut ShParser, text: &str) -> bool {
+    if p.error != 0 or not sh_p_at(p, text) { return false; };
+    sh_p_bump(p);
+}
+
+def sh_p_fail(p: &mut ShParser, code: i64) -> i64 {
+    if p.error == 0 { p.error = code; p.error_start = sh_p_token(p).start; p.error_end = sh_p_token(p).end; };
+    -1;
+}
+
+def sh_p_expect(p: &mut ShParser, text: &str) -> () {
+    if sh_p_take(p, text) { return; };
+    sh_p_fail(p, 3001);
+    ();
+}
+
+def sh_p_enter(p: &mut ShParser) -> bool {
+    if p.error != 0 { return false; };
+    if p.depth >= 128 { sh_p_fail(p, 3002); return false; };
+    p.depth = p.depth + 1;
+    true;
+}
+
+def sh_p_edge(p: &mut ShParser, children: &Vec<i64>, id: i64) -> () {
+    if id < 0 or p.error != 0 { return; };
+    if not children.push(id) { sh_p_fail(p, 3003); return; };
+    ();
+}
+
+def sh_p_node(p: &mut ShParser, kind: i64, start: i64, payload: i64, children: &Vec<i64>) -> i64 {
+    if p.error != 0 { return -1; };
+    if p.limit < 0 or sh_ast_count(&p.ast) >= p.limit { return sh_p_fail(p, 3003); };
+    let id = sh_ast_count(&p.ast);
+    let first = p.ast.edges.len();
+    let mut index = 0;
+    while index < children.len() { let child = sengoo_vec_get_or_default_i64(children.handle, index, -1); if child < 0 or child >= id { return sh_p_fail(p, 3003); }; if not p.ast.edges.push(child) { return sh_p_fail(p, 3003); }; index = index + 1; };
+    let stored = p.ast.words.push(kind) and p.ast.words.push(p.source) and p.ast.words.push(start) and p.ast.words.push(p.previous) and p.ast.words.push(payload) and p.ast.words.push(first) and p.ast.words.push(children.len());
+    if not stored { return sh_p_fail(p, 3003); };
+    id;
+}
+
+def sh_p_leaf(p: &mut ShParser, kind: i64) -> i64 {
+    let token = sh_p_token(p);
+    if not sh_p_bump(p) { return sh_p_fail(p, 3001); (); };
+    let children = vec_new_i64();
+    sh_p_node(p, kind, token.start, token.kind, &children);
+}
+
+def sh_p_name(p: &mut ShParser) -> i64 {
+    if sh_p_kind(p) == 1 or sh_p_at(p, "self") or sh_p_at(p, "default") { return sh_p_leaf(p, 10); };
+    sh_p_fail(p, 3001);
+}
+
+def sh_p_path(p: &mut ShParser, kind: i64) -> i64 {
+    let start = sh_p_token(p).start;
+    let children = vec_new_i64();
+    let first = if sh_p_at(p, "Self") { sh_p_leaf(p, 10); } else { sh_p_name(p); };
+    sh_p_edge(p, &children, first);
+    while p.error == 0 and sh_p_at(p, "::") and (sh_p_peek(p) == 1 or sh_p_peek(p) == sh_kind("Self") or sh_p_peek(p) == sh_kind("async") or sh_p_peek(p) == sh_kind("default")) { sh_p_bump(p); let name = if sh_p_at(p, "async") or sh_p_at(p, "default") or sh_p_at(p, "Self") { sh_p_leaf(p, 10); } else { sh_p_name(p); }; sh_p_edge(p, &children, name); };
+    sh_p_node(p, kind, start, 0, &children);
+}
+
+def sh_p_gt(p: &mut ShParser) -> bool {
+    if p.pending_gt > 0 { p.pending_gt = p.pending_gt - 1; return true; };
+    if sh_p_take(p, ">") { return true; };
+    if sh_p_take(p, ">>") { p.pending_gt = 1; return true; };
+    false;
+}
+
+def sh_p_type(p: &mut ShParser) -> i64 {
+    if not sh_p_enter(p) { return -1; };
+    let start = sh_p_token(p).start;
+    let children = vec_new_i64();
+    let mut kind = 70;
+    let mut payload = sh_p_kind(p);
+    if sh_p_take(p, "&") or sh_p_take(p, "*") { kind = 71; if sh_p_take(p, "mut") { payload = payload + 1000; }; sh_p_take(p, "const"); let base = sh_p_type(p); sh_p_edge(p, &children, base); } else if sh_p_take(p, "(") { kind = 72; while p.error == 0 and not sh_p_at(p, ")") { let ty = sh_p_type(p); sh_p_edge(p, &children, ty); if not sh_p_take(p, ",") { break; }; }; sh_p_expect(p, ")"); } else if sh_p_take(p, "[") { kind = 73; let elem = sh_p_type(p); sh_p_edge(p, &children, elem); if sh_p_take(p, ";") { if sh_p_kind(p) != 2 { sh_p_fail(p, 3001); (); } else { let count = sh_p_leaf(p, 11); sh_p_edge(p, &children, count); }; }; sh_p_expect(p, "]"); } else if sh_p_take(p, "fn") { kind = 74; sh_p_expect(p, "("); while p.error == 0 and not sh_p_at(p, ")") { let ty = sh_p_type(p); sh_p_edge(p, &children, ty); if not sh_p_take(p, ",") { break; }; }; sh_p_expect(p, ")"); if sh_p_take(p, "->") { payload = payload + 1000; let ty = sh_p_type(p); sh_p_edge(p, &children, ty); }; } else if sh_p_take(p, "!") or sh_p_take(p, "_") { kind = 75; } else if sh_p_take(p, "dyn") { kind = 75; let ty = sh_p_type(p); sh_p_edge(p, &children, ty); while sh_p_take(p, "+") { let bound = sh_p_type(p); sh_p_edge(p, &children, bound); }; } else { let path = sh_p_path(p, 12); sh_p_edge(p, &children, path); if sh_p_take(p, "<") { while p.error == 0 and not sh_p_gt(p) { let ty = sh_p_type(p); if p.pending_gt == 0 and (sh_p_take(p, "=") or sh_p_take(p, ":=")) { let binding_children = vec_new_i64(); sh_p_edge(p, &binding_children, ty); let associated = sh_p_type(p); sh_p_edge(p, &binding_children, associated); let binding_start = sh_ast_word(&p.ast, ty, 2); let binding = sh_p_node(p, 76, binding_start, 0, &binding_children); sh_p_edge(p, &children, binding); } else { sh_p_edge(p, &children, ty); }; if sh_p_gt(p) { break; }; if not sh_p_take(p, ",") { sh_p_fail(p, 3001); break; }; }; }; };
+    let result = sh_p_node(p, kind, start, payload, &children);
+    p.depth = p.depth - 1;
+    result;
+}
+
+def sh_p_precedence(p: &ShParser) -> i64 {
+    if sh_p_at(p, "=") or sh_p_at(p, ":=") or sh_p_at(p, "+=") or sh_p_at(p, "-=") or sh_p_at(p, "*=") or sh_p_at(p, "/=") or sh_p_at(p, "%=") or sh_p_at(p, "&=") or sh_p_at(p, "|=") or sh_p_at(p, "^=") or sh_p_at(p, "<<=") or sh_p_at(p, ">>=") { return 1; };
+    if sh_p_at(p, "..") or sh_p_at(p, "..=") { return 2; };
+    if sh_p_at(p, "or") or sh_p_at(p, "||") { return 2; };
+    if sh_p_at(p, "and") or sh_p_at(p, "&&") { return 3; };
+    if sh_p_at(p, "|") { return 5; };
+    if sh_p_at(p, "^") { return 6; };
+    if sh_p_at(p, "&") { return 7; };
+    if sh_p_at(p, "==") or sh_p_at(p, "!=") { return 4; };
+    if sh_p_at(p, "<") or sh_p_at(p, ">") or sh_p_at(p, "<=") or sh_p_at(p, ">=") { return 4; };
+    if sh_p_at(p, "<<") or sh_p_at(p, ">>") { return 8; };
+    if sh_p_at(p, "+") or sh_p_at(p, "-") { return 9; };
+    if sh_p_at(p, "*") or sh_p_at(p, "/") or sh_p_at(p, "%") { return 10; };
+    if sh_p_at(p, "as") { return 11; };
+    0;
+}
+
+def sh_p_binary(p: &mut ShParser, kind: i64, left: i64, right: i64, op: i64) -> i64 {
+    let children = vec_new_i64();
+    sh_p_edge(p, &children, left);
+    sh_p_edge(p, &children, right);
+    let start = sh_ast_word(&p.ast, left, 2);
+    sh_p_node(p, kind, start, op, &children);
+}
+
+def sh_p_expr(p: &mut ShParser, minimum: i64) -> i64 {
+    if not sh_p_enter(p) { return -1; };
+    let mut left = sh_p_prefix(p);
+    while p.error == 0 { if sh_p_at(p, "(") or sh_p_at(p, "[") or sh_p_at(p, ".") or sh_p_at(p, "?") or sh_p_at(p, "::") or sh_p_at(p, "!") { left = sh_p_postfix(p, left); } else if sh_p_at(p, "{") and p.condition == 0 and (sh_ast_word(&p.ast, left, 0) == 12 or sh_ast_word(&p.ast, left, 0) == 70) { left = sh_p_struct_literal(p, left); } else { let precedence = sh_p_precedence(p); if precedence == 0 or precedence < minimum { break; }; let op = sh_p_kind(p); sh_p_bump(p); if op == sh_kind("as") { let ty = sh_p_type(p); left = sh_p_binary(p, 57, left, ty, op); } else { let next = if precedence == 1 { precedence; } else { precedence + 1; }; let right = sh_p_expr(p, next); left = sh_p_binary(p, if precedence == 1 { 52; } else { 51; }, left, right, op); }; }; };
+    p.depth = p.depth - 1;
+    left;
+}
+
+def sh_p_postfix(p: &mut ShParser, left: i64) -> i64 {
+    let start = sh_ast_word(&p.ast, left, 2);
+    let children = vec_new_i64();
+    sh_p_edge(p, &children, left);
+    if sh_p_take(p, "(") { while p.error == 0 and not sh_p_at(p, ")") { if sh_p_kind(p) == 1 and sh_p_peek(p) == sh_kind(":") { let name = sh_p_name(p); sh_p_edge(p, &children, name); sh_p_bump(p); (); }; let arg = sh_p_expr(p, 1); sh_p_edge(p, &children, arg); if not sh_p_take(p, ",") { break; }; }; sh_p_expect(p, ")"); return sh_p_node(p, 53, start, 0, &children); };
+    if sh_p_take(p, "[") { let index = sh_p_expr(p, 1); sh_p_edge(p, &children, index); sh_p_expect(p, "]"); return sh_p_node(p, 54, start, 0, &children); };
+    if sh_p_take(p, ".") { let name = if sh_p_kind(p) == 2 { sh_p_leaf(p, 10); } else { sh_p_name(p); }; sh_p_edge(p, &children, name); return sh_p_node(p, 55, start, 0, &children); };
+    if sh_p_take(p, "?") { return sh_p_node(p, 56, start, 0, &children); };
+    if sh_p_take(p, "!") { let group = sh_p_token_tree(p); sh_p_edge(p, &children, group); return sh_p_node(p, 92, start, 0, &children); };
+    if sh_p_take(p, "::") { if sh_p_take(p, "<") { while p.error == 0 and not sh_p_gt(p) { let ty = sh_p_type(p); sh_p_edge(p, &children, ty); if sh_p_gt(p) { break; }; if not sh_p_take(p, ",") { sh_p_fail(p, 3001); break; }; }; } else { let name = sh_p_name(p); sh_p_edge(p, &children, name); }; return sh_p_node(p, 12, start, 0, &children); };
+    sh_p_fail(p, 3001);
+}
+
+def sh_p_struct_literal(p: &mut ShParser, path: i64) -> i64 {
+    let start = sh_ast_word(&p.ast, path, 2);
+    let children = vec_new_i64();
+    sh_p_edge(p, &children, path);
+    sh_p_expect(p, "{");
+    while p.error == 0 and not sh_p_at(p, "}") { if sh_p_take(p, "..") { let update_start = sh_p_token(p).start; let update_children = vec_new_i64(); let base = sh_p_expr(p, 1); sh_p_edge(p, &update_children, base); let update = sh_p_node(p, 23, update_start, 1, &update_children); sh_p_edge(p, &children, update); sh_p_take(p, ","); break; }; let field_start = sh_p_token(p).start; let fields = vec_new_i64(); let name = sh_p_name(p); sh_p_edge(p, &fields, name); if sh_p_take(p, ":") { let value = sh_p_expr(p, 1); sh_p_edge(p, &fields, value); }; let field = sh_p_node(p, 23, field_start, 0, &fields); sh_p_edge(p, &children, field); if not sh_p_take(p, ",") { break; }; };
+    sh_p_expect(p, "}");
+    sh_p_node(p, 60, start, 0, &children);
+}
+
+def sh_numeric_validate(text: &String, token: ShToken, negative: bool) -> i64 {
+    let raw = sh_token_text(text, token);
+    if not raw.is_ok() { return 3005; };
+    let bytes = sh_lex_bytes(&raw.value);
+    if not bytes.is_ok() { return 3003; };
+    let mut end = raw.value.len();
+    let mut bits = 64;
+    let mut unsigned = false;
+    if str_ends_with(raw.value.as_str(), "usize") { end = end - 5; unsigned = true; } else if str_ends_with(raw.value.as_str(), "isize") { end = end - 5; } else if str_ends_with(raw.value.as_str(), "u64") { end = end - 3; unsigned = true; } else if str_ends_with(raw.value.as_str(), "u32") { end = end - 3; unsigned = true; bits = 32; } else if str_ends_with(raw.value.as_str(), "u16") { end = end - 3; unsigned = true; bits = 16; } else if str_ends_with(raw.value.as_str(), "u8") { end = end - 2; unsigned = true; bits = 8; } else if str_ends_with(raw.value.as_str(), "i64") or str_ends_with(raw.value.as_str(), "f64") or str_ends_with(raw.value.as_str(), "f32") { end = end - 3; } else if str_ends_with(raw.value.as_str(), "i32") { end = end - 3; bits = 32; } else if str_ends_with(raw.value.as_str(), "i16") { end = end - 3; bits = 16; } else if str_ends_with(raw.value.as_str(), "i8") { end = end - 2; bits = 8; };
+    let mut limit: u64 = (9223372036854775807 as u64 * 2 as u64) + 1 as u64;
+    let mut power: u64 = 1 as u64;
+    let mut b = 0;
+    let power_bits = if unsigned { bits; } else { bits - 1; };
+    if power_bits < 64 { while b < power_bits { power = power * 2 as u64; b = b + 1; }; limit = if unsigned or not negative { power - 1 as u64; } else { power; }; };
+    let mut base: u64 = 10 as u64;
+    let mut index = 0;
+    if end >= 2 and sh_lex_byte(&bytes.value, 0) == 48 { let prefix = sh_lex_byte(&bytes.value, 1); if prefix == 120 or prefix == 88 { base = 16 as u64; index = 2; } else if prefix == 98 or prefix == 66 { base = 2 as u64; index = 2; } else if prefix == 111 or prefix == 79 { base = 8 as u64; index = 2; }; };
+    let mut value: u64 = 0 as u64;
+    let mut digits = 0;
+    while index < end { let byte = sh_lex_byte(&bytes.value, index); if byte != 95 { let digit = sh_lex_hex(byte); if digit < 0 or (digit as u64) >= base { return 3005; }; let d = digit as u64; if value > (limit - d) / base { return 3005; }; value = value * base + d; digits = digits + 1; }; index = index + 1; };
+    if digits == 0 { return 3005; };
+    0;
+}
+
+def sh_p_can_expr(p: &ShParser) -> bool {
+    let kind = sh_p_kind(p);
+    kind == 1 or kind == 2 or kind == 3 or (kind >= 5 and kind <= 9) or sh_p_at(p, "true") or sh_p_at(p, "false") or sh_p_at(p, "null") or sh_p_at(p, "self") or sh_p_at(p, "(") or sh_p_at(p, "[") or sh_p_at(p, "{") or sh_p_at(p, "if") or sh_p_at(p, "while") or sh_p_at(p, "for") or sh_p_at(p, "loop") or sh_p_at(p, "match") or sh_p_at(p, "return") or sh_p_at(p, "break") or sh_p_at(p, "continue") or sh_p_at(p, "yield") or sh_p_at(p, "await") or sh_p_at(p, "async") or sh_p_at(p, "parallel") or sh_p_at(p, "try") or sh_p_at(p, "-") or sh_p_at(p, "!") or sh_p_at(p, "not") or sh_p_at(p, "~") or sh_p_at(p, "&") or sh_p_at(p, "*") or sh_p_at(p, "|");
+}
+
+def sh_p_prefix(p: &mut ShParser) -> i64 {
+    let token = sh_p_token(p);
+    if sh_p_take(p, "return") or sh_p_take(p, "break") or sh_p_take(p, "continue") or sh_p_take(p, "yield") { let children = vec_new_i64(); if token.kind != sh_kind("continue") and sh_p_can_expr(p) { let value = sh_p_expr(p, 1); sh_p_edge(p, &children, value); }; return sh_p_node(p, 42, token.start, token.kind, &children); };
+    if token.kind == 2 { if sh_numeric_validate(&p.text, token, false) != 0 { return sh_p_fail(p, 3005); }; return sh_p_leaf(p, 11); };
+    if token.kind >= 5 and token.kind <= 9 { return sh_p_literal(p); };
+    if token.kind == 2 or token.kind == 3 or (token.kind >= 5 and token.kind <= 9) or sh_p_at(p, "true") or sh_p_at(p, "false") or sh_p_at(p, "null") { return sh_p_leaf(p, 11); };
+    if sh_p_at(p, "-") or sh_p_at(p, "!") or sh_p_at(p, "not") or sh_p_at(p, "~") or sh_p_at(p, "*") or sh_p_at(p, "&") or sh_p_at(p, "await") { sh_p_bump(p); let children = vec_new_i64(); let mutable = sh_p_take(p, "mut"); let mut value = -1; if token.kind == sh_kind("-") and sh_p_kind(p) == 2 { if sh_numeric_validate(&p.text, sh_p_token(p), true) != 0 { return sh_p_fail(p, 3005); }; value = sh_p_leaf(p, 11); } else { value = sh_p_expr(p, 12); }; sh_p_edge(p, &children, value); return sh_p_node(p, 50, token.start, token.kind + if mutable { 1000; } else { 0; }, &children); };
+    if sh_p_at(p, "{") { return sh_p_block(p); };
+    if sh_p_take(p, "(") { let children = vec_new_i64(); let mut tuple = 0; if sh_p_at(p, ")") { tuple = 1; }; while p.error == 0 and not sh_p_at(p, ")") { let value = sh_p_expr(p, 1); sh_p_edge(p, &children, value); if not sh_p_take(p, ",") { break; }; tuple = 1; }; sh_p_expect(p, ")"); return sh_p_node(p, 58, token.start, tuple, &children); };
+    if sh_p_take(p, "[") { let children = vec_new_i64(); let mut repeated = 0; while p.error == 0 and not sh_p_at(p, "]") { let value = sh_p_expr(p, 1); sh_p_edge(p, &children, value); if sh_p_take(p, ";") { repeated = 1; let count = sh_p_expr(p, 1); sh_p_edge(p, &children, count); break; }; if not sh_p_take(p, ",") { break; }; }; sh_p_expect(p, "]"); return sh_p_node(p, 59, token.start, repeated, &children); };
+    if sh_p_at(p, "if") or sh_p_at(p, "while") or sh_p_at(p, "for") or sh_p_at(p, "loop") or sh_p_at(p, "match") { return sh_p_control(p); };
+    if sh_p_take(p, "|") { let children = vec_new_i64(); if token.kind != sh_kind("||") { while p.error == 0 and not sh_p_at(p, "|") { let name = sh_p_name(p); sh_p_edge(p, &children, name); if sh_p_take(p, ":") { let ty = sh_p_type(p); sh_p_edge(p, &children, ty); }; if not sh_p_take(p, ",") { break; }; }; sh_p_expect(p, "|"); }; let body = sh_p_expr(p, 1); sh_p_edge(p, &children, body); return sh_p_node(p, 67, token.start, 0, &children); };
+    if sh_p_take(p, "async") or sh_p_take(p, "parallel") or sh_p_take(p, "try") { let children = vec_new_i64(); let body = sh_p_block(p); sh_p_edge(p, &children, body); return sh_p_node(p, 68, token.start, token.kind, &children); };
+    if token.kind == 1 or sh_p_at(p, "self") or sh_p_at(p, "Self") { return sh_p_path(p, 12); };
+    sh_p_fail(p, 3001);
+}
+
+def sh_p_control(p: &mut ShParser) -> i64 {
+    let token = sh_p_token(p);
+    sh_p_bump(p);
+    let children = vec_new_i64();
+    let old = p.condition;
+    p.condition = 1;
+    let mut kind = 61;
+    if token.kind == sh_kind("for") { kind = 63; let pattern = sh_p_pattern(p, 0); sh_p_edge(p, &children, pattern); sh_p_expect(p, "in"); };
+    if token.kind == sh_kind("while") { kind = 62; };
+    if token.kind == sh_kind("loop") { kind = 64; };
+    if token.kind == sh_kind("match") { kind = 65; };
+    if kind != 64 { let condition = sh_p_expr(p, 1); sh_p_edge(p, &children, condition); };
+    p.condition = old;
+    if kind == 65 { sh_p_expect(p, "{"); while p.error == 0 and not sh_p_at(p, "}") { let start = sh_p_token(p).start; let arms = vec_new_i64(); let pattern = sh_p_pattern(p, 0); sh_p_edge(p, &arms, pattern); if sh_p_take(p, "if") { let guard = sh_p_expr(p, 1); sh_p_edge(p, &arms, guard); }; sh_p_expect(p, "=>"); let body = sh_p_expr(p, 1); sh_p_edge(p, &arms, body); let arm = sh_p_node(p, 66, start, 0, &arms); sh_p_edge(p, &children, arm); sh_p_take(p, ","); }; sh_p_expect(p, "}"); } else { let body = sh_p_block(p); sh_p_edge(p, &children, body); if kind == 61 and (sh_p_take(p, "else") or sh_p_take(p, "elif")) { let branch = if sh_p_at(p, "if") { sh_p_control(p); } else { sh_p_block(p); }; sh_p_edge(p, &children, branch); }; };
+    sh_p_node(p, kind, token.start, 0, &children);
+}
+
+def sh_p_pattern(p: &mut ShParser, minimum: i64) -> i64 {
+    if not sh_p_enter(p) { return -1; };
+    let start = sh_p_token(p).start;
+    let children = vec_new_i64();
+    let mut payload = 0;
+    let token = sh_p_token(p);
+    if sh_p_take(p, "(") or sh_p_take(p, "[") { let close = if token.kind == sh_kind("(") { ")"; } else { "]"; }; while p.error == 0 and not sh_p_at(p, close) { let child = sh_p_pattern(p, 0); sh_p_edge(p, &children, child); if not sh_p_take(p, ",") { break; }; }; sh_p_expect(p, close); payload = token.kind; } else if sh_p_take(p, "_") { payload = 2; } else if sh_p_take(p, "..") { payload = 3; sh_p_take(p, "="); if sh_p_kind(p) == 1 { let rest = sh_p_name(p); sh_p_edge(p, &children, rest); } else if sh_p_kind(p) == 2 { let end = sh_p_leaf(p, 11); sh_p_edge(p, &children, end); }; } else if sh_p_kind(p) == 1 or sh_p_at(p, "Self") { let path = sh_p_path(p, 12); sh_p_edge(p, &children, path); if sh_p_take(p, "(") { while p.error == 0 and not sh_p_at(p, ")") { let child = sh_p_pattern(p, 0); sh_p_edge(p, &children, child); if not sh_p_take(p, ",") { break; }; }; sh_p_expect(p, ")"); payload = 4; } else if sh_p_take(p, "{") { while p.error == 0 and not sh_p_at(p, "}") { if sh_p_take(p, "..") { payload = 5; } else { let name = sh_p_name(p); sh_p_edge(p, &children, name); if sh_p_take(p, ":") { let child = sh_p_pattern(p, 0); sh_p_edge(p, &children, child); }; }; if not sh_p_take(p, ",") { break; }; }; sh_p_expect(p, "}"); payload = 5; }; } else if sh_p_kind(p) == 2 or sh_p_kind(p) == 3 or (sh_p_kind(p) >= 5 and sh_p_kind(p) <= 8) or sh_p_at(p, "true") or sh_p_at(p, "false") or sh_p_at(p, "null") { let literal = sh_p_leaf(p, 11); sh_p_edge(p, &children, literal); } else { sh_p_fail(p, 3001); (); };
+    let mut left = sh_p_node(p, 80, start, payload, &children);
+    if sh_p_take(p, "..") { let op = if sh_p_take(p, "=") { 1242; } else { 242; }; let right = sh_p_pattern(p, 1); left = sh_p_binary(p, 81, left, right, op); };
+    while minimum == 0 and sh_p_take(p, "|") { let right = sh_p_pattern(p, 1); left = sh_p_binary(p, 81, left, right, sh_kind("|")); };
+    p.depth = p.depth - 1;
+    left;
+}
+
+def sh_p_block(p: &mut ShParser) -> i64 {
+    if not sh_p_enter(p) { return -1; };
+    let start = sh_p_token(p).start;
+    let children = vec_new_i64();
+    sh_p_expect(p, "{");
+    while p.error == 0 and not sh_p_at(p, "}") { if sh_p_take(p, ";") { continue; }; let before = p.pos; let start_stmt = sh_p_token(p).start; let fields = vec_new_i64(); let constant = sh_p_at(p, "const"); if sh_p_take(p, "let") or sh_p_take(p, "const") { let mutable = if constant { false; } else { sh_p_take(p, "mut"); }; let name = sh_p_name(p); sh_p_edge(p, &fields, name); let typed = sh_p_take(p, ":"); if typed { let ty = sh_p_type(p); sh_p_edge(p, &fields, ty); }; if constant and not typed { sh_p_fail(p, 3001); (); }; let initialized = sh_p_take(p, "="); if initialized { let value = sh_p_expr(p, 1); sh_p_edge(p, &fields, value); }; if constant and not initialized { sh_p_fail(p, 3001); (); }; sh_p_take(p, ";"); let kind = if constant { 44; } else { 41; }; let node = sh_p_node(p, kind, start_stmt, if mutable { 1; } else { 0; }, &fields); sh_p_edge(p, &children, node); } else { let value = sh_p_expr(p, 1); sh_p_edge(p, &fields, value); let semi = sh_p_take(p, ";"); let node = sh_p_node(p, 43, start_stmt, if semi { 1; } else { 0; }, &fields); sh_p_edge(p, &children, node); }; if p.pos == before { sh_p_fail(p, 3001); (); }; };
+    sh_p_expect(p, "}");
+    let result = sh_p_node(p, 40, start, 0, &children);
+    p.depth = p.depth - 1;
+    result;
+}
+
+def sh_p_generics(p: &mut ShParser) -> i64 {
+    let start = sh_p_token(p).start;
+    let children = vec_new_i64();
+    sh_p_expect(p, "<");
+    while p.error == 0 and not sh_p_gt(p) { let param_start = sh_p_token(p).start; let fields = vec_new_i64(); let name = sh_p_name(p); sh_p_edge(p, &fields, name); let mut flags = 0; if sh_p_take(p, ":") { flags = flags + 1; let bound = sh_p_type(p); sh_p_edge(p, &fields, bound); while sh_p_take(p, "+") { let other = sh_p_type(p); sh_p_edge(p, &fields, other); }; }; if sh_p_take(p, "=") { flags = flags + 2; let default_type = sh_p_type(p); sh_p_edge(p, &fields, default_type); }; let param = sh_p_node(p, 35, param_start, flags, &fields); sh_p_edge(p, &children, param); if sh_p_gt(p) { break; }; if not sh_p_take(p, ",") { sh_p_fail(p, 3001); break; }; };
+    sh_p_node(p, 34, start, 0, &children);
+}
+
+def sh_p_generic_has(p: &ShParser, children: &Vec<i64>, name: i64) -> bool {
+    let wanted = p.text.get(sh_ast_word(&p.ast, name, 2), sh_ast_word(&p.ast, name, 3));
+    if not wanted.is_ok() { return false; };
+    let mut index = 0;
+    while index < children.len() { let generic = sengoo_vec_get_or_default_i64(children.handle, index, -1); if sh_ast_word(&p.ast, generic, 0) == 34 { let mut param = 0; while param < sh_ast_word(&p.ast, generic, 6) { let declaration = sh_ast_child(&p.ast, generic, param); let identifier = sh_ast_child(&p.ast, declaration, 0); let text = p.text.get(sh_ast_word(&p.ast, identifier, 2), sh_ast_word(&p.ast, identifier, 3)); if text.is_ok() and text.value.eq(wanted.value) { return true; }; param = param + 1; }; }; index = index + 1; };
+    false;
+}
+
+def sh_p_where(p: &mut ShParser, children: &Vec<i64>) -> () {
+    if not sh_p_take(p, "where") { return; };
+    while p.error == 0 { let start = sh_p_token(p).start; let bounds = vec_new_i64(); let name = sh_p_name(p); sh_p_edge(p, &bounds, name); let declared = sh_p_generic_has(p, children, name); if not declared { sh_p_fail(p, 3001); return; }; sh_p_expect(p, ":"); let bound = sh_p_type(p); sh_p_edge(p, &bounds, bound); while sh_p_take(p, "+") { let other = sh_p_type(p); sh_p_edge(p, &bounds, other); }; let node = sh_p_node(p, 35, start, 1, &bounds); sh_p_edge(p, children, node); if not sh_p_take(p, ",") { break; }; if sh_p_at(p, "{") or sh_p_at(p, ";") or sh_p_at(p, "=") { break; }; };
+    ();
+}
+
+def sh_p_fields(p: &mut ShParser, children: &Vec<i64>, named: bool, closing: &str) -> () {
+    while p.error == 0 and not sh_p_at(p, closing) { let start = sh_p_token(p).start; let fields = vec_new_i64(); let public = sh_p_take(p, "pub"); sh_p_take(p, "priv"); if named { let name = sh_p_name(p); sh_p_edge(p, &fields, name); sh_p_expect(p, ":"); }; let ty = sh_p_type(p); sh_p_edge(p, &fields, ty); let field = sh_p_node(p, 23, start, if public { 2; } else { 0; }, &fields); sh_p_edge(p, children, field); if not sh_p_take(p, ",") and not sh_p_take(p, ";") { if not sh_p_at(p, closing) { sh_p_fail(p, 3001); (); }; break; }; };
+    sh_p_expect(p, closing);
+}
+
+def sh_p_function(p: &mut ShParser, start: i64, children: &Vec<i64>, flags: i64) -> i64 {
+    let name = sh_p_name(p);
+    sh_p_edge(p, children, name);
+    if sh_p_at(p, "<") { let generics = sh_p_generics(p); sh_p_edge(p, children, generics); };
+    sh_p_expect(p, "(");
+    let mut position = 0;
+    while p.error == 0 and not sh_p_at(p, ")") { let param_start = sh_p_token(p).start; let params = vec_new_i64(); let reference = sh_p_take(p, "&"); let mutable = sh_p_take(p, "mut"); let self_param = sh_p_at(p, "self") and position == 0 and p.context != 3 and p.context != 5; let pattern = sh_p_name(p); sh_p_edge(p, &params, pattern); if self_param { if sh_p_at(p, ":") { sh_p_fail(p, 3001); (); }; } else { if reference { sh_p_fail(p, 3001); (); }; sh_p_expect(p, ":"); let ty = sh_p_type(p); sh_p_edge(p, &params, ty); }; let receiver = if self_param { 4; } else { 0; }; let ref_flag = if reference { 1; } else { 0; }; let mut_flag = if mutable { 2; } else { 0; }; let param = sh_p_node(p, 21, param_start, receiver + ref_flag + mut_flag, &params); sh_p_edge(p, children, param); position = position + 1; if not sh_p_take(p, ",") { break; }; };
+    sh_p_expect(p, ")");
+    if sh_p_take(p, "->") { let result = sh_p_type(p); sh_p_edge(p, children, result); };
+    sh_p_where(p, children);
+    let mut contracts = 0;
+    while sh_p_at(p, "requires") or sh_p_at(p, "ensures") { let op = sh_p_kind(p); let flag = if sh_p_at(p, "requires") { 1; } else { 2; }; if (contracts & flag) != 0 or p.context == 3 or p.context == 5 { sh_p_fail(p, 3001); break; }; contracts = contracts | flag; sh_p_bump(p); let old = p.condition; p.condition = 1; let expr = sh_p_expr(p, 1); p.condition = old; let contract = vec_new_i64(); sh_p_edge(p, &contract, expr); let node = sh_p_node(p, 35, start, op, &contract); sh_p_edge(p, children, node); sh_p_take(p, ";"); };
+    if p.context == 3 { sh_p_expect(p, ";"); } else { let body = sh_p_block(p); sh_p_edge(p, children, body); };
+    sh_p_node(p, 20, start, flags, children);
+}
+
+def sh_p_ident_is(p: &ShParser, spelling: &str) -> bool {
+    if sh_p_kind(p) != 1 { return false; };
+    let name = sh_token_text(&p.text, sh_p_token(p));
+    name.is_ok() and name.value.as_str() == spelling;
+}
+
+def sh_p_token_tree(p: &mut ShParser) -> i64 {
+    if not sh_p_enter(p) { return -1; };
+    let token = sh_p_token(p);
+    let children = vec_new_i64();
+    let mut close = 0;
+    if sh_p_take(p, "(") { close = sh_kind(")"); } else if sh_p_take(p, "[") { close = sh_kind("]"); } else if sh_p_take(p, "{") { close = sh_kind("}"); } else { sh_p_fail(p, 3001); (); };
+    while p.error == 0 and sh_p_kind(p) != close { let before = p.pos; let mut child = -1; if sh_p_at(p, "(") or sh_p_at(p, "[") or sh_p_at(p, "{") { child = sh_p_token_tree(p); } else if sh_p_at(p, ")") or sh_p_at(p, "]") or sh_p_at(p, "}") or sh_p_kind(p) <= 0 { sh_p_fail(p, 3001); (); } else { child = sh_p_leaf(p, 89); }; sh_p_edge(p, &children, child); if p.pos == before { sh_p_fail(p, 3001); (); }; };
+    if p.error == 0 { sh_p_bump(p); (); };
+    let result = sh_p_node(p, 90, token.start, token.kind, &children);
+    p.depth = p.depth - 1;
+    result;
+}
+
+def sh_p_decl(p: &mut ShParser) -> i64 {
+    if not sh_p_enter(p) { return -1; };
+    let start = sh_p_token(p).start;
+    let children = vec_new_i64();
+    while sh_p_take(p, "#") { let attrs = vec_new_i64(); sh_p_expect(p, "["); let name = sh_p_name(p); sh_p_edge(p, &attrs, name); if sh_p_take(p, "(") { while p.error == 0 and not sh_p_at(p, ")") { let value = sh_p_expr(p, 1); sh_p_edge(p, &attrs, value); if not sh_p_take(p, ",") { break; }; }; sh_p_expect(p, ")"); } else if sh_p_take(p, "=") { let value = sh_p_expr(p, 1); sh_p_edge(p, &attrs, value); }; sh_p_expect(p, "]"); let attr = sh_p_node(p, 33, start, 0, &attrs); sh_p_edge(p, &children, attr); };
+    let mut flags = 0;
+    if sh_p_take(p, "pub") { flags = flags + 1; };
+    sh_p_take(p, "priv");
+    if sh_p_take(p, "unsafe") { flags = flags + 2; };
+    if sh_p_take(p, "async") { flags = flags + 4; };
+    let macro_rules = sh_p_ident_is(p, "macro_rules");
+    if macro_rules { let name_token = sh_p_leaf(p, 10); sh_p_edge(p, &children, name_token); sh_p_expect(p, "!"); let name = sh_p_name(p); sh_p_edge(p, &children, name); let group = sh_p_token_tree(p); sh_p_edge(p, &children, group); sh_p_take(p, ";"); let result = sh_p_node(p, 91, start, flags, &children); p.depth = p.depth - 1; return result; };
+    if sh_p_kind(p) == 1 and sh_p_peek(p) == sh_kind("!") { let path = sh_p_path(p, 12); sh_p_edge(p, &children, path); sh_p_expect(p, "!"); let group = sh_p_token_tree(p); sh_p_edge(p, &children, group); sh_p_take(p, ";"); let result = sh_p_node(p, 92, start, flags, &children); p.depth = p.depth - 1; return result; };
+    let keyword = sh_p_kind(p);
+    if sh_p_at(p, "fn") and p.context != 3 and p.context != 5 { sh_p_fail(p, 3001); (); };
+    if p.context == 1 and not sh_p_at(p, "def") and not sh_p_at(p, "type") { sh_p_fail(p, 3001); (); };
+    if p.context == 2 and not sh_p_at(p, "def") and not sh_p_at(p, "type") and not sh_p_at(p, "const") { sh_p_fail(p, 3001); (); };
+    if p.context == 3 and not sh_p_at(p, "fn") and not sh_p_at(p, "static") { sh_p_fail(p, 3001); (); };
+    if p.context == 5 and not sh_p_at(p, "fn") { sh_p_fail(p, 3001); (); };
+    if (flags & 2) != 0 and keyword != sh_kind("extern") and p.context != 3 and p.context != 5 { sh_p_fail(p, 3001); (); };
+    if (flags & 4) != 0 and keyword != sh_kind("def") { sh_p_fail(p, 3001); (); };
+    let mut kind = 0;
+    if sh_p_take(p, "def") or sh_p_take(p, "fn") { let node = sh_p_function(p, start, &children, flags); p.depth = p.depth - 1; return node; } else if sh_p_take(p, "struct") or sh_p_take(p, "enum") or sh_p_take(p, "class") or sh_p_take(p, "trait") { kind = if keyword == sh_kind("struct") { 22; } else { if keyword == sh_kind("enum") { 24; } else { if keyword == sh_kind("class") { 32; } else { 27; }; }; }; let name = sh_p_name(p); sh_p_edge(p, &children, name); if sh_p_at(p, "<") { let generic = sh_p_generics(p); sh_p_edge(p, &children, generic); }; if sh_p_take(p, ":") { let bound = sh_p_type(p); sh_p_edge(p, &children, bound); while sh_p_take(p, "+") or sh_p_take(p, ",") { let other = sh_p_type(p); sh_p_edge(p, &children, other); }; }; sh_p_where(p, &children); if kind == 22 { if sh_p_take(p, "{") { sh_p_fields(p, &children, true, "}"); } else if sh_p_take(p, "(") { sh_p_fields(p, &children, false, ")"); sh_p_take(p, ";"); (); } else { sh_p_expect(p, ";"); }; } else if kind == 24 { sh_p_expect(p, "{"); while p.error == 0 and not sh_p_at(p, "}") { let variant_start = sh_p_token(p).start; let fields = vec_new_i64(); let name = sh_p_name(p); sh_p_edge(p, &fields, name); if sh_p_take(p, "(") { sh_p_fields(p, &fields, false, ")"); } else if sh_p_take(p, "{") { sh_p_fields(p, &fields, true, "}"); } else if sh_p_take(p, "=") { let value = sh_p_expr(p, 1); sh_p_edge(p, &fields, value); }; let variant = sh_p_node(p, 25, variant_start, 0, &fields); sh_p_edge(p, &children, variant); if not sh_p_take(p, ",") { if not sh_p_at(p, "}") { sh_p_fail(p, 3001); (); }; break; }; }; sh_p_expect(p, "}"); } else { let old_context = p.context; p.context = if kind == 32 { 4; } else { 2; }; sh_p_expect(p, "{"); while p.error == 0 and not sh_p_at(p, "}") { if kind == 32 and (sh_p_kind(p) == 1 or ((sh_p_at(p, "pub") or sh_p_at(p, "priv")) and sh_p_peek(p) == 1)) { let field_start = sh_p_token(p).start; let public = sh_p_take(p, "pub"); sh_p_take(p, "priv"); let fields = vec_new_i64(); let name = sh_p_name(p); sh_p_edge(p, &fields, name); sh_p_expect(p, ":"); let ty = sh_p_type(p); sh_p_edge(p, &fields, ty); sh_p_take(p, ";"); let field = sh_p_node(p, 23, field_start, if public { 2; } else { 0; }, &fields); sh_p_edge(p, &children, field); } else { let member = sh_p_decl(p); sh_p_edge(p, &children, member); }; }; sh_p_expect(p, "}"); p.context = old_context; }; } else if sh_p_take(p, "impl") { kind = 26; if sh_p_at(p, "<") { let generic = sh_p_generics(p); sh_p_edge(p, &children, generic); }; if sh_p_take(p, "!") { flags = flags + 8; }; let target = sh_p_type(p); sh_p_edge(p, &children, target); if sh_p_take(p, "for") { let ty = sh_p_type(p); sh_p_edge(p, &children, ty); }; sh_p_where(p, &children); let old_context = p.context; p.context = 1; sh_p_expect(p, "{"); while p.error == 0 and not sh_p_at(p, "}") { let member = sh_p_decl(p); sh_p_edge(p, &children, member); }; sh_p_expect(p, "}"); p.context = old_context; } else if sh_p_take(p, "type") { kind = 28; let name = sh_p_name(p); sh_p_edge(p, &children, name); if p.context == 2 { sh_p_expect(p, ";"); } else { if p.context == 0 { if sh_p_at(p, "<") { let generic = sh_p_generics(p); sh_p_edge(p, &children, generic); }; sh_p_where(p, &children); }; sh_p_expect(p, "="); let ty = sh_p_type(p); sh_p_edge(p, &children, ty); sh_p_expect(p, ";"); }; } else if sh_p_take(p, "const") or sh_p_take(p, "static") { kind = 29; if sh_p_take(p, "mut") { flags = flags + 8; }; let name = sh_p_name(p); sh_p_edge(p, &children, name); sh_p_expect(p, ":"); let ty = sh_p_type(p); sh_p_edge(p, &children, ty); if p.context != 3 { sh_p_expect(p, "="); let value = sh_p_expr(p, 1); sh_p_edge(p, &children, value); }; sh_p_expect(p, ";"); } else if sh_p_take(p, "import") { kind = 30; let path = sh_p_path(p, 12); sh_p_edge(p, &children, path); sh_p_take(p, "::"); if sh_p_take(p, "as") { flags = flags + 16; let alias = sh_p_name(p); sh_p_edge(p, &children, alias); } else if sh_p_take(p, "{") { flags = flags + 32; while p.error == 0 and not sh_p_at(p, "}") { let name = sh_p_name(p); sh_p_edge(p, &children, name); if not sh_p_take(p, ",") { break; }; }; sh_p_expect(p, "}"); } else if sh_p_take(p, "*") { flags = flags + 48; sh_p_expect(p, "from"); }; sh_p_expect(p, ";"); } else if sh_p_take(p, "extern") { kind = 31; if sh_p_kind(p) != 5 { sh_p_fail(p, 3001); (); } else { let abi = sh_p_leaf(p, 11); sh_p_edge(p, &children, abi); }; let old_context = p.context; if sh_p_take(p, "{") { p.context = 3; while p.error == 0 and not sh_p_at(p, "}") { let member = sh_p_decl(p); sh_p_edge(p, &children, member); }; sh_p_expect(p, "}"); } else { p.context = 5; let function = sh_p_decl(p); sh_p_edge(p, &children, function); }; p.context = old_context; } else { sh_p_fail(p, 3001); (); };
+    let result = sh_p_node(p, kind, start, flags, &children);
+    p.depth = p.depth - 1;
+    result;
+}
+
+def sh_p_new(text: &String, source: i64, maximum: i64, depth: i64) -> ShParser {
+    let token_limit = if maximum < 0 or maximum > 1000000 { 1; } else { maximum * 8 + 1; };
+    let lexed = sh_lex(text, token_limit);
+    let copied = text.clone();
+    let ast = ShAst { words: vec_new_i64(), edges: vec_new_i64(), root: -1 };
+    let error = if maximum < 0 or maximum > 1000000 or not copied.is_ok() { 3003; } else { lexed.error; };
+    let mut p = ShParser { tokens: lexed.tokens, text: copied.value, ast: ast, pos: 0, previous: 0, error: error, error_start: lexed.start, error_end: lexed.end, depth: depth, limit: maximum, source: source, pending_gt: 0, condition: 0, context: 0 };
+    while sh_p_kind(&p) >= 10 and sh_p_kind(&p) <= 12 { p.pos = p.pos + 1; };
+    p;
+}
+
+def sh_parse_fragment(text: &String, source: i64, maximum: i64, depth: i64) -> ShParsed {
+    let mut p = sh_p_new(text, source, maximum, depth);
+    let root = sh_p_expr(&mut p, 1);
+    let remaining = sh_p_kind(&p);
+    if p.error == 0 and remaining != 0 { sh_p_fail(&mut p, 3001); (); };
+    p.ast.root = if p.error == 0 { root; } else { -1; };
+    ShParsed { ast: p.ast, error: p.error, start: p.error_start, end: p.error_end };
+}
+
+def sh_p_merge(p: &mut ShParser, ast: &ShAst, offset: i64) -> i64 {
+    let count = sh_ast_count(ast);
+    let base = sh_ast_count(&p.ast);
+    let edge_base = p.ast.edges.len();
+    if count > p.limit - base { return sh_p_fail(p, 3003); };
+    let mut index = 0;
+    while index < ast.edges.len() { let edge = ast.edges.get(index).unwrap_or(-1); if edge < 0 or edge >= count or not p.ast.edges.push(base + edge) { return sh_p_fail(p, 3003); }; index = index + 1; };
+    index = 0;
+    while index < count { let stored = p.ast.words.push(sh_ast_word(ast, index, 0)) and p.ast.words.push(p.source) and p.ast.words.push(sh_ast_word(ast, index, 2) + offset) and p.ast.words.push(sh_ast_word(ast, index, 3) + offset) and p.ast.words.push(sh_ast_word(ast, index, 4)) and p.ast.words.push(sh_ast_word(ast, index, 5) + edge_base) and p.ast.words.push(sh_ast_word(ast, index, 6)); if not stored { return sh_p_fail(p, 3003); }; index = index + 1; };
+    base + ast.root;
+}
+
+def sh_p_literal(p: &mut ShParser) -> i64 {
+    let token = sh_p_token(p);
+    let decoded = sh_literal_decode(&p.text, token);
+    if not decoded.is_ok() { return sh_p_fail(p, 3001); };
+    if token.kind != 9 { return sh_p_leaf(p, 11); };
+    let fields = sh_fstring_fields(&p.text, token, p.limit);
+    if fields.error != 0 { p.error = fields.error; p.error_start = fields.start; p.error_end = fields.end; return -1; };
+    let children = vec_new_i64();
+    let mut index = 0;
+    while p.error == 0 and index < sh_token_count(&fields.tokens) { let field = sh_token_get(&fields.tokens, index); let raw = p.text.get(field.start, field.end); if not raw.is_ok() { return sh_p_fail(p, 3001); }; let parsed = sh_parse_fragment(&raw.value, p.source, p.limit - sh_ast_count(&p.ast), p.depth + 1); if parsed.error != 0 { p.error = parsed.error; p.error_start = parsed.start + field.start; p.error_end = parsed.end + field.start; return -1; }; let root = sh_p_merge(p, &parsed.ast, field.start); sh_p_edge(p, &children, root); index = index + 1; };
+    sh_p_bump(p);
+    sh_p_node(p, 69, token.start, token.kind, &children);
+}
+
+def sh_parse(text: &String, source: i64, max_nodes: i64) -> ShParsed {
+    let mut p = sh_p_new(text, source, max_nodes, 0);
+    let children = vec_new_i64();
+    while p.error == 0 and sh_p_kind(&p) != 0 { let before = p.pos; let decl = sh_p_decl(&mut p); sh_p_edge(&mut p, &children, decl); if p.pos == before { sh_p_fail(&mut p, 3001); (); }; };
+    if p.pending_gt != 0 { sh_p_fail(&mut p, 3001); (); };
+    let root = sh_p_node(&mut p, 1, 0, 0, &children);
+    p.ast.root = root;
+    ShParsed { ast: p.ast, error: p.error, start: p.error_start, end: p.error_end };
+}

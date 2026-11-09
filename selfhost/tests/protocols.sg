@@ -1,0 +1,105 @@
+import selfhost_protocols;
+
+import std::assert;
+
+extern "C" {
+    fn sengoo_string_live_handle_count() -> i64;
+    fn sengoo_buffer_live_handle_count() -> i64;
+    fn sengoo_opaque_live_handle_count() -> i64;
+}
+
+def sh_protocol_input(text: &str) -> Result<ShExpanded, i64> {
+    let input = sh_exp_empty();
+    let owned = string_from_str(text)?;
+    let origin = ShSpan { source: 0, start: 0, end: owned.len() };
+    if not sh_exp_emit_mode(&input, &owned, origin, 1048576, 0) { return Result { is_ok: false, value: sh_exp_empty(), error: 1603 }; };
+    Result { is_ok: true, value: input, error: 0 };
+}
+
+def sh_protocol_method_count(expanded: &ShExpanded, name: &str) -> Result<i64, i64> {
+    let parsed = sh_parse(&expanded.text, 0, 1000000);
+    if parsed.error != 0 { return sh_i64_error(parsed.error); };
+    let mut count = 0;
+    let mut index = 0;
+    while index < sh_ast_count(&parsed.ast) { if sh_ast_word(&parsed.ast, index, 0) == 20 and sh_protocol_function_name(&expanded.text, &parsed.ast, index, name) { count = count + 1; }; index = index + 1; };
+    sh_i64_ok(count);
+}
+
+def sh_test_protocols_round() -> Result<bool, i64> {
+    let input = sh_protocol_input("struct Badge { id: i64, } impl Display for Badge { def fmt(&self, f: &mut Formatter) { f.write_i64(self.id); } } impl Debug for Badge { def fmt(&self, f: &mut Formatter) { f.write_i64(self.id); } } impl Hash for Badge { def hash_into(&self, h: &mut Hasher) { h.write_i64(self.id); } }")?;
+    let output = sh_protocols(&input, 1048576);
+    assert_eq_i64(output.error, 0, "protocols.sg", 31);
+    assert_eq_i64(sh_protocol_method_count(&output, "to_string")?, 2, "protocols.sg", 32);
+    assert_eq_i64(sh_protocol_method_count(&output, "hash")?, 1, "protocols.sg", 33);
+    assert_true(str_contains(output.text.as_str(), "self.fmt(&mut __formatter)"), "protocols.sg", 34);
+    assert_true(str_contains(output.text.as_str(), "self.hash_into(&mut __hasher)"), "protocols.sg", 35);
+    let repeated = sh_protocols(&output, 1048576);
+    assert_eq_i64(repeated.error, 0, "protocols.sg", 37);
+    assert_true(output.text.eq(repeated.text), "protocols.sg", 38);
+    let existing = sh_protocol_input("impl Display for Badge { def fmt(&self, f: &mut Formatter) {} def to_string() -> String { string_new() } } impl Hash for Badge { def hash_into(&self, h: &mut Hasher) {} def hash() -> i64 { 7 } }")?;
+    let preserved = sh_protocols(&existing, 1048576);
+    assert_eq_i64(preserved.error, 0, "protocols.sg", 41);
+    assert_true(existing.text.eq(preserved.text), "protocols.sg", 42);
+    let unrelated = sh_protocol_input("impl Badge { def fmt(&self, f: &mut Formatter) {} } impl other::Display for Badge { def fmt(&self, f: &mut Formatter) {} } impl Display for Badge { def fmt(f: &mut Formatter) {} } impl Hash for Badge { def hash_into(h: &mut Hasher) {} }")?;
+    let skipped = sh_protocols(&unrelated, 1048576);
+    assert_eq_i64(skipped.error, 0, "protocols.sg", 45);
+    assert_true(unrelated.text.eq(skipped.text), "protocols.sg", 46);
+    let generic = sh_protocol_input("impl<T: Copy> Display for Wrapper<T> { def fmt(&self, f: &mut Formatter) {} }")?;
+    let generated = sh_protocols(&generic, 1048576);
+    assert_eq_i64(generated.error, 0, "protocols.sg", 49);
+    assert_eq_i64(sh_protocol_method_count(&generated, "to_string")?, 1, "protocols.sg", 50);
+    let capped = sh_protocols(&generic, generic.text.len());
+    assert_eq_i64(capped.error, 1603, "protocols.sg", 52);
+    let malformed = sh_protocol_input("impl Display for Badge {")?;
+    let rejected = sh_protocols(&malformed, 1048576);
+    assert_eq_i64(rejected.error, 3001, "protocols.sg", 55);
+    let propagated = sh_exp_error(1401, 8, 12);
+    let failure = sh_protocols(&propagated, 1048576);
+    assert_eq_i64(failure.error, 1401, "protocols.sg", 58);
+    assert_eq_i64(failure.start, 8, "protocols.sg", 59);
+    assert_eq_i64(failure.end, 12, "protocols.sg", 60);
+    Result { is_ok: true, value: true, error: 0 };
+}
+
+def sh_test_protocols_mapping() -> Result<bool, i64> {
+    let input = sh_exp_empty();
+    let first = string_from_str("// prefix\n")?;
+    let implementation = string_from_str("impl Display for Badge { def fmt(&self, f: &mut Formatter) {} }")?;
+    let prefix_site = ShSpan { source: 0, start: 0, end: first.len() };
+    let generated_site = ShSpan { source: 0, start: 200, end: 230 };
+    if not sh_exp_emit_mode(&input, &first, prefix_site, 1048576, 0) { return result_err_bool(1603); };
+    if not sh_exp_emit(&input, &implementation, generated_site, 1048576) { return result_err_bool(1603); };
+    let name = string_from_str("Badge")?;
+    let message = string_from_str("old")?;
+    let replacement = string_from_str("new")?;
+    let removal = string_from_str("0.4")?;
+    let metadata = ShDeprecated { name: name, kind: 1, message: message, replacement: replacement, removal: removal, flags: 7 };
+    if not input.deprecated.push(metadata) { return result_err_bool(1603); };
+    let output = sh_protocols(&input, 1048576);
+    assert_eq_i64(output.error, 0, "protocols.sg", 74);
+    let mut at = 0;
+    let mut generated = 0;
+    while at < output.mapping.words.len() { let low = output.mapping.words.get(at).unwrap_or(0); let high = output.mapping.words.get(at + 1).unwrap_or(0); let text = output.text.get(low, high)?; if str_contains(text.as_str(), "def to_string") { let origin = sh_exp_map(&output.mapping, low, high); assert_eq_i64(origin.start, 200, "protocols.sg", 84); assert_eq_i64(origin.end, 230, "protocols.sg", 85); generated = generated + 1; }; at = at + 5; };
+    assert_eq_i64(generated, 1, "protocols.sg", 90);
+    assert_eq_i64(output.deprecated.len(), 1, "protocols.sg", 91);
+    assert_eq_str(output.deprecated.get(0).message.as_str(), "old", "protocols.sg", 92);
+    let direct = sh_exp_map(&output.mapping, 0, 2);
+    assert_eq_i64(direct.start, 0, "protocols.sg", 94);
+    assert_eq_i64(direct.end, 2, "protocols.sg", 95);
+    Result { is_ok: true, value: true, error: 0 };
+}
+
+def main() -> i64 {
+    let strings = sengoo_string_live_handle_count();
+    let buffers = sengoo_buffer_live_handle_count();
+    let opaque = sengoo_opaque_live_handle_count();
+    let mut round = 0;
+    while round < 100 { let result = sh_test_protocols_round(); if not result.is_ok() { println(result.error); return 1; }; round = round + 1; };
+    let mapping = sh_test_protocols_mapping();
+    if not mapping.is_ok() { println(mapping.error); return 2; };
+    assert_eq_i64(sengoo_string_live_handle_count(), strings, "protocols.sg", 112);
+    assert_eq_i64(sengoo_buffer_live_handle_count(), buffers, "protocols.sg", 113);
+    assert_eq_i64(sengoo_opaque_live_handle_count(), opaque, "protocols.sg", 114);
+    println("selfhost protocols: ok");
+    0;
+}

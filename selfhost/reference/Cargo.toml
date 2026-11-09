@@ -1,0 +1,12 @@
+[package]
+name = "selfhost-reference"
+version = "0.1.0"
+edition = "2021"
+publish = false
+
+[workspace]
+
+[dependencies]
+sengoo-compiler = { path = "../../compiler" }
+serde_json = "1.0"
+sgfmt = { path = "../../tools/sgfmt" }

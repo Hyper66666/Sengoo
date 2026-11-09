@@ -1,0 +1,39 @@
+import selfhost_expand;
+
+import std::args;
+
+import std::file;
+
+import std::io;
+
+def sh_expand_argument(index: i64) -> Result<String, i64> {
+    let length = arg_len(index)?;
+    let bytes = ffi_buffer_new(length)?;
+    let count = arg_copy(index, bytes)?;
+    string_from_utf8(bytes, count);
+}
+
+def sh_expand_cli(input: &str, output: &str) -> Result<i64, i64> {
+    let sources = sh_sources_new(1, 16777216);
+    let source = sh_source_load(&sources, input)?;
+    let length = sh_source_len(&sources, source)?;
+    let text = sh_span_text(&sources, ShSpan { source: source, start: 0, end: length })?;
+    let features = sh_symbols_new(0);
+    let expanded = sh_expand(&text, &features, 16777216, 16);
+    if expanded.error != 0 { io_stderr_write("expand error/start/end:\n"); println(expanded.error); println(expanded.start); println(expanded.end); return sh_i64_ok(65); };
+    let bytes = sh_lex_bytes(&expanded.text)?;
+    let written = file_write_str_raw(sengoo_stdlib_str_ptr(output), bytes.ptr(), expanded.text.len())?;
+    if written != expanded.text.len() { return sh_i64_error(1007); };
+    println("selfhost expand cli: ok");
+    sh_i64_ok(0);
+}
+
+def main() -> i64 {
+    if args_len() != 2 { io_stderr_write("usage: expand INPUT OUTPUT\n"); return 64; };
+    let input = sh_expand_argument(0);
+    let output = sh_expand_argument(1);
+    if not input.is_ok() or not output.is_ok() { io_stderr_write("expand: invalid UTF-8 arguments\n"); return 64; };
+    let result = sh_expand_cli(input.value.as_str(), output.value.as_str());
+    if not result.is_ok() { io_stderr_write("expand I/O error/start/end:\n"); println(result.error); println(0); println(0); return 66; };
+    result.value;
+}
