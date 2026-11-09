@@ -143,13 +143,15 @@ hosts continue to require their own evidence.
 
 ## Native development preview
 
-`source_codegen_gate.py` builds `tools/native.sg`, then compares nine exact
-source programs through the SG and frozen qualified Rust/LLVM paths. Both paths
-execute with exit status 42 and identical stdout/stderr. Fixtures cover calls,
-branches, while/for, scalar match, explicit narrow integer suffixes, a six-arg
-C call and Unicode source/path handling. Repeated SG objects must have identical
-bytes; syntax, semantic and unsupported-codegen failures preserve existing
-output files. The gate accepts `--seed`, `--formatter`, `--clang`, `--reference`
+`source_codegen_gate.py` builds `tools/native.sg` and runs 34 exact source
+programs. Thirty-three execute with exit status 42 and identical stdout/stderr
+through both the SG native and frozen qualified Rust/LLVM paths. The remaining
+Result try fixture executes 42 through SG and preserves the reviewed reference
+invalid-LLVM failure in `REFERENCE_GAPS.md`; it is not counted as equivalent.
+Fixtures cover calls, control flow, generics, aggregate/float/numeric operations,
+class/impl methods, try propagation, user Drop and Unicode source paths.
+Repeated SG objects must have identical bytes; four deliberate failures preserve
+existing output. The gate accepts `--seed`, `--formatter`, `--clang`, `--reference`
 and `--output`; the reference identity comes from `reference-baseline.lock`.
 
 After the gate, the development CLI can be invoked as:
@@ -160,11 +162,20 @@ native.exe INPUT.sg OUTPUT.obj [--wrap]
 
 The default checks integer add/subtract/multiply overflow. `--wrap` selects
 wrapping arithmetic. Output diagnostics use JSON schema version 1. This preview
-currently handles single-source scalar MIR and writes AMD64 COFF directly.
-It is not yet the public `sgc` command interface. Floating/aggregate values,
-ownership cleanup, division/remainder, async, full module/tool compatibility,
-stack probing/unwind/CodeView and SG linking remain open. Unsupported code
-reports a failure; there is no automatic LLVM fallback.
+handles the qualified single-source subset and writes AMD64 COFF directly.
+It is not yet the public `sgc` command interface. Resolved root and structural
+cleanup, stack probing and unwind records have focused execution gates; pending
+runtime glue, conditional field cleanup, async, full module/tool compatibility,
+CodeView and complete native behavior remain open. Unsupported code reports a
+failure; there is no automatic LLVM fallback.
+
+`linker_gate.py` separately qualifies SG COFF/archive/PE linking, real Windows
+SDK imports and independently observed Windows execution. `native_link_gate.py`
+consumes passed source/linker evidence and rechecks every input/tool/artifact
+hash before running SG source emission, SG linking and generated programs with
+an empty PATH. It compares object and PE bytes across two fresh directories.
+The SG numeric SDK fixture only provides verification exit hooks; this gate does
+not rebuild the compiler itself or qualify the full runtime SDK.
 
 Other focused gates are `syntax_gate.py`, `transform_gate.py`, `format_gate.py`,
 `native_gate.py`, `layout_gate.py`, `object_gate.py` and `codegen_gate.py`.

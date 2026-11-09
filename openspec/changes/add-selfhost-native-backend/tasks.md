@@ -16,6 +16,7 @@
 - [x] Preserve saturating float-to-signed/unsigned integer conversion, integer-to-float rounding and f32/f64 width conversion with independently executed boundary/NaN/infinity cases and 4,096 integer bit patterns (`target/selfhost/m4-numeric-casts/evidence.json`). Full M4 semantics remain open.
 - [x] Execute signed/unsigned division and remainder, debug zero/overflow hooks and release wrapping behavior for signed minimum divided by minus one (`target/selfhost/m4-division/evidence.json`). Full numeric/cleanup coverage remains open.
 - [x] Execute initial owned-local initialization, conditional user Drop, cleared flags, nested/array reverse cleanup and active-only enum payload cleanup; reject pending resource glue and forged nested Drop calls without emitting an object (`target/selfhost/m4-cleanup-safe/evidence.json`). Runtime resource glue, conditional partial-field cleanup and full ownership support remain open.
+- [x] Run the qualified SG native emitter with the separately qualified SG linker and real SDK import archive under an empty PATH; execute 32 programs in two clean directories and compare object/PE bytes exactly (`target/selfhost/m5-native-source-link-qualified/evidence.json`). Compiler self-rebuild, full runtime and M4/M5 closure remain open.
 
 ## Supported target behavior
 
@@ -193,3 +194,20 @@ case requires the documented frozen-reference invalid-LLVM link failure and
 records `result_equal=false`; `selfhost/REFERENCE_GAPS.md` retains this gap.
 Four syntax/semantic/native failures preserve prior output, including strict
 class unit tails. This is not full reference parity or a completed M4 gate.
+
+SG-source-to-SG-link integration:
+`target/selfhost/m5-native-source-link-qualified/evidence.json`, SHA-256
+`928c4004fd61f9397cadad532a0c8cddc936e5d693c39ae0e87d2b4718e30745`.
+Start/end revision is `94c7a24fc99053c220fb6c4d36849de6451c9eea`,
+Windows 11 AMD64; all 205 inputs and recorded tool/SDK hashes were unchanged.
+All 201 commands passed. Two fresh Unicode output directories each compile,
+SG-link and execute 32 programs with exit 42; source, object, PE and observed
+output hashes match across directories. A real SDK import program calls both
+GetCurrentProcessId and GetCurrentThreadId. The SG verification-only numeric
+SDK uses ExitProcess for checked overflow 63 and division-zero 62. Missing
+runtime symbols reject with 65 and preserve the previous output. Every executed
+command uses an empty PATH and removes source-runtime/toolchain overrides.
+The report first revalidates passed emitter/linker evidence and exact generated
+binary hashes. Those tools were built earlier with the Rust seed and clang;
+this gate does not rebuild them or prove an S2/S3 fixed point, process tracing,
+full SDK/runtime behavior, debugger support or complete M4/M5 parity.

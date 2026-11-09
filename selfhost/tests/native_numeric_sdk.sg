@@ -1,0 +1,13 @@
+extern "C" {
+    fn ExitProcess(code: u32);
+}
+
+def sengoo_panic_integer_overflow(value: i64) {
+    if value != 0 { ExitProcess(63 as u32); (); };
+    ();
+}
+
+def sengoo_panic_division_by_zero(value: i64) {
+    if value == 0 { ExitProcess(62 as u32); (); };
+    ();
+}
