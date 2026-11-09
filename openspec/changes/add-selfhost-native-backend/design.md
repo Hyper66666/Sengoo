@@ -77,11 +77,10 @@ preserves the reference overflow hook for signed/unsigned add/subtract/multiply;
 wrapping mode omits that hook. Scalar initialization facts may be elided only
 because this initial consumer rejects every local requiring ownership cleanup.
 
-Frames larger than 4,000 bytes reject until stack probing/unwind records land.
-Floating values, aggregate values, string literal data, division/remainder,
-ownership/drop and async operations remain explicit unsupported errors. This
-initial path has no unwind/CodeView records and does not qualify debugging or
-unwinding across its frames. Independent C callers execute actual generated
+At the initial checkpoint frames larger than 4,000 bytes rejected. Floating
+values, aggregate values, string literal data, division/remainder, ownership/drop
+and async operations remain explicit unsupported errors. The first path lacked
+unwind/CodeView records. Independent C callers execute actual generated
 machine code and test checked failure exits and wrapping results; raw MIR
 validation and output limits are checked before publishing an object.
 
@@ -92,9 +91,11 @@ section-relative relocations. The generated prologue is checked against the
 record at each instruction boundary by `RtlVirtualUnwind`; the C probe also
 looks up both generated functions through `RtlLookupFunctionEntry`. Frames over
 one page emit a checked `mov RAX, size; call __chkstk; sub RSP, RAX` sequence;
-the external `__chkstk` relocation is explicit in the object. Large frame
-execution remains outside this fixture until a complete runtime probe is
-added. Exception/termination handlers, chained entries, XMM saves and
+the external `__chkstk` relocation points at the call displacement, and unwind
+allocation offsets describe the longer probe prologue. A 600-local fixture
+executes the probe, reads six ABI arguments, writes/loads its deepest local,
+returns 42 and is found by a Windows stack walk. Exception/termination
+handlers, chained entries, XMM saves and
 CodeView locals remain open.
 
 `x64_sse.sg` provides a separate checked scalar SSE encoder for f32/f64

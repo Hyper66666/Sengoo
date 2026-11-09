@@ -96,6 +96,8 @@ def main():
         executed = run("execute-checked", [probe], b"native MIR calls, loop, pointers, narrow memory and checked arithmetic: ok")
         if b"native unwind metadata: ok" not in executed:
             raise AssertionError("Windows stack walk did not traverse generated function metadata")
+        if b"native large stack probe: ok" not in executed:
+            raise AssertionError("large stack-frame probe did not execute")
         for case in ("overflow", "overflow8", "umul-overflow", "uadd-overflow", "mul-overflow"):
             run("reject-" + case, [probe, case], b"integer overflow", 63)
         run("execute-wrap", [wrap_probe, "wrap"], b"native wrapping arithmetic: ok")

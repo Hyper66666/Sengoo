@@ -155,7 +155,7 @@ def sh_native_function(native: &mut ShNative, mir: &ShMir, function: i64) -> Res
     if not native.functions.set(function, start) { return sh_i64_error(6503); };
     sh_x64_stack_register(&native.code, 5, false)?;
     sh_x64_mov(&native.code, 5, 4)?;
-    if native.frame > 4096 { let probe = sh_x64_probe_stack(&native.code, native.frame)?; if not native.calls.push(probe) or not native.calls.push(sh_mir_fn_count(mir) + 1) { return sh_i64_error(6503); }; (); } else { sh_x64_stack_adjust(&native.code, native.frame, false)?; (); };
+    if native.frame > 4096 { let probe = sh_x64_probe_stack(&native.code, native.frame)?; if not native.calls.push(probe + 11) or not native.calls.push(sh_mir_fn_count(mir) + 1) { return sh_i64_error(6503); }; (); } else { sh_x64_stack_adjust(&native.code, native.frame, false)?; (); };
     index = 0;
     while index < sh_mir_inst_count(mir) { if sh_mir_inst(mir, index, 0) == function and sh_mir_inst(mir, index, 2) == 1 { let ordinal = sh_mir_inst(mir, index, 6); if ordinal < 4 { let register = if ordinal == 0 { 1; } else { if ordinal == 1 { 2; } else { if ordinal == 2 { 8; } else { 9; }; }; }; sh_x64_mov(&native.code, 0, register)?; } else { sh_x64_memory(&native.code, 0, 0, 5, 48 + (ordinal - 4) * 8)?; }; sh_native_normalize(native, mir, sh_mir_value_type(mir, index), 0)?; sh_native_save(native, index, 0)?; (); }; index = index + 1; };
     let entry = sh_x64_branch(&native.code, 0, 0)?;
@@ -170,7 +170,7 @@ def sh_native_unwind(native: &ShNative, object: &ShObject, mir: &ShMir, symbol_i
     let xdata = sh_binary_new(native.code.limit);
     let pdata = sh_binary_new(native.code.limit);
     let mut function = 0;
-    while function < sh_mir_fn_count(mir) { let start = sh_native_at(&native.functions, function); if start >= 0 { let end = sh_native_at(&native.ends, function); let frame = sh_native_at(&native.frames, function); if end <= start { return sh_i64_error(6601); }; let unwind = sh_unwind_fixed(&xdata, frame, 11)?; sh_binary_unsigned(&pdata, 0, 4)?; (); sh_binary_unsigned(&pdata, end - start, 4)?; (); sh_binary_unsigned(&pdata, unwind, 4)?; (); }; function = function + 1; };
+    while function < sh_mir_fn_count(mir) { let start = sh_native_at(&native.functions, function); if start >= 0 { let end = sh_native_at(&native.ends, function); let frame = sh_native_at(&native.frames, function); if end <= start { return sh_i64_error(6601); }; let unwind = sh_unwind_fixed(&xdata, frame, if frame > 4096 { 22; } else { 11; })?; sh_binary_unsigned(&pdata, 0, 4)?; (); sh_binary_unsigned(&pdata, end - start, 4)?; (); sh_binary_unsigned(&pdata, unwind, 4)?; (); }; function = function + 1; };
     let xname = string_from_str(".xdata")?;
     let pname = string_from_str(".pdata")?;
     let xsection_result = sh_object_add_section(object, &xname, &xdata, 1073741888, 4)?;

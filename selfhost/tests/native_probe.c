@@ -21,12 +21,13 @@ extern int64_t sg_native_shift(int64_t,int64_t);
 extern bool sg_native_less(int64_t,int64_t);
 extern uint64_t sg_native_uadd(uint64_t,uint64_t);
 extern uint64_t sg_native_umul(uint64_t,uint64_t);
+extern int64_t sg_native_large(int64_t,int64_t,int64_t,int64_t,int64_t,int64_t);
 static int checks;
 static int unwound;
 void sengoo_panic_integer_overflow(int64_t overflow) {
     ++checks;
     if (overflow) { fputs("integer overflow\n",stderr); exit(63); }
-    if (unwound!=3) {
+    if (unwound!=7) {
         void *frames[32];
         USHORT count=CaptureStackBackTrace(0,32,frames,NULL);
         for (USHORT i=0;i<count;++i) {
@@ -34,6 +35,7 @@ void sengoo_panic_integer_overflow(int64_t overflow) {
             PRUNTIME_FUNCTION entry=RtlLookupFunctionEntry((DWORD64)(uintptr_t)frames[i],&image,NULL);
             if (entry && image+entry->BeginAddress==(DWORD64)(uintptr_t)sg_native_add) unwound|=1;
             if (entry && image+entry->BeginAddress==(DWORD64)(uintptr_t)sg_native_swap) unwound|=2;
+            if (entry && image+entry->BeginAddress==(DWORD64)(uintptr_t)sg_native_large) unwound|=4;
         }
     }
 }
@@ -94,9 +96,11 @@ int main(int argc,char **argv) {
         sg_native_swap(2)!=12 || sg_native_swap(101)!=21 ||
         sg_native_mul(-6,7)!=-42 || sg_native_sub(2,44)!=-42 || sg_native_shift(-84,1)!=-42 ||
         !sg_native_less(INT64_MIN,INT64_MAX) || sg_native_less(INT64_MAX,INT64_MIN) ||
-        sg_native_uadd(40,2)!=42 || sg_native_umul(6,7)!=42 || checks<4 || unwound!=3) return 67;
+        sg_native_uadd(40,2)!=42 || sg_native_umul(6,7)!=42 ||
+        sg_native_large(1,2,3,4,5,6)!=42 || checks<4 || unwound!=7) return 67;
     if (virtual_unwind(sg_native_add) || virtual_unwind(sg_native_swap)) return 68;
     puts("native MIR calls, loop, pointers, narrow memory and checked arithmetic: ok");
     puts("native unwind metadata: ok");
+    puts("native large stack probe: ok");
     return 0;
 }

@@ -79,6 +79,17 @@ buffers and the >4 KiB `__chkstk` encoder. The prior report remains retained
 as development evidence; exception handlers, XMM saves, CodeView and actual
 large-frame execution remain open.
 
+Large-frame execution now supersedes that residual:
+`target/selfhost/m4-large-stack-bounded/evidence.json`, SHA-256
+`13b93f912b43531ab07a95bb4168605dbfbada3e641a7d3e15869e3c921ae0ff`,
+revision `9a62b4e2c24d9610451b18915dea5629ce356b9e`, Windows 11 x64.
+Twenty commands passed with unchanged source/tool identities. An independently
+linked C caller executed a 600-local frame through `__chkstk`, validated all
+six ABI arguments, the deepest local load/store and result 42, and located the
+generated large function during a Windows stack walk. The test fixes the call
+relocation and longer unwind prologue offsets; earlier emission-only evidence
+did not prove these. Exception handlers, XMM saves and CodeView remain open.
+
 Scalar SSE encoder evidence: `target/selfhost/m4-sse-final/evidence.json`,
 SHA-256 `910dda9aa543f0cde288b0dd35a3c70379408a94e0c6480a460fcc7576bb5895`,
 revision `9a62b4e2c24d9610451b18915dea5629ce356b9e`, Windows 11 x64.

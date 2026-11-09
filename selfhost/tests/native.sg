@@ -238,6 +238,32 @@ def sh_nt_fixture(mir: &ShMir) -> Result<bool, i64> {
     let unsigned = sh_type_primitive(&mir.types, 2, 64, 0)?;
     sh_nt_binary_function(mir, "sg_native_uadd", unsigned, unsigned, "+")?;
     sh_nt_binary_function(mir, "sg_native_umul", unsigned, unsigned, "*")?;
+    args.clear();
+    index = 0;
+    while index < 6 { args.push(integer); index = index + 1; };
+    let large = sh_nt_fn(mir, "sg_native_large", &args, integer, 0, false)?;
+    let large_scope = sh_mir_add_scope(mir, large, -1, 0)?;
+    let large_block = sh_nt_block(mir, large, large_scope)?;
+    let mut last_local = -1;
+    index = 0;
+    while index < 600 { last_local = sh_mir_add_local(mir, large, integer, -1, 2, 1, large_scope, -1, -1, 0, 0)?; index = index + 1; };
+    args.clear();
+    let mut total_value = -1;
+    index = 0;
+    while index < 6 { let parameter = sh_nt_inst(mir, large_block, 1, integer, &empty, index, 0)?; total_value = if total_value < 0 { parameter; } else { sh_nt_binary(mir, large_block, integer, total_value, parameter, "+")?; }; index = index + 1; };
+    let constant = sh_nt_inst(mir, large_block, 4, integer, &empty, 21, 0)?;
+    let total_result = sh_nt_binary(mir, large_block, integer, total_value, constant, "+")?;
+    args.push(integer);
+    let local_ptr_type = sh_type_intern(&mir.types, 6, 0, 1, -1, &args)?;
+    let ptr = sh_nt_inst(mir, large_block, 13, local_ptr_type, &empty, last_local, 0)?;
+    args.clear();
+    args.push(ptr);
+    args.push(total_result);
+    sh_nt_inst(mir, large_block, 15, unit, &args, 0, 0)?;
+    args.clear();
+    args.push(ptr);
+    let restored = sh_nt_inst(mir, large_block, 14, integer, &args, 0, 0)?;
+    sh_nt_return(mir, large_block, restored)?;
     Result { is_ok: true, value: true, error: 0 };
 }
 
@@ -258,7 +284,7 @@ def sh_test_native() -> Result<bool, i64> {
     assert_eq_i64(sh_x64_probe_stack(&probe, 4096).error, 6101, "native.sg", 165);
     assert_eq_i64(sh_x64_probe_stack(&probe, 4112)?, 0, "native.sg", 165);
     assert_true(sh_binary_len(&probe) > 0, "native.sg", 165);
-    let mir = sh_mir_new(1000);
+    let mir = sh_mir_new(2000);
     sh_nt_fixture(&mir)?;
     assert_eq_i64(sh_mir_validate(&mir).error, 0, "native.sg", 168);
     let checked = sh_native_object(&mir, 65536, true)?;
@@ -293,7 +319,7 @@ def sh_nt_emit() -> Result<bool, i64> {
     let path_bytes = ffi_buffer_new(arg_len(0).unwrap_or(0))?;
     let copied = arg_copy(0, path_bytes)?;
     let path = string_from_utf8(path_bytes, copied)?;
-    let mir = sh_mir_new(1000);
+    let mir = sh_mir_new(2000);
     sh_nt_fixture(&mir)?;
     let object = sh_native_object(&mir, 65536, args_len() == 1)?;
     let buffer = sh_binary_buffer(&object)?;
