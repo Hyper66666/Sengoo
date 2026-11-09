@@ -1,0 +1,115 @@
+import selfhost_native;
+
+import selfhost_frontend;
+
+import selfhost_mir_lower;
+
+import selfhost_link_native_debug;
+
+import selfhost_link_pe;
+
+import std::args;
+
+import std::file;
+
+import std::io;
+
+import std::assert;
+
+extern "C" {
+    fn sengoo_string_live_handle_count() -> i64;
+    fn sengoo_buffer_live_handle_count() -> i64;
+    fn sengoo_opaque_live_handle_count() -> i64;
+    fn sengoo_file_snapshot_live_handle_count() -> i64;
+    fn sengoo_file_snapshot_live_bytes() -> i64;
+}
+
+def sh_lnt_argument(index: i64) -> Result<String, i64> {
+    let buffer = ffi_buffer_new(arg_len(index).unwrap_or(0))?;
+    let length = arg_copy(index, buffer)?;
+    string_from_utf8(buffer, length);
+}
+
+def sh_lnt_mapping(native: &ShNative, mir: &ShMir) -> ShNativeDebugMap {
+    let map = sh_link_native_debug_map();
+    let mut function = 0;
+    while function < sh_mir_fn_count(mir) { let first = sh_native_at(&native.functions, function); if first >= 0 { map.functions.push(function); map.functions.push(first); map.functions.push(sh_native_at(&native.ends, function)); map.functions.push(sh_native_at(&native.frames, function) + 8); map.functions.push(sh_native_at(&native.prologue_ends, function) - first); map.functions.push(1); (); }; function = function + 1; };
+    let mut instruction = 0;
+    while instruction < sh_mir_inst_count(mir) { let start = sh_native_at(&native.instruction_starts, instruction); if start >= 0 { map.instructions.push(instruction); map.instructions.push(start); map.instructions.push(sh_native_at(&native.instruction_ends, instruction)); (); }; instruction = instruction + 1; };
+    let mut term = 0;
+    while term < sh_mir_term_count(mir) { let start = sh_native_at(&native.terminator_starts, term); if start >= 0 { map.terminators.push(term); map.terminators.push(start); map.terminators.push(sh_native_at(&native.terminator_ends, term)); (); }; term = term + 1; };
+    let mut local = 0;
+    while local < sh_mir_local_count(mir) { let slot = sh_native_at(&native.locals, local); if slot >= 0 { map.locals.push(local); map.locals.push(sh_native_at(&native.frames, sh_mir_local(mir, local, 0)) - slot); (); }; local = local + 1; };
+    let mut index = 0;
+    while index < native.epilogues.len() { map.epilogues.push(sh_native_at(&native.epilogues, index)); index = index + 1; };
+    map;
+}
+
+def sh_lnt_file(source_path: &String, object_path: &String, image_path: &String, pdb_path: &String, write: bool, invalid: i64) -> Result<i64, i64> {
+    let sources = sh_sources_new(1, 1048576);
+    let source_id = sh_source_load(&sources, source_path.as_str())?;
+    let length = sh_source_len(&sources, source_id)?;
+    let text = sh_span_text(&sources, ShSpan { source: source_id, start: 0, end: length })?;
+    let source = sh_link_load(source_path.as_str(), 1048576)?;
+    let features = sh_symbols_new(0);
+    let front = sh_frontend(&text, source_id, &features, 1048576, 1000000);
+    if front.error != 0 { return sh_i64_error(front.error); };
+    if sengoo_string_eq(text.handle, front.expanded.text.handle) == 0 { return sh_i64_error(7313); };
+    let checked = sh_check(&front.expanded.text, &front.parsed.ast, 1000);
+    if checked.error != 0 { return sh_i64_error(checked.error); };
+    let lowered = sh_lower(&front.expanded.text, &front.parsed.ast, &checked, 100000);
+    if lowered.error != 0 { return sh_i64_error(lowered.error); };
+    let object = sh_object_new(1048576);
+    let mut native = sh_native_new(&lowered.mir, 1048576, false);
+    native.collect_debug = true;
+    sh_native_emit_into(&mut native, &lowered.mir, &object)?;
+    let map = sh_lnt_mapping(&native, &lowered.mir);
+    if invalid == 1 { let mut index = 0; while index < 6 { map.functions.push(sh_link_word(&map.functions, 6, 0, index)); index = index + 1; }; };
+    if invalid == 2 { map.instructions.set(2, -1); (); };
+    if invalid == 3 { map.instructions.pop(); map.instructions.pop(); map.instructions.pop(); (); };
+    if invalid == 4 { map.locals.set(1, 1048576); (); };
+    if invalid == 5 { map.epilogues.pop(); map.epilogues.pop(); map.epilogues.pop(); (); };
+    if invalid == 6 { map.functions.set(3, 0); (); };
+    if invalid == 7 { map.instructions.set(3, sh_link_word(&map.instructions, 3, 0, 0)); (); };
+    if invalid == 8 { map.functions.set(5, 2); (); };
+    if invalid == 9 { map.terminators.set(1, sh_link_word(&map.instructions, 3, 0, 1)); (); };
+    sh_link_native_debug_attach(&object, &lowered.mir, &map, source_path, &source)?;
+    let raw = sh_object_emit(&object)?;
+    let main = string_from_str("main")?;
+    let mut link = sh_link_new(1048576);
+    let object_id = sh_link_coff(&mut link, &raw)?;
+    let image = sh_link_pe(&mut link, &main)?;
+    let mut decoded = sh_link_debug_new();
+    sh_link_debug_source(&mut decoded, source_path, &source)?;
+    sh_link_codeview_read(&decoded, &link, &image, object_id)?;
+    let linked_image = sh_link_debug_image(&decoded, &image, pdb_path)?;
+    let pdb = sh_link_pdb(&decoded, &image, pdb_path)?;
+    if write { let object_bytes = sh_binary_buffer(&raw)?; let image_bytes = sh_binary_buffer(&linked_image)?; let pdb_bytes = sh_binary_buffer(&pdb)?; file_write_str_raw(sengoo_stdlib_str_ptr(object_path.as_str()), object_bytes.ptr(), object_bytes.used_len())?; file_write_str_raw(sengoo_stdlib_str_ptr(image_path.as_str()), image_bytes.ptr(), image_bytes.used_len())?; file_write_str_raw(sengoo_stdlib_str_ptr(pdb_path.as_str()), pdb_bytes.ptr(), pdb_bytes.used_len())?; (); };
+    sh_i64_ok(0);
+}
+
+def main() -> i64 {
+    if args_len() != 4 and args_len() != 5 { return 64; };
+    let source = sh_lnt_argument(0);
+    let object = sh_lnt_argument(1);
+    let image = sh_lnt_argument(2);
+    let pdb = sh_lnt_argument(3);
+    if not source.is_ok() or not object.is_ok() or not image.is_ok() or not pdb.is_ok() { return 64; };
+    let invalid = if args_len() == 5 { let argument = sh_lnt_argument(4); if not argument.is_ok() { return 64; }; let bytes = sh_coff_symbol_bytes(&argument.value); if not bytes.is_ok() { return 64; }; bytes.value.get_u8(0).unwrap_or(65) - 64; } else { 0; };
+    let result = sh_lnt_file(&source.value, &object.value, &image.value, &pdb.value, true, invalid);
+    if not result.is_ok() { println(result.error); return 65; };
+    let strings = sengoo_string_live_handle_count();
+    let buffers = sengoo_buffer_live_handle_count();
+    let opaque = sengoo_opaque_live_handle_count();
+    let snapshots = sengoo_file_snapshot_live_handle_count();
+    let snapshot_bytes = sengoo_file_snapshot_live_bytes();
+    let mut round = 0;
+    while round < 5 { let scoped = sh_lnt_file(&source.value, &object.value, &image.value, &pdb.value, false, 0); if not scoped.is_ok() { println(scoped.error); return 65; }; let rejected = sh_lnt_file(&source.value, &object.value, &image.value, &pdb.value, false, 2); if rejected.is_ok() or rejected.error != 7311 { return 66; }; round = round + 1; };
+    assert_eq_i64(sengoo_string_live_handle_count(), strings, "link_native_debug.sg", 1);
+    assert_eq_i64(sengoo_buffer_live_handle_count(), buffers, "link_native_debug.sg", 1);
+    assert_eq_i64(sengoo_opaque_live_handle_count(), opaque, "link_native_debug.sg", 1);
+    assert_eq_i64(sengoo_file_snapshot_live_handle_count(), snapshots, "link_native_debug.sg", 1);
+    assert_eq_i64(sengoo_file_snapshot_live_bytes(), snapshot_bytes, "link_native_debug.sg", 1);
+    println("selfhost SG source/native/COFF/CodeView/PDB exact resources: ok");
+    result.value;
+}

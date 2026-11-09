@@ -241,3 +241,45 @@ observes 40 then 42 while stepping through its body and reports the local as
 unavailable after entering the first epilogue. A Windows probe checks
 RtlLookupFunctionEntry and RtlVirtualUnwind at eleven offsets spanning partial
 prologue, function body, and both epilogues, restoring caller RIP/RSP/RBP.
+
+
+## Automatic native compiler debug mapping checkpoint
+
+`link_native_debug.sg` deliberately imports MIR validation and the CodeView
+writer rather than the native backend. `ShNativeDebugMap` is a checked adapter
+contract consisting of flat records: functions [MIR function, absolute text
+start, end-exclusive, frame metadata bytes, relative prologue end, input COFF
+section]; instructions [MIR instruction, absolute start, end-exclusive];
+terminators [MIR terminator, absolute start, end-exclusive]; locals [MIR local,
+SP offset]; and epilogues [MIR function, absolute start, end-exclusive].
+The native backend's optional metadata collector supplies those facts without
+changing ordinary object bytes. Its frame allocation plus saved-RBP slot forms
+the debug frame metadata; local SP offsets are allocation minus RBP slot.
+
+The adapter normalizes map order with bounded bottom-up merge sorting, validates
+complete unique MIR identities, function/type/source boundaries, disjoint
+instruction/terminator code intervals and return-to-epilogue correspondence,
+then builds source line indices once and uses binary lookups for source spans.
+Function/local/line records are derived from MIR spans and names and actual
+native code offsets; no fixture machine addresses are supplied to the adapter.
+An i64 local is initially visible only after a direct entry-block store that
+dominates reachable blocks. Additional ranges split at every recorded epilogue.
+Unsupported lexical scopes, unproven branch-only initialization, moves/storage
+invalidation, parameter/other function prototypes and non-i64 named locals fail
+explicitly. The initial contract supports one unchanged UTF-8 source file,
+no-argument signed-i64 functions and named signed-i64 stable stack locations.
+No macro-expanded source coordinate remapping is claimed by this checkpoint.
+
+The automatic gate runs SG frontend, semantics, MIR lowering, native object
+construction, CodeView attachment, SG object/PE linking, relocated CodeView
+reading and SG PDB generation under an empty toolchain PATH. One source has a
+preceding function so main's debug addresses are nonzero; another has two return
+paths and native RBP frames. LLVM independently inspects actual COFF CodeView
+and PDB records, while LLDB sets source breakpoints, steps and observes local
+answer = 40 then 42 before Windows exit 42. Repeated object/PE/PDB bytes and
+complete source-pipeline resource scopes are checked. Malformed maps preserve
+all prior outputs; unsupported source/type/local forms produce no artifacts.
+Errors 7311/7312/7313 identify malformed mapping/span, capacity and unsupported
+automatic mapping respectively; underlying MIR/CodeView diagnostics retain their
+own stable codes. This remains a primitive mapping subset and does not qualify
+the complete M5 type/module/SDK/debug corpus.

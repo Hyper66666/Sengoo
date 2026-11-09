@@ -78,3 +78,11 @@ and final process/equality/performance gates SHALL retain their own evidence.
 - **THEN** COFF and PDB preserve the ordered ranges without extending the local through the stack-changing gaps
 - **AND** a real debugger reads expected live values and reports the local unavailable in a declared epilogue gap
 - **AND** Windows runtime unwinding restores caller state throughout both epilogues
+
+
+#### Scenario: Native compiler metadata supplies automatic source debugging
+- **WHEN** supported MIR source/name/type records and checked native machine-code/stack/epilogue maps are supplied
+- **THEN** SG derives the CodeView procedure, source-line and initialized-local ranges without fixture machine addresses
+- **AND** actual source compilation reaches a deterministic object, PE and PDB using SG alone
+- **AND** a real debugger verifies source stops, stepping and expected locals at nonzero function offsets and multiple returns
+- **AND** incomplete/conflicting code maps and unsupported or unproven local lifetimes fail explicitly

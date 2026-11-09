@@ -1,0 +1,180 @@
+import selfhost_mir_validate;
+
+import selfhost_link_codeview;
+
+struct ShNativeDebugMap {
+    functions: Vec<i64>,
+    instructions: Vec<i64>,
+    terminators: Vec<i64>,
+    locals: Vec<i64>,
+    epilogues: Vec<i64>,
+}
+
+def sh_link_native_debug_map() -> ShNativeDebugMap {
+    ShNativeDebugMap { functions: vec_new_i64(), instructions: vec_new_i64(), terminators: vec_new_i64(), locals: vec_new_i64(), epilogues: vec_new_i64() };
+}
+
+def sh_lnd_function(map: &ShNativeDebugMap, function: i64) -> i64 {
+    let mut row = 0;
+    while row < map.functions.len() / 6 { if sh_link_word(&map.functions, 6, row, 0) == function { return row; }; row = row + 1; };
+    -1;
+}
+
+def sh_lnd_index(words: &Vec<i64>, width: i64, count: i64) -> Result<Vec<i64>, i64> {
+    if count < 0 or count > 100000 or words.len() % width != 0 or words.len() / width > count { return sh_lnd_index_error(7311); };
+    let output = vec_new_i64();
+    let mut index = 0;
+    while index < count { sh_link_push(&output, -1)?; index = index + 1; };
+    index = 0;
+    while index < words.len() / width { let id = sh_link_word(words, width, index, 0); if id < 0 or id >= count or sengoo_vec_get_or_default_i64(output.handle, id, -1) >= 0 { return sh_lnd_index_error(7311); }; if not output.set(id, index) { return sh_lnd_index_error(7312); }; index = index + 1; };
+    Result { is_ok: true, value: output, error: 0 };
+}
+
+def sh_lnd_index_error(code: i64) -> Result<Vec<i64>, i64> {
+    let empty: Vec<i64> = Vec { handle: 0, marker: 0 };
+    Result { is_ok: false, value: empty, error: code };
+}
+
+def sh_lnd_i64(mir: &ShMir, ty: i64) -> bool {
+    sh_mir_type_word(mir, ty, 0) == 2 and sh_mir_type_word(mir, ty, 1) == 64 and sh_mir_type_word(mir, ty, 2) == 1;
+}
+
+def sh_lnd_source_line(lines: &Vec<i64>, offset: i64) -> Result<i64, i64> {
+    if offset < 0 or lines.len() == 0 { return sh_i64_error(7311); };
+    let mut low = 0;
+    let mut high = lines.len();
+    while low < high { let middle = (low + high) / 2; if sengoo_vec_get_or_default_i64(lines.handle, middle, -1) <= offset { low = middle + 1; } else { high = middle; }; };
+    sh_i64_ok(low);
+}
+
+def sh_lnd_scope_contains(mir: &ShMir, owner: i64, scope: i64) -> bool {
+    let mut current = scope;
+    let mut depth = 0;
+    while current >= 0 and depth <= sh_mir_scope_count(mir) { if current == owner { return true; }; current = sh_mir_scope(mir, current, 1); depth = depth + 1; };
+    false;
+}
+
+def sh_lnd_record_span(debug: &ShLinkDebug, lines: &Vec<i64>, file: i64, expected_file: i64, start: i64, end: i64) -> Result<i64, i64> {
+    if file != expected_file or start < 0 or end < start or end > debug.source.len() { return sh_i64_error(7311); };
+    sh_lnd_source_line(lines, start);
+}
+
+def sh_lnd_validate_map(mir: &ShMir, map: &ShNativeDebugMap, file: i64) -> Result<i64, i64> {
+    let function_ids = sh_lnd_index(&map.functions, 6, sh_mir_fn_count(mir))?;
+    let instructions = sh_lnd_index(&map.instructions, 3, sh_mir_inst_count(mir))?;
+    let terms = sh_lnd_index(&map.terminators, 3, sh_mir_term_count(mir))?;
+    let locals = sh_lnd_index(&map.locals, 2, sh_mir_local_count(mir))?;
+    if map.functions.len() == 0 or map.functions.len() / 6 > 256 or map.epilogues.len() % 3 != 0 or map.epilogues.len() / 3 > 65536 { return sh_i64_error(7312); };
+    let mut row = 0;
+    let mut previous_end = 0;
+    while row < map.functions.len() / 6 { let function = sh_link_word(&map.functions, 6, row, 0); let first = sh_link_word(&map.functions, 6, row, 1); let end = sh_link_word(&map.functions, 6, row, 2); let frame = sh_link_word(&map.functions, 6, row, 3); let prologue = sh_link_word(&map.functions, 6, row, 4); let section = sh_link_word(&map.functions, 6, row, 5); let signature = sh_mir_fn(mir, function, 1); if sh_mir_fn(mir, function, 3) != 0 or sh_mir_type_word(mir, signature, 0) != 11 or sh_mir_type_word(mir, signature, 5) != 1 or not sh_lnd_i64(mir, sh_mir_type_arg(mir, signature, 0)) { return sh_i64_error(7313); }; if sh_mir_fn(mir, function, 4) != file or first < previous_end or end <= first or end - first > 65535 or frame < 8 or frame > 1048576 or frame % 8 != 0 or prologue < 1 or prologue >= end - first or section != 1 { return sh_i64_error(7311); }; previous_end = end; row = row + 1; };
+    row = 0;
+    while row < sh_mir_fn_count(mir) { if sh_mir_fn(mir, row, 3) == 0 and sengoo_vec_get_or_default_i64(function_ids.handle, row, -1) < 0 { return sh_i64_error(7311); }; row = row + 1; };
+    let mut prior = -1;
+    row = 0;
+    while row < map.instructions.len() / 3 { let id = sh_link_word(&map.instructions, 3, row, 0); let function = sh_lnd_function(map, sh_mir_inst(mir, id, 0)); let start = sh_link_word(&map.instructions, 3, row, 1); let end = sh_link_word(&map.instructions, 3, row, 2); if function < 0 or start < prior or start < sh_link_word(&map.functions, 6, function, 1) + sh_link_word(&map.functions, 6, function, 4) or end < start or end > sh_link_word(&map.functions, 6, function, 2) { return sh_i64_error(7311); }; prior = end; row = row + 1; };
+    prior = -1;
+    row = 0;
+    while row < map.terminators.len() / 3 { let id = sh_link_word(&map.terminators, 3, row, 0); let function = sh_lnd_function(map, sh_mir_term(mir, id, 0)); let start = sh_link_word(&map.terminators, 3, row, 1); let end = sh_link_word(&map.terminators, 3, row, 2); if function < 0 or start < prior or start < sh_link_word(&map.functions, 6, function, 1) + sh_link_word(&map.functions, 6, function, 4) or end < start or end > sh_link_word(&map.functions, 6, function, 2) { return sh_i64_error(7311); }; prior = end; row = row + 1; };
+    row = 0;
+    while row < sh_mir_inst_count(mir) { if sh_lnd_function(map, sh_mir_inst(mir, row, 0)) >= 0 and sengoo_vec_get_or_default_i64(instructions.handle, row, -1) < 0 { return sh_i64_error(7311); }; row = row + 1; };
+    row = 0;
+    while row < sh_mir_term_count(mir) { if sh_lnd_function(map, sh_mir_term(mir, row, 0)) >= 0 and sengoo_vec_get_or_default_i64(terms.handle, row, -1) < 0 { return sh_i64_error(7311); }; row = row + 1; };
+    prior = -1;
+    row = 0;
+    while row < map.epilogues.len() / 3 { let function = sh_lnd_function(map, sh_link_word(&map.epilogues, 3, row, 0)); let start = sh_link_word(&map.epilogues, 3, row, 1); let end = sh_link_word(&map.epilogues, 3, row, 2); if function < 0 or start < prior or end <= start or start < sh_link_word(&map.functions, 6, function, 1) + sh_link_word(&map.functions, 6, function, 4) or end > sh_link_word(&map.functions, 6, function, 2) { return sh_i64_error(7311); }; prior = end; let mut term = 0; let mut matched = false; while term < map.terminators.len() / 3 { let id = sh_link_word(&map.terminators, 3, term, 0); if sh_mir_term(mir, id, 0) == sh_link_word(&map.epilogues, 3, row, 0) and sh_mir_term(mir, id, 2) == 3 and start >= sh_link_word(&map.terminators, 3, term, 1) and end == sh_link_word(&map.terminators, 3, term, 2) { matched = true; }; term = term + 1; }; if not matched { return sh_i64_error(7311); }; row = row + 1; };
+    row = 0;
+    while row < map.terminators.len() / 3 { let id = sh_link_word(&map.terminators, 3, row, 0); if sh_mir_term(mir, id, 2) == 3 { let mut epilogue = 0; let mut matched = false; while epilogue < map.epilogues.len() / 3 { if sh_link_word(&map.epilogues, 3, epilogue, 0) == sh_mir_term(mir, id, 0) and sh_link_word(&map.epilogues, 3, epilogue, 2) == sh_link_word(&map.terminators, 3, row, 2) { matched = true; }; epilogue = epilogue + 1; }; if not matched { return sh_i64_error(7311); }; }; row = row + 1; };
+    let mut instruction_cursor = 0;
+    let mut term_cursor = 0;
+    let mut code_end = -1;
+    while instruction_cursor < map.instructions.len() / 3 or term_cursor < map.terminators.len() / 3 { let inst_at = if instruction_cursor < map.instructions.len() / 3 { sh_link_word(&map.instructions, 3, instruction_cursor, 1); } else { 9223372036854775807; }; let term_at = if term_cursor < map.terminators.len() / 3 { sh_link_word(&map.terminators, 3, term_cursor, 1); } else { 9223372036854775807; }; let use_inst = inst_at <= term_at; let start = if use_inst { inst_at; } else { term_at; }; let end = if use_inst { sh_link_word(&map.instructions, 3, instruction_cursor, 2); } else { sh_link_word(&map.terminators, 3, term_cursor, 2); }; if start < code_end { return sh_i64_error(7311); }; code_end = end; if use_inst { instruction_cursor = instruction_cursor + 1; } else { term_cursor = term_cursor + 1; }; };
+    sh_i64_ok(0);
+}
+
+def sh_lnd_local(debug: &ShLinkDebug, mir: &ShMir, map: &ShNativeDebugMap, local: i64, debug_function: i64, function_row: i64, local_indexes: &Vec<i64>, inst_indexes: &Vec<i64>, file: i64) -> Result<i64, i64> {
+    let ty = sh_mir_local(mir, local, 1);
+    if not sh_lnd_i64(mir, ty) or sh_mir_local(mir, local, 3) != 0 or sh_mir_local(mir, local, 4) >= 2 or sh_mir_local(mir, local, 7) != file { return sh_i64_error(7313); };
+    let local_row = sengoo_vec_get_or_default_i64(local_indexes.handle, local, -1);
+    if local_row < 0 { return sh_i64_error(7311); };
+    let stack = sh_link_word(&map.locals, 2, local_row, 1);
+    let function = sh_mir_local(mir, local, 0);
+    let entry = sh_mir_fn(mir, function, 2);
+    let mut initialized = -1;
+    let mut instruction = 0;
+    while instruction < sh_mir_inst_count(mir) { if sh_mir_inst(mir, instruction, 0) == function { let opcode = sh_mir_inst(mir, instruction, 2); if opcode == 15 { let pointer = sh_mir_inst_arg(mir, instruction, 0); if sh_mir_inst(mir, pointer, 2) == 13 and sh_mir_inst(mir, pointer, 6) == local and sh_mir_inst(mir, instruction, 1) == entry and initialized < 0 { let index = sengoo_vec_get_or_default_i64(inst_indexes.handle, instruction, -1); initialized = sh_link_word(&map.instructions, 3, index, 2); }; }; if opcode == 21 and sh_mir_inst(mir, instruction, 6) == local { return sh_i64_error(7313); }; if opcode == 25 and sh_mir_inst(mir, instruction, 6) == local and sh_mir_inst(mir, instruction, 7) == 0 { return sh_i64_error(7313); }; }; instruction = instruction + 1; };
+    if initialized < 0 { return sh_i64_error(7313); };
+    let mut block = 0;
+    while block < sh_mir_block_count(mir) { if sh_mir_block(mir, block, 0) == function { let scope = sh_mir_block(mir, block, 1); if not sh_lnd_scope_contains(mir, sh_mir_local(mir, local, 5), scope) and scope != sh_mir_fn(mir, function, 7) { return sh_i64_error(7313); }; }; block = block + 1; };
+    let owner_scope = sh_mir_local(mir, local, 5);
+    let root_scope = sh_mir_fn(mir, function, 7);
+    if owner_scope != root_scope and sh_mir_scope(mir, owner_scope, 1) != root_scope { return sh_i64_error(7313); };
+    let name = sh_symbol_text(&mir.symbols, sh_mir_local(mir, local, 2))?;
+    let first = sh_link_word(&map.functions, 6, function_row, 1);
+    let end = sh_link_word(&map.functions, 6, function_row, 2);
+    let mut current = initialized;
+    let mut local_id = -1;
+    let mut epilogue = 0;
+    while epilogue < map.epilogues.len() / 3 { if sh_link_word(&map.epilogues, 3, epilogue, 0) == function { let start = sh_link_word(&map.epilogues, 3, epilogue, 1); let finish = sh_link_word(&map.epilogues, 3, epilogue, 2); if start > current { if local_id < 0 { local_id = sh_link_debug_local(debug, debug_function, &name, 19, stack, current - first, start - current)?; } else { sh_link_debug_local_range(debug, local_id, current - first, start - current)?; (); }; }; if finish > current { current = finish; }; }; epilogue = epilogue + 1; };
+    if current < end { if local_id < 0 { local_id = sh_link_debug_local(debug, debug_function, &name, 19, stack, current - first, end - current)?; } else { sh_link_debug_local_range(debug, local_id, current - first, end - current)?; (); }; };
+    if local_id < 0 { return sh_i64_error(7313); };
+    sh_i64_ok(local_id);
+}
+
+def sh_lnd_lines(debug: &ShLinkDebug, mir: &ShMir, map: &ShNativeDebugMap, function_row: i64, debug_function: i64, file: i64, lines: &Vec<i64>) -> Result<i64, i64> {
+    let function = sh_link_word(&map.functions, 6, function_row, 0);
+    let first = sh_link_word(&map.functions, 6, function_row, 1);
+    let end = sh_link_word(&map.functions, 6, function_row, 2);
+    let line = sh_lnd_record_span(debug, lines, sh_mir_fn(mir, function, 4), file, sh_mir_fn(mir, function, 5), sh_mir_fn(mir, function, 6))?;
+    sh_link_debug_line(debug, debug_function, 0, line)?;
+    let mut instruction = 0;
+    let mut term = 0;
+    let mut previous = first;
+    let mut last_line = line;
+    while instruction < map.instructions.len() / 3 or term < map.terminators.len() / 3 { let inst_at = if instruction < map.instructions.len() / 3 { sh_link_word(&map.instructions, 3, instruction, 1); } else { 9223372036854775807; }; let term_at = if term < map.terminators.len() / 3 { sh_link_word(&map.terminators, 3, term, 1); } else { 9223372036854775807; }; let use_inst = inst_at <= term_at; let row = if use_inst { instruction; } else { term; }; let id = if use_inst { sh_link_word(&map.instructions, 3, row, 0); } else { sh_link_word(&map.terminators, 3, row, 0); }; let owner = if use_inst { sh_mir_inst(mir, id, 0); } else { sh_mir_term(mir, id, 0); }; let at = if use_inst { inst_at; } else { term_at; }; let finish = if use_inst { sh_link_word(&map.instructions, 3, row, 2); } else { sh_link_word(&map.terminators, 3, row, 2); }; if owner == function and at > previous and at < end and finish > at { let source_file = if use_inst { sh_mir_inst(mir, id, 9); } else { sh_mir_term(mir, id, 7); }; let source_start = if use_inst { sh_mir_inst(mir, id, 10); } else { sh_mir_term(mir, id, 8); }; let source_end = if use_inst { sh_mir_inst(mir, id, 11); } else { sh_mir_term(mir, id, 9); }; let source_line = sh_lnd_record_span(debug, lines, source_file, file, source_start, source_end)?; if source_line != last_line { sh_link_debug_line(debug, debug_function, at - first, source_line)?; previous = at; last_line = source_line; (); }; }; if use_inst { instruction = instruction + 1; } else { term = term + 1; }; };
+    sh_i64_ok(0);
+}
+
+def sh_link_native_debug_fill(debug: &mut ShLinkDebug, mir: &ShMir, map: &ShNativeDebugMap, path: &String, source: &ShBinary) -> Result<i64, i64> {
+    let validation = sh_mir_validate(mir);
+    if validation.error != 0 { return sh_i64_error(validation.error); };
+    if debug.path >= 0 or sh_mir_count(&mir.sources, 2) != 1 or sh_mir_word(&mir.sources, 2, 0, 1) != sh_binary_len(source) { return sh_i64_error(7313); };
+    let file = sh_mir_word(&mir.sources, 2, 0, 0);
+    sh_link_native_debug_order(map)?;
+    sh_lnd_validate_map(mir, map, file)?;
+    sh_link_debug_source(debug, path, source)?;
+    let lines = vec_new_i64();
+    sh_link_push(&lines, 0)?;
+    let mut source_at = 0;
+    while source_at < debug.source.len() { if sengoo_vec_get_or_default_i64(debug.source.handle, source_at, -1) == 10 { sh_link_push(&lines, source_at + 1)?; (); }; source_at = source_at + 1; };
+    let local_indexes = sh_lnd_index(&map.locals, 2, sh_mir_local_count(mir))?;
+    let inst_indexes = sh_lnd_index(&map.instructions, 3, sh_mir_inst_count(mir))?;
+    let mut row = 0;
+    while row < map.functions.len() / 6 { let function = sh_link_word(&map.functions, 6, row, 0); let name = sh_symbol_text(&mir.symbols, sh_mir_fn(mir, function, 0))?; let first = sh_link_word(&map.functions, 6, row, 1); let debug_function = sh_link_debug_function(debug, &name, 1, first, sh_link_word(&map.functions, 6, row, 2) - first, sh_link_word(&map.functions, 6, row, 3), sh_link_word(&map.functions, 6, row, 4), 0)?; sh_lnd_lines(debug, mir, map, row, debug_function, file, &lines)?; let mut local = 0; while local < sh_mir_local_count(mir) { if sh_mir_local(mir, local, 0) == function and sh_mir_local(mir, local, 2) >= 0 { sh_lnd_local(debug, mir, map, local, debug_function, row, &local_indexes, &inst_indexes, file)?; (); }; local = local + 1; }; row = row + 1; };
+    sh_i64_ok(debug.functions.len() / 8);
+}
+
+def sh_link_native_debug_attach(object: &ShObject, mir: &ShMir, map: &ShNativeDebugMap, path: &String, source: &ShBinary) -> Result<i64, i64> {
+    let mut debug = sh_link_debug_new();
+    sh_link_native_debug_fill(&mut debug, mir, map, path, source)?;
+    sh_link_codeview_attach(object, &debug);
+}
+
+def sh_lnd_sort(words: &Vec<i64>, width: i64) -> Result<i64, i64> {
+    if words.len() % width != 0 or words.len() / width > 100000 { return sh_i64_error(7312); };
+    let count = words.len() / width;
+    let merged = vec_new_i64();
+    let mut index = 0;
+    while index < words.len() { sh_link_push(&merged, 0)?; index = index + 1; };
+    let mut run = 1;
+    while run < count { let mut first = 0; while first < count { let middle = if first + run < count { first + run; } else { count; }; let end = if middle + run < count { middle + run; } else { count; }; let mut left = first; let mut right = middle; let mut output = first; while output < end { let choose_left = if right == end { true; } else { if left == middle { false; } else { let a = sh_link_word(words, width, left, 1); let b = sh_link_word(words, width, right, 1); a < b or a == b and sh_link_word(words, width, left, 0) <= sh_link_word(words, width, right, 0); }; }; let selected = if choose_left { left; } else { right; }; let mut field = 0; while field < width { if not merged.set(output * width + field, sh_link_word(words, width, selected, field)) { return sh_i64_error(7312); }; field = field + 1; }; if choose_left { left = left + 1; } else { right = right + 1; }; output = output + 1; }; first = end; }; index = 0; while index < words.len() { if not words.set(index, sengoo_vec_get_or_default_i64(merged.handle, index, -1)) { return sh_i64_error(7312); }; index = index + 1; }; run = run * 2; };
+    sh_i64_ok(count);
+}
+
+def sh_link_native_debug_order(map: &ShNativeDebugMap) -> Result<i64, i64> {
+    sh_lnd_sort(&map.functions, 6)?;
+    sh_lnd_sort(&map.instructions, 3)?;
+    sh_lnd_sort(&map.terminators, 3)?;
+    sh_lnd_sort(&map.epilogues, 3)?;
+    sh_i64_ok(0);
+}

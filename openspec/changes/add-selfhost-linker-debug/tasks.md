@@ -160,3 +160,37 @@ All runs used Windows 11 AMD64 and retained exact commands/results. Product
 emission remains SG-only with an empty toolchain PATH. These are fixed-frame
 primitive debug fixtures; automatic compiler mapping and the complete M5
 native/type/debug corpus remain open.
+
+
+## Automatic SG native source debugging checkpoint evidence
+
+- [x] Consume checked native function/instruction/terminator/stack/epilogue maps through an isolated MIR-to-CodeView adapter, with bounded sorting and indexed source-line lookups.
+- [x] Derive function/local/source records automatically from actual SG frontend/semantic/MIR/native results, including a main function at nonzero text offset and a two-return RBP frame.
+- [x] Run complete source-to-object-to-PE-to-PDB operations with an empty toolchain PATH, independently inspect COFF/PDB, and prove real source stepping with answer = 40 then 42 and exit 42.
+- [x] Require byte-identical repeated object/PE/PDB artifacts and five exact-resource complete source-pipeline scopes plus failure scopes per invocation.
+- [x] Reject nine malformed metadata maps while preserving all three previous outputs, and reject five unsupported function/local/initialization/scope source forms without creating artifacts.
+
+Evidence: `target/selfhost/m5-link-native-debug-checked/evidence.json`, SHA-256
+`17f41545670b4e5f70f3255bce4e48ffb304b316ca5d1979af6c67858aecfab5`.
+Start/end full revision `c20cb681fff8880ad4e4488c599fa266e9723f60`, Windows 11
+AMD64. All 204 source inputs, 37 imported SG implementation modules and 36
+recorded tool/runtime dependency identities were unchanged. Twenty-nine commands
+passed. Each of two source fixtures is compiled twice and exercises five
+success/failure resource scopes per invocation; tracked String/Buffer/opaque/
+FileSnapshot counts and bytes recover exactly.
+
+The preceding before function is 76 bytes; main starts at text offset 80 and
+has 365 bytes, with its automatically initialized local at SP+256 over
+[202,436). The real two-return main is 762 bytes, with SP+496 local ranges
+[122,509) and [518,753), excluding both native return epilogues. These values
+come from the SG native compiler and parsed PDB rather than fixture-supplied
+code offsets. The retained independent LLVM/LLDB logs show the actual source
+breakpoints, local 40/42 values, stepping and exit 42.
+
+The initial trial passed its smaller corpus. The checked run additionally
+rejects nested entry-block lexical locals and overlapping instruction/terminator
+maps; source lines use a prebuilt index and binary search. The supported subset
+still requires one unchanged source, no-argument signed-i64 functions and
+named signed-i64 locals whose entry-block initialization and scope are proven.
+Full type/module/macro/SDK/native-package debug integration and complete M5
+qualification remain open; this checkpoint does not close the broad tasks.
