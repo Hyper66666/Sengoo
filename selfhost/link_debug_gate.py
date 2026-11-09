@@ -16,7 +16,7 @@ import sys
 import time
 
 ROOT = Path(__file__).resolve().parents[1]
-MODULES = ("core", "binary", "coff", "object", "link_model", "link_coff", "link_imports", "link_pe", "link_hash", "link_msf", "link_debug", "link_pdb")
+MODULES = ("core", "binary", "coff", "object", "link_model", "link_coff", "link_imports", "link_pe", "link_hash", "link_msf", "link_cv_types", "link_debug", "link_pdb")
 
 
 def sha(path):

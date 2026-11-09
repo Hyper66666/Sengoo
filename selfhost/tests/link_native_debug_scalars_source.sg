@@ -1,0 +1,10 @@
+def scalar(flag: bool, small: i32, big: u64) -> i64 {
+    let mut answer: i64 = small as i64;
+    if flag {
+        answer = answer + (big as i64);
+    };
+    return answer;
+}
+def main() -> i64 {
+    return scalar(true, 40i32, 2u64);
+}

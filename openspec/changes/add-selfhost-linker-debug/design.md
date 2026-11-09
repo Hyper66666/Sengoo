@@ -283,3 +283,48 @@ Errors 7311/7312/7313 identify malformed mapping/span, capacity and unsupported
 automatic mapping respectively; underlying MIR/CodeView diagnostics retain their
 own stable codes. This remains a primitive mapping subset and does not qualify
 the complete M5 type/module/SDK/debug corpus.
+
+
+## Primitive CodeView signatures and typed parameter/local records
+
+`link_cv_types.sg` owns a bounded primitive type pool rather than assigning one
+fixed function prototype to every procedure. It interns LF_ARGLIST and
+LF_PROCEDURE records deterministically, validates their counts, builtin kinds,
+calling convention and backward argument-list references, and returns an
+explicit input-to-canonical type-index map when reading a COFF type stream.
+Limits are 64 parameters, 4,096 type records and 1 MiB type-record bytes.
+Malformed counts/references, capacity overflow and unsupported leaves/kinds use
+7321, 7322 and 7323; the CodeView input reader retains its 7301/7302/7303 family
+when exposing those failures through its object-input API.
+
+The debug model supports primitive void results, bool, signed/unsigned 8/16/32/
+64-bit values, Unicode char32, f32 and f64. Typed function records refer to the
+interned prototype, and locals retain their actual builtin type. Parameters
+carry S_LOCAL's parameter flag and must match the declared prototype in number,
+order and type. Their stable stack lifetimes begin after the native entry store
+and use the same checked, disjoint range mechanism as ordinary locals. The
+native adapter maps MIR builtin types and ordered parameter locals into these
+records; the PE console main contract remains signed-i64() for the explicit
+entry-result wrapper. Other compiled functions can use supported scalar
+parameters/results. Native stack locations retain their minimum eight-byte
+slot contract; arbitrary packed SDK frame layouts remain separate work.
+
+The COFF writer serializes the actual type pool. Its reader remaps procedure
+references, checks local/parameter flags and scope/prototype agreement, and
+writes the corresponding PDB TPI records. Unknown aggregate/pointer/type-server
+leaves, reserved calling-convention forms, variadic prototypes and unsupported
+local types remain explicit failures. No copied fixed i64() prototype is used
+to represent a differently typed function.
+
+A separate SG fixture calls double(double,double), writes real typed COFF and
+PDB records, and proves via LLDB that both parameters are 20 and a double local
+steps from 40 to 42 before exit 42. One hundred type-pool remap/resource scopes,
+twenty complete typed PDB scopes per invocation, repeated identical bytes and
+ten malformed prototype/parameter cases complement the earlier object/debug/
+unwind corpus. Automatic source fixtures additionally exercise real SG f64
+parameters/results/locals and bool/i32/u64 parameter values when the qualified
+frontend/MIR/native interfaces are synchronized. Complete aggregate/generic/
+module/SDK debug support still retains its own open gates.
+
+Primitive CodeView type reference:
+https://github.com/llvm/llvm-project/blob/llvmorg-19.1.7/llvm/include/llvm/DebugInfo/CodeView/TypeIndex.h

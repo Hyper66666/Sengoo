@@ -1,0 +1,89 @@
+import selfhost_link_model;
+
+struct ShLinkCvTypes {
+    records: ShBinary,
+    offsets: Vec<i64>,
+}
+
+def sh_link_cv_types_new() -> ShLinkCvTypes {
+    ShLinkCvTypes { records: sh_binary_new(1048576), offsets: vec_new_i64() };
+}
+
+def sh_link_cv_builtin(kind: i64, allow_void: bool) -> bool {
+    if kind == 3 { return allow_void; };
+    kind == 16 or kind == 17 or kind == 18 or kind == 19 or kind == 32 or kind == 33 or kind == 34 or kind == 35 or kind == 48 or kind == 64 or kind == 65 or kind == 104 or kind == 105 or kind == 112 or kind == 113 or kind == 114 or kind == 115 or kind == 116 or kind == 117 or kind == 118 or kind == 119 or kind == 122 or kind == 123;
+}
+
+def sh_link_cv_type_record(types: &ShLinkCvTypes, record: &ShBinary) -> Result<i64, i64> {
+    if types.offsets.len() >= 4096 { return sh_i64_error(7322); };
+    if sh_binary_len(record) < 4 or sh_binary_len(record) > 65536 or sh_binary_len(record) % 4 != 0 or sh_link_uint(record, 0, 2)? != sh_binary_len(record) - 2 { return sh_i64_error(7321); };
+    let mut index = 0;
+    while index < types.offsets.len() { let offset = sengoo_vec_get_or_default_i64(types.offsets.handle, index, -1); let size = sh_link_uint(&types.records, offset, 2)? + 2; if size == sh_binary_len(record) { let mut at = 0; while at < size and sh_binary_get(&types.records, offset + at)? == sh_binary_get(record, at)? { at = at + 1; }; if at == size { return sh_i64_ok(4096 + index); }; }; index = index + 1; };
+    if sh_binary_len(record) > types.records.limit - sh_binary_len(&types.records) { return sh_i64_error(7322); };
+    let offset = sh_binary_len(&types.records);
+    let mut at = 0;
+    while at < sh_binary_len(record) { sh_binary_byte(&types.records, sh_binary_get(record, at)?)?; at = at + 1; };
+    sh_link_push(&types.offsets, offset)?;
+    sh_i64_ok(4096 + types.offsets.len() - 1);
+}
+
+def sh_link_cv_type_arguments(types: &ShLinkCvTypes, arguments: &Vec<i64>) -> Result<i64, i64> {
+    if arguments.len() > 64 { return sh_i64_error(7322); };
+    let record = sh_binary_new(264);
+    sh_binary_unsigned(&record, 6 + arguments.len() * 4, 2)?;
+    sh_binary_unsigned(&record, 4609, 2)?;
+    sh_binary_unsigned(&record, arguments.len(), 4)?;
+    let mut index = 0;
+    while index < arguments.len() { let kind = sengoo_vec_get_or_default_i64(arguments.handle, index, -1); if not sh_link_cv_builtin(kind, false) { return sh_i64_error(7323); }; sh_binary_unsigned(&record, kind, 4)?; index = index + 1; };
+    sh_link_cv_type_record(types, &record);
+}
+
+def sh_link_cv_type_procedure(types: &ShLinkCvTypes, result: i64, arguments: &Vec<i64>) -> Result<i64, i64> {
+    if not sh_link_cv_builtin(result, true) { return sh_i64_error(7323); };
+    let argument_list = sh_link_cv_type_arguments(types, arguments)?;
+    let record = sh_binary_new(16);
+    sh_binary_unsigned(&record, 14, 2)?;
+    sh_binary_unsigned(&record, 4104, 2)?;
+    sh_binary_unsigned(&record, result, 4)?;
+    sh_binary_unsigned(&record, 0, 2)?;
+    sh_binary_unsigned(&record, arguments.len(), 2)?;
+    sh_binary_unsigned(&record, argument_list, 4)?;
+    sh_link_cv_type_record(types, &record);
+}
+
+def sh_link_cv_type_kind(types: &ShLinkCvTypes, type_id: i64) -> i64 {
+    if type_id < 4096 or type_id - 4096 >= types.offsets.len() { return -1; };
+    sh_link_uint(&types.records, sengoo_vec_get_or_default_i64(types.offsets.handle, type_id - 4096, -1) + 2, 2).unwrap_or(-1);
+}
+
+def sh_link_cv_types_read(types: &ShLinkCvTypes, input: &ShBinary) -> Result<Vec<i64>, i64> {
+    if sh_binary_len(input) < 4 or sh_binary_len(input) > 1048576 or sh_link_uint(input, 0, 4)? != 4 { return sh_link_cv_type_map_error(7321); };
+    let remap = vec_new_i64();
+    let mut at = 4;
+    while at < sh_binary_len(input) { if sh_binary_len(input) - at < 4 { return sh_link_cv_type_map_error(7321); }; if remap.len() >= 4096 { return sh_link_cv_type_map_error(7322); }; let length = sh_link_uint(input, at, 2)?; let kind = sh_link_uint(input, at + 2, 2)?; if length < 2 or length + 2 > sh_binary_len(input) - at or (length + 2) % 4 != 0 { return sh_link_cv_type_map_error(7321); }; let mut mapped = -1; if kind == 4609 { if length < 6 { return sh_link_cv_type_map_error(7321); }; let count = sh_link_uint(input, at + 4, 4)?; if count > 64 { return sh_link_cv_type_map_error(7322); }; if length != 6 + count * 4 { return sh_link_cv_type_map_error(7321); }; let arguments = vec_new_i64(); let mut index = 0; while index < count { sh_link_push(&arguments, sh_link_uint(input, at + 8 + index * 4, 4)?)?; index = index + 1; }; mapped = sh_link_cv_type_arguments(types, &arguments)?; } else { if kind == 4104 { if length != 14 or sh_link_uint(input, at + 8, 2)? != 0 { return sh_link_cv_type_map_error(7323); }; let old_list = sh_link_uint(input, at + 12, 4)?; if old_list < 4096 or old_list - 4096 >= remap.len() { return sh_link_cv_type_map_error(7321); }; let list = sengoo_vec_get_or_default_i64(remap.handle, old_list - 4096, -1); if sh_link_cv_type_kind(types, list) != 4609 { return sh_link_cv_type_map_error(7321); }; let list_at = sengoo_vec_get_or_default_i64(types.offsets.handle, list - 4096, -1); let count = sh_link_uint(&types.records, list_at + 4, 4)?; if sh_link_uint(input, at + 10, 2)? != count { return sh_link_cv_type_map_error(7321); }; let arguments = vec_new_i64(); let mut index = 0; while index < count { sh_link_push(&arguments, sh_link_uint(&types.records, list_at + 8 + index * 4, 4)?)?; index = index + 1; }; mapped = sh_link_cv_type_procedure(types, sh_link_uint(input, at + 4, 4)?, &arguments)?; } else { return sh_link_cv_type_map_error(7323); }; }; sh_link_push(&remap, mapped)?; at = at + length + 2; };
+    if at != sh_binary_len(input) { return sh_link_cv_type_map_error(7321); };
+    Result { is_ok: true, value: remap, error: 0 };
+}
+
+def sh_link_cv_type_map_error(code: i64) -> Result<Vec<i64>, i64> {
+    let empty: Vec<i64> = Vec { handle: 0, marker: 0 };
+    Result { is_ok: false, value: empty, error: code };
+}
+
+def sh_link_cv_procedure_result(types: &ShLinkCvTypes, id: i64) -> Result<i64, i64> {
+    if sh_link_cv_type_kind(types, id) != 4104 { return sh_i64_error(7323); };
+    sh_link_uint(&types.records, sengoo_vec_get_or_default_i64(types.offsets.handle, id - 4096, -1) + 4, 4);
+}
+
+def sh_link_cv_procedure_count(types: &ShLinkCvTypes, id: i64) -> Result<i64, i64> {
+    if sh_link_cv_type_kind(types, id) != 4104 { return sh_i64_error(7323); };
+    sh_link_uint(&types.records, sengoo_vec_get_or_default_i64(types.offsets.handle, id - 4096, -1) + 10, 2);
+}
+
+def sh_link_cv_procedure_argument(types: &ShLinkCvTypes, id: i64, argument: i64) -> Result<i64, i64> {
+    let count = sh_link_cv_procedure_count(types, id)?;
+    if argument < 0 or argument >= count { return sh_i64_error(7321); };
+    let list = sh_link_uint(&types.records, sengoo_vec_get_or_default_i64(types.offsets.handle, id - 4096, -1) + 12, 4)?;
+    if sh_link_cv_type_kind(types, list) != 4609 { return sh_i64_error(7321); };
+    sh_link_uint(&types.records, sengoo_vec_get_or_default_i64(types.offsets.handle, list - 4096, -1) + 8 + argument * 4, 4);
+}

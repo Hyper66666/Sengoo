@@ -87,7 +87,7 @@ def sh_ldt_scope(source_path: &String, pdb_path: &String, image_path: &String, w
     let function = sh_link_debug_function(&debug, &main, if invalid == 1 { 97; } else { if invalid == 2 { 2; } else { 1; }; }, if invalid == 3 { 4294967295; } else { 0; }, 29, 40, 4, 24)?;
     if invalid == 7 { sh_link_debug_function(&debug, &main, 1, 32, 29, 40, 4, 24)?; (); };
     let local = string_from_str("answer")?;
-    sh_link_debug_local(&debug, function, &local, if invalid == 4 { 64; } else { 19; }, if invalid == 5 { 40; } else { 32; }, 13, if invalid == 6 { 12; } else { 11; })?;
+    sh_link_debug_local(&debug, function, &local, if invalid == 4 { 14; } else { 19; }, if invalid == 5 { 40; } else { 32; }, 13, if invalid == 6 { 12; } else { 11; })?;
     if invalid == 8 { sh_link_debug_local(&debug, function, &local, 19, 32, 13, 11)?; (); };
     sh_link_debug_line(&debug, function, 0, 1)?;
     sh_link_debug_line(&debug, function, 4, 2)?;

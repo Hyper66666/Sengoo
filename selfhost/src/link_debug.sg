@@ -2,19 +2,26 @@ import selfhost_link_msf;
 
 import selfhost_link_hash;
 
+import selfhost_link_cv_types;
+
 struct ShLinkDebug {
     names: ShSymbols,
+    types: ShLinkCvTypes,
     path: i64,
     source: Vec<i64>,
     source_lines: i64,
     functions: Vec<i64>,
     locals: Vec<i64>,
+    local_flags: Vec<i64>,
     ranges: Vec<i64>,
     lines: Vec<i64>,
 }
 
 def sh_link_debug_new() -> ShLinkDebug {
-    ShLinkDebug { names: sh_symbols_new(1048576), path: -1, source: vec_new_i64(), source_lines: 0, functions: vec_new_i64(), locals: vec_new_i64(), ranges: vec_new_i64(), lines: vec_new_i64() };
+    let types = sh_link_cv_types_new();
+    let arguments = vec_new_i64();
+    let default_type = sh_link_cv_type_procedure(&types, 19, &arguments);
+    ShLinkDebug { types: types, names: sh_symbols_new(1048576), path: -1, source: vec_new_i64(), source_lines: 0, functions: vec_new_i64(), locals: vec_new_i64(), local_flags: vec_new_i64(), ranges: vec_new_i64(), lines: vec_new_i64() };
 }
 
 def sh_link_debug_name(debug: &ShLinkDebug, text: &String) -> Result<i64, i64> {
@@ -53,13 +60,13 @@ def sh_link_debug_function(debug: &ShLinkDebug, name: &String, segment: i64, off
     sh_link_push(&debug.functions, frame)?;
     sh_link_push(&debug.functions, prologue)?;
     sh_link_push(&debug.functions, epilogue)?;
-    sh_link_push(&debug.functions, 19)?;
+    sh_link_push(&debug.functions, 4097)?;
     sh_i64_ok(debug.functions.len() / 8 - 1);
 }
 
 def sh_link_debug_local(debug: &ShLinkDebug, function: i64, name: &String, kind: i64, stack: i64, start: i64, size: i64) -> Result<i64, i64> {
     if debug.locals.len() / 6 >= 4096 { return sh_i64_error(7302); };
-    if kind != 19 { return sh_i64_error(7303); };
+    if not sh_link_cv_builtin(kind, false) { return sh_i64_error(7303); };
     if function < 0 or function >= debug.functions.len() / 8 or stack < 0 or stack > sh_link_word(&debug.functions, 8, function, 4) - 8 or start < sh_link_word(&debug.functions, 8, function, 5) or size < 1 or start + size > sh_link_debug_lifetime_end(debug, function) { return sh_i64_error(7301); };
     let symbol = sh_link_debug_name(debug, name)?;
     let mut index = 0;
@@ -70,6 +77,7 @@ def sh_link_debug_local(debug: &ShLinkDebug, function: i64, name: &String, kind:
     sh_link_push(&debug.locals, stack)?;
     sh_link_push(&debug.locals, start)?;
     sh_link_push(&debug.locals, size)?;
+    sh_link_push(&debug.local_flags, 0)?;
     sh_i64_ok(debug.locals.len() / 6 - 1);
 }
 
@@ -116,8 +124,9 @@ def sh_link_debug_validate(debug: &ShLinkDebug, image: &ShBinary) -> Result<i64,
     let mut section = 0;
     while section < sections { let row = 328 + section * 40; let size = sh_link_uint(image, row + 8, 4)?; let rva = sh_link_uint(image, row + 12, 4)?; let padded = sh_link_uint(image, row + 16, 4)?; let raw = sh_link_uint(image, row + 20, 4)?; if rva % 4096 != 0 or raw % 512 != 0 or padded % 512 != 0 or rva < previous_virtual or raw < previous_raw or raw > sh_binary_len(image) or padded > sh_binary_len(image) - raw or size > padded or rva > virtual_size or size > virtual_size - rva { return sh_i64_error(7301); }; previous_raw = raw + padded; previous_virtual = sh_link_align(rva + size, 4096, 16777216)?; section = section + 1; };
     if debug.path < 0 or debug.functions.len() == 0 { return sh_i64_error(7301); };
+    if debug.local_flags.len() != debug.locals.len() / 6 { return sh_i64_error(7301); };
     let mut function = 0;
-    while function < debug.functions.len() / 8 { let segment = sh_link_word(&debug.functions, 8, function, 1); if segment > sections { return sh_i64_error(7301); }; let row = 328 + (segment - 1) * 40; let offset = sh_link_word(&debug.functions, 8, function, 2); let size = sh_link_word(&debug.functions, 8, function, 3); if (sh_link_uint(image, row + 36, 4)? & 536870912) == 0 or offset > sh_link_uint(image, row + 8, 4)? or size > sh_link_uint(image, row + 8, 4)? - offset { return sh_i64_error(7301); }; function = function + 1; };
+    while function < debug.functions.len() / 8 { let signature = sh_link_word(&debug.functions, 8, function, 7); let expected_parameters = sh_link_cv_procedure_count(&debug.types, signature)?; let mut parameters = 0; let mut local = 0; while local < debug.locals.len() / 6 { let flags = sengoo_vec_get_or_default_i64(debug.local_flags.handle, local, -1); if flags < 0 or flags > 1 { return sh_i64_error(7303); }; if sh_link_word(&debug.locals, 6, local, 0) == function and flags == 1 { parameters = parameters + 1; }; local = local + 1; }; if parameters != expected_parameters { return sh_i64_error(7301); }; let segment = sh_link_word(&debug.functions, 8, function, 1); if segment > sections { return sh_i64_error(7301); }; let row = 328 + (segment - 1) * 40; let offset = sh_link_word(&debug.functions, 8, function, 2); let size = sh_link_word(&debug.functions, 8, function, 3); if (sh_link_uint(image, row + 36, 4)? & 536870912) == 0 or offset > sh_link_uint(image, row + 8, 4)? or size > sh_link_uint(image, row + 8, 4)? - offset { return sh_i64_error(7301); }; function = function + 1; };
     sh_i64_ok(sections);
 }
 
@@ -135,9 +144,11 @@ def sh_link_debug_identity(debug: &ShLinkDebug, image: &ShBinary, pdb_path: &Str
     sh_binary_unsigned(&identity, debug.source.len(), 8)?;
     sh_binary_unsigned(&identity, debug.functions.len(), 8)?;
     sh_binary_unsigned(&identity, debug.locals.len(), 8)?;
+    sh_binary_unsigned(&identity, sh_binary_len(&debug.types.records), 8)?;
     sh_binary_unsigned(&identity, debug.ranges.len(), 8)?;
     sh_binary_unsigned(&identity, debug.lines.len(), 8)?;
     sh_link_debug_text(&identity, pdb_path)?;
+    sh_link_debug_append(&identity, &debug.types.records)?;
     sh_link_debug_append(&identity, image)?;
     let mut name = 0;
     while name < debug.names.names.len() { let text = sh_symbol_text(&debug.names, name)?; sh_link_debug_text(&identity, &text)?; name = name + 1; };
@@ -147,6 +158,8 @@ def sh_link_debug_identity(debug: &ShLinkDebug, image: &ShBinary, pdb_path: &Str
     while index < debug.functions.len() { sh_binary_unsigned(&identity, sengoo_vec_get_or_default_i64(debug.functions.handle, index, 0), 8)?; index = index + 1; };
     index = 0;
     while index < debug.locals.len() { sh_binary_unsigned(&identity, sengoo_vec_get_or_default_i64(debug.locals.handle, index, 0), 8)?; index = index + 1; };
+    index = 0;
+    while index < debug.local_flags.len() { sh_binary_unsigned(&identity, sengoo_vec_get_or_default_i64(debug.local_flags.handle, index, -1), 8)?; index = index + 1; };
     index = 0;
     while index < debug.ranges.len() { sh_binary_unsigned(&identity, sengoo_vec_get_or_default_i64(debug.ranges.handle, index, 0), 8)?; index = index + 1; };
     index = 0;
@@ -217,4 +230,24 @@ def sh_link_debug_local_range(debug: &ShLinkDebug, local: i64, start: i64, size:
     sh_link_push(&debug.ranges, start)?;
     sh_link_push(&debug.ranges, size)?;
     sh_i64_ok(debug.ranges.len() / 3 - 1);
+}
+
+def sh_link_debug_typed_function(debug: &ShLinkDebug, name: &String, segment: i64, offset: i64, size: i64, frame: i64, prologue: i64, epilogue: i64, result: i64, arguments: &Vec<i64>) -> Result<i64, i64> {
+    let signature = sh_link_cv_type_procedure(&debug.types, result, arguments)?;
+    let function = sh_link_debug_function(debug, name, segment, offset, size, frame, prologue, epilogue)?;
+    if not debug.functions.set(function * 8 + 7, signature) { return sh_i64_error(7302); };
+    sh_i64_ok(function);
+}
+
+def sh_link_debug_parameter(debug: &ShLinkDebug, function: i64, name: &String, kind: i64, stack: i64, start: i64, size: i64) -> Result<i64, i64> {
+    if function < 0 or function >= debug.functions.len() / 8 { return sh_i64_error(7301); };
+    let signature = sh_link_word(&debug.functions, 8, function, 7);
+    let expected = sh_link_cv_procedure_count(&debug.types, signature)?;
+    let mut parameters = 0;
+    let mut index = 0;
+    while index < debug.locals.len() / 6 { if sh_link_word(&debug.locals, 6, index, 0) == function and sengoo_vec_get_or_default_i64(debug.local_flags.handle, index, 0) == 1 { parameters = parameters + 1; }; index = index + 1; };
+    if parameters >= expected or sh_link_cv_procedure_argument(&debug.types, signature, parameters)? != kind { return sh_i64_error(7301); };
+    let local = sh_link_debug_local(debug, function, name, kind, stack, start, size)?;
+    if not debug.local_flags.set(local, 1) { return sh_i64_error(7302); };
+    sh_i64_ok(local);
 }

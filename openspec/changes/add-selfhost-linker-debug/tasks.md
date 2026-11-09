@@ -194,3 +194,49 @@ still requires one unchanged source, no-argument signed-i64 functions and
 named signed-i64 locals whose entry-block initialization and scope are proven.
 Full type/module/macro/SDK/native-package debug integration and complete M5
 qualification remain open; this checkpoint does not close the broad tasks.
+
+
+## Primitive prototypes, parameters and locals checkpoint evidence
+
+- [x] Intern/remap bounded LF_ARGLIST/LF_PROCEDURE records and retain real builtin result/parameter/local kinds in COFF and PDB.
+- [x] Verify parameter flags, count/order/type agreement, malformed references/prototypes and unsupported calling-convention rejection.
+- [x] Exercise 100 type-pool exact-resource scopes, twenty complete typed COFF/PDB scopes per invocation, repeated bytes and real LLDB double parameters/local values.
+- [x] Regress the prior PDB/SHA/MSF, multiple-return/gap and Windows unwind corpus with the new type pool.
+- [x] Automatically compile and debug real SG f64 parameters/results/locals and bool/i32/u64 parameters through the synchronized native metadata API.
+
+Pure COFF/PDB evidence: `target/selfhost/m5-codeview-primitives-checked/evidence.json`,
+SHA-256 `d2d4a92ca7bbe291235594aeda40b84906dd328fe78637fc125ec83f5c913871`.
+Sixty commands and 33 negative cases passed, with 185 source inputs and 36
+recorded tool/runtime identities unchanged. The full revision interval is
+`190ef7ca9fb26656f0a2be4e9adf1c60b6b787c2` through
+`35b163db0bb259fe74e4f786d74f084f9cdc51e1`; the concurrent native commit was
+outside this gate's real closure. The gate includes previous RBP/body/epilogue
+Windows runtime unwind checks, real source stepping/local lifetime gaps,
+primitive signature remapping, typed parameter/local resources and LLDB
+left = 20, right = 20, answer = 40 then 42, with exit 42.
+
+Direct debug regression: `target/selfhost/m5-debug-primitive-regression/evidence.json`,
+SHA-256 `f91561cb0a7a316f91280b455089140921ee8f4f382fac38a60909e3edb9bb88`;
+32 commands, 178 unchanged sources and 37 unchanged tools/runtime identities,
+start/end revision `190ef7ca9fb26656f0a2be4e9adf1c60b6b787c2`.
+
+Automatic source evidence: `target/selfhost/m5-native-debug-primitives-trial/evidence.json`,
+SHA-256 `f892e6ec6e27e7eb868dc59abe6d265ef3053081aeb3e6a590d50de58a53c7ca`.
+Despite the directory's development label, this complete report is `passed`:
+40 commands, 13 negative cases, 207 unchanged source inputs, 38 imported SG
+modules and 36 unchanged tool/runtime identities, start/end full revision
+`35b163db0bb259fe74e4f786d74f084f9cdc51e1`. All runs use Windows 11 AMD64.
+Four real sources are compiled twice each with byte-identical objects/PE/PDBs;
+every invocation exercises five complete success/failure resource scopes.
+LLVM inspects the resulting COFF/PDB records and LLDB proves each source stop,
+step, answer 40/42 and exit 42. The typed fixtures additionally read double
+left/right = 20 and bool flag = true, i32 small = 40, u64 big = 2. The new run
+includes the synchronized HIR4/MIR26 interfaces and the qualified native typed
+load fix; the earlier failed development build with a transient missing
+ShChecked builtin_calls field is retained and is not qualification evidence.
+
+The primitive reader/writer supports the named builtin kinds; pointer,
+aggregate, type-server/variadic and complete native SDK/debug/module coverage
+remain open. The console main contract is still signed-i64(), and local
+initialization/scope/lifetime proofs retain their stated restrictions.
+`m5_complete` remains `false`.

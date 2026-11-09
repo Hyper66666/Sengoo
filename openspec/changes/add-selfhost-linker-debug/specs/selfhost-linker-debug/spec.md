@@ -86,3 +86,10 @@ and final process/equality/performance gates SHALL retain their own evidence.
 - **AND** actual source compilation reaches a deterministic object, PE and PDB using SG alone
 - **AND** a real debugger verifies source stops, stepping and expected locals at nonzero function offsets and multiple returns
 - **AND** incomplete/conflicting code maps and unsupported or unproven local lifetimes fail explicitly
+
+
+#### Scenario: Supported scalar prototypes and parameters are debugged
+- **WHEN** supported functions declare builtin scalar parameter, result and local types
+- **THEN** SG interns and remaps their real CodeView prototypes and preserves typed parameter/local records in the PDB
+- **AND** a real debugger observes the declared scalar parameter and local values while stepping
+- **AND** malformed type references, counts, parameter flags or prototype mismatches fail before outputs are published

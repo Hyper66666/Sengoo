@@ -1,0 +1,9 @@
+def add_values(left: f64, right: f64) -> f64 {
+    let mut answer: f64 = left + right;
+    answer = answer + 2.0;
+    return answer;
+}
+def main() -> i64 {
+    let value: f64 = add_values(20.0, 20.0);
+    return value as i64;
+}

@@ -50,9 +50,9 @@ def mutations(raw):
         ("signature", change(start, 2), 7303),
         ("symbol-kind", change(symbols[0x1101] + 2, 0x7777, "<H"), 7303),
         ("symbol-length", change(symbols[0x1101], 0, "<H"), 7301),
-        ("procedure-type", change(symbols[0x1110] + 28, 0x1002), 7303),
+        ("procedure-type", change(symbols[0x1110] + 28, 0x1000), 7303),
         ("frame-flags", change(symbols[0x1012] + 26, 0), 7303),
-        ("local-type", change(symbols[0x113E] + 4, 0x40), 7303),
+        ("local-type", change(symbols[0x113E] + 4, 0x1505), 7303),
         ("local-stack-range", change(symbols[0x1142] + 4, 0xFFFFFFFF), 7301),
         ("local-lifetime", change(symbols[0x1142] + 14, 65535, "<H"), 7301),
         ("source-checksum", change(fragments[0xF4][1] + 6, raw[fragments[0xF4][1] + 6] ^ 128, "<B"), 7301),
@@ -73,11 +73,61 @@ def mutations(raw):
     return cases
 
 
+def type_mutations(raw):
+    sections = {}
+    for index in range(u16(raw, 2)):
+        row = 20 + index * 40
+        sections[raw[row:row + 8].rstrip(b"\0")] = (u32(raw, row + 20), u32(raw, row + 16))
+    start, size = sections[b".debug$S"]
+    at, locals_ = start + 4, []
+    while at < start + size:
+        kind, length = struct.unpack_from("<II", raw, at)
+        if kind == 0xF1:
+            symbol = at + 8
+            while symbol < at + length + 8:
+                if u16(raw, symbol + 2) == 0x113E:
+                    locals_.append(symbol)
+                symbol += u16(raw, symbol) + 2
+        at = (at + length + 11) & ~3
+    at, size = sections[b".debug$T"]
+    end = at + size
+    at += 4
+    arguments = procedure = None
+    while at < end:
+        length, kind = struct.unpack_from("<HH", raw, at)
+        if kind == 0x1201 and u32(raw, at + 4):
+            arguments = at
+        if kind == 0x1008 and u16(raw, at + 10):
+            procedure = at
+        at += length + 2
+    if len(locals_) != 3 or arguments is None or procedure is None:
+        raise AssertionError("typed fixture structure differs")
+
+    def change(at, value, fmt="<I"):
+        changed = bytearray(raw)
+        struct.pack_into(fmt, changed, at, value)
+        return bytes(changed)
+
+    return [
+        ("parameter-flags", change(locals_[0] + 8, 2, "<H"), 7303),
+        ("parameter-prototype-type", change(locals_[0] + 4, 0x40), 7301),
+        ("parameter-missing-flag", change(locals_[0] + 8, 0, "<H"), 7301),
+        ("parameter-extra-flag", change(locals_[2] + 8, 1, "<H"), 7301),
+        ("argument-count", change(arguments + 4, 3), 7301),
+        ("argument-void", change(arguments + 8, 3), 7303),
+        ("procedure-parameter-count", change(procedure + 10, 3, "<H"), 7301),
+        ("procedure-result-kind", change(procedure + 4, 0x1505), 7303),
+        ("procedure-forward-list", change(procedure + 12, 0x1003), 7301),
+        ("procedure-calling-convention", change(procedure + 8, 1, "<H"), 7303),
+    ]
+
+
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     for name in ("seed", "clang", "formatter", "lldb-python-home", "output"):
         parser.add_argument("--" + name, type=Path, required=True)
     parser.add_argument("--ranges", action="store_true")
+    parser.add_argument("--primitives", action="store_true")
     args = parser.parse_args()
     output = args.output.resolve()
     if not output.is_relative_to(ROOT / "target"):
@@ -95,6 +145,8 @@ def main():
     if args.ranges:
         inputs.append(ROOT / "selfhost/tests/link_debug_ranges.sg")
         inputs.append(ROOT / "selfhost/tests/link_debug_ranges_probe.c")
+    if args.primitives:
+        inputs += [ROOT / "selfhost/tests" / name for name in ("link_cv_types.sg", "link_cv_types_debug.sg", "link_native_debug_types_source.sg")]
     for folder in (ROOT / "tools/stdlib", ROOT / "runtime"):
         inputs += [path for path in folder.rglob("*") if path.is_file() and not any(part in {"target", "build", "__pycache__"} for part in path.relative_to(folder).parts)]
     revision = lambda: subprocess.check_output(["git", "rev-parse", "HEAD"], cwd=ROOT, text=True).strip()
@@ -106,6 +158,7 @@ def main():
                          "COFF auxiliary/COMDAT/weak/full SDK CodeView, multiple modules, aggregate/generic debug types and automatic native compiler debug mapping remain open",
                          "debug contributions currently remain in mapped PE sections; complete debug stripping/public CLI policy is later integration work"]}
     report["multiple_return_ranges"] = args.ranges
+    report["primitive_signatures"] = args.primitives
     env = dict(os.environ)
     for name in list(env):
         if name.upper().startswith(("SENGOO_", "SGPLATFORM_", "SDL2_", "PYTHON", "LLDB_")):
@@ -144,6 +197,8 @@ def main():
         format_paths = [ROOT / "selfhost/src/link_codeview.sg", ROOT / "selfhost/tests/link_codeview.sg"]
         if args.ranges:
             format_paths.append(ROOT / "selfhost/tests/link_debug_ranges.sg")
+        if args.primitives:
+            format_paths += [ROOT / "selfhost/src/link_cv_types.sg", ROOT / "selfhost/tests/link_cv_types.sg", ROOT / "selfhost/tests/link_cv_types_debug.sg"]
         for path in format_paths:
             run("format-" + path.stem, [tools["formatter"], "--check", path])
         binary = output / "sg-codeview.exe"
@@ -200,6 +255,45 @@ def main():
         report.update(result="passed", negative_cases=negatives, native_resource_scopes=20, artifacts={path.name: sha(path) for path in (binary, reader, object_path, image, pdb)})
         if args.ranges:
             report["artifacts"][probe.name] = sha(probe)
+        if args.primitives:
+            type_test = output / "cv-types.exe"
+            run("build-primitive-type-pool", [tools["seed"], "--runtime-mode", "source-development", "build", ROOT / "selfhost/tests/link_cv_types.sg", "--force-rebuild", "-O", "0", "-o", type_test])
+            run("primitive-type-pool-remap-100-resources", [type_test], marker=b"selfhost SG CodeView primitive signature remapping: ok", pure=True)
+            type_debug = output / "typed-debug.exe"
+            run("build-typed-codeview-fixture", [tools["seed"], "--runtime-mode", "source-development", "build", ROOT / "selfhost/tests/link_cv_types_debug.sg", "--force-rebuild", "-O", "0", "-o", type_debug])
+            typed_source = ROOT / "selfhost/tests/link_native_debug_types_source.sg"
+            typed_obj, typed_image, typed_pdb = output / "typed-input.obj", output / "typed-linked.exe", output / "typed-linked.pdb"
+            typed_command = [type_debug, *[path.as_posix() for path in (typed_source, typed_obj, typed_image, typed_pdb)]]
+            run("emit-typed-coff-pdb-20-resources", typed_command, marker=b"selfhost SG typed parameter/local PDB exact resources: ok", pure=True)
+            typed_bytes = [path.read_bytes() for path in (typed_obj, typed_image, typed_pdb)]
+            run("typed-byte-determinism", typed_command, pure=True)
+            if typed_bytes != [path.read_bytes() for path in (typed_obj, typed_image, typed_pdb)]:
+                raise AssertionError("typed COFF/PE/PDB bytes differ on repeat")
+            run("execute-typed-linked-image", [typed_image], 42, pure=True)
+            run("inspect-typed-coff", [tools["coff_inspector"], "--codeview", "--relocations", typed_obj], marker=b"double")
+            types_dump = run("inspect-typed-pdb", [tools["pdb_inspector"], "dump", "--types", "--symbols", typed_pdb])
+            for marker in (b"double (double, double)", b"flags = param", b"left", b"right", b"answer"):
+                if marker not in types_dump:
+                    raise AssertionError("typed PDB inspection missing " + repr(marker))
+            typed_commands = ["breakpoint set --file " + typed_source.name + " --line 3", "run", "frame variable left right answer", "thread step-over", "frame variable answer", "continue"]
+            typed_debugged = run("live-typed-parameters-locals", [tools["debugger"], "--batch", "--no-lldbinit", *[item for command in typed_commands for item in ("-o", command)], typed_image], debugger=True)
+            for marker in (b"(double) left = 20", b"(double) right = 20", b"(double) answer = 40", b"(double) answer = 42", b"exited with status = 42"):
+                if marker not in typed_debugged:
+                    raise AssertionError("typed debugger evidence missing " + repr(marker))
+            for name, raw, expected in type_mutations(typed_bytes[0]):
+                path = output / (name + ".obj")
+                path.write_bytes(raw)
+                sentinel = b"preserve previous typed debug outputs"
+                typed_image.write_bytes(sentinel)
+                typed_pdb.write_bytes(sentinel)
+                result = run("reject-typed-" + name, [reader, "read", path, typed_image.as_posix(), typed_pdb.as_posix(), typed_source.as_posix()], 65, pure=True)
+                if result.strip() != str(expected).encode() or typed_image.read_bytes() != sentinel or typed_pdb.read_bytes() != sentinel:
+                    raise AssertionError("typed failure diagnostic/output differs: " + repr(result))
+                report["negative_cases"].append({"name": name, "expected_code": expected, "input_sha256": sha(path), "previous_outputs_preserved": True})
+            typed_image.write_bytes(typed_bytes[1])
+            typed_pdb.write_bytes(typed_bytes[2])
+            report["artifacts"].update({path.name: sha(path) for path in (type_test, type_debug, typed_obj, typed_image, typed_pdb)})
+            report["primitive_resource_scopes"] = {"type_pool": 100, "typed_coff_pdb_per_invocation": 20}
     except BaseException as error:
         report.update(result="failed", error=repr(error))
         raise
