@@ -18,8 +18,18 @@ import sys
 import time
 
 ROOT = Path(__file__).resolve().parents[1]
-MODULES = ("core", "types", "lexer", "parser", "semantic_base", "semantic",
-           "borrow", "hir", "mir", "mir_validate", "mir_lower")
+def frontend_modules():
+    pending = [ROOT / "selfhost/tests/borrow.sg", ROOT / "selfhost/tests/mir.sg"]
+    seen = set()
+    while pending:
+        path = pending.pop()
+        if path in seen:
+            continue
+        if not path.is_file():
+            raise RuntimeError("missing frontend import source: " + str(path))
+        seen.add(path)
+        pending += [ROOT / "selfhost/src" / (name + ".sg") for name in re.findall(r"^\s*import\s+selfhost_([a-z0-9_]+)\s*;", path.read_text(encoding="utf-8"), re.MULTILINE)]
+    return sorted(path.stem for path in seen if path.parent == ROOT / "selfhost/src")
 SEED_SHA = "9b1055c5a5cb7f09c016228a44f7427b7519b6a92e69cad5993004831c3aa1e5"
 CLANG_SHA = "56ef1abd0df11a3b1b77822193e927c6345078c24511567ae10b3afd803d03a3"
 
@@ -35,14 +45,20 @@ def revision() -> str:
 def inputs() -> dict[str, str]:
     paths = {Path(__file__).resolve(), ROOT / "Cargo.toml", ROOT / "Cargo.lock",
              ROOT / "rust-toolchain.toml", ROOT / "selfhost/tests/borrow.sg", ROOT / "selfhost/tests/mir.sg"}
-    # Guard the complete declared frontend import closure. Sibling native backend
-    # files are independent jobs and are not inputs to these two test programs.
-    for name in MODULES:
-        path = ROOT / "selfhost/src" / (name + ".sg")
+    # Discover every real import of both unchanged legacy programs. New HIR
+    # codec dependencies must be guarded rather than dropped from a fixed list.
+    pending = [ROOT / "selfhost/tests/borrow.sg", ROOT / "selfhost/tests/mir.sg"]
+    visited = set()
+    while pending:
+        path = pending.pop()
+        if path in visited:
+            continue
+        if not path.is_file():
+            raise RuntimeError("missing frontend import source: " + str(path))
+        visited.add(path)
         paths.add(path)
         for dependency in re.findall(r"^\s*import\s+selfhost_([a-z0-9_]+)\s*;", path.read_text(encoding="utf-8"), re.MULTILINE):
-            if dependency not in MODULES:
-                raise RuntimeError("missing declared frontend dependency: " + dependency)
+            pending.append(ROOT / "selfhost/src" / (dependency + ".sg"))
     for directory in ("tools/stdlib", "runtime"):
         for path in (ROOT / directory).rglob("*"):
             if path.is_file() and not any(part in {"target", "build", "__pycache__"} for part in path.relative_to(ROOT / directory).parts):
@@ -61,7 +77,7 @@ def main() -> int:
     tools = {args.seed.resolve(): SEED_SHA, args.clang.resolve(): CLANG_SHA}
     report: dict = {
         "schema": 1, "stage": "m3-hir-mir-ownership-contracts", "result": "running",
-        "m3_complete": False, "hir_schema": 5, "mir_schema": 1, "runtime_abi": 1,
+        "m3_complete": False, "hir_schema": 6, "mir_schema": 1, "runtime_abi": 1,
         "target": "x86_64-pc-windows-msvc", "optimization": 0,
         "started_at": dt.datetime.now(dt.timezone.utc).isoformat(),
         "host": {"system": platform.system(), "release": platform.release(), "machine": platform.machine(), "python": platform.python_version(), "python_executable_sha256": sha(Path(sys.executable))},
@@ -86,9 +102,10 @@ def main() -> int:
         report["tools"] = {str(path): {"sha256": sha(path), "version": subprocess.check_output([str(path), "--version"], text=True, stderr=subprocess.STDOUT, timeout=30).strip()} for path in tools}
         before = inputs()
         report["inputs_before"] = before
+        report["actual_frontend_import_modules"] = frontend_modules()
         env = os.environ.copy()
         env.update(SENGOO_STDLIB=str(ROOT / "tools/stdlib"), SENGOO_RUNTIME=str(ROOT / "tools/stdlib/runtime.c"), SENGOO_CLANG=str(args.clang.resolve()),
-                   SENGOO_MODULE_MAP=";".join("selfhost_" + name + "=" + str(ROOT / "selfhost/src" / (name + ".sg")) for name in MODULES))
+                   SENGOO_MODULE_MAP=";".join("selfhost_" + name + "=" + str(ROOT / "selfhost/src" / (name + ".sg")) for name in frontend_modules()))
         env["PATH"] = str(args.clang.resolve().parent) + os.pathsep + env.get("PATH", "")
         jobs = [
             ("borrow-build", [str(args.seed.resolve()), "--runtime-mode", "source-development", "build", "selfhost/tests/borrow.sg", "--force-rebuild", "-O", "0", "-o", str(output / "borrow-tests.exe")], None),

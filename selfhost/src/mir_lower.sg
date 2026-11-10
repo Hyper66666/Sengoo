@@ -298,8 +298,6 @@ def sh_l_ownership_place(lower: &mut ShMirLower, checked: &ShChecked, ast: &ShAs
     sh_l_emit(lower, ast, node, 17, pointer.value, &args, ordinal, variant, 0);
 }
 
-// Validated action 10 only disarms storage: assignment emits the zero store;
-// the preceding root move already cleared its flag. Do not restore init/Drop.
 def sh_l_actions_phase(lower: &mut ShMirLower, checked: &ShChecked, ast: &ShAst, ownership: &ShOwnership, node: i64, phase: i64) {
     if lower.block < 0 or lower.error != 0 { return; };
     let mut missing = 0;
@@ -828,6 +826,7 @@ def sh_lower_parts(text: &String, ast: &ShAst, checked: &ShChecked, ownership: &
 def sh_lower_hir(hir: &ShHir, max_items: i64) -> ShLowered {
     let error = if hir.error != 0 { hir.error; } else { sh_hir_validate(hir); };
     if error != 0 { return ShLowered { mir: sh_mir_new(max_items), error: error, start: hir.start, end: hir.end }; };
+    if hir.origins.present != 0 or hir.origins.module_input.len() != 0 { return ShLowered { mir: sh_mir_new(max_items), error: 5008, start: hir.start, end: hir.end }; };
     sh_lower_parts(&hir.source, &hir.ast, &hir.checked, &hir.ownership, max_items);
 }
 

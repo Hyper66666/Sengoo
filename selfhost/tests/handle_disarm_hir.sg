@@ -16,7 +16,7 @@ def sh_detach_round() -> Result<bool, i64> {
     assert_eq_i64(checked.error, 0, "detach.sg", 2);
     let hir = sh_hir_lift(&text, &parsed.ast, &checked, 10000);
     if hir.error != 0 { println("lift"); println(hir.error); return result_err_bool(hir.error); };
-    assert_eq_i64(hir.schema, 5, "detach.sg", 3);
+    assert_eq_i64(hir.schema, 6, "detach.sg", 3);
     let mut action = 0;
     let mut found = -1;
     while action < sh_ownership_action_count(&hir.ownership) { if sh_ownership_action(&hir.ownership, action, 2) == 10 { assert_eq_i64(found, -1, "detach.sg", 4); found = action; }; action = action + 1; };
@@ -94,10 +94,10 @@ def sh_detach_round() -> Result<bool, i64> {
     assert_eq_i64(sh_type_count(&hir.checked.types), types_before, "detach.sg", 65);
     let encoded = sh_hir_encode(&hir, 1000000);
     assert_eq_i64(encoded.error, 0, "detach.sg", 14);
-    encoded.words.set(1, 4);
+    encoded.words.set(1, 5);
     let old_schema = sh_hir_decode(&encoded.words, 1000000);
     assert_eq_i64(old_schema.error, 5502, "detach.sg", 40);
-    encoded.words.set(1, 5);
+    encoded.words.set(1, 6);
     let decoded = sh_hir_decode(&encoded.words, 1000000);
     assert_eq_i64(decoded.error, 0, "detach.sg", 15);
     let reencoded = sh_hir_encode(&decoded, 1000000);

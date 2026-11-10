@@ -862,3 +862,36 @@ other malformed specialization names. The observed generated name remains
 `identity__sg_instance_3`; the previous report's actual code was specialized,
 but its name check also accepted the bare spelling. The stronger negative
 control closes that test-oracle gap without changing the adapter implementation.
+
+
+## HIR6 complete owning snapshot fidelity
+
+- [x] Preserve all ShChecked limits/scalars/arenas/symbol bytes and every ShOwnership field through independent clone/codec ownership.
+- [x] Migrate HIR schema to six while rejecting old five and preserving builtin6/deferred4/actions8/9/10 semantics.
+- [x] Bind actual module/ownership inputs through read-only full-state comparison, without using a decoded payload as its own external source authority.
+- [x] Verify ordinary legacy behavior, complete per-field corruption and codec/budget refusals, first-call resources and required HIR/MIR/source-native regressions.
+- [x] Freeze full revision/host/tool/source/artifact evidence and strict specs with complete compiler milestones still open.
+
+Candidate-specific codec and authority-boundary design/qualification is owned
+by `add-selfhost-collection-intrinsics/hir-codec-checkpoint.md` and its
+`selfhost-hir-origin-codec` capability. This section owns generic HIR fidelity.
+
+Qualification: `target/selfhost/m3-hir6-owning-budget-qualified3/evidence.json`
+SHA-256 `87a96fcb6e9a91eafa7ccab82d287710573a95eaa1e11512516fa316f07f08f4`,
+Windows-11-10.0.26300-SP0; full revision
+`0b797a88391fe8e28a7bb35d2255ab79b3da02ca` through
+`b7867614ce59d4e404c702784df52db6acb9db8a`. Concurrent commits did not alter
+consumed inputs; all source/tool/configuration/checkout/artifact guards are
+empty. Ten ordinary plus seven module first-call scopes, 120 field poisons,
+thirteen mapping poisons, actual physical-text replacement refusal, exact
+aggregate budget boundaries and old-HIR5 rejection all execute. Complete
+legacy regressions pass expected exits: HIR/MIR four, disarm nineteen with its
+explicit reference zero-drop policy difference, projection twenty-two and
+source-native 346 commands (49 positive/five negative programs). Independent
+audit SHA-256 `beb39143b3ad1944416ebc63dd46b955b3539881435160a5167eed45abdfffba`
+rehashes 3,709 records and 820 receipt files. Full source pins, original limits,
+ownership diagnostics and HIR error/start/end are retained. Actual standard
+ownership still rejects 6101 with 112 diagnostics; no M3/core112 closure,
+constructor/Ref authority, compiler self-build capacity or M8 RSS result is
+claimed. The collection checkpoint records exact commands, child report
+hashes, failed trials and the C/Rust development/legacy-linker boundary.

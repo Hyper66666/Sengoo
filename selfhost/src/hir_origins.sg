@@ -1,0 +1,584 @@
+import selfhost_semantic_loans;
+
+def sh_ho_physical_valid(graph: &ShModules) -> bool {
+    let count = graph.units.len();
+    if count < 1 or count > 100000 or count > graph.sources.limit or graph.sources.texts.len() != count or graph.order.len() != count or graph.mapping.len() != count * 5 or graph.states.len() != count or graph.root < 0 or graph.root >= count or graph.units.get(graph.root).standard != 0 or graph.maximum < 0 or graph.maximum > 16777216 or graph.sources.max_bytes < 0 or graph.sources.max_bytes > 16777216 or not sh_modules_unchanged(graph) { return false; };
+    let mut index = 0;
+    let mut total = 0;
+    while index < count { if (graph.units.get(index).standard != 0 and graph.units.get(index).standard != 1) or graph.units.get(index).source != index or sh_origin_at(&graph.states, index) != 2 { return false; }; let identity = graph.units.get(index).snapshot.identity(); let path = graph.units.get(index).snapshot.path(); let length = graph.units.get(index).snapshot.len(); if not identity.is_ok() or not path.is_ok() or not length.is_ok() or length.value < 0 or length.value > 16777216 or total > graph.maximum - length.value or identity.value.as_str() != graph.units.get(index).identity.as_str() or path.value.as_str() != graph.units.get(index).path.as_str() { return false; }; let allocated = ffi_buffer_new(length.value); if not allocated.is_ok() { return false; }; let mut bytes = allocated.value; let copied = graph.units.get(index).snapshot.copy_bytes(&mut bytes); if not copied.is_ok() or copied.value != length.value { return false; }; let decoded = string_from_utf8(bytes, copied.value); if not decoded.is_ok() or decoded.value.as_str() != graph.sources.texts.get(index).text.as_str() { return false; }; total = total + length.value; index = index + 1; };
+    if total != graph.bytes or total > graph.sources.max_bytes { return false; };
+    let joined = string_new();
+    index = 0;
+    while index < count { let module = sh_origin_at(&graph.order, index); if module < 0 or module >= count { return false; }; let mut prior = 0; while prior < index { if sh_origin_at(&graph.order, prior) == module { return false; }; prior = prior + 1; }; let text = graph.sources.texts.get(module).text.clone(); if not text.is_ok() { return false; }; let bytes = sh_lex_bytes(&text.value); if not bytes.is_ok() { return false; }; let start = joined.len(); let bom = text.value.len() >= 3 and sh_lex_byte(&bytes.value, 0) == 239 and sh_lex_byte(&bytes.value, 1) == 187 and sh_lex_byte(&bytes.value, 2) == 191; if bom { let tail = text.value.get(3, text.value.len()); if not tail.is_ok() or not joined.push_str("   ").is_ok() or not sh_module_append(&joined, &tail.value) { return false; }; } else if not sh_module_append(&joined, &text.value) { return false; }; if sh_origin_word(&graph.mapping, index, 5, 0) != start or sh_origin_word(&graph.mapping, index, 5, 1) != joined.len() or sh_origin_word(&graph.mapping, index, 5, 2) != module or sh_origin_word(&graph.mapping, index, 5, 3) != 0 or sh_origin_word(&graph.mapping, index, 5, 4) != text.value.len() { return false; }; if joined.len() > graph.maximum - 2 or not joined.push_str("\n\n").is_ok() { return false; }; index = index + 1; };
+    joined.as_str() == graph.text.as_str() and sh_modules_unchanged(graph);
+}
+
+struct ShHirOrigins {
+    schema: i64,
+    present: i64,
+    unlowerable: i64,
+    limit: i64,
+    origins: ShOriginFacts,
+    loans: ShBackingLoans,
+    module_input: Vec<i64>,
+    error: i64,
+}
+
+struct ShHirOriginsImage {
+    words: Vec<i64>,
+    error: i64,
+}
+
+struct ShHirOriginsReader {
+    words: Vec<i64>,
+    position: i64,
+    maximum: i64,
+    error: i64,
+}
+
+def sh_ho_words(input: &Vec<i64>, limit: i64, error: &mut i64) -> Vec<i64> {
+    let output = vec_new_i64();
+    if input.len() > limit or limit < 0 { *error = 5501; return output; };
+    let mut index = 0;
+    while index < input.len() { if not output.push(sengoo_vec_get_or_default_i64(input.handle, index, -1)) { *error = 5501; return output; }; index = index + 1; };
+    output;
+}
+
+def sh_ho_put(output: &mut ShHirOriginsImage, value: i64, maximum: i64) {
+    if output.error != 0 { return; };
+    if output.words.len() >= maximum or not output.words.push(value) { output.error = 5501; };
+}
+
+def sh_ho_put_vector(output: &mut ShHirOriginsImage, input: &Vec<i64>, maximum: i64) {
+    sh_ho_put(output, input.len(), maximum);
+    let mut index = 0;
+    while output.error == 0 and index < input.len() { sh_ho_put(output, sengoo_vec_get_or_default_i64(input.handle, index, -1), maximum); index = index + 1; };
+}
+
+def sh_ho_take(reader: &mut ShHirOriginsReader) -> i64 {
+    if reader.error != 0 { return 0; };
+    if reader.position < 0 or reader.position >= reader.words.len() { reader.error = 5502; return 0; };
+    let value = sengoo_vec_get_or_default_i64(reader.words.handle, reader.position, 0);
+    reader.position = reader.position + 1;
+    value;
+}
+
+def sh_ho_take_vector(reader: &mut ShHirOriginsReader, maximum: i64) -> Vec<i64> {
+    let output = vec_new_i64();
+    let count = sh_ho_take(reader);
+    if reader.error != 0 or count < 0 or count > maximum or count > reader.words.len() - reader.position { reader.error = 5501; return output; };
+    let mut index = 0;
+    while reader.error == 0 and index < count { let value = sh_ho_take(reader); if not output.push(value) { reader.error = 5501; }; index = index + 1; };
+    output;
+}
+
+def sh_ho_take_text(reader: &mut ShHirOriginsReader, maximum: i64) -> String {
+    let output = string_new();
+    let count = sh_ho_take(reader);
+    let bytes = sh_ho_take(reader);
+    if reader.error != 0 or count < 0 or count > maximum or bytes < 0 or bytes > maximum or count > reader.words.len() - reader.position { reader.error = 5501; return output; };
+    let mut index = 0;
+    while reader.error == 0 and index < count { let value = sh_ho_take(reader); if value < 0 or value > 1114111 or value >= 55296 and value <= 57343 or not sh_lex_scalar(&output, value) { reader.error = 5507; }; index = index + 1; };
+    if output.len() != bytes { reader.error = 5507; };
+    output;
+}
+
+def sh_hir_origins_absent(limit: i64) -> ShHirOrigins {
+    ShHirOrigins { schema: 1, present: 0, unlowerable: 1, limit: limit, origins: sh_origin_new(limit), loans: sh_loans_new(limit, 1), module_input: vec_new_i64(), error: 0 };
+}
+
+def sh_ho_copy_text(input: &String, maximum: i64, error: &mut i64) -> String {
+    if maximum < 0 or maximum > 4000000 or input.len() > maximum * 4 { *error = 5501; return string_new(); };
+    let counted = sh_ho_text_count(input);
+    if not counted.is_ok() { *error = counted.error; return string_new(); };
+    if counted.value > maximum { *error = 5501; return string_new(); };
+    let copied = input.clone();
+    if not copied.is_ok() { *error = 5501; return string_new(); };
+    copied.value;
+}
+
+def sh_ho_clone_origin(input: &ShOriginFacts, maximum: i64, error: &mut i64) -> ShOriginFacts {
+    let copied_identity = sh_ho_copy_text(&input.identity, maximum, error);
+    let copied_digest = sh_ho_copy_text(&input.digest, maximum, error);
+    let copied_prototype = sh_ho_copy_text(&input.prototype, maximum, error);
+    let copied_text = sh_ho_copy_text(&input.text, maximum, error);
+    let copied_canonical = sh_ho_words(&input.canonical, maximum, error);
+    let copied_factories = sh_ho_words(&input.factories, maximum, error);
+    let copied_nodes = sh_ho_words(&input.nodes, maximum, error);
+    let copied_bindings = sh_ho_words(&input.bindings, maximum, error);
+    let copied_returns = sh_ho_words(&input.returns, maximum, error);
+    let copied_obligations = sh_ho_words(&input.obligations, maximum, error);
+    let copied_calls = sh_ho_words(&input.calls, maximum, error);
+    let copied_diagnostics = sh_ho_words(&input.diagnostics, maximum, error);
+    let copied_input = sh_ho_words(&input.input, maximum, error);
+    ShOriginFacts { schema: input.schema, limit: input.limit, module: input.module, error: input.error, partial: input.partial, identity: copied_identity, digest: copied_digest, prototype: copied_prototype, text: copied_text, canonical: copied_canonical, factories: copied_factories, nodes: copied_nodes, bindings: copied_bindings, returns: copied_returns, obligations: copied_obligations, calls: copied_calls, diagnostics: copied_diagnostics, input: copied_input, function: input.function, return_node: input.return_node, flow: input.flow, depth: input.depth };
+}
+
+def sh_ho_clone_loans(input: &ShBackingLoans, maximum: i64, error: &mut i64) -> ShBackingLoans {
+    let copied_option_identity = sh_ho_copy_text(&input.option_identity, maximum, error);
+    let copied_option_digest = sh_ho_copy_text(&input.option_digest, maximum, error);
+    let copied_nodes = sh_ho_words(&input.nodes, maximum, error);
+    let copied_leases = sh_ho_words(&input.leases, maximum, error);
+    let copied_effects = sh_ho_words(&input.effects, maximum, error);
+    let copied_summaries = sh_ho_words(&input.summaries, maximum, error);
+    let copied_returns = sh_ho_words(&input.returns, maximum, error);
+    let copied_calls = sh_ho_words(&input.calls, maximum, error);
+    let copied_diagnostics = sh_ho_words(&input.diagnostics, maximum, error);
+    let copied_admissions = sh_ho_words(&input.admissions, maximum, error);
+    let copied_origin_input = sh_ho_words(&input.origin_input, maximum, error);
+    let copied_bindings = sh_ho_words(&input.bindings, maximum, error);
+    let copied_active = sh_ho_words(&input.active, maximum, error);
+    ShBackingLoans { schema: input.schema, limit: input.limit, error: input.error, partial: input.partial, mode: input.mode, unlowerable: input.unlowerable, option_binding: input.option_binding, option_module: input.option_module, option_identity: copied_option_identity, option_digest: copied_option_digest, nodes: copied_nodes, leases: copied_leases, effects: copied_effects, summaries: copied_summaries, returns: copied_returns, calls: copied_calls, diagnostics: copied_diagnostics, admissions: copied_admissions, origin_input: copied_origin_input, bindings: copied_bindings, active: copied_active, function: input.function, scope: input.scope, depth: input.depth, flow: input.flow, return_node: input.return_node };
+}
+
+def sh_hir_origins_clone(input: &ShHirOrigins, maximum: i64) -> ShHirOrigins {
+    let mut error = 0;
+    let budget = sh_ho_budget(input, maximum);
+    if budget != 0 { error = budget; };
+    if error != 0 { let mut failed = sh_hir_origins_absent(0); failed.error = error; return failed; };
+    let copied_origins = sh_ho_clone_origin(&input.origins, maximum, &mut error);
+    let copied_loans = sh_ho_clone_loans(&input.loans, maximum, &mut error);
+    let copied_module = sh_ho_words(&input.module_input, maximum, &mut error);
+    ShHirOrigins { schema: input.schema, present: input.present, unlowerable: input.unlowerable, limit: input.limit, origins: copied_origins, loans: copied_loans, module_input: copied_module, error: if error != 0 { error; } else { input.error; } };
+}
+
+def sh_ho_add_budget(total: &mut i64, count: i64, maximum: i64) -> bool {
+    if count < 0 or *total < 0 or *total > maximum or count > maximum - *total { return false; };
+    *total = *total + count;
+    true;
+}
+
+def sh_hir_origins_word_count(input: &ShHirOrigins) -> Result<i64, i64> {
+    let maximum = 4000000;
+    if maximum < 0 or maximum > 4000000 { return sh_i64_error(5501); };
+    if input.limit < 0 or input.limit > 100000 { return sh_i64_error(5501); };
+    let mut total = 62;
+    if not sh_ho_add_budget(&mut total, input.module_input.len(), maximum) { return sh_i64_error(5501); };
+    if input.origins.identity.len() > input.limit * 128 { return sh_i64_error(5501); };
+    let counted_origins_identity = sh_ho_text_count(&input.origins.identity);
+    if not counted_origins_identity.is_ok() { return sh_i64_error(counted_origins_identity.error); };
+    if not sh_ho_add_budget(&mut total, counted_origins_identity.value, maximum) { return sh_i64_error(5501); };
+    if input.origins.digest.len() > input.limit * 128 { return sh_i64_error(5501); };
+    let counted_origins_digest = sh_ho_text_count(&input.origins.digest);
+    if not counted_origins_digest.is_ok() { return sh_i64_error(counted_origins_digest.error); };
+    if not sh_ho_add_budget(&mut total, counted_origins_digest.value, maximum) { return sh_i64_error(5501); };
+    if input.origins.prototype.len() > input.limit * 128 { return sh_i64_error(5501); };
+    let counted_origins_prototype = sh_ho_text_count(&input.origins.prototype);
+    if not counted_origins_prototype.is_ok() { return sh_i64_error(counted_origins_prototype.error); };
+    if not sh_ho_add_budget(&mut total, counted_origins_prototype.value, maximum) { return sh_i64_error(5501); };
+    if input.origins.text.len() > input.limit * 128 { return sh_i64_error(5501); };
+    let counted_origins_text = sh_ho_text_count(&input.origins.text);
+    if not counted_origins_text.is_ok() { return sh_i64_error(counted_origins_text.error); };
+    if not sh_ho_add_budget(&mut total, counted_origins_text.value, maximum) { return sh_i64_error(5501); };
+    if not sh_ho_add_budget(&mut total, input.origins.canonical.len(), maximum) { return sh_i64_error(5501); };
+    if not sh_ho_add_budget(&mut total, input.origins.factories.len(), maximum) { return sh_i64_error(5501); };
+    if not sh_ho_add_budget(&mut total, input.origins.nodes.len(), maximum) { return sh_i64_error(5501); };
+    if not sh_ho_add_budget(&mut total, input.origins.bindings.len(), maximum) { return sh_i64_error(5501); };
+    if not sh_ho_add_budget(&mut total, input.origins.returns.len(), maximum) { return sh_i64_error(5501); };
+    if not sh_ho_add_budget(&mut total, input.origins.obligations.len(), maximum) { return sh_i64_error(5501); };
+    if not sh_ho_add_budget(&mut total, input.origins.calls.len(), maximum) { return sh_i64_error(5501); };
+    if not sh_ho_add_budget(&mut total, input.origins.diagnostics.len(), maximum) { return sh_i64_error(5501); };
+    if not sh_ho_add_budget(&mut total, input.origins.input.len(), maximum) { return sh_i64_error(5501); };
+    if input.loans.option_identity.len() > input.limit * 128 { return sh_i64_error(5501); };
+    let counted_loans_option_identity = sh_ho_text_count(&input.loans.option_identity);
+    if not counted_loans_option_identity.is_ok() { return sh_i64_error(counted_loans_option_identity.error); };
+    if not sh_ho_add_budget(&mut total, counted_loans_option_identity.value, maximum) { return sh_i64_error(5501); };
+    if input.loans.option_digest.len() > input.limit * 128 { return sh_i64_error(5501); };
+    let counted_loans_option_digest = sh_ho_text_count(&input.loans.option_digest);
+    if not counted_loans_option_digest.is_ok() { return sh_i64_error(counted_loans_option_digest.error); };
+    if not sh_ho_add_budget(&mut total, counted_loans_option_digest.value, maximum) { return sh_i64_error(5501); };
+    if not sh_ho_add_budget(&mut total, input.loans.nodes.len(), maximum) { return sh_i64_error(5501); };
+    if not sh_ho_add_budget(&mut total, input.loans.leases.len(), maximum) { return sh_i64_error(5501); };
+    if not sh_ho_add_budget(&mut total, input.loans.effects.len(), maximum) { return sh_i64_error(5501); };
+    if not sh_ho_add_budget(&mut total, input.loans.summaries.len(), maximum) { return sh_i64_error(5501); };
+    if not sh_ho_add_budget(&mut total, input.loans.returns.len(), maximum) { return sh_i64_error(5501); };
+    if not sh_ho_add_budget(&mut total, input.loans.calls.len(), maximum) { return sh_i64_error(5501); };
+    if not sh_ho_add_budget(&mut total, input.loans.diagnostics.len(), maximum) { return sh_i64_error(5501); };
+    if not sh_ho_add_budget(&mut total, input.loans.admissions.len(), maximum) { return sh_i64_error(5501); };
+    if not sh_ho_add_budget(&mut total, input.loans.origin_input.len(), maximum) { return sh_i64_error(5501); };
+    if not sh_ho_add_budget(&mut total, input.loans.bindings.len(), maximum) { return sh_i64_error(5501); };
+    if not sh_ho_add_budget(&mut total, input.loans.active.len(), maximum) { return sh_i64_error(5501); };
+    sh_i64_ok(total);
+}
+
+def sh_ho_budget(input: &ShHirOrigins, maximum: i64) -> i64 {
+    if maximum < 0 or maximum > 4000000 { return 5501; };
+    let counted = sh_hir_origins_word_count(input);
+    if not counted.is_ok() { return counted.error; };
+    if counted.value > maximum { return 5501; };
+    0;
+}
+
+def sh_hir_origins_shape(input: &ShHirOrigins) -> i64 {
+    if input.schema != 1 or (input.present != 0 and input.present != 1) or input.unlowerable != 1 { return 5502; };
+    if input.limit < 0 or input.limit > 100000 { return 5501; };
+    if input.error != 0 or input.origins.error != 0 or input.loans.error != 0 { return 5508; };
+    if input.origins.schema != 1 or input.loans.schema != 1 or input.loans.unlowerable != 1 { return 5502; };
+    if input.origins.limit < 0 or input.origins.limit > input.limit or input.loans.limit < 0 or input.loans.limit > input.limit { return 5501; };
+    if input.origins.bindings.len() != 0 or input.origins.function != -1 or input.origins.return_node != -1 or input.origins.flow != 0 or input.origins.depth != 0 { return 5508; };
+    if input.loans.bindings.len() != 0 or input.loans.active.len() != 0 or input.loans.function != -1 or input.loans.scope != -1 or input.loans.return_node != -1 or input.loans.depth != 0 or input.loans.flow != 0 { return 5508; };
+    if input.origins.partial < 1 or input.loans.partial < 1 or input.loans.mode < 0 or input.loans.mode > 1 { return 5508; };
+    if input.module_input.len() > 4000000 { return 5501; };
+    if input.origins.identity.len() > input.limit * 128 { return 5501; };
+    if input.origins.digest.len() > input.limit * 128 { return 5501; };
+    if input.origins.prototype.len() > input.limit * 128 { return 5501; };
+    if input.origins.text.len() > input.limit * 128 { return 5501; };
+    if input.origins.canonical.len() % 1 != 0 or input.origins.canonical.len() > input.limit * 64 { return 5508; };
+    if input.origins.factories.len() % 6 != 0 or input.origins.factories.len() > input.limit * 64 { return 5508; };
+    if input.origins.nodes.len() % 8 != 0 or input.origins.nodes.len() > input.limit * 64 { return 5508; };
+    if input.origins.bindings.len() % 1 != 0 or input.origins.bindings.len() > input.limit * 64 { return 5508; };
+    if input.origins.returns.len() % 5 != 0 or input.origins.returns.len() > input.limit * 64 { return 5508; };
+    if input.origins.obligations.len() % 5 != 0 or input.origins.obligations.len() > input.limit * 64 { return 5508; };
+    if input.origins.calls.len() % 5 != 0 or input.origins.calls.len() > input.limit * 64 { return 5508; };
+    if input.origins.diagnostics.len() % 3 != 0 or input.origins.diagnostics.len() > input.limit * 64 { return 5508; };
+    if input.origins.input.len() % 1 != 0 or input.origins.input.len() > input.limit * 64 { return 5508; };
+    if input.loans.option_identity.len() > input.limit * 128 { return 5501; };
+    if input.loans.option_digest.len() > input.limit * 128 { return 5501; };
+    if input.loans.nodes.len() % 8 != 0 or input.loans.nodes.len() > input.limit * 64 { return 5508; };
+    if input.loans.leases.len() % 10 != 0 or input.loans.leases.len() > input.limit * 64 { return 5508; };
+    if input.loans.effects.len() % 6 != 0 or input.loans.effects.len() > input.limit * 64 { return 5508; };
+    if input.loans.summaries.len() % 1 != 0 or input.loans.summaries.len() > input.limit * 64 { return 5508; };
+    if input.loans.returns.len() % 6 != 0 or input.loans.returns.len() > input.limit * 64 { return 5508; };
+    if input.loans.calls.len() % 6 != 0 or input.loans.calls.len() > input.limit * 64 { return 5508; };
+    if input.loans.diagnostics.len() % 5 != 0 or input.loans.diagnostics.len() > input.limit * 64 { return 5508; };
+    if input.loans.admissions.len() % 5 != 0 or input.loans.admissions.len() > input.limit * 64 { return 5508; };
+    if input.loans.origin_input.len() % 1 != 0 or input.loans.origin_input.len() > input.limit * 64 { return 5508; };
+    if input.loans.bindings.len() % 1 != 0 or input.loans.bindings.len() > input.limit * 64 { return 5508; };
+    if input.loans.active.len() % 1 != 0 or input.loans.active.len() > input.limit * 64 { return 5508; };
+    if input.present == 1 { if input.limit < 1 or input.origins.limit < 1 or input.loans.limit < 1 or input.module_input.len() == 0 or input.origins.module < 0 or input.loans.option_binding < 0 or input.loans.option_module < 0 { return 5508; }; if input.origins.canonical.len() != 5 or input.origins.factories.len() != 18 or input.origins.nodes.len() != input.loans.nodes.len() or input.origins.returns.len() / 5 != input.loans.returns.len() / 6 or input.loans.summaries.len() != input.loans.returns.len() / 6 { return 5508; }; } else { if input.origins.limit != input.limit or input.loans.limit != input.limit or input.origins.module != -1 or input.origins.partial != 1 or input.loans.partial != 1 or input.loans.mode != 1 or input.loans.option_binding != -1 or input.loans.option_module != -1 { return 5508; }; if input.origins.identity.len() != 0 { return 5508; }; if input.origins.digest.len() != 0 { return 5508; }; if input.origins.prototype.len() != 0 { return 5508; }; if input.origins.text.len() != 0 { return 5508; }; if input.origins.canonical.len() != 0 { return 5508; }; if input.origins.factories.len() != 0 { return 5508; }; if input.origins.nodes.len() != 0 { return 5508; }; if input.origins.bindings.len() != 0 { return 5508; }; if input.origins.returns.len() != 0 { return 5508; }; if input.origins.obligations.len() != 0 { return 5508; }; if input.origins.calls.len() != 0 { return 5508; }; if input.origins.diagnostics.len() != 0 { return 5508; }; if input.origins.input.len() != 0 { return 5508; }; if input.loans.option_identity.len() != 0 { return 5508; }; if input.loans.option_digest.len() != 0 { return 5508; }; if input.loans.nodes.len() != 0 { return 5508; }; if input.loans.leases.len() != 0 { return 5508; }; if input.loans.effects.len() != 0 { return 5508; }; if input.loans.summaries.len() != 0 { return 5508; }; if input.loans.returns.len() != 0 { return 5508; }; if input.loans.calls.len() != 0 { return 5508; }; if input.loans.diagnostics.len() != 0 { return 5508; }; if input.loans.admissions.len() != 0 { return 5508; }; if input.loans.origin_input.len() != 0 { return 5508; }; if input.loans.bindings.len() != 0 { return 5508; }; if input.loans.active.len() != 0 { return 5508; }; };
+    0;
+}
+
+def sh_hir_origins_encode(input: &ShHirOrigins, maximum: i64) -> ShHirOriginsImage {
+    let mut out = ShHirOriginsImage { words: vec_new_i64(), error: sh_hir_origins_shape(input) };
+    let budget = sh_ho_budget(input, maximum);
+    if budget != 0 { out.error = budget; };
+    if out.error != 0 { return out; };
+    sh_ho_put(&mut out, 1397182290, maximum);
+    sh_ho_put(&mut out, input.schema, maximum);
+    sh_ho_put(&mut out, input.present, maximum);
+    sh_ho_put(&mut out, input.unlowerable, maximum);
+    sh_ho_put(&mut out, input.limit, maximum);
+    sh_ho_put(&mut out, 22, maximum);
+    sh_ho_put(&mut out, input.origins.schema, maximum);
+    sh_ho_put(&mut out, input.origins.limit, maximum);
+    sh_ho_put(&mut out, input.origins.module, maximum);
+    sh_ho_put(&mut out, input.origins.error, maximum);
+    sh_ho_put(&mut out, input.origins.partial, maximum);
+    sh_ho_put_text(&mut out, &input.origins.identity, maximum);
+    sh_ho_put_text(&mut out, &input.origins.digest, maximum);
+    sh_ho_put_text(&mut out, &input.origins.prototype, maximum);
+    sh_ho_put_text(&mut out, &input.origins.text, maximum);
+    sh_ho_put_vector(&mut out, &input.origins.canonical, maximum);
+    sh_ho_put_vector(&mut out, &input.origins.factories, maximum);
+    sh_ho_put_vector(&mut out, &input.origins.nodes, maximum);
+    sh_ho_put_vector(&mut out, &input.origins.bindings, maximum);
+    sh_ho_put_vector(&mut out, &input.origins.returns, maximum);
+    sh_ho_put_vector(&mut out, &input.origins.obligations, maximum);
+    sh_ho_put_vector(&mut out, &input.origins.calls, maximum);
+    sh_ho_put_vector(&mut out, &input.origins.diagnostics, maximum);
+    sh_ho_put_vector(&mut out, &input.origins.input, maximum);
+    sh_ho_put(&mut out, input.origins.function, maximum);
+    sh_ho_put(&mut out, input.origins.return_node, maximum);
+    sh_ho_put(&mut out, input.origins.flow, maximum);
+    sh_ho_put(&mut out, input.origins.depth, maximum);
+    sh_ho_put(&mut out, 26, maximum);
+    sh_ho_put(&mut out, input.loans.schema, maximum);
+    sh_ho_put(&mut out, input.loans.limit, maximum);
+    sh_ho_put(&mut out, input.loans.error, maximum);
+    sh_ho_put(&mut out, input.loans.partial, maximum);
+    sh_ho_put(&mut out, input.loans.mode, maximum);
+    sh_ho_put(&mut out, input.loans.unlowerable, maximum);
+    sh_ho_put(&mut out, input.loans.option_binding, maximum);
+    sh_ho_put(&mut out, input.loans.option_module, maximum);
+    sh_ho_put_text(&mut out, &input.loans.option_identity, maximum);
+    sh_ho_put_text(&mut out, &input.loans.option_digest, maximum);
+    sh_ho_put_vector(&mut out, &input.loans.nodes, maximum);
+    sh_ho_put_vector(&mut out, &input.loans.leases, maximum);
+    sh_ho_put_vector(&mut out, &input.loans.effects, maximum);
+    sh_ho_put_vector(&mut out, &input.loans.summaries, maximum);
+    sh_ho_put_vector(&mut out, &input.loans.returns, maximum);
+    sh_ho_put_vector(&mut out, &input.loans.calls, maximum);
+    sh_ho_put_vector(&mut out, &input.loans.diagnostics, maximum);
+    sh_ho_put_vector(&mut out, &input.loans.admissions, maximum);
+    sh_ho_put_vector(&mut out, &input.loans.origin_input, maximum);
+    sh_ho_put_vector(&mut out, &input.loans.bindings, maximum);
+    sh_ho_put_vector(&mut out, &input.loans.active, maximum);
+    sh_ho_put(&mut out, input.loans.function, maximum);
+    sh_ho_put(&mut out, input.loans.scope, maximum);
+    sh_ho_put(&mut out, input.loans.depth, maximum);
+    sh_ho_put(&mut out, input.loans.flow, maximum);
+    sh_ho_put(&mut out, input.loans.return_node, maximum);
+    sh_ho_put_vector(&mut out, &input.module_input, maximum);
+    out;
+}
+
+def sh_hir_origins_decode(words: &Vec<i64>, maximum: i64) -> ShHirOrigins {
+    if maximum < 0 or maximum > 4000000 or words.len() > maximum { let mut failed = sh_hir_origins_absent(0); failed.error = 5501; return failed; };
+    let mut error = 0;
+    let copy = sh_ho_words(words, maximum, &mut error);
+    let mut reader = ShHirOriginsReader { words: copy, position: 0, maximum: maximum, error: error };
+    let magic = sh_ho_take(&mut reader);
+    let schema = sh_ho_take(&mut reader);
+    let present = sh_ho_take(&mut reader);
+    let unlowerable = sh_ho_take(&mut reader);
+    let limit = sh_ho_take(&mut reader);
+    if magic != 1397182290 or schema != 1 or (present != 0 and present != 1) or unlowerable != 1 { reader.error = 5502; };
+    if limit < 0 or limit > 100000 { reader.error = 5501; };
+    if reader.error != 0 { let mut failed = sh_hir_origins_absent(0); failed.error = reader.error; return failed; };
+    let origin_fields = sh_ho_take(&mut reader);
+    if origin_fields != 22 { reader.error = 5502; };
+    let origin_schema = sh_ho_take(&mut reader);
+    let origin_limit = sh_ho_take(&mut reader);
+    let origin_module = sh_ho_take(&mut reader);
+    let origin_error = sh_ho_take(&mut reader);
+    let origin_partial = sh_ho_take(&mut reader);
+    let origin_identity = sh_ho_take_text(&mut reader, limit * 128);
+    let origin_digest = sh_ho_take_text(&mut reader, limit * 128);
+    let origin_prototype = sh_ho_take_text(&mut reader, limit * 128);
+    let origin_text = sh_ho_take_text(&mut reader, limit * 128);
+    let origin_canonical = sh_ho_take_vector(&mut reader, 4000000);
+    let origin_factories = sh_ho_take_vector(&mut reader, 4000000);
+    let origin_nodes = sh_ho_take_vector(&mut reader, 4000000);
+    let origin_bindings = sh_ho_take_vector(&mut reader, 4000000);
+    let origin_returns = sh_ho_take_vector(&mut reader, 4000000);
+    let origin_obligations = sh_ho_take_vector(&mut reader, 4000000);
+    let origin_calls = sh_ho_take_vector(&mut reader, 4000000);
+    let origin_diagnostics = sh_ho_take_vector(&mut reader, 4000000);
+    let origin_input = sh_ho_take_vector(&mut reader, 4000000);
+    let origin_function = sh_ho_take(&mut reader);
+    let origin_return_node = sh_ho_take(&mut reader);
+    let origin_flow = sh_ho_take(&mut reader);
+    let origin_depth = sh_ho_take(&mut reader);
+    let origin = ShOriginFacts { schema: origin_schema, limit: origin_limit, module: origin_module, error: origin_error, partial: origin_partial, identity: origin_identity, digest: origin_digest, prototype: origin_prototype, text: origin_text, canonical: origin_canonical, factories: origin_factories, nodes: origin_nodes, bindings: origin_bindings, returns: origin_returns, obligations: origin_obligations, calls: origin_calls, diagnostics: origin_diagnostics, input: origin_input, function: origin_function, return_node: origin_return_node, flow: origin_flow, depth: origin_depth };
+    let loans_fields = sh_ho_take(&mut reader);
+    if loans_fields != 26 { reader.error = 5502; };
+    let loans_schema = sh_ho_take(&mut reader);
+    let loans_limit = sh_ho_take(&mut reader);
+    let loans_error = sh_ho_take(&mut reader);
+    let loans_partial = sh_ho_take(&mut reader);
+    let loans_mode = sh_ho_take(&mut reader);
+    let loans_unlowerable = sh_ho_take(&mut reader);
+    let loans_option_binding = sh_ho_take(&mut reader);
+    let loans_option_module = sh_ho_take(&mut reader);
+    let loans_option_identity = sh_ho_take_text(&mut reader, limit * 128);
+    let loans_option_digest = sh_ho_take_text(&mut reader, limit * 128);
+    let loans_nodes = sh_ho_take_vector(&mut reader, 4000000);
+    let loans_leases = sh_ho_take_vector(&mut reader, 4000000);
+    let loans_effects = sh_ho_take_vector(&mut reader, 4000000);
+    let loans_summaries = sh_ho_take_vector(&mut reader, 4000000);
+    let loans_returns = sh_ho_take_vector(&mut reader, 4000000);
+    let loans_calls = sh_ho_take_vector(&mut reader, 4000000);
+    let loans_diagnostics = sh_ho_take_vector(&mut reader, 4000000);
+    let loans_admissions = sh_ho_take_vector(&mut reader, 4000000);
+    let loans_origin_input = sh_ho_take_vector(&mut reader, 4000000);
+    let loans_bindings = sh_ho_take_vector(&mut reader, 4000000);
+    let loans_active = sh_ho_take_vector(&mut reader, 4000000);
+    let loans_function = sh_ho_take(&mut reader);
+    let loans_scope = sh_ho_take(&mut reader);
+    let loans_depth = sh_ho_take(&mut reader);
+    let loans_flow = sh_ho_take(&mut reader);
+    let loans_return_node = sh_ho_take(&mut reader);
+    let loans = ShBackingLoans { schema: loans_schema, limit: loans_limit, error: loans_error, partial: loans_partial, mode: loans_mode, unlowerable: loans_unlowerable, option_binding: loans_option_binding, option_module: loans_option_module, option_identity: loans_option_identity, option_digest: loans_option_digest, nodes: loans_nodes, leases: loans_leases, effects: loans_effects, summaries: loans_summaries, returns: loans_returns, calls: loans_calls, diagnostics: loans_diagnostics, admissions: loans_admissions, origin_input: loans_origin_input, bindings: loans_bindings, active: loans_active, function: loans_function, scope: loans_scope, depth: loans_depth, flow: loans_flow, return_node: loans_return_node };
+    let module_input = sh_ho_take_vector(&mut reader, 4000000);
+    if reader.position != reader.words.len() and reader.error == 0 { reader.error = 5502; };
+    let mut out = ShHirOrigins { schema: schema, present: present, unlowerable: unlowerable, limit: limit, origins: origin, loans: loans, module_input: module_input, error: reader.error };
+    if out.error == 0 { out.error = sh_hir_origins_shape(&out); };
+    out;
+}
+
+def sh_ho_text_count(text: &String) -> Result<i64, i64> {
+    let bytes = sh_lex_bytes(text)?;
+    let mut at = 0;
+    let mut count = 0;
+    while at < text.len() { let first = sh_lex_byte(&bytes, at); let width = if first >= 0 and first < 128 { 1; } else if first >= 194 and first <= 223 { 2; } else if first >= 224 and first <= 239 { 3; } else if first >= 240 and first <= 244 { 4; } else { 0; }; if width == 0 or width > text.len() - at { return sh_i64_error(5507); }; let mut i = 1; while i < width { let value = sh_lex_byte(&bytes, at + i); if value < 128 or value > 191 { return sh_i64_error(5507); }; i = i + 1; }; if width > 1 { let second = sh_lex_byte(&bytes, at + 1); if first == 224 and second < 160 or first == 237 and second >= 160 or first == 240 and second < 144 or first == 244 and second >= 144 { return sh_i64_error(5507); }; }; at = at + width; count = count + 1; };
+    sh_i64_ok(count);
+}
+
+def sh_ho_put_text(output: &mut ShHirOriginsImage, text: &String, maximum: i64) {
+    if output.error != 0 { return; };
+    let counted = sh_ho_text_count(text);
+    if not counted.is_ok() { output.error = counted.error; return; };
+    sh_ho_put(output, counted.value, maximum);
+    sh_ho_put(output, text.len(), maximum);
+    let bytes = sh_lex_bytes(text);
+    if not bytes.is_ok() { output.error = 5501; return; };
+    let mut at = 0;
+    while output.error == 0 and at < text.len() { let scalar = sh_lex_utf8(&bytes.value, at); sh_ho_put(output, scalar.value, maximum); at = scalar.end; };
+    ();
+}
+
+def sh_ho_symbols(output: &mut ShHirOriginsImage, input: &ShSymbols, maximum: i64) {
+    sh_ho_put(output, input.limit, maximum);
+    sh_ho_put(output, sh_symbol_count(input), maximum);
+    let mut i = 0;
+    while output.error == 0 and i < sh_symbol_count(input) { let name = sh_symbol_text(input, i); if not name.is_ok() { output.error = 5504; return; }; sh_ho_put_text(output, &name.value, maximum); i = i + 1; };
+    ();
+}
+
+def sh_hir_origins_module_input(graph: &ShModules, analyzed: &ShModuleChecked, maximum: i64) -> ShHirOriginsImage {
+    let mut out = ShHirOriginsImage { words: vec_new_i64(), error: 0 };
+    if maximum < 0 or maximum > 4000000 or graph.error != 0 or analyzed.error != 0 or not sh_ho_physical_valid(graph) { out.error = 5509; return out; };
+    sh_ho_put(&mut out, 1, maximum);
+    sh_ho_put(&mut out, graph.sources.limit, maximum);
+    sh_ho_put(&mut out, graph.sources.max_bytes, maximum);
+    sh_ho_put(&mut out, graph.root, maximum);
+    sh_ho_put(&mut out, graph.bytes, maximum);
+    sh_ho_put(&mut out, graph.maximum, maximum);
+    sh_ho_put(&mut out, graph.error, maximum);
+    sh_ho_put(&mut out, graph.source, maximum);
+    sh_ho_put(&mut out, graph.start, maximum);
+    sh_ho_put(&mut out, graph.end, maximum);
+    sh_ho_put_text(&mut out, &graph.stdlib, maximum);
+    sh_ho_put_text(&mut out, &graph.text, maximum);
+    sh_ho_put(&mut out, graph.units.len(), maximum);
+    let mut i = 0;
+    while out.error == 0 and i < graph.units.len() { sh_ho_put(&mut out, graph.units.get(i).source, maximum); sh_ho_put(&mut out, graph.units.get(i).standard, maximum); sh_ho_put_text(&mut out, &graph.units.get(i).path, maximum); sh_ho_put_text(&mut out, &graph.units.get(i).identity, maximum); let identity = graph.units.get(i).snapshot.identity(); let path = graph.units.get(i).snapshot.path(); let digest = graph.units.get(i).snapshot.sha256(); let length = graph.units.get(i).snapshot.len(); if not identity.is_ok() or not path.is_ok() or not digest.is_ok() or not length.is_ok() { out.error = 5509; return out; }; sh_ho_put_text(&mut out, &identity.value, maximum); sh_ho_put_text(&mut out, &path.value, maximum); sh_ho_put_text(&mut out, &digest.value, maximum); sh_ho_put(&mut out, length.value, maximum); i = i + 1; };
+    sh_ho_put(&mut out, graph.sources.texts.len(), maximum);
+    i = 0;
+    while out.error == 0 and i < graph.sources.texts.len() { sh_ho_put_text(&mut out, &graph.sources.texts.get(i).text, maximum); i = i + 1; };
+    sh_ho_put_vector(&mut out, &graph.states, maximum);
+    sh_ho_put_vector(&mut out, &graph.edges, maximum);
+    sh_ho_put_vector(&mut out, &graph.order, maximum);
+    sh_ho_put_vector(&mut out, &graph.local_order, maximum);
+    sh_ho_symbols(&mut out, &graph.requested, maximum);
+    sh_ho_put_vector(&mut out, &graph.requests, maximum);
+    sh_ho_put_vector(&mut out, &graph.standard_ids, maximum);
+    sh_ho_put_vector(&mut out, &graph.mapping, maximum);
+    sh_ho_symbols(&mut out, &graph.config.names, maximum);
+    sh_ho_put(&mut out, graph.config.error, maximum);
+    sh_ho_put_vector(&mut out, &graph.config.keys, maximum);
+    sh_ho_put(&mut out, graph.config.paths.len(), maximum);
+    i = 0;
+    while out.error == 0 and i < graph.config.paths.len() { sh_ho_put_text(&mut out, &graph.config.paths.get(i).text, maximum); i = i + 1; };
+    sh_ho_symbols(&mut out, &graph.features, maximum);
+    sh_ho_put(&mut out, analyzed.error, maximum);
+    sh_ho_put(&mut out, analyzed.source, maximum);
+    sh_ho_put(&mut out, analyzed.start, maximum);
+    sh_ho_put(&mut out, analyzed.end, maximum);
+    sh_ho_put(&mut out, analyzed.front.source, maximum);
+    sh_ho_put(&mut out, analyzed.front.error, maximum);
+    sh_ho_put(&mut out, analyzed.front.start, maximum);
+    sh_ho_put(&mut out, analyzed.front.end, maximum);
+    sh_ho_put(&mut out, analyzed.front.parsed.error, maximum);
+    sh_ho_put(&mut out, analyzed.front.parsed.start, maximum);
+    sh_ho_put(&mut out, analyzed.front.parsed.end, maximum);
+    sh_ho_put(&mut out, analyzed.front.expanded.error, maximum);
+    sh_ho_put(&mut out, analyzed.front.expanded.start, maximum);
+    sh_ho_put(&mut out, analyzed.front.expanded.end, maximum);
+    sh_ho_put_vector(&mut out, &analyzed.front.expanded.mapping.words, maximum);
+    sh_ho_put(&mut out, analyzed.front.expanded.deprecated.len(), maximum);
+    i = 0;
+    while out.error == 0 and i < analyzed.front.expanded.deprecated.len() { sh_ho_put_text(&mut out, &analyzed.front.expanded.deprecated.get(i).name, maximum); sh_ho_put(&mut out, analyzed.front.expanded.deprecated.get(i).kind, maximum); sh_ho_put_text(&mut out, &analyzed.front.expanded.deprecated.get(i).message, maximum); sh_ho_put_text(&mut out, &analyzed.front.expanded.deprecated.get(i).replacement, maximum); sh_ho_put_text(&mut out, &analyzed.front.expanded.deprecated.get(i).removal, maximum); sh_ho_put(&mut out, analyzed.front.expanded.deprecated.get(i).flags, maximum); i = i + 1; };
+    sh_ho_put_vector(&mut out, &analyzed.node_modules, maximum);
+    sh_ho_put_vector(&mut out, &analyzed.binding_modules, maximum);
+    sh_ho_put_vector(&mut out, &analyzed.scope_modules, maximum);
+    sh_ho_put_vector(&mut out, &analyzed.module_scopes, maximum);
+    sh_ho_put_vector(&mut out, &analyzed.module_bindings, maximum);
+    sh_ho_put_vector(&mut out, &analyzed.exports, maximum);
+    out;
+}
+
+def sh_hir_origins_capture(graph: &ShModules, analyzed: &ShModuleChecked, identity: &str, digest: &str, prototype: &str, option_identity: &str, option_digest: &str, limit: i64) -> ShHirOrigins {
+    let mut output = sh_hir_origins_absent(limit);
+    let origins = sh_origins_analyze(graph, analyzed, identity, digest, prototype, limit);
+    if origins.error != 0 { output.error = origins.error; return output; };
+    let loans = sh_loans_analyze(&origins, graph, analyzed, identity, digest, prototype, option_identity, option_digest, limit, 1);
+    if loans.error != 0 { output.error = loans.error; return output; };
+    let captured = sh_hir_origins_module_input(graph, analyzed, 4000000);
+    if captured.error != 0 { output.error = captured.error; return output; };
+    output.present = 1;
+    output.origins = origins;
+    output.loans = loans;
+    output.module_input = captured.words;
+    output.error = sh_hir_origins_shape(&output);
+    output;
+}
+
+def sh_hir_origins_validate(input: &ShHirOrigins, graph: &ShModules, analyzed: &ShModuleChecked, identity: &str, digest: &str, prototype: &str, option_identity: &str, option_digest: &str) -> i64 {
+    let shape = sh_hir_origins_shape(input);
+    if shape != 0 { return shape; };
+    let captured = sh_hir_origins_module_input(graph, analyzed, 4000000);
+    if captured.error != 0 { return captured.error; };
+    if not sh_o_equal(&input.module_input, &captured.words) { return 5509; };
+    if input.present == 0 { if sh_hir_origins_module_candidate_site(graph, analyzed) >= 0 { return 5008; }; return 0; };
+    let origins = sh_origins_validate(&input.origins, graph, analyzed, identity, digest, prototype);
+    if origins != 0 { return origins; };
+    sh_loans_validate(&input.loans, &input.origins, graph, analyzed, identity, digest, prototype, option_identity, option_digest);
+}
+
+def sh_hir_origins_capture_absent(graph: &ShModules, analyzed: &ShModuleChecked, limit: i64) -> ShHirOrigins {
+    let mut out = sh_hir_origins_absent(limit);
+    if not sh_ho_physical_valid(graph) { out.error = 5509; return out; };
+    if sh_hir_origins_module_candidate_site(graph, analyzed) >= 0 { out.error = 5008; return out; };
+    let captured = sh_hir_origins_module_input(graph, analyzed, 4000000);
+    out.error = captured.error;
+    out.module_input = captured.words;
+    out;
+}
+
+def sh_ho_named(checked: &ShChecked, binding: i64, name: &str) -> bool {
+    let text = sh_symbol_text(&checked.symbols, sh_binding_word(checked, binding, 0));
+    text.is_ok() and text.value.as_str() == name;
+}
+
+def sh_ho_role(checked: &ShChecked, ty: i64, role: i64) -> bool {
+    let actual = sh_o_base(checked, ty);
+    let owner = sh_adt_binding(checked, actual);
+    if sh_s_kind(checked, actual) != 12 or sh_s_arity(checked, actual) != 1 or owner < 0 or not sh_ho_named(checked, owner, if role == 1 { "Vec"; } else if role == 2 { "RawVecIter"; } else { "VecIter"; }) { return false; };
+    let mut binding = 0;
+    let mut fields = 0;
+    let mut count = 0;
+    while binding < sh_binding_count(checked) { if sh_binding_word(checked, binding, 2) == 6 and sh_binding_word(checked, binding, 6) == owner { let ordinal = sh_binding_word(checked, binding, 7); if ordinal < 0 or ordinal > 1 or not sh_o_i64(checked, sh_binding_word(checked, binding, 3)) or not sh_ho_named(checked, binding, if ordinal == 0 { "handle"; } else { "marker"; }) { return false; }; fields = fields | (1 << ordinal); count = count + 1; }; binding = binding + 1; };
+    fields == 3 and count == 2;
+}
+
+def sh_ho_record(checked: &ShChecked, ast: &ShAst, node: i64, role: i64) -> bool {
+    if sh_ast_word(ast, node, 0) != 60 or sh_ast_word(ast, node, 6) != 3 or not sh_ho_role(checked, sh_node_type(checked, node), role) { return false; };
+    let owner = sh_adt_binding(checked, sh_o_base(checked, sh_node_type(checked, node)));
+    let mut child = 1;
+    let mut fields = 0;
+    while child < 3 { let field = sh_ast_child(ast, node, child); let mut binding = sh_node_binding(checked, field); if binding < 0 { binding = sh_node_binding(checked, sh_ast_child(ast, field, 0)); }; let ordinal = sh_binding_word(checked, binding, 7); if sh_binding_word(checked, binding, 6) != owner or ordinal < 0 or ordinal > 1 { return false; }; fields = fields | (1 << ordinal); child = child + 1; };
+    fields == 3;
+}
+
+def sh_ho_candidate_binding(text: &String, ast: &ShAst, checked: &ShChecked, binding: i64) -> bool {
+    if binding < 0 or sh_binding_word(checked, binding, 2) != 2 { return false; };
+    let signature = sh_s_resolve(checked, sh_binding_word(checked, binding, 3));
+    let arity = sh_s_arity(checked, signature);
+    if sh_s_kind(checked, signature) != 11 or sh_s_data(checked, signature) != 0 or sh_s_flags(checked, signature) != 0 or arity < 1 { return false; };
+    let returned = sh_s_resolve(checked, sh_s_argument(checked, signature, arity - 1));
+    let body = sh_o_body_value(ast, binding, checked);
+    if sh_ho_named(checked, binding, "vec_new") and arity == 1 and sh_ho_role(checked, returned, 1) and sh_ho_record(checked, ast, body, 1) { let mut child = 1; while child < 3 { let value = sh_ast_child(ast, sh_ast_child(ast, body, child), 1); if not sh_o_zero(text, ast, value) { return false; }; child = child + 1; }; return true; };
+    if sh_ho_named(checked, binding, "raw_vec_iter_next") and arity == 2 and sh_o_i64(checked, sh_s_argument(checked, signature, 0)) and sh_ast_word(ast, body, 0) == 53 and sh_node_binding(checked, body) == binding and sh_ast_word(ast, body, 6) == 2 { let option = sh_adt_binding(checked, returned); if sh_s_kind(checked, returned) != 12 or sh_s_arity(checked, returned) != 1 or not sh_ho_named(checked, option, "Option") { return false; }; let payload = sh_s_resolve(checked, sh_s_argument(checked, returned, 0)); return sh_s_kind(checked, payload) == 6 and sh_s_flags(checked, payload) == 0; };
+    if sh_ho_named(checked, binding, "iter") and arity == 2 and sh_s_kind(checked, sh_s_resolve(checked, sh_s_argument(checked, signature, 0))) == 6 and sh_ho_role(checked, sh_s_argument(checked, signature, 0), 1) and (sh_ho_record(checked, ast, body, 2) or sh_ho_record(checked, ast, body, 3)) { let mut child = 1; while child < 3 { let field = sh_ast_child(ast, body, child); let value = sh_ast_child(ast, field, 1); if sh_ast_word(ast, value, 0) == 53 and sh_ast_word(ast, value, 6) == 2 and sh_ho_named(checked, sh_node_binding(checked, value), "sengoo_raw_vec_iter_new") { let projection = sh_ast_child(ast, value, 1); let member = sh_node_binding(checked, projection); let receiver = sh_ast_child(ast, projection, 0); let parameter = sh_node_binding(checked, receiver); if sh_ast_word(ast, projection, 0) == 55 and sh_binding_word(checked, member, 7) == 0 and sh_ho_named(checked, member, "handle") and sh_binding_word(checked, parameter, 2) == 1 and sh_binding_word(checked, parameter, 6) == binding and sh_binding_word(checked, parameter, 7) == 0 { return true; }; }; child = child + 1; }; };
+    false;
+}
+
+def sh_ho_owner(checked: &ShChecked, node: i64) -> i64 {
+    let mut scope = sh_node_scope(checked, node);
+    let mut depth = 0;
+    while scope >= 0 and depth < 128 { let owner = sh_scope_word(checked, scope, 1); if sh_binding_word(checked, owner, 2) == 2 or sh_binding_word(checked, owner, 2) == 15 { return owner; }; scope = sh_scope_word(checked, scope, 0); depth = depth + 1; };
+    -1;
+}
+
+def sh_hir_origins_candidate_site(text: &String, ast: &ShAst, checked: &ShChecked) -> i64 {
+    let candidates = vec_new_i64();
+    let mut binding = 0;
+    while binding < sh_binding_count(checked) { if sh_ho_candidate_binding(text, ast, checked, binding) { candidates.push(binding); (); }; binding = binding + 1; };
+    let mut node = 0;
+    while node < sh_ast_count(ast) { let kind = sh_ast_word(ast, node, 0); let target = sh_node_binding(checked, node); if (kind == 12 or kind == 53 or kind == 55) and target >= 0 { let owner = sh_ho_owner(checked, node); let mut i = 0; while i < candidates.len() { let candidate = sh_origin_at(&candidates, i); if target == candidate and owner != candidate and not sh_ho_candidate_binding(text, ast, checked, owner) { return node; }; i = i + 1; }; }; node = node + 1; };
+    -1;
+}
+
+def sh_hir_origins_module_candidate_site(graph: &ShModules, analyzed: &ShModuleChecked) -> i64 {
+    let text = &analyzed.front.expanded.text;
+    let ast = &analyzed.front.parsed.ast;
+    let checked = &analyzed.checked;
+    let candidates = vec_new_i64();
+    let mut binding = 0;
+    while binding < sh_binding_count(checked) { if sh_ho_candidate_binding(text, ast, checked, binding) { candidates.push(binding); (); }; binding = binding + 1; };
+    let mut node = 0;
+    while node < sh_ast_count(ast) { let source = sh_module_node_source(analyzed, node); if source >= 0 and source < graph.units.len() and graph.units.get(source).standard == 0 { let kind = sh_ast_word(ast, node, 0); let target = sh_node_binding(checked, node); if (kind == 12 or kind == 53 or kind == 55) and target >= 0 { let owner = sh_ho_owner(checked, node); let mut i = 0; while i < candidates.len() { let candidate = sh_origin_at(&candidates, i); if target == candidate and owner != candidate { return node; }; i = i + 1; }; }; }; node = node + 1; };
+    -1;
+}

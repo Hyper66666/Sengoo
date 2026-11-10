@@ -146,3 +146,22 @@ frontend state.
 - **THEN** ownership checking SHALL preserve the source owner or reference loan for later valid uses
 - **AND** dereference transfer classification SHALL use the checked expression result rather than a differently typed lifetime-provenance place
 - **AND** moving an owning value out of a borrowed place SHALL retain its explicit rejection
+
+
+### Requirement: HIR snapshots SHALL preserve complete bounded typed and ownership facts
+
+Successful HIR schema-six snapshots SHALL own the complete original checked
+and ownership state within fixed global budgets. Clone and wire roundtrip
+SHALL preserve source/AST, all scalars, strings, diagnostics, vectors and
+configured arena limits without reconstructing missing facts by type checking.
+
+#### Scenario: Existing HIR facts pass through schema six
+- **WHEN** a successful typed source and actual ownership are lifted, cloned, encoded and decoded
+- **THEN** every original checked and ownership field SHALL be preserved with independent owned storage
+- **AND** builtin-call width six, deferred-type width four and ownership actions eight, nine and ten SHALL retain their existing meanings
+- **AND** old HIR5 SHALL reject 5502 instead of being reinterpreted
+- **AND** configured arena limits SHALL retain their original bounded values while actual stored lengths obey the HIR and global wire caps
+- **AND** lift and clone SHALL reject exhausted aggregate budgets before copying output arenas, using read-only scalar/word counts and checked arithmetic
+- **AND** HIR error/start/end fields SHALL survive valid roundtrip and clone, while an error-bearing source result SHALL NOT become a successful encoded HIR
+- **AND** clone and encoding SHALL apply the caller's maximum to the exact total wire words, accepting an exact total and rejecting one fewer word even when every individual vector fits
+- **AND** existing typed HIR/MIR and native source behavior SHALL retain their independently executed regressions

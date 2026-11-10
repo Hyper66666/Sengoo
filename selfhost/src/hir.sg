@@ -1,5 +1,7 @@
 import selfhost_borrow;
 
+import selfhost_hir_origins;
+
 struct ShHir {
     schema: i64,
     target: i64,
@@ -10,6 +12,7 @@ struct ShHir {
     ast: ShAst,
     checked: ShChecked,
     ownership: ShOwnership,
+    origins: ShHirOrigins,
     error: i64,
     start: i64,
     end: i64,
@@ -120,9 +123,18 @@ def sh_hir_validate_ownership_links(hir: &ShHir) -> i64 {
 }
 
 def sh_hir_validate(hir: &ShHir) -> i64 {
-    if hir.schema != 5 or hir.target != 1 or hir.runtime_abi != 1 or hir.pointer_width != 64 { return 5502; };
+    if hir.schema != 6 or hir.target != 1 or hir.runtime_abi != 1 or hir.pointer_width != 64 { return 5502; };
     if hir.limit < 0 or hir.limit > 100000 or hir.source.len() > hir.limit * 128 { return 5501; };
     if hir.error != 0 or hir.checked.error != 0 or hir.ownership.error != 0 { return 5502; };
+    if hir.start < 0 or hir.end < hir.start or hir.end > hir.source.len() { return 5502; };
+    if hir.checked.types.limit < 0 or hir.checked.types.limit > 1000000 or hir.checked.symbols.limit < 0 or hir.checked.symbols.limit > 1000000 or sh_type_count(&hir.checked.types) > hir.checked.types.limit or sh_symbol_count(&hir.checked.symbols) > hir.checked.symbols.limit { return 5501; };
+    if hir.ownership.limit < 1 or hir.ownership.limit > 1000000 or hir.checked.diagnostic_limit < 0 or hir.checked.diagnostic_limit > 1000000 { return 5501; };
+    let budget = sh_hir_budget(hir);
+    if budget != 0 { return budget; };
+    let candidates = sh_hir_origins_shape(&hir.origins);
+    if candidates != 0 { return candidates; };
+    if hir.origins.limit != hir.limit { return 5501; };
+    if hir.origins.present == 0 and hir.origins.module_input.len() == 0 and sh_hir_origins_candidate_site(&hir.source, &hir.ast, &hir.checked) >= 0 { return 5008; };
     let count = sh_ast_count(&hir.ast);
     if hir.ast.words.len() % 7 != 0 or count <= 0 or count > hir.limit or hir.ast.edges.len() > hir.limit * 8 or not sh_hir_node_valid(hir, hir.ast.root) or sh_ast_word(&hir.ast, hir.ast.root, 0) != 1 { return 5502; };
     if hir.checked.node_types.len() != count or hir.checked.resolution.len() != count or hir.checked.call_types.len() != count or hir.checked.node_scopes.len() != count { return 5502; };
@@ -179,6 +191,8 @@ def sh_hir_put_vector(output: &mut ShHirImage, input: &Vec<i64>, maximum: i64) {
 }
 
 def sh_hir_put_text(output: &mut ShHirImage, text: &String, maximum: i64) {
+    let strict_text = sh_ho_text_count(text);
+    if not strict_text.is_ok() { output.error = strict_text.error; return; };
     let count_at = output.words.len();
     sh_hir_put(output, 0, maximum);
     sh_hir_put(output, text.len(), maximum);
@@ -224,10 +238,10 @@ def sh_hir_empty_checked(limit: i64) -> ShChecked {
 }
 
 def sh_hir_snapshot_checked(input: &ShChecked, limit: i64, error: &mut i64) -> ShChecked {
-    let symbols = sh_symbols_new(limit);
+    let symbols = sh_symbols_new(input.symbols.limit);
     let mut index = 0;
     while index < sh_symbol_count(&input.symbols) { let name = sh_symbol_text(&input.symbols, index); if not name.is_ok() { *error = 5504; break; }; let stored = sh_intern(&symbols, &name.value); if not stored.is_ok() or stored.value != index { *error = 5504; break; }; index = index + 1; };
-    ShChecked { types: ShTypes { words: sh_hir_words(&input.types.words, limit * 8, error), arguments: sh_hir_words(&input.types.arguments, limit * 8, error), limit: limit }, symbols: symbols, node_types: sh_hir_words(&input.node_types, limit * 8, error), resolution: sh_hir_words(&input.resolution, limit * 8, error), call_types: sh_hir_words(&input.call_types, limit * 8, error), deferred_types: sh_hir_words(&input.deferred_types, limit * 8, error), builtin_calls: sh_hir_words(&input.builtin_calls, limit * 8, error), node_scopes: sh_hir_words(&input.node_scopes, limit * 8, error), bindings: sh_hir_words(&input.bindings, limit * 8, error), scopes: sh_hir_words(&input.scopes, limit * 8, error), diagnostics: sh_hir_diagnostics(&input.diagnostics, limit, error), substitutions: sh_hir_words(&input.substitutions, limit * 8, error), generic_parameters: sh_hir_words(&input.generic_parameters, limit * 8, error), constraints: sh_hir_words(&input.constraints, limit * 8, error), trait_types: sh_hir_words(&input.trait_types, limit * 8, error), class_parents: sh_hir_words(&input.class_parents, limit * 8, error), propagation: sh_hir_words(&input.propagation, limit * 8, error), loop_values: sh_hir_words(&input.loop_values, limit * 8, error), async_depth: input.async_depth, unsafe_depth: input.unsafe_depth, error: input.error, start: input.start, end: input.end, diagnostic_limit: input.diagnostic_limit, current_scope: input.current_scope, current_owner: input.current_owner, current_return: input.current_return, loop_depth: input.loop_depth, depth: input.depth, unit_type: input.unit_type, bool_type: input.bool_type, integer_type: input.integer_type, float_type: input.float_type, char_type: input.char_type, str_type: input.str_type, never_type: input.never_type, error_type: input.error_type };
+    ShChecked { types: ShTypes { words: sh_hir_words(&input.types.words, limit * 8, error), arguments: sh_hir_words(&input.types.arguments, limit * 8, error), limit: input.types.limit }, symbols: symbols, node_types: sh_hir_words(&input.node_types, limit * 8, error), resolution: sh_hir_words(&input.resolution, limit * 8, error), call_types: sh_hir_words(&input.call_types, limit * 8, error), deferred_types: sh_hir_words(&input.deferred_types, limit * 8, error), builtin_calls: sh_hir_words(&input.builtin_calls, limit * 8, error), node_scopes: sh_hir_words(&input.node_scopes, limit * 8, error), bindings: sh_hir_words(&input.bindings, limit * 8, error), scopes: sh_hir_words(&input.scopes, limit * 8, error), diagnostics: sh_hir_diagnostics(&input.diagnostics, limit, error), substitutions: sh_hir_words(&input.substitutions, limit * 8, error), generic_parameters: sh_hir_words(&input.generic_parameters, limit * 8, error), constraints: sh_hir_words(&input.constraints, limit * 8, error), trait_types: sh_hir_words(&input.trait_types, limit * 8, error), class_parents: sh_hir_words(&input.class_parents, limit * 8, error), propagation: sh_hir_words(&input.propagation, limit * 8, error), loop_values: sh_hir_words(&input.loop_values, limit * 8, error), async_depth: input.async_depth, unsafe_depth: input.unsafe_depth, error: input.error, start: input.start, end: input.end, diagnostic_limit: input.diagnostic_limit, current_scope: input.current_scope, current_owner: input.current_owner, current_return: input.current_return, loop_depth: input.loop_depth, depth: input.depth, unit_type: input.unit_type, bool_type: input.bool_type, integer_type: input.integer_type, float_type: input.float_type, char_type: input.char_type, str_type: input.str_type, never_type: input.never_type, error_type: input.error_type };
 }
 
 def sh_hir_empty_ownership(limit: i64) -> ShOwnership {
@@ -235,20 +249,29 @@ def sh_hir_empty_ownership(limit: i64) -> ShOwnership {
 }
 
 def sh_hir_empty(limit: i64) -> ShHir {
-    ShHir { schema: 5, target: 1, runtime_abi: 1, pointer_width: 64, limit: limit, source: string_new(), ast: ShAst { words: vec_new_i64(), edges: vec_new_i64(), root: -1 }, checked: sh_hir_empty_checked(limit), ownership: sh_hir_empty_ownership(limit), error: 0, start: 0, end: 0 };
+    ShHir { schema: 6, target: 1, runtime_abi: 1, pointer_width: 64, limit: limit, source: string_new(), ast: ShAst { words: vec_new_i64(), edges: vec_new_i64(), root: -1 }, checked: sh_hir_empty_checked(limit), ownership: sh_hir_empty_ownership(limit), origins: sh_hir_origins_absent(limit), error: 0, start: 0, end: 0 };
 }
 
 def sh_hir_lift(text: &String, ast: &ShAst, checked: &ShChecked, limit: i64) -> ShHir {
     if limit < 0 or limit > 100000 { let mut failed = sh_hir_empty(0); failed.error = 5501; return failed; };
     if checked.error != 0 { let mut failed = sh_hir_empty(limit); failed.error = checked.error; failed.start = checked.start; failed.end = checked.end; return failed; };
     let mut error = 0;
+    let empty_ownership = sh_hir_empty_ownership(limit);
+    let empty_origins = sh_hir_origins_absent(limit);
+    let input_budget = sh_hir_input_budget(text, ast, checked, &empty_ownership, &empty_origins, limit, 0, 4000000);
+    if input_budget != 0 { let mut failed = sh_hir_empty(limit); failed.error = input_budget; return failed; };
+    let candidate = sh_hir_origins_candidate_site(text, ast, checked);
+    if candidate >= 0 { let mut failed = sh_hir_empty(limit); failed.error = 5008; failed.start = sh_ast_word(ast, candidate, 2); failed.end = sh_ast_word(ast, candidate, 3); return failed; };
+    let ownership = sh_check_ownership(text, ast, checked, 100);
+    let absent = sh_hir_origins_absent(limit);
+    let budget = sh_hir_input_budget(text, ast, checked, &ownership, &absent, limit, 0, 4000000);
+    if budget != 0 { let mut failed = sh_hir_empty(limit); failed.error = budget; return failed; };
     let source = text.clone();
     if not source.is_ok() { let mut failed = sh_hir_empty(limit); failed.error = 5501; return failed; };
-    let ownership = sh_check_ownership(text, ast, checked, 100);
     let snapshot = sh_hir_snapshot_checked(checked, limit, &mut error);
     let ast_words = sh_hir_words(&ast.words, limit * 8, &mut error);
     let ast_edges = sh_hir_words(&ast.edges, limit * 8, &mut error);
-    let mut hir = ShHir { schema: 5, target: 1, runtime_abi: 1, pointer_width: 64, limit: limit, source: source.value, ast: ShAst { words: ast_words, edges: ast_edges, root: ast.root }, checked: snapshot, ownership: ownership, error: error, start: 0, end: 0 };
+    let mut hir = ShHir { schema: 6, target: 1, runtime_abi: 1, pointer_width: 64, limit: limit, source: source.value, ast: ShAst { words: ast_words, edges: ast_edges, root: ast.root }, checked: snapshot, ownership: ownership, origins: sh_hir_origins_absent(limit), error: error, start: 0, end: 0 };
     if checked.error != 0 { hir.error = checked.error; hir.start = checked.start; hir.end = checked.end; } else { if hir.ownership.error != 0 { hir.error = hir.ownership.error; hir.start = hir.ownership.start; hir.end = hir.ownership.end; } else { if hir.error == 0 { hir.error = sh_hir_validate(&hir); }; }; };
     hir;
 }
@@ -257,13 +280,20 @@ def sh_hir_encode(hir: &ShHir, maximum: i64) -> ShHirImage {
     let mut output = ShHirImage { words: vec_new_i64(), error: sh_hir_validate(hir) };
     if maximum < 0 or maximum > 4000000 { output.error = 5501; };
     if output.error != 0 { return output; };
+    output.error = sh_hir_input_budget(&hir.source, &hir.ast, &hir.checked, &hir.ownership, &hir.origins, hir.limit, 0, maximum);
+    if output.error != 0 { return output; };
     sh_hir_put(&mut output, 1397180489, maximum);
-    sh_hir_put(&mut output, 5, maximum);
+    sh_hir_put(&mut output, 6, maximum);
     sh_hir_put(&mut output, 1, maximum);
     sh_hir_put(&mut output, 1, maximum);
     sh_hir_put(&mut output, 64, maximum);
     sh_hir_put(&mut output, hir.limit, maximum);
     sh_hir_put(&mut output, hir.ast.root, maximum);
+    sh_hir_put(&mut output, hir.error, maximum);
+    sh_hir_put(&mut output, hir.start, maximum);
+    sh_hir_put(&mut output, hir.end, maximum);
+    sh_hir_put(&mut output, hir.checked.types.limit, maximum);
+    sh_hir_put(&mut output, hir.checked.symbols.limit, maximum);
     sh_hir_put_text(&mut output, &hir.source, maximum);
     sh_hir_put_vector(&mut output, &hir.ast.words, maximum);
     sh_hir_put_vector(&mut output, &hir.ast.edges, maximum);
@@ -309,9 +339,34 @@ def sh_hir_encode(hir: &ShHir, maximum: i64) -> ShHirImage {
     sh_hir_put(&mut output, hir.checked.diagnostics.len(), maximum);
     index = 0;
     while output.error == 0 and index < hir.checked.diagnostics.len() { let diagnostic = hir.checked.diagnostics.get(index); sh_hir_put(&mut output, diagnostic.code, maximum); sh_hir_put(&mut output, diagnostic.severity, maximum); sh_hir_put(&mut output, diagnostic.node, maximum); sh_hir_put(&mut output, diagnostic.start, maximum); sh_hir_put(&mut output, diagnostic.end, maximum); sh_hir_put(&mut output, diagnostic.expected, maximum); sh_hir_put(&mut output, diagnostic.actual, maximum); index = index + 1; };
+    sh_hir_put(&mut output, 22, maximum);
+    sh_hir_put(&mut output, hir.ownership.diagnostics.len(), maximum);
+    index = 0;
+    while output.error == 0 and index < hir.ownership.diagnostics.len() { let item = hir.ownership.diagnostics.get(index); sh_hir_put(&mut output, item.code, maximum); sh_hir_put(&mut output, item.severity, maximum); sh_hir_put(&mut output, item.node, maximum); sh_hir_put(&mut output, item.start, maximum); sh_hir_put(&mut output, item.end, maximum); sh_hir_put(&mut output, item.expected, maximum); sh_hir_put(&mut output, item.actual, maximum); index = index + 1; };
     sh_hir_put_vector(&mut output, &hir.ownership.actions, maximum);
     sh_hir_put_vector(&mut output, &hir.ownership.action_paths, maximum);
     sh_hir_put_vector(&mut output, &hir.ownership.paths, maximum);
+    sh_hir_put_vector(&mut output, &hir.ownership.state, maximum);
+    sh_hir_put_vector(&mut output, &hir.ownership.loans, maximum);
+    sh_hir_put_vector(&mut output, &hir.ownership.loan_parents, maximum);
+    sh_hir_put(&mut output, hir.ownership.access_mode, maximum);
+    sh_hir_put_vector(&mut output, &hir.ownership.last_uses, maximum);
+    sh_hir_put_vector(&mut output, &hir.ownership.loops, maximum);
+    sh_hir_put_vector(&mut output, &hir.ownership.definitions, maximum);
+    sh_hir_put_vector(&mut output, &hir.ownership.contracts, maximum);
+    sh_hir_put(&mut output, hir.ownership.projection_context, maximum);
+    sh_hir_put_vector(&mut output, &hir.ownership.try_scopes, maximum);
+    sh_hir_put(&mut output, hir.ownership.error, maximum);
+    sh_hir_put(&mut output, hir.ownership.start, maximum);
+    sh_hir_put(&mut output, hir.ownership.end, maximum);
+    sh_hir_put(&mut output, hir.ownership.limit, maximum);
+    sh_hir_put(&mut output, hir.ownership.function, maximum);
+    sh_hir_put(&mut output, hir.ownership.scope, maximum);
+    sh_hir_put(&mut output, hir.ownership.flow, maximum);
+    sh_hir_put(&mut output, hir.ownership.depth, maximum);
+    let origin_image = sh_hir_origins_encode(&hir.origins, maximum);
+    if origin_image.error != 0 { output.error = origin_image.error; return output; };
+    sh_hir_put_vector(&mut output, &origin_image.words, maximum);
     output;
 }
 
@@ -327,8 +382,15 @@ def sh_hir_decode(words: &Vec<i64>, maximum: i64) -> ShHir {
     let pointer = sh_hir_take(&mut reader);
     let limit = sh_hir_take(&mut reader);
     let root = sh_hir_take(&mut reader);
-    if magic != 1397180489 or schema != 5 or target != 1 or abi != 1 or pointer != 64 or limit < 0 or limit > 100000 or maximum < 0 or maximum > 4000000 { reader.error = 5502; };
+    if magic != 1397180489 or schema != 6 or target != 1 or abi != 1 or pointer != 64 or limit < 0 or limit > 100000 or maximum < 0 or maximum > 4000000 { reader.error = 5502; };
     if reader.error != 0 { let mut failed = sh_hir_empty(0); failed.error = reader.error; return failed; };
+    let hir_error = sh_hir_take(&mut reader);
+    let hir_start = sh_hir_take(&mut reader);
+    let hir_end = sh_hir_take(&mut reader);
+    if hir_error != 0 { reader.error = 5502; };
+    let types_limit = sh_hir_take(&mut reader);
+    let symbols_limit = sh_hir_take(&mut reader);
+    if types_limit < 0 or types_limit > 1000000 or symbols_limit < 0 or symbols_limit > 1000000 { reader.error = 5501; };
     let source = sh_hir_take_text(&mut reader, limit * 128);
     let ast_words = sh_hir_take_vector(&mut reader, limit * 8);
     let ast_edges = sh_hir_take_vector(&mut reader, limit * 8);
@@ -349,7 +411,7 @@ def sh_hir_decode(words: &Vec<i64>, maximum: i64) -> ShHir {
     let class_parents = sh_hir_take_vector(&mut reader, limit * 8);
     let propagation = sh_hir_take_vector(&mut reader, limit * 8);
     let loop_values = sh_hir_take_vector(&mut reader, limit * 8);
-    let symbols = sh_symbols_new(limit);
+    let symbols = sh_symbols_new(symbols_limit);
     let names = sh_hir_take(&mut reader);
     let mut index = 0;
     if names < 0 or names > limit { reader.error = 5501; };
@@ -378,13 +440,298 @@ def sh_hir_decode(words: &Vec<i64>, maximum: i64) -> ShHir {
     if diagnostic_count < 0 or diagnostic_count > limit { reader.error = 5501; };
     index = 0;
     while reader.error == 0 and index < diagnostic_count { let c_d_code = sh_hir_take(&mut reader); let c_d_severity = sh_hir_take(&mut reader); let c_d_node = sh_hir_take(&mut reader); let c_d_start = sh_hir_take(&mut reader); let c_d_end = sh_hir_take(&mut reader); let c_d_expected = sh_hir_take(&mut reader); let c_d_actual = sh_hir_take(&mut reader); let diagnostic = ShDiagnostic { code: c_d_code, severity: c_d_severity, node: c_d_node, start: c_d_start, end: c_d_end, expected: c_d_expected, actual: c_d_actual }; if not diagnostics.push(diagnostic) { reader.error = 5501; }; index = index + 1; };
-    let ownership_actions = sh_hir_take_vector(&mut reader, limit * 8);
-    let ownership_action_paths = sh_hir_take_vector(&mut reader, limit * 8);
-    let ownership_paths = sh_hir_take_vector(&mut reader, limit * 8);
+    let ownership_fields = sh_hir_take(&mut reader);
+    if ownership_fields != 22 { reader.error = 5502; };
+    let owned_diagnostics: Vec<ShDiagnostic> = vec_new();
+    let owned_diagnostics_count = sh_hir_take(&mut reader);
+    if owned_diagnostics_count < 0 or owned_diagnostics_count > limit { reader.error = 5501; };
+    index = 0;
+    while reader.error == 0 and index < owned_diagnostics_count { let code = sh_hir_take(&mut reader); let severity = sh_hir_take(&mut reader); let node = sh_hir_take(&mut reader); let start = sh_hir_take(&mut reader); let end = sh_hir_take(&mut reader); let expected = sh_hir_take(&mut reader); let actual = sh_hir_take(&mut reader); let item = ShDiagnostic { code: code, severity: severity, node: node, start: start, end: end, expected: expected, actual: actual }; if not owned_diagnostics.push(item) { reader.error = 5501; }; index = index + 1; };
+    let owned_actions = sh_hir_take_vector(&mut reader, 4000000);
+    let owned_action_paths = sh_hir_take_vector(&mut reader, 4000000);
+    let owned_paths = sh_hir_take_vector(&mut reader, 4000000);
+    let owned_state = sh_hir_take_vector(&mut reader, 4000000);
+    let owned_loans = sh_hir_take_vector(&mut reader, 4000000);
+    let owned_loan_parents = sh_hir_take_vector(&mut reader, 4000000);
+    let owned_access_mode = sh_hir_take(&mut reader);
+    let owned_last_uses = sh_hir_take_vector(&mut reader, 4000000);
+    let owned_loops = sh_hir_take_vector(&mut reader, 4000000);
+    let owned_definitions = sh_hir_take_vector(&mut reader, 4000000);
+    let owned_contracts = sh_hir_take_vector(&mut reader, 4000000);
+    let owned_projection_context = sh_hir_take(&mut reader);
+    let owned_try_scopes = sh_hir_take_vector(&mut reader, 4000000);
+    let owned_error = sh_hir_take(&mut reader);
+    let owned_start = sh_hir_take(&mut reader);
+    let owned_end = sh_hir_take(&mut reader);
+    let owned_limit = sh_hir_take(&mut reader);
+    let owned_function = sh_hir_take(&mut reader);
+    let owned_scope = sh_hir_take(&mut reader);
+    let owned_flow = sh_hir_take(&mut reader);
+    let owned_depth = sh_hir_take(&mut reader);
+    let origin_words = sh_hir_take_vector(&mut reader, 4000000);
+    let origins = sh_hir_origins_decode(&origin_words, 4000000);
+    if reader.error == 0 and origins.error != 0 { reader.error = origins.error; };
     if reader.position != reader.words.len() { reader.error = 5502; };
-    let checked = ShChecked { types: ShTypes { words: types_words, arguments: types_arguments, limit: limit }, symbols: symbols, node_types: node_types, resolution: resolution, call_types: call_types, deferred_types: deferred_types, builtin_calls: builtin_calls, node_scopes: node_scopes, bindings: bindings, scopes: scopes, diagnostics: diagnostics, substitutions: substitutions, generic_parameters: generic_parameters, constraints: constraints, trait_types: trait_types, class_parents: class_parents, propagation: propagation, loop_values: loop_values, async_depth: c_async_depth, unsafe_depth: c_unsafe_depth, error: c_error, start: c_start, end: c_end, diagnostic_limit: c_diagnostic_limit, current_scope: c_current_scope, current_owner: c_current_owner, current_return: c_current_return, loop_depth: c_loop_depth, depth: c_depth, unit_type: c_unit_type, bool_type: c_bool_type, integer_type: c_integer_type, float_type: c_float_type, char_type: c_char_type, str_type: c_str_type, never_type: c_never_type, error_type: c_error_type };
-    let ownership = sh_ownership_from_facts(ownership_actions, ownership_action_paths, ownership_paths, if limit > 0 { limit; } else { 1; });
-    let mut hir = ShHir { schema: schema, target: target, runtime_abi: abi, pointer_width: pointer, limit: limit, source: source, ast: ShAst { words: ast_words, edges: ast_edges, root: root }, checked: checked, ownership: ownership, error: reader.error, start: 0, end: 0 };
+    let checked = ShChecked { types: ShTypes { words: types_words, arguments: types_arguments, limit: types_limit }, symbols: symbols, node_types: node_types, resolution: resolution, call_types: call_types, deferred_types: deferred_types, builtin_calls: builtin_calls, node_scopes: node_scopes, bindings: bindings, scopes: scopes, diagnostics: diagnostics, substitutions: substitutions, generic_parameters: generic_parameters, constraints: constraints, trait_types: trait_types, class_parents: class_parents, propagation: propagation, loop_values: loop_values, async_depth: c_async_depth, unsafe_depth: c_unsafe_depth, error: c_error, start: c_start, end: c_end, diagnostic_limit: c_diagnostic_limit, current_scope: c_current_scope, current_owner: c_current_owner, current_return: c_current_return, loop_depth: c_loop_depth, depth: c_depth, unit_type: c_unit_type, bool_type: c_bool_type, integer_type: c_integer_type, float_type: c_float_type, char_type: c_char_type, str_type: c_str_type, never_type: c_never_type, error_type: c_error_type };
+    let ownership = ShOwnership { diagnostics: owned_diagnostics, actions: owned_actions, action_paths: owned_action_paths, paths: owned_paths, state: owned_state, loans: owned_loans, loan_parents: owned_loan_parents, access_mode: owned_access_mode, last_uses: owned_last_uses, loops: owned_loops, definitions: owned_definitions, contracts: owned_contracts, projection_context: owned_projection_context, try_scopes: owned_try_scopes, error: owned_error, start: owned_start, end: owned_end, limit: owned_limit, function: owned_function, scope: owned_scope, flow: owned_flow, depth: owned_depth };
+    let mut hir = ShHir { schema: schema, target: target, runtime_abi: abi, pointer_width: pointer, limit: limit, source: source, ast: ShAst { words: ast_words, edges: ast_edges, root: root }, checked: checked, ownership: ownership, origins: origins, error: if reader.error != 0 { reader.error; } else { hir_error; }, start: hir_start, end: hir_end };
     if hir.error == 0 { hir.error = sh_hir_validate(&hir); };
     hir;
+}
+
+def sh_hir_input_budget(text: &String, ast: &ShAst, checked: &ShChecked, ownership: &ShOwnership, origins: &ShHirOrigins, limit: i64, additional: i64, maximum: i64) -> i64 {
+    if maximum < 0 or maximum > 4000000 { return 5501; };
+    if limit < 0 or limit > 100000 { return 5501; };
+    if checked.types.limit < 0 or checked.types.limit > 1000000 or checked.symbols.limit < 0 or checked.symbols.limit > 1000000 or sh_type_count(&checked.types) > limit or sh_symbol_count(&checked.symbols) > limit or text.len() > limit * 128 or ownership.limit < 1 or ownership.limit > 1000000 { return 5501; };
+    let mut total = 78;
+    let source_utf8 = sh_ho_text_count(text);
+    if not source_utf8.is_ok() { return source_utf8.error; };
+    if not sh_ho_add_budget(&mut total, source_utf8.value, maximum) { return 5501; };
+    if not sh_ho_add_budget(&mut total, checked.node_types.len(), maximum) { return 5501; };
+    if not sh_ho_add_budget(&mut total, checked.call_types.len(), maximum) { return 5501; };
+    if not sh_ho_add_budget(&mut total, checked.deferred_types.len(), maximum) { return 5501; };
+    if not sh_ho_add_budget(&mut total, checked.builtin_calls.len(), maximum) { return 5501; };
+    if not sh_ho_add_budget(&mut total, checked.resolution.len(), maximum) { return 5501; };
+    if not sh_ho_add_budget(&mut total, checked.node_scopes.len(), maximum) { return 5501; };
+    if not sh_ho_add_budget(&mut total, checked.bindings.len(), maximum) { return 5501; };
+    if not sh_ho_add_budget(&mut total, checked.scopes.len(), maximum) { return 5501; };
+    if checked.diagnostics.len() > limit or not sh_ho_add_budget(&mut total, checked.diagnostics.len() * 7, maximum) { return 5501; };
+    if not sh_ho_add_budget(&mut total, checked.substitutions.len(), maximum) { return 5501; };
+    if not sh_ho_add_budget(&mut total, checked.generic_parameters.len(), maximum) { return 5501; };
+    if not sh_ho_add_budget(&mut total, checked.constraints.len(), maximum) { return 5501; };
+    if not sh_ho_add_budget(&mut total, checked.trait_types.len(), maximum) { return 5501; };
+    if not sh_ho_add_budget(&mut total, checked.class_parents.len(), maximum) { return 5501; };
+    if not sh_ho_add_budget(&mut total, checked.propagation.len(), maximum) { return 5501; };
+    if not sh_ho_add_budget(&mut total, checked.loop_values.len(), maximum) { return 5501; };
+    if ownership.diagnostics.len() > limit or not sh_ho_add_budget(&mut total, ownership.diagnostics.len() * 7, maximum) { return 5501; };
+    if not sh_ho_add_budget(&mut total, ownership.actions.len(), maximum) { return 5501; };
+    if not sh_ho_add_budget(&mut total, ownership.action_paths.len(), maximum) { return 5501; };
+    if not sh_ho_add_budget(&mut total, ownership.paths.len(), maximum) { return 5501; };
+    if not sh_ho_add_budget(&mut total, ownership.state.len(), maximum) { return 5501; };
+    if not sh_ho_add_budget(&mut total, ownership.loans.len(), maximum) { return 5501; };
+    if not sh_ho_add_budget(&mut total, ownership.loan_parents.len(), maximum) { return 5501; };
+    if not sh_ho_add_budget(&mut total, ownership.last_uses.len(), maximum) { return 5501; };
+    if not sh_ho_add_budget(&mut total, ownership.loops.len(), maximum) { return 5501; };
+    if not sh_ho_add_budget(&mut total, ownership.definitions.len(), maximum) { return 5501; };
+    if not sh_ho_add_budget(&mut total, ownership.contracts.len(), maximum) { return 5501; };
+    if not sh_ho_add_budget(&mut total, ownership.try_scopes.len(), maximum) { return 5501; };
+    if not sh_ho_add_budget(&mut total, ast.words.len(), maximum) { return 5501; };
+    if not sh_ho_add_budget(&mut total, ast.edges.len(), maximum) { return 5501; };
+    if not sh_ho_add_budget(&mut total, checked.types.words.len(), maximum) { return 5501; };
+    if not sh_ho_add_budget(&mut total, checked.types.arguments.len(), maximum) { return 5501; };
+    let mut i = 0;
+    while i < sh_symbol_count(&checked.symbols) { let label = sh_symbol_text(&checked.symbols, i); if not label.is_ok() { return 5504; }; if label.value.len() > limit * 128 { return 5501; }; let utf8 = sh_ho_text_count(&label.value); if not utf8.is_ok() { return utf8.error; }; if not sh_ho_add_budget(&mut total, utf8.value + 2, maximum) { return 5501; }; i = i + 1; };
+    let payload = sh_hir_origins_word_count(origins);
+    if not payload.is_ok() { return payload.error; };
+    if not sh_ho_add_budget(&mut total, payload.value, maximum) { return 5501; };
+    if not sh_ho_add_budget(&mut total, additional, maximum) { return 5501; };
+    0;
+}
+
+def sh_hir_budget(hir: &ShHir) -> i64 {
+    sh_hir_input_budget(&hir.source, &hir.ast, &hir.checked, &hir.ownership, &hir.origins, hir.limit, 0, 4000000);
+}
+
+def sh_hir_ownership_copy(input: &ShOwnership, limit: i64, error: &mut i64) -> ShOwnership {
+    let copied_diagnostics = sh_hir_diagnostics(&input.diagnostics, limit, error);
+    let copied_actions = sh_hir_words(&input.actions, 4000000, error);
+    let copied_action_paths = sh_hir_words(&input.action_paths, 4000000, error);
+    let copied_paths = sh_hir_words(&input.paths, 4000000, error);
+    let copied_state = sh_hir_words(&input.state, 4000000, error);
+    let copied_loans = sh_hir_words(&input.loans, 4000000, error);
+    let copied_loan_parents = sh_hir_words(&input.loan_parents, 4000000, error);
+    let copied_last_uses = sh_hir_words(&input.last_uses, 4000000, error);
+    let copied_loops = sh_hir_words(&input.loops, 4000000, error);
+    let copied_definitions = sh_hir_words(&input.definitions, 4000000, error);
+    let copied_contracts = sh_hir_words(&input.contracts, 4000000, error);
+    let copied_try_scopes = sh_hir_words(&input.try_scopes, 4000000, error);
+    ShOwnership { diagnostics: copied_diagnostics, actions: copied_actions, action_paths: copied_action_paths, paths: copied_paths, state: copied_state, loans: copied_loans, loan_parents: copied_loan_parents, access_mode: input.access_mode, last_uses: copied_last_uses, loops: copied_loops, definitions: copied_definitions, contracts: copied_contracts, projection_context: input.projection_context, try_scopes: copied_try_scopes, error: input.error, start: input.start, end: input.end, limit: input.limit, function: input.function, scope: input.scope, flow: input.flow, depth: input.depth };
+}
+
+def sh_hir_checked_equal(left: &ShChecked, right: &ShChecked) -> bool {
+    if left.types.limit != right.types.limit or not sh_o_equal(&left.types.words, &right.types.words) or not sh_o_equal(&left.types.arguments, &right.types.arguments) { return false; };
+    if left.symbols.limit != right.symbols.limit or sh_symbol_count(&left.symbols) != sh_symbol_count(&right.symbols) { return false; };
+    let mut symbol = 0;
+    while symbol < sh_symbol_count(&left.symbols) { let a = sh_symbol_text(&left.symbols, symbol); let b = sh_symbol_text(&right.symbols, symbol); if not a.is_ok() or not b.is_ok() or a.value.as_str() != b.value.as_str() { return false; }; symbol = symbol + 1; };
+    if not sh_o_equal(&left.node_types, &right.node_types) { return false; };
+    if not sh_o_equal(&left.call_types, &right.call_types) { return false; };
+    if not sh_o_equal(&left.deferred_types, &right.deferred_types) { return false; };
+    if not sh_o_equal(&left.builtin_calls, &right.builtin_calls) { return false; };
+    if not sh_o_equal(&left.resolution, &right.resolution) { return false; };
+    if not sh_o_equal(&left.node_scopes, &right.node_scopes) { return false; };
+    if not sh_o_equal(&left.bindings, &right.bindings) { return false; };
+    if not sh_o_equal(&left.scopes, &right.scopes) { return false; };
+    if left.diagnostics.len() != right.diagnostics.len() { return false; };
+    let mut i = 0;
+    while i < left.diagnostics.len() { let a = left.diagnostics.get(i); let b = right.diagnostics.get(i); if a.code != b.code or a.severity != b.severity or a.node != b.node or a.start != b.start or a.end != b.end or a.expected != b.expected or a.actual != b.actual { return false; }; i = i + 1; };
+    if not sh_o_equal(&left.substitutions, &right.substitutions) { return false; };
+    if not sh_o_equal(&left.generic_parameters, &right.generic_parameters) { return false; };
+    if not sh_o_equal(&left.constraints, &right.constraints) { return false; };
+    if not sh_o_equal(&left.trait_types, &right.trait_types) { return false; };
+    if not sh_o_equal(&left.class_parents, &right.class_parents) { return false; };
+    if not sh_o_equal(&left.propagation, &right.propagation) { return false; };
+    if not sh_o_equal(&left.loop_values, &right.loop_values) { return false; };
+    if left.async_depth != right.async_depth { return false; };
+    if left.unsafe_depth != right.unsafe_depth { return false; };
+    if left.error != right.error { return false; };
+    if left.start != right.start { return false; };
+    if left.end != right.end { return false; };
+    if left.diagnostic_limit != right.diagnostic_limit { return false; };
+    if left.current_scope != right.current_scope { return false; };
+    if left.current_owner != right.current_owner { return false; };
+    if left.current_return != right.current_return { return false; };
+    if left.loop_depth != right.loop_depth { return false; };
+    if left.depth != right.depth { return false; };
+    if left.unit_type != right.unit_type { return false; };
+    if left.bool_type != right.bool_type { return false; };
+    if left.integer_type != right.integer_type { return false; };
+    if left.float_type != right.float_type { return false; };
+    if left.char_type != right.char_type { return false; };
+    if left.str_type != right.str_type { return false; };
+    if left.never_type != right.never_type { return false; };
+    if left.error_type != right.error_type { return false; };
+    true;
+}
+
+def sh_hir_ownership_equal(left: &ShOwnership, right: &ShOwnership) -> bool {
+    if left.diagnostics.len() != right.diagnostics.len() { return false; };
+    let mut i = 0;
+    while i < left.diagnostics.len() { let a = left.diagnostics.get(i); let b = right.diagnostics.get(i); if a.code != b.code or a.severity != b.severity or a.node != b.node or a.start != b.start or a.end != b.end or a.expected != b.expected or a.actual != b.actual { return false; }; i = i + 1; };
+    if not sh_o_equal(&left.actions, &right.actions) { return false; };
+    if not sh_o_equal(&left.action_paths, &right.action_paths) { return false; };
+    if not sh_o_equal(&left.paths, &right.paths) { return false; };
+    if not sh_o_equal(&left.state, &right.state) { return false; };
+    if not sh_o_equal(&left.loans, &right.loans) { return false; };
+    if not sh_o_equal(&left.loan_parents, &right.loan_parents) { return false; };
+    if left.access_mode != right.access_mode { return false; };
+    if not sh_o_equal(&left.last_uses, &right.last_uses) { return false; };
+    if not sh_o_equal(&left.loops, &right.loops) { return false; };
+    if not sh_o_equal(&left.definitions, &right.definitions) { return false; };
+    if not sh_o_equal(&left.contracts, &right.contracts) { return false; };
+    if left.projection_context != right.projection_context { return false; };
+    if not sh_o_equal(&left.try_scopes, &right.try_scopes) { return false; };
+    if left.error != right.error { return false; };
+    if left.start != right.start { return false; };
+    if left.end != right.end { return false; };
+    if left.limit != right.limit { return false; };
+    if left.function != right.function { return false; };
+    if left.scope != right.scope { return false; };
+    if left.flow != right.flow { return false; };
+    if left.depth != right.depth { return false; };
+    true;
+}
+
+def sh_hir_lift_modules(graph: &ShModules, analyzed: &ShModuleChecked, actual_ownership: &ShOwnership, input: &ShHirOrigins, identity: &str, digest: &str, prototype: &str, option_identity: &str, option_digest: &str, limit: i64) -> ShHir {
+    let mut failed = sh_hir_empty(limit);
+    if limit < 0 or limit > 100000 { failed.error = 5501; return failed; };
+    if graph.error != 0 or analyzed.error != 0 or analyzed.front.error != 0 or analyzed.checked.error != 0 { failed.error = 5509; return failed; };
+    let owner_words = sh_hir_ownership_word_count(actual_ownership);
+    if not owner_words.is_ok() { failed.error = owner_words.error; return failed; };
+    let input_budget = sh_hir_input_budget(&analyzed.front.expanded.text, &analyzed.front.parsed.ast, &analyzed.checked, actual_ownership, input, limit, owner_words.value + 1, 4000000);
+    if input_budget != 0 { failed.error = input_budget; return failed; };
+    let candidate = sh_hir_origins_module_candidate_site(graph, analyzed);
+    if input.present == 0 and candidate >= 0 { failed.error = 5008; failed.start = sh_ast_word(&analyzed.front.parsed.ast, candidate, 2); failed.end = sh_ast_word(&analyzed.front.parsed.ast, candidate, 3); return failed; };
+    let validation = sh_hir_origins_validate(input, graph, analyzed, identity, digest, prototype, option_identity, option_digest);
+    if validation != 0 { failed.error = validation; return failed; };
+    let owner_image = sh_hir_ownership_input(actual_ownership);
+    if owner_image.error != 0 { failed.error = owner_image.error; return failed; };
+    let joined = sh_hir_origins_module_input(graph, analyzed, 4000000);
+    if joined.error != 0 { failed.error = joined.error; return failed; };
+    let mut witness = ShHirOriginsImage { words: joined.words, error: 0 };
+    sh_ho_put_vector(&mut witness, &owner_image.words, 4000000);
+    if witness.error != 0 { failed.error = witness.error; return failed; };
+    let budget = sh_hir_input_budget(&analyzed.front.expanded.text, &analyzed.front.parsed.ast, &analyzed.checked, actual_ownership, input, limit, owner_image.words.len() + 1, 4000000);
+    if budget != 0 { failed.error = budget; return failed; };
+    let mut error = 0;
+    let copied_source = analyzed.front.expanded.text.clone();
+    if not copied_source.is_ok() { failed.error = 5501; return failed; };
+    let copied_ast_words = sh_hir_words(&analyzed.front.parsed.ast.words, limit * 8, &mut error);
+    let copied_ast_edges = sh_hir_words(&analyzed.front.parsed.ast.edges, limit * 8, &mut error);
+    let copied_checked = sh_hir_snapshot_checked(&analyzed.checked, limit, &mut error);
+    let copied_ownership = sh_hir_ownership_copy(actual_ownership, limit, &mut error);
+    let mut copied_origins = sh_hir_origins_clone(input, 4000000);
+    copied_origins.module_input = witness.words;
+    let mut hir = ShHir { schema: 6, target: 1, runtime_abi: 1, pointer_width: 64, limit: limit, source: copied_source.value, ast: ShAst { words: copied_ast_words, edges: copied_ast_edges, root: analyzed.front.parsed.ast.root }, checked: copied_checked, ownership: copied_ownership, origins: copied_origins, error: error, start: 0, end: 0 };
+    if hir.error == 0 { hir.error = sh_hir_validate(&hir); };
+    hir;
+}
+
+def sh_hir_validate_modules(hir: &ShHir, graph: &ShModules, analyzed: &ShModuleChecked, actual_ownership: &ShOwnership, identity: &str, digest: &str, prototype: &str, option_identity: &str, option_digest: &str) -> i64 {
+    let structural = sh_hir_validate(hir);
+    if structural != 0 { return structural; };
+    if hir.source.as_str() != analyzed.front.expanded.text.as_str() or hir.ast.root != analyzed.front.parsed.ast.root or not sh_o_equal(&hir.ast.words, &analyzed.front.parsed.ast.words) or not sh_o_equal(&hir.ast.edges, &analyzed.front.parsed.ast.edges) or not sh_hir_checked_equal(&hir.checked, &analyzed.checked) or not sh_hir_ownership_equal(&hir.ownership, actual_ownership) { return 5509; };
+    if hir.origins.present == 0 and sh_hir_origins_module_candidate_site(graph, analyzed) >= 0 { return 5008; };
+    let actual_witness = sh_hir_origins_module_input(graph, analyzed, 4000000);
+    if actual_witness.error != 0 { return actual_witness.error; };
+    let actual_owner = sh_hir_ownership_input(actual_ownership);
+    if actual_owner.error != 0 { return actual_owner.error; };
+    let mut witness = ShHirOriginsImage { words: actual_witness.words, error: 0 };
+    sh_ho_put_vector(&mut witness, &actual_owner.words, 4000000);
+    if witness.error != 0 { return witness.error; };
+    if not sh_o_equal(&hir.origins.module_input, &witness.words) { return 5509; };
+    if hir.origins.present == 0 { return 0; };
+    let origins = sh_origins_validate(&hir.origins.origins, graph, analyzed, identity, digest, prototype);
+    if origins != 0 { return origins; };
+    sh_loans_validate(&hir.origins.loans, &hir.origins.origins, graph, analyzed, identity, digest, prototype, option_identity, option_digest);
+}
+
+def sh_hir_clone(input: &ShHir, maximum: i64) -> ShHir {
+    let mut error = sh_hir_input_budget(&input.source, &input.ast, &input.checked, &input.ownership, &input.origins, input.limit, 0, maximum);
+    let origins_budget = sh_ho_budget(&input.origins, maximum);
+    if origins_budget != 0 { error = origins_budget; };
+    if maximum < 0 or maximum > 4000000 { error = 5501; };
+    if error != 0 { let mut failed = sh_hir_empty(0); failed.error = error; return failed; };
+    let copied_source = sh_ho_copy_text(&input.source, maximum, &mut error);
+    let copied_words = sh_hir_words(&input.ast.words, maximum, &mut error);
+    let copied_edges = sh_hir_words(&input.ast.edges, maximum, &mut error);
+    let copied_checked = sh_hir_snapshot_checked(&input.checked, input.limit, &mut error);
+    let copied_ownership = sh_hir_ownership_copy(&input.ownership, input.limit, &mut error);
+    let copied_origins = sh_hir_origins_clone(&input.origins, maximum);
+    ShHir { schema: input.schema, target: input.target, runtime_abi: input.runtime_abi, pointer_width: input.pointer_width, limit: input.limit, source: copied_source, ast: ShAst { words: copied_words, edges: copied_edges, root: input.ast.root }, checked: copied_checked, ownership: copied_ownership, origins: copied_origins, error: if error != 0 { error; } else { input.error; }, start: input.start, end: input.end };
+}
+
+def sh_hir_ownership_word_count(input: &ShOwnership) -> Result<i64, i64> {
+    let mut total = 22;
+    if input.diagnostics.len() > 100000 or not sh_ho_add_budget(&mut total, input.diagnostics.len() * 7, 4000000) { return sh_i64_error(5501); };
+    if not sh_ho_add_budget(&mut total, input.actions.len(), 4000000) { return sh_i64_error(5501); };
+    if not sh_ho_add_budget(&mut total, input.action_paths.len(), 4000000) { return sh_i64_error(5501); };
+    if not sh_ho_add_budget(&mut total, input.paths.len(), 4000000) { return sh_i64_error(5501); };
+    if not sh_ho_add_budget(&mut total, input.state.len(), 4000000) { return sh_i64_error(5501); };
+    if not sh_ho_add_budget(&mut total, input.loans.len(), 4000000) { return sh_i64_error(5501); };
+    if not sh_ho_add_budget(&mut total, input.loan_parents.len(), 4000000) { return sh_i64_error(5501); };
+    if not sh_ho_add_budget(&mut total, input.last_uses.len(), 4000000) { return sh_i64_error(5501); };
+    if not sh_ho_add_budget(&mut total, input.loops.len(), 4000000) { return sh_i64_error(5501); };
+    if not sh_ho_add_budget(&mut total, input.definitions.len(), 4000000) { return sh_i64_error(5501); };
+    if not sh_ho_add_budget(&mut total, input.contracts.len(), 4000000) { return sh_i64_error(5501); };
+    if not sh_ho_add_budget(&mut total, input.try_scopes.len(), 4000000) { return sh_i64_error(5501); };
+    sh_i64_ok(total);
+}
+
+def sh_hir_ownership_input(input: &ShOwnership) -> ShHirOriginsImage {
+    let mut output = ShHirOriginsImage { words: vec_new_i64(), error: 0 };
+    sh_ho_put(&mut output, input.diagnostics.len(), 4000000);
+    let mut i = 0;
+    while output.error == 0 and i < input.diagnostics.len() { let d = input.diagnostics.get(i); sh_ho_put(&mut output, d.code, 4000000); sh_ho_put(&mut output, d.severity, 4000000); sh_ho_put(&mut output, d.node, 4000000); sh_ho_put(&mut output, d.start, 4000000); sh_ho_put(&mut output, d.end, 4000000); sh_ho_put(&mut output, d.expected, 4000000); sh_ho_put(&mut output, d.actual, 4000000); i = i + 1; };
+    sh_ho_put_vector(&mut output, &input.actions, 4000000);
+    sh_ho_put_vector(&mut output, &input.action_paths, 4000000);
+    sh_ho_put_vector(&mut output, &input.paths, 4000000);
+    sh_ho_put_vector(&mut output, &input.state, 4000000);
+    sh_ho_put_vector(&mut output, &input.loans, 4000000);
+    sh_ho_put_vector(&mut output, &input.loan_parents, 4000000);
+    sh_ho_put(&mut output, input.access_mode, 4000000);
+    sh_ho_put_vector(&mut output, &input.last_uses, 4000000);
+    sh_ho_put_vector(&mut output, &input.loops, 4000000);
+    sh_ho_put_vector(&mut output, &input.definitions, 4000000);
+    sh_ho_put_vector(&mut output, &input.contracts, 4000000);
+    sh_ho_put(&mut output, input.projection_context, 4000000);
+    sh_ho_put_vector(&mut output, &input.try_scopes, 4000000);
+    sh_ho_put(&mut output, input.error, 4000000);
+    sh_ho_put(&mut output, input.start, 4000000);
+    sh_ho_put(&mut output, input.end, 4000000);
+    sh_ho_put(&mut output, input.limit, 4000000);
+    sh_ho_put(&mut output, input.function, 4000000);
+    sh_ho_put(&mut output, input.scope, 4000000);
+    sh_ho_put(&mut output, input.flow, 4000000);
+    sh_ho_put(&mut output, input.depth, 4000000);
+    output;
 }
