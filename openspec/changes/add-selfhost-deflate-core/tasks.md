@@ -186,3 +186,83 @@ The shared raw and Rust input closures were unchanged; their earlier 46- and
 10-command qualifications are consumed rather than falsely claimed to have
 been rerun. The old `567da8...` report remains the genuine pre-trim historical
 record and is not rewritten to qualify the new fixture bytes.
+## Bounded continuation increment
+
+- [x] Implement fixed 45,056-byte SG state and primitive memory-only adapters.
+- [x] Verify all block/tree/repeat/extra/match phases across single-byte and arbitrary input/output cuts.
+- [x] Verify exact/prefix consumption, sticky finish, zero buffers, reset/copy/dispose and invalid API no-access controls.
+- [x] Execute independent Python/Rust complete-output and malformed/history comparisons with guard pages.
+- [x] Qualify bounded peak state and source/native artifacts; record an honest prototype boundary.
+- [ ] Migrate old raw/prefix/gzip exports to the one shared core and rerun complete original raw/gzip gates.
+- [ ] Add SG gzip framing/CRC continuation and incremental tar/staging integration.
+
+### Continuation prototype exact-source evidence
+
+The new continuation core is separately qualified by
+`target/selfhost/runtime-deflate-stream-formal-04/evidence.json`, SHA256
+`7470038605a737782d84399768dea83d71bafe1837fc77bffa076c2b18dd59fb`.
+All 35 commands actually completed on Windows-11-10.0.26300-SP0 at identical
+start/end revision `7416bc9e95abb66fee8cf26a53ca58fcc8d008b5`. The 1,359
+source, 263 external-source, 44 tool and 88 artifact manifests all have empty
+change guards. Earlier failed qualification attempts (stage name and actual
+formatter/stack artifact-field assumptions) are retained without rewriting.
+
+Each instrumented and production executable completes the original 5,290
+independent raw fixtures, 17,337 schedule runs and 8,125,565 step calls.
+Schedules include one-byte input/one-byte output, fixed-seed independent
+chunk sizes, full-input bounded output, and every two-part input cut for
+accepted streams at most 64 bytes long. Results include 268,375 need-input
+and 7,839,510 need-output responses. Instrumentation records 18,229,227 ring
+reads only after an actual emitted byte initializes that history slot; init's
+zero fill does not grant initialized-history authority. Production history
+read counts are explicitly null. Input is read-only and ends at a guard page;
+the 45,056-byte state has guards on both sides, and each reused output chunk
+ends at a guard page. Output pointers change between different capacities.
+
+Protocol assertions additionally execute prefix consumption of exactly four
+bytes without reading following framing data, exact-tail rejection, waiting
+for final EOF, zero-capacity pending literals, sticky finish and unconsumed
+input retry, zero-input draining of a 258-byte overlapping match, bytewise
+inactive-state cloning with two independent completions, reset counts and
+history, zero-output null buffers, complete dispose erasure and fresh/failed/
+disposed query behavior. Eleven invalid API variants use null pointers and
+perform no state-word accesses. State/input/output pointers are not retained.
+
+The independent pinned miniz_oxide 0.8.9 report is
+`target/selfhost/deflate-stream-rust-02/evidence.json`, SHA256
+`343a6525b4669c289dc83a0b3080bb0f237b06f728d4ec7c134a09c521d21b88`.
+Seven actual commands build offline with locked repository dependency
+identities and cached source/archive byte verification, then execute every
+fixture. Its actual command/stdout is reparsed and compared with all declared
+IDs/results. The independent Python zlib oracle revalidates the complete
+original corpus. 528 valid/capacity-source outputs equal Rust output. Eighteen
+named differences remain explicit: two unused HDIST31/32 declarations that
+miniz rejects, two incomplete alphabets miniz accepts but SG/zlib reject, and
+three explicit plus eleven mutated trailing-byte streams that miniz accepts
+as prefixes while SG/zlib exact mode rejects. No compatibility rule is widened
+to hide these observations.
+
+Two fresh directories emit identical SG core/smoke objects, normalized leaf
+C memory/constant-data fixture objects and SG-linked PE bytes. Both empty-PATH
+cold executions return 42 with empty stdout/stderr; SG itself drives 259
+one-byte-output calls and checks 259 literal bytes and dispose erasure.
+The gate consumes the unchanged UTF-8 qualification's complete native,
+formatter, historical SG linker and explicit NTDLL stack-probe source/tool
+branch. It separately consumes the immutable raw corpus rather than claiming
+that old raw/gzip source qualifications were rerun or migrated. Actual C
+header closures and actual selected LLD/library inputs are bound.
+
+The persistent state is exactly 45,056 bytes; this is not a whole-process RSS
+claim. A read-only inspection of the actual SG object finds only the six
+memory adapter imports and __chkstk, with no heap/runtime-algorithm imports.
+The current seed backend allocates a fixed 45,104-byte step stack frame;
+tree/symbol/fixed helpers additionally use fixed 7,120/5,520/1,600-byte frames.
+Those native SSA temporary costs are separate from the persistent state and
+remain subject to later performance/RSS qualification. The decoder allocates
+no SG heap storage, and its storage does not grow with output length.
+
+The existing production `deflate.sg` and `gzip.sg` bytes are unchanged. This
+checkpoint does NOT claim a final single implementation across their old
+exports and the new prototype. Shared-core migration and complete raw46/
+gzip51 regressions are unchecked next steps, followed by real gzip/tar
+continuations and private staging/atomic publication.

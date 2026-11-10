@@ -1,5 +1,62 @@
 # Bounded raw stream decoder
 
+## Incremental implementation owner and transition
+
+`selfhost_core` owns the new SG continuation core and its subsequent shared
+raw/gzip integration. The first prototype is `runtime/deflate_stream.sg`;
+the qualified `deflate.sg` and `gzip.sg` remain unchanged until independent
+chunked proof and explicit source-freeze coordination. A prototype does not
+claim that the existing one-shot exports already use it. Final integration
+must remove the duplicate implementation path and rerun all existing raw and
+gzip qualifications before replacing those exports.
+
+### Caller-owned continuation ABI
+
+`init(state, extent, exact, input_limit, output_limit)` and `reset` initialize
+exactly 45,056 caller-owned bytes; no heap or external handle is allocated.
+`step(state, extent, input, length, output, capacity, finish)` returns 0
+need-input, 1 need-output, 2 finished, -1 malformed/truncated, -2 cumulative
+budget exhaustion, -3 invalid API extent/flag/field, or -4 uninitialized or
+invalid state. `query(state, extent, field)` gives last-call consumed/produced
+(0/1), cumulative consumed/produced (2/3), status (4), phase (5), or the fixed
+state byte size (6). `dispose` erases the fixed state and releases no allocation;
+the caller owns the memory. Unknown query fields and invalid extents reject
+before memory access. Fresh/failed/finished queries have explicit results.
+
+All C exports use primitive pointers/integers. The unsafe caller supplies
+readable/writable disjoint extents for state, input and output, no concurrent
+or reentrant access, and an intact opaque state produced by init/step. No
+input/output pointer is retained. Bytewise copying a valid inactive state is
+allowed and creates an independent decoding snapshot; there are no external
+handles to alias. Arbitrary corrupted state is not a serialization trust
+boundary, although all internal indexes, tree lengths, bits, matches and
+counters remain bounded before memory access.
+
+The state is 5,632 i64 words, with little-endian scalar memory access through
+a minimal C memory adapter. Header words [0,64) use 512 bytes; the 320 code
+lengths occupy words [64,384); literal, distance and code-length trees each
+use 305 words at [384,689), [689,994), [994,1299), comprising 16 counts,
+288 symbol slots and a used count. Tree-construction offsets use [1299,1315).
+The 32 KiB ring history starts at byte 10,520 and ends at byte 43,288; the
+remaining 1,768 bytes are reserved and zeroed. All word offsets are 8-byte
+aligned. State size and peak storage do not grow with stream output.
+
+Input budget is at most 64 MiB and output budget at most 512 MiB, cumulative
+counts rather than arenas. The later package consumer independently enforces
+256 MiB file content and a separate tar wire/metadata budget. A step may accept
+at most 64 MiB input/output extents; normal use supplies small chunks. A
+zero-length input may drain buffered symbols/matches, and zero capacity may
+parse only until a pending byte requires output; that byte remains in state.
+`finish` is sticky once asserted and subsequent calls must also assert it,
+including retries of unconsumed input after need-output. Need-input at final
+EOF becomes truncation. Prefix mode finishes at the final EOB's exact byte
+boundary without reading a following framing byte; exact mode waits for final
+EOF and rejects complete trailing bytes. Pending state includes partial
+Huffman symbols, repeats, extras and overlapping matches across calls.
+
+This stage does not implement gzip header/CRC continuation, incremental tar,
+staging or atomic publication. It does not widen existing raw/gzip arenas.
+
 Implement the raw format from [RFC 1951](https://www.rfc-editor.org/rfc/rfc1951),
 including stored, fixed and dynamic Huffman blocks, code-length repeats,
 length/distance extra bits, overlapping copies and history across blocks.

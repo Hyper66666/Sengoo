@@ -1,0 +1,60 @@
+extern "C" {
+    unsafe fn sengoo_sg_deflate_stream_init(state: * mut u8, extent: i64, exact: i64, input_limit: i64,
+    output_limit: i64) -> i64;
+    unsafe fn sengoo_sg_deflate_stream_step(state: * mut u8, extent: i64, source: * const u8, length: i64,
+    output: * mut u8, capacity: i64, finish: i64) -> i64;
+    unsafe fn sengoo_sg_deflate_stream_query(state: * mut u8, extent: i64, field: i64) -> i64;
+    unsafe fn sengoo_sg_deflate_stream_dispose(state: * mut u8, extent: i64) -> i64;
+    unsafe fn sengoo_ds_fixture_state() -> * mut u8;
+    unsafe fn sengoo_ds_fixture_output() -> * mut u8;
+    unsafe fn sengoo_ds_fixture_input(offset: i64) -> * const u8;
+    fn sengoo_ds_fixture_byte() -> u8;
+    fn sengoo_ds_fixture_state_byte(offset: i64) -> u8;
+}
+pub unsafe extern "C" fn main() -> i64 {
+    let state = sengoo_ds_fixture_state();
+    if sengoo_sg_deflate_stream_init(state, 45056, 1, 67108864, 536870912) != 0 {
+        return 1;
+    };
+    let mut consumed = 0;
+    let mut produced = 0;
+    let mut calls = 0;
+    loop {
+        let status = sengoo_sg_deflate_stream_step(state, 45056, sengoo_ds_fixture_input(consumed), 4 - consumed,
+        sengoo_ds_fixture_output(), 1, 1);
+        consumed = consumed + sengoo_sg_deflate_stream_query(state, 45056, 0);
+        let made = sengoo_sg_deflate_stream_query(state, 45056, 1);
+        if made == 1 and (sengoo_ds_fixture_byte() as i64) != 65 {
+            return 2;
+        };
+        if made < 0 or made > 1 {
+            return 3;
+        };
+        produced = produced + made;
+        calls = calls + 1;
+        if status == 2 {
+            break;
+        };
+        if status != 1 or calls > 260 {
+            return 4;
+        };
+    };
+    if consumed != 4 or produced != 259 or calls != 259 {
+        return 5;
+    };
+    if sengoo_sg_deflate_stream_query(state, 45056, 2) != 4 or sengoo_sg_deflate_stream_query(state,
+    45056, 3) != 259 {
+        return 6;
+    };
+    if sengoo_sg_deflate_stream_dispose(state, 45056) != 0 {
+        return 7;
+    };
+    let mut index = 0;
+    while index < 45056 {
+        if (sengoo_ds_fixture_state_byte(index) as i64) != 0 {
+            return 8;
+        };
+        index = index + 1;
+    };
+    42;
+}

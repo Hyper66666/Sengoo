@@ -1,5 +1,37 @@
 ## ADDED Requirements
 
+### Requirement: Incremental DEFLATE SHALL use fixed bounded SG continuation state
+
+The continuation decoder SHALL preserve bit, block, Huffman, repeat, match
+and 32 KiB history state in fixed caller-owned storage, retain no input/output
+pointer and implement all compression policy in SG. A minimal C adapter SHALL
+provide only primitive memory access. Init/reset/dispose SHALL allocate nothing.
+
+#### Scenario: Arbitrary input and output chunk cuts
+- **WHEN** a valid stored, fixed or dynamic stream is presented at arbitrary or single-byte cuts with independently bounded output chunks
+- **THEN** exact consumed/produced counters and need-input/need-output/finished states SHALL permit byte-identical completion
+- **AND** overlapping and cross-block references SHALL use only previously initialized ring history
+
+#### Scenario: Final input and output backpressure interact
+- **WHEN** finish is asserted with pending output, zero capacity or an incomplete symbol
+- **THEN** finish SHALL remain sticky across retries, pending bytes SHALL not be lost and final missing bits SHALL produce truncation
+- **AND** zero input SHALL still permit draining buffered matches
+
+#### Scenario: Exact and prefix completion remain distinct
+- **WHEN** final EOB is followed by unused padding bits and complete framing bytes
+- **THEN** prefix mode SHALL return the precise raw byte boundary without reading framing bytes
+- **AND** exact mode SHALL reject complete trailing bytes after final EOF is asserted
+
+#### Scenario: Invalid extents and state ownership
+- **WHEN** an invalid extent, flag or query field is supplied
+- **THEN** the call SHALL return its precise API error without accessing caller memory
+- **AND** documented reset/copy/dispose behavior SHALL not hide a heap allocation or external handle
+
+#### Scenario: Migration to the existing exports
+- **WHEN** the new continuation prototype passes its chunked gate
+- **THEN** this SHALL NOT by itself qualify replacement of the existing raw/gzip exports
+- **AND** their final shared-core migration SHALL require fresh complete raw and gzip regression qualifications
+
 ### Requirement: SG raw DEFLATE decoding SHALL support all defined block kinds
 
 The SG decoder SHALL implement stored, fixed and dynamic Huffman raw DEFLATE
