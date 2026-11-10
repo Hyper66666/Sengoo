@@ -1,0 +1,239 @@
+import selfhost_collection_provider;
+
+import selfhost_semantic_loan_liveness;
+
+struct ShCollectionHandles {
+    schema: i64,
+    limit: i64,
+    error: i64,
+    unlowerable: i64,
+    raw_next: i64,
+    module: i64,
+    coverage: Vec<i64>,
+    obligations: Vec<i64>,
+    receipts: Vec<i64>,
+    diagnostics: Vec<i64>,
+    provider_rows: Vec<i64>,
+    canonical: Vec<i64>,
+}
+
+def sh_ch_new(limit: i64) -> ShCollectionHandles {
+    ShCollectionHandles { schema: 1, limit: limit, error: 0, unlowerable: 1, raw_next: -1, module: -1, coverage: vec_new_i64(), obligations: vec_new_i64(), receipts: vec_new_i64(), diagnostics: vec_new_i64(), provider_rows: vec_new_i64(), canonical: vec_new_i64() };
+}
+
+def sh_ch_at(values: &Vec<i64>, row: i64, width: i64, field: i64) -> i64 {
+    sh_origin_word(values, row, width, field);
+}
+
+def sh_ch_diag(facts: &mut ShCollectionHandles, owner: i64, code: i64, node: i64, arg: i64, ty: i64) {
+    let mut row = 0;
+    while row < facts.diagnostics.len() / 5 { if sh_ch_at(&facts.diagnostics, row, 5, 0) == owner and sh_ch_at(&facts.diagnostics, row, 5, 1) == code and sh_ch_at(&facts.diagnostics, row, 5, 2) == node and sh_ch_at(&facts.diagnostics, row, 5, 3) == arg { return; }; row = row + 1; };
+    if facts.diagnostics.len() / 5 >= facts.limit or not (facts.diagnostics.push(owner) and facts.diagnostics.push(code) and facts.diagnostics.push(node) and facts.diagnostics.push(arg) and facts.diagnostics.push(ty)) { facts.error = 5950; };
+    ();
+}
+
+def sh_ch_owner(checked: &ShChecked, node: i64) -> i64 {
+    let mut scope = sh_node_scope(checked, node);
+    let mut depth = 0;
+    while scope >= 0 and depth < 128 { let owner = sh_scope_word(checked, scope, 1); let kind = sh_binding_word(checked, owner, 2); if kind == 2 or kind == 15 { return owner; }; scope = sh_scope_word(checked, scope, 0); depth = depth + 1; };
+    -1;
+}
+
+def sh_ch_param(checked: &ShChecked, function: i64, ordinal: i64) -> i64 {
+    let mut binding = 0;
+    while binding < sh_binding_count(checked) { if sh_binding_word(checked, binding, 2) == 1 and sh_binding_word(checked, binding, 6) == function and sh_binding_word(checked, binding, 7) == ordinal { return binding; }; binding = binding + 1; };
+    -1;
+}
+
+def sh_ch_unwrap(ast: &ShAst, node: i64) -> i64 {
+    let mut result = node;
+    let mut depth = 0;
+    while depth < 128 { let kind = sh_ast_word(ast, result, 0); if kind == 43 or kind == 40 and sh_ast_word(ast, result, 6) == 1 or kind == 58 and sh_ast_word(ast, result, 4) == 0 and sh_ast_word(ast, result, 6) == 1 { result = sh_ast_child(ast, result, 0); } else { return result; }; depth = depth + 1; };
+    -1;
+}
+
+def sh_ch_coverage(facts: &ShCollectionHandles, function: i64) -> i64 {
+    let mut row = 0;
+    while row < facts.coverage.len() / 8 { if sh_ch_at(&facts.coverage, row, 8, 0) == function { return row; }; row = row + 1; };
+    -1;
+}
+
+def sh_ch_cover(facts: &mut ShCollectionHandles, analyzed: &ShModuleChecked, function: i64, kind: i64, body: i64, complete: i64) {
+    if sh_ch_coverage(facts, function) >= 0 { return; };
+    if facts.coverage.len() / 8 >= facts.limit or not (facts.coverage.push(function) and facts.coverage.push(sh_binding_word(&analyzed.checked, function, 4)) and facts.coverage.push(sh_module_binding_source(analyzed, function)) and facts.coverage.push(kind) and facts.coverage.push(body) and facts.coverage.push(complete) and facts.coverage.push(0) and facts.coverage.push(1)) { facts.error = 5950; };
+    ();
+}
+
+def sh_ch_obligation(facts: &mut ShCollectionHandles, function: i64, parameter: i64, element: i64, site: i64, target: i64, role: i64, source: i64, provider: i64, guard: i64, kind: i64, ordinal: i64, signature: i64) -> i64 {
+    let mut row = 0;
+    while row < facts.obligations.len() / 12 { if sh_ch_at(&facts.obligations, row, 12, 0) == function and sh_ch_at(&facts.obligations, row, 12, 1) == parameter and sh_ch_at(&facts.obligations, row, 12, 2) == element and sh_ch_at(&facts.obligations, row, 12, 3) == site { return row; }; row = row + 1; };
+    row = facts.obligations.len() / 12;
+    if row >= facts.limit or not (facts.obligations.push(function) and facts.obligations.push(parameter) and facts.obligations.push(element) and facts.obligations.push(site) and facts.obligations.push(target) and facts.obligations.push(role) and facts.obligations.push(source) and facts.obligations.push(provider) and facts.obligations.push(guard) and facts.obligations.push(kind) and facts.obligations.push(ordinal) and facts.obligations.push(signature)) { facts.error = 5950; return -1; };
+    row;
+}
+
+def sh_ch_primitive(checked: &ShChecked, ty: i64) -> bool {
+    let actual = sh_s_resolve(checked, ty);
+    sh_s_kind(checked, actual) == 1 or sh_o_i64(checked, actual);
+}
+
+def sh_ch_deref(loans: &ShBackingLoans, checked: &ShChecked, ast: &ShAst, node: i64, item: i64, element: i64) -> bool {
+    let actual = sh_ch_unwrap(ast, node);
+    let projected = sh_ast_child(ast, actual, 0);
+    let base = sh_ast_child(ast, projected, 0);
+    let field = sh_node_binding(checked, projected);
+    sh_ast_word(ast, actual, 0) == 50 and sh_ast_word(ast, actual, 4) % 1000 == sh_kind("*") and sh_node_type(checked, actual) == element and sh_ast_word(ast, projected, 0) == 55 and sh_ast_word(ast, base, 0) == 12 and sh_node_binding(checked, base) == item and sh_binding_word(checked, field, 2) == 6 and sh_binding_word(checked, field, 6) == loans.option_binding and sh_binding_word(checked, field, 7) == 1 and sh_o_name(checked, field, "value");
+}
+
+def sh_ch_boolean_conversion(analyzed: &ShModuleChecked, module: i64, function: i64) -> bool {
+    let checked = &analyzed.checked;
+    let ast = &analyzed.front.parsed.ast;
+    let signature = sh_binding_word(checked, function, 3);
+    if sh_module_binding_source(analyzed, function) != module or sh_s_kind(checked, signature) != 11 or sh_s_data(checked, signature) != 0 or sh_s_flags(checked, signature) != 0 or sh_s_arity(checked, signature) != 2 or sh_s_kind(checked, sh_s_argument(checked, signature, 0)) != 1 or not sh_o_i64(checked, sh_s_argument(checked, signature, 1)) { return false; };
+    let body = sh_ch_unwrap(ast, sh_s_child_kind(ast, sh_binding_word(checked, function, 4), 40));
+    if sh_ast_word(ast, body, 0) != 61 or sh_ast_word(ast, body, 6) != 3 or sh_node_binding(checked, sh_ast_child(ast, body, 0)) != sh_ch_param(checked, function, 0) { return false; };
+    let left = sh_ch_unwrap(ast, sh_ast_child(ast, body, 1));
+    let right = sh_ch_unwrap(ast, sh_ast_child(ast, body, 2));
+    sh_sdk_ast_text(&analyzed.front.expanded.text, ast, left, "1") and sh_sdk_ast_text(&analyzed.front.expanded.text, ast, right, "0");
+}
+
+def sh_ch_helper(facts: &mut ShCollectionHandles, loans: &ShBackingLoans, analyzed: &ShModuleChecked, function: i64, provider: i64) {
+    let checked = &analyzed.checked;
+    let ast = &analyzed.front.parsed.ast;
+    let signature = sh_binding_word(checked, function, 3);
+    let body = sh_s_child_kind(ast, sh_binding_word(checked, function, 4), 40);
+    if sh_module_binding_source(analyzed, function) != facts.module or sh_s_kind(checked, signature) != 11 or sh_s_data(checked, signature) != 0 or sh_s_flags(checked, signature) != 0 or sh_s_arity(checked, signature) != 3 or not sh_o_i64(checked, sh_s_argument(checked, signature, 0)) or not sh_o_i64(checked, sh_s_argument(checked, signature, 1)) or not sh_o_i64(checked, sh_s_argument(checked, signature, 2)) or sh_ast_word(ast, body, 6) != 2 { return; };
+    let declaration = sh_ast_child(ast, body, 0);
+    let item = sh_node_binding(checked, sh_ast_child(ast, declaration, 0));
+    let call = sh_ast_child(ast, declaration, sh_ast_word(ast, declaration, 6) - 1);
+    let call_type = sh_node_callable_type(checked, call);
+    if sh_ast_word(ast, declaration, 0) != 41 or sh_ast_word(ast, call, 0) != 53 or sh_ast_word(ast, call, 6) != 2 or sh_node_binding(checked, call) != facts.raw_next or sh_s_kind(checked, call_type) != 11 or sh_s_data(checked, call_type) != 0 or sh_s_flags(checked, call_type) != 0 or sh_s_arity(checked, call_type) != 2 or not sh_o_i64(checked, sh_s_argument(checked, call_type, 0)) { return; };
+    let element = sh_bl_option_ref(loans, checked, sh_s_argument(checked, call_type, 1));
+    let handle = sh_ast_child(ast, call, 1);
+    let parameter = sh_ch_param(checked, function, 0);
+    if not sh_ch_primitive(checked, element) or sh_ast_word(ast, handle, 0) != 12 or sh_node_binding(checked, handle) != parameter { return; };
+    let branch = sh_ch_unwrap(ast, sh_ast_child(ast, body, 1));
+    let condition = sh_ast_child(ast, branch, 0);
+    let tag = sh_node_binding(checked, condition);
+    if sh_ast_word(ast, branch, 0) != 61 or sh_ast_word(ast, branch, 6) != 3 or sh_ast_word(ast, condition, 0) != 55 or sh_node_binding(checked, sh_ast_child(ast, condition, 0)) != item or sh_binding_word(checked, tag, 6) != loans.option_binding or sh_binding_word(checked, tag, 7) != 0 or not sh_o_name(checked, tag, "is_some") { return; };
+    let left = sh_ch_unwrap(ast, sh_ast_child(ast, branch, 1));
+    let right = sh_ch_unwrap(ast, sh_ast_child(ast, branch, 2));
+    if sh_ast_word(ast, right, 0) != 12 or sh_node_binding(checked, right) != sh_ch_param(checked, function, 1) { return; };
+    let mut valid = sh_ch_deref(loans, checked, ast, left, item, element);
+    if sh_s_kind(checked, element) == 1 and sh_ast_word(ast, left, 0) == 53 and sh_ast_word(ast, left, 6) == 2 { valid = sh_ch_boolean_conversion(analyzed, facts.module, sh_node_binding(checked, left)) and sh_ch_deref(loans, checked, ast, sh_ast_child(ast, left, 1), item, element); };
+    if not valid { return; };
+    sh_ch_cover(facts, analyzed, function, 1, body, 1);
+    sh_ch_obligation(facts, function, parameter, element, call, facts.raw_next, 0, facts.module, provider, branch, 1, 0, call_type);
+    ();
+}
+
+def sh_ch_relay_complete(facts: &ShCollectionHandles, analyzed: &ShModuleChecked, function: i64, site: i64, parameter: i64) -> bool {
+    let checked = &analyzed.checked;
+    let ast = &analyzed.front.parsed.ast;
+    let body = sh_s_child_kind(ast, sh_binding_word(checked, function, 4), 40);
+    if sh_ch_unwrap(ast, body) != site or sh_ast_word(ast, site, 0) != 53 { return false; };
+    let target = sh_node_binding(checked, site);
+    let covered = sh_ch_coverage(facts, target);
+    let signature = sh_binding_word(checked, function, 3);
+    if covered < 0 or sh_ch_at(&facts.coverage, covered, 8, 5) != 1 or sh_s_data(checked, signature) != 0 or not sh_o_i64(checked, sh_s_argument(checked, signature, sh_s_arity(checked, signature) - 1)) { return false; };
+    let mut child = 1;
+    while child < sh_ast_word(ast, site, 6) { let actual = sh_ast_child(ast, site, child); let kind = sh_ast_word(ast, actual, 0); if kind == 12 { let binding = sh_node_binding(checked, actual); if sh_binding_word(checked, binding, 2) != 1 or sh_binding_word(checked, binding, 6) != function or not sh_o_i64(checked, sh_binding_word(checked, binding, 3)) { return false; }; } else if kind != 11 { return false; }; child = child + 1; };
+    sh_binding_word(checked, parameter, 2) == 1 and sh_binding_word(checked, parameter, 6) == function;
+}
+
+def sh_ch_field(origins: &ShOriginFacts, checked: &ShChecked, ast: &ShAst, actual: i64, element: i64) -> bool {
+    let base = sh_ast_child(ast, actual, 0);
+    let field = sh_node_binding(checked, actual);
+    let ty = sh_o_base(checked, sh_node_type(checked, base));
+    let owner = sh_adt_binding(checked, ty);
+    let role = sh_o_role(origins, checked, ty);
+    sh_ast_word(ast, actual, 0) == 55 and (role == 2 or role == 3) and sh_o_element(checked, ty) == element and sh_binding_word(checked, field, 2) == 6 and sh_binding_word(checked, field, 6) == owner and sh_binding_word(checked, field, 7) == 0 and sh_o_name(checked, field, "handle") and sh_o_i64(checked, sh_binding_word(checked, field, 3)) and sh_o_i64(checked, sh_node_type(checked, actual));
+}
+
+def sh_ch_nll_lease(nll: &ShLoanLiveness, function: i64, base: i64, element: i64) -> i64 {
+    if nll.error != 0 { return -1; };
+    let mut covered = false;
+    let mut row = 0;
+    while row < nll.functions.len() / 4 { if sh_ch_at(&nll.functions, row, 4, 0) == function { covered = true; }; row = row + 1; };
+    let token = sh_nll_node(nll, base, 0);
+    if not covered or token < 0 or sh_nll_token(nll, token, 0) != function or sh_nll_token(nll, token, 2) != element or sh_nll_token(nll, token, 7) != 1 or (sh_nll_token(nll, token, 6) != 1 and sh_nll_token(nll, token, 6) != 2) { return -1; };
+    row = 0;
+    while row < nll.events.len() / 10 { if sh_nll_event(nll, row, 0) == function and sh_nll_event(nll, row, 1) == base and sh_ch_at(&nll.reachable, row, 1, 0) == 1 and (sh_ch_at(&nll.valid_in, row, 1, 0) & sh_nll_bit(nll, token)) != 0 { return token; }; row = row + 1; };
+    -1;
+}
+
+def sh_ch_receipt(facts: &mut ShCollectionHandles, loans: &ShBackingLoans, origins: &ShOriginFacts, nll: &ShLoanLiveness, analyzed: &ShModuleChecked, node: i64, obligation: i64) {
+    let checked = &analyzed.checked;
+    let ast = &analyzed.front.parsed.ast;
+    let target = sh_node_binding(checked, node);
+    let owner = sh_ch_owner(checked, node);
+    let signature = sh_node_callable_type(checked, node);
+    let ordinal = sh_ch_at(&facts.obligations, obligation, 12, 10);
+    let callee = sh_ast_child(ast, node, 0);
+    let argument = if sh_ast_word(ast, callee, 0) == 55 { if ordinal == 0 { sh_ast_child(ast, callee, 0); } else { sh_ast_child(ast, node, ordinal); }; } else { sh_ast_child(ast, node, ordinal + 1); };
+    let element = sh_ch_at(&facts.obligations, obligation, 12, 2);
+    let provider = sh_ch_at(&facts.obligations, obligation, 12, 7);
+    let mut state = 0;
+    let mut root = -1;
+    let mut token = -1;
+    let mut field = -1;
+    let mut nominal = -1;
+    let mut parent = -1;
+    if sh_s_kind(checked, signature) != 11 or not sh_o_i64(checked, sh_s_argument(checked, signature, ordinal)) { sh_ch_diag(facts, owner, 5954, node, argument, element); return; };
+    if sh_ch_field(origins, checked, ast, argument, element) { let base = sh_ast_child(ast, argument, 0); field = sh_node_binding(checked, argument); nominal = sh_o_base(checked, sh_node_type(checked, base)); token = sh_ch_nll_lease(nll, owner, base, element); if token >= 0 { root = sh_nll_token(nll, token, 1); state = sh_nll_token(nll, token, 6); } else { let parameter = sh_node_binding(checked, base); if sh_ast_word(ast, base, 0) == 12 and sh_binding_word(checked, parameter, 2) == 1 and sh_binding_word(checked, parameter, 6) == owner and sh_o_role(origins, checked, sh_binding_word(checked, parameter, 3)) >= 2 { root = parameter; state = 2; } else { sh_ch_diag(facts, owner, 5955, node, argument, element); }; }; if state == 2 { parent = sh_ch_obligation(facts, owner, root, element, node, target, sh_o_role(origins, checked, nominal), sh_module_binding_source(analyzed, owner), provider, -1, 2, sh_binding_word(checked, root, 7), signature); }; } else if sh_ast_word(ast, argument, 0) == 12 { let parameter = sh_node_binding(checked, argument); if sh_binding_word(checked, parameter, 2) == 1 and sh_binding_word(checked, parameter, 6) == owner and sh_o_i64(checked, sh_binding_word(checked, parameter, 3)) { root = parameter; state = 2; parent = sh_ch_obligation(facts, owner, parameter, element, node, target, 0, sh_module_binding_source(analyzed, owner), provider, -1, 3, sh_binding_word(checked, parameter, 7), signature); } else { sh_ch_diag(facts, owner, 5953, node, argument, element); }; } else if sh_ast_word(ast, argument, 0) == 55 { sh_ch_diag(facts, owner, 5954, node, argument, element); } else { sh_ch_diag(facts, owner, 5953, node, argument, element); };
+    let body = sh_s_child_kind(ast, sh_binding_word(checked, owner, 4), 40);
+    let complete = if parent >= 0 and sh_ch_relay_complete(facts, analyzed, owner, node, root) { 1; } else { 0; };
+    sh_ch_cover(facts, analyzed, owner, if complete == 1 { 2; } else { 3; }, body, complete);
+    let parameter = sh_ch_param(checked, target, ordinal);
+    if facts.receipts.len() / 16 >= facts.limit or not (facts.receipts.push(node) and facts.receipts.push(target) and facts.receipts.push(parameter) and facts.receipts.push(argument) and facts.receipts.push(owner) and facts.receipts.push(sh_module_node_source(analyzed, node)) and facts.receipts.push(element) and facts.receipts.push(field) and facts.receipts.push(nominal) and facts.receipts.push(root) and facts.receipts.push(token) and facts.receipts.push(state) and facts.receipts.push(obligation) and facts.receipts.push(parent) and facts.receipts.push(signature) and facts.receipts.push(provider)) { facts.error = 5950; };
+    ();
+}
+
+def sh_collection_handle_status(facts: &ShCollectionHandles, node: i64) -> i64 {
+    if facts.error != 0 or facts.schema != 1 or facts.unlowerable != 1 or facts.provider_rows.len() != 48 { return 0; };
+    let provider = sh_ch_at(&facts.provider_rows, 2, 8, 2);
+    let mut row = 0;
+    let mut status = 1;
+    let mut found = false;
+    while row < facts.receipts.len() / 16 { if sh_ch_at(&facts.receipts, row, 16, 0) == node { found = true; let obligation = sh_ch_at(&facts.receipts, row, 16, 12); let parent = sh_ch_at(&facts.receipts, row, 16, 13); let state = sh_ch_at(&facts.receipts, row, 16, 11); let target = sh_ch_at(&facts.receipts, row, 16, 1); let covered = sh_ch_coverage(facts, target); if obligation < 0 or sh_ch_at(&facts.obligations, obligation, 12, 0) != target or sh_ch_at(&facts.obligations, obligation, 12, 2) != sh_ch_at(&facts.receipts, row, 16, 6) or sh_ch_at(&facts.obligations, obligation, 12, 7) != provider or covered < 0 or sh_ch_at(&facts.coverage, covered, 8, 5) != 1 or sh_ch_at(&facts.receipts, row, 16, 15) != provider or state < 1 or state > 2 { return 0; }; if state == 2 { if parent < 0 or sh_ch_at(&facts.obligations, parent, 12, 0) != sh_ch_at(&facts.receipts, row, 16, 4) or sh_ch_at(&facts.obligations, parent, 12, 1) != sh_ch_at(&facts.receipts, row, 16, 9) or sh_ch_at(&facts.obligations, parent, 12, 2) != sh_ch_at(&facts.receipts, row, 16, 6) { return 0; }; status = 2; }; }; row = row + 1; };
+    if found { status; } else { 0; };
+}
+
+def sh_collection_handle_function_error(facts: &ShCollectionHandles, function: i64) -> i64 {
+    if facts.error != 0 { return facts.error; };
+    if sh_ch_coverage(facts, function) < 0 { return 5956; };
+    let mut row = 0;
+    while row < facts.diagnostics.len() / 5 { if sh_ch_at(&facts.diagnostics, row, 5, 0) == function { return sh_ch_at(&facts.diagnostics, row, 5, 1); }; row = row + 1; };
+    0;
+}
+
+def sh_collection_handles(provider: &ShCollectionProvider, mapping: &ShCollectionProviders, provider_root: &str, manifest_pin: &str, artifact_pin: &str, origins: &ShOriginFacts, loans: &ShBackingLoans, nll: &ShLoanLiveness, graph: &ShModules, analyzed: &ShModuleChecked, identity: &str, digest: &str, prototype: &str, option_identity: &str, option_digest: &str, limit: i64, development: bool) -> ShCollectionHandles {
+    let mut facts = sh_ch_new(limit);
+    if limit < 1 or limit > 100000 or not development or sh_collection_provider_map_validate(provider, provider_root, mapping, graph, analyzed, manifest_pin, artifact_pin, identity, digest, "x86_64-pc-windows-msvc", 1, development) != 0 or sh_loan_liveness_validate(nll, origins, loans, graph, analyzed, identity, digest, prototype, option_identity, option_digest) != 0 { facts.error = 5951; return facts; };
+    facts.module = origins.module;
+    let checked = &analyzed.checked;
+    let ast = &analyzed.front.parsed.ast;
+    facts.raw_next = sh_o_unique(analyzed, facts.module, "raw_vec_iter_next", 2);
+    if not sh_bl_admitted(loans, origins, analyzed, facts.raw_next, 1) { facts.error = 5951; return facts; };
+    let mut at = 0;
+    while at < mapping.rows.len() { if not facts.provider_rows.push(sh_origin_at(&mapping.rows, at)) { facts.error = 5950; return facts; }; at = at + 1; };
+    at = 0;
+    while at < origins.canonical.len() { if not facts.canonical.push(sh_origin_at(&origins.canonical, at)) { facts.error = 5950; return facts; }; at = at + 1; };
+    let runtime = sh_ch_at(&mapping.rows, 2, 8, 2);
+    let mut function = 0;
+    while function < sh_binding_count(checked) { if sh_binding_word(checked, function, 2) == 2 { sh_ch_helper(&mut facts, loans, analyzed, function, runtime); }; function = function + 1; };
+    if facts.coverage.len() / 8 < 2 { facts.error = 5956; return facts; };
+    let mut iteration = 0;
+    let mut changed = true;
+    while changed and iteration < 16 and facts.error == 0 { let before = facts.obligations.len(); let mut node = 0; while node < sh_ast_count(ast) { if sh_ast_word(ast, node, 0) == 53 { let target = sh_node_binding(checked, node); let required = facts.obligations.len() / 12; let mut row = 0; while row < required { if sh_ch_at(&facts.obligations, row, 12, 0) == target { let mut prior = 0; let mut existing = false; while prior < facts.receipts.len() / 16 { if sh_ch_at(&facts.receipts, prior, 16, 0) == node and sh_ch_at(&facts.receipts, prior, 16, 12) == row { existing = true; }; prior = prior + 1; }; if not existing { sh_ch_receipt(&mut facts, loans, origins, nll, analyzed, node, row); }; }; row = row + 1; }; }; node = node + 1; }; changed = facts.obligations.len() != before; iteration = iteration + 1; };
+    if changed { facts.error = 5950; };
+    facts;
+}
+
+def sh_collection_handles_validate(facts: &ShCollectionHandles, provider: &ShCollectionProvider, mapping: &ShCollectionProviders, provider_root: &str, manifest_pin: &str, artifact_pin: &str, origins: &ShOriginFacts, loans: &ShBackingLoans, nll: &ShLoanLiveness, graph: &ShModules, analyzed: &ShModuleChecked, identity: &str, digest: &str, prototype: &str, option_identity: &str, option_digest: &str, development: bool) -> i64 {
+    if facts.schema != 1 or facts.error != 0 or facts.unlowerable != 1 { return 5952; };
+    let expected = sh_collection_handles(provider, mapping, provider_root, manifest_pin, artifact_pin, origins, loans, nll, graph, analyzed, identity, digest, prototype, option_identity, option_digest, facts.limit, development);
+    if expected.error != 0 { return expected.error; };
+    if facts.raw_next != expected.raw_next or facts.module != expected.module or not sh_o_equal(&facts.coverage, &expected.coverage) or not sh_o_equal(&facts.obligations, &expected.obligations) or not sh_o_equal(&facts.receipts, &expected.receipts) or not sh_o_equal(&facts.diagnostics, &expected.diagnostics) or not sh_o_equal(&facts.provider_rows, &expected.provider_rows) or not sh_o_equal(&facts.canonical, &expected.canonical) { return 5952; };
+    0;
+}

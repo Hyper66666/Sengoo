@@ -213,7 +213,7 @@ have actual CFG outcomes. Per-parameter effects preserve the unaffected root
 and reject the affected root when it remains borrowed. Primitive Option tag
 copies no longer prolong a reference; non-Copy Owner movement retains 5807.
 Unknown source/ordinary raw i64 remains 5904, unknown tracked containers and
-unsupported match remain 5906, and conditional token state2 never becomes1.
+unsupported match remain 5906, and conditional token state 2 never becomes1.
 
 Saved edges, liveness bits, token roots, effects, source bytes, type arenas,
 input loan tables, scratch and unlowerable bits all have explicit poison
@@ -263,3 +263,85 @@ supported complete CFG coverage, then inspect its diagnostics and every relevant
 old-row supersession. A missing coverage row stays unsupported and cannot pass
 because the convenience diagnostic query returns0. Physical-handle module-level
 analysis must establish its own coverage rather than reuse this root-only gap.
+
+## Stage-four module physical-handle source contracts
+
+- [x] Derive two complete actual scalar helper contracts from canonical raw-next instantiated Option<&T> calls, Some guards, fallback and primitive read bodies.
+- [x] Record module-level conditional parameter/T obligations and every actual call receipt, including exact canonical field owner/ordinal/type and explicit NLL coverage for concrete callers.
+- [x] Prove concrete i64/bool callers and pure forwarding, preserve state 2, and reject unknown/repacked/Owner/cross-T/invalidated inputs.
+- [x] Demonstrate clear-obligation/receipt/provider causal rejection and typed/source/member/provider poison validation with readonly arenas and first-call resources.
+- [x] Pin prior source/provider qualification reports, run exact source/tool/revision native gate and freeze the independent phase.
+
+Actual production borrow/HIR/MIR integration and actualcore112 elimination remain
+open after standalone module source contracts. Conditional source permissions
+alone do not create a runtime borrowed pointer or primitive Copy authority.
+
+### Stage-four qualified source contract evidence and remaining integration
+
+Final report: target/selfhost/m3-collection-handles/checkpoint/evidence.json,
+SHA256 62f9421e7e7d7405bd1fbfa797e15f65f86b5e1d4f24136066596192ead40140.
+Actual full revision b7867614ce59d4e404c702784df52db6acb9db8a at start and end,
+Windows 11 10.0.26300-SP0/Python 3.12.14, actual UTC
+2026-11-10T01:14:25.626316+00:00 through
+2026-11-10T01:17:03.644313+00:00. Six commands passed: pinned seed, clang,
+actual rustc and cargo versions; native SG contract tests; and three first-call
+analysis scopes. All 598 input hashes (including external qualification and
+provider snapshots), 137 producer snapshots including the executable, four
+tools, producer checkout hashes and external Cargo config candidates remain
+unchanged. String, Buffer, opaque and file-snapshot handle/byte counts return
+exactly after each scope without warmup; typed words/arguments remain unchanged.
+Observed peak Windows working set is 63,434,752 bytes for analysis and 155,676,672
+bytes for the compiler process; this is not M8/performance qualification.
+
+Actual tables contain 58 callable coverage rows, 25 conditional parameter/T
+obligations, 56 call receipts and 19 conditional standard-module sites. Exactly
+two complete scalar helpers are admitted structurally from the canonical
+raw-next instantiated Fn return Option<&i64/bool>, actual Some guard, primitive
+read/fallback and proved bool conversion. Neither helper spelling nor slot
+width authorizes T. Source calls include five concrete i64/bool/forward/move/
+reborrow receipts, three conditional raw/receiver/forward relationships, seven
+unknown/repacked/Owner/cross-T/dead/zero/unknown-forward rejections, plus a
+foreign source function with the same full helper shape that is not admitted.
+The missing-coverage diagnostic query returns 5956 rather than treating absent
+standard/callee coverage as clean.
+
+The first poison scope clears obligations, receipts and provider records and
+asserts the same call loses its source-contract status, then checks payload
+validation failure. All 16 fields of a concrete receipt are poisoned individually
+(including the normally negative parent relationship), restored and rejected.
+An absent namespace2 map fails 5951. Member owner/type arenas, independently
+selected source bytes and development policy changes reject; final restore
+validation passes before source mutation. The schema retains unlowerable=1 and
+does not authorize any runtime reference or suppress Drop.
+
+The runner pins the previous physical provider report
+a63152e01208dff39e1d5cbcbd326187901808c8f76fa0d3075a08e0a9fa1cd3,
+manifest 939013725b14961a3de99519f0fc07382a23c2194b855120fd29d6f541a0b2ca
+and object 6186b302533aa26588534a0062ccbaa488b58df8561c692a8c0257c65193575a.
+It validates every qualified provider source/artifact and separately binds
+current collection_provider.sg and semantic_origins.sg to that report's actual
+qualified checkout source hashes. The old loan source/report and NLL
+checkpoint-boundaries report d06e4eb... are independently pinned as well.
+This is an explicit development reference-provider chain; SDK16 admission,
+constructor/native optional-pointer authority and final runtime migration are
+not inferred from it.
+
+target/selfhost/m3-collection-handles/identity-negative/control.json records a
+wrong-seed identity rejection before any tool is executed (zero steps), replacing
+an existing pass with failed. Its failed report SHA256 is
+716e1cb13bb6daa3f6005934ec9ef25bb30dd05b9941c57b31757b098d4440df.
+Earlier development1 correctly remains failed because guarded proposal/design
+bytes changed while its behavior test ran; that old behavioral exit0 is not a
+formal pass. Subsequent qualification uses the exact final immutable inputs.
+
+- [ ] Connect fresh validated handle contracts to actual ownership analysis, retaining the same 22-field ShOwnership and existing action/contract semantics; production borrow changes require a baseline/scope barrier.
+- [ ] Prove complete primitive helper premises without owned locals or borrowed escape, and consume exact callsite receipts without treating partial standard caller obligations as complete ownership/NLL coverage.
+- [ ] Bind actual ownership and fresh physical-handle/NLL/provider context into HIR6/source lowering while ordinary module-witness-only lowering remains 5008.
+- [ ] Integrate qualified constructor/descriptors and MIR27 guarded optional borrowing, then reconcile actualcore112 by actual source checking/lowering rather than clearing diagnosis arrays.
+
+The qualified origin/loan/NLL sources, borrow.sg, semantic.sg, hir.sg and MIR
+sources remain unchanged by this phase. Interface details are in
+target/selfhost/m3-collection-handles/interface-draft.md. Contract query results
+are useful only after independent payload validation, and state 2 remains an
+obligation to real callers. Module coverage rows do not invent backing storage
+validity where root NLL lacks actual coverage.

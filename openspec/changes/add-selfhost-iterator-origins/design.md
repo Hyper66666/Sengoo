@@ -212,3 +212,62 @@ spelling-based restoration of origin validity is permitted. A later fresh
 operation/effect proof must distinguish owner-preserving mutation from release,
 move and unknown escape using actual canonical declarations/body/provider
 contracts. The production/full-compatibility NLL task remains unchecked.
+
+## Stage four: module physical iterator handle source obligations
+
+semantic_collection_handles.sg owns a fresh schema-one ShCollectionHandles,
+unlowerable1, independently of existing origin/loan/NLL schemas and HIR6.
+It consumes actual ShModules/ShModuleChecked plus validated origin/loan/NLL
+facts, the namespace2 physical provider map and independent provider root,
+manifest/object pins, target/ABI/development selection. The provider remains
+reference-runtime development authority; it is not widened to the SDK16 table.
+
+The initial complete-body admission is structural: an actual pinned collections
+function FnSG(i64,i64)->i64 binds the canonical raw-next call's instantiated
+FnSG(i64)->actual Option<&i64/bool> result; the only later statement branches on
+that same Option bool tag, reads its shared value only in Some, returns the
+fallback parameter in None, and either returns the i64 or uses a separately
+checked pinned bool-to-i64 body. Helper names do not assign T. Generic Owner
+and arbitrary same-width payloads do not qualify. The raw-next recursive source
+placeholder still needs its actual provider/MIR bridge; this is conditional
+source semantics, not an emitted reference.
+
+All actual typed calls across modules are scanned to a bounded fixed point.
+A canonical iterator field requires resolved field binding owner, ordinal0,
+namehandle, signed i64 field/actual argument type and exact actual ADT element.
+A concrete root call additionally needs an explicit NLL functions4 coverage
+row and reachable valid-in iterator token of the same function/T/root/lease.
+The old root-only function-error0 query alone is never used as module coverage.
+A parameter projection transfers its exact ordinal/role/T as a conditional
+obligation; a raw i64 helper parameter transfers the required physical-handle
+obligation without inventing an origin. State2 stays conditional. Unknown i64,
+reconstructed iterators, Owner handles, cross-T handles and invalidated storage
+do not discharge the obligation. Literal zero remains unproved/inert.
+
+Owned coverage8 rows distinguish complete scalar-helper bodies, complete pure
+forwarding bodies and partial projection callers. Obligations12 carry callable,
+parameter,T,actual source call,target,required role,physical module,provider,
+Some guard,obligation kind,parameter ordinal and instantiated signature.
+Receipts16 carry call,callee,callee parameter,actual argument,caller,module,T,
+field binding,actual nominal type,root,NLL token,state,callee obligation,caller
+conditional obligation,signature and provider binding. Diagnostics5 and copied
+provider/canonical IDs are retained. A query result1 is a concretely discharged
+source call;2 means a validated conditional relationship;0 is unavailable.
+Neither result is runtime Ref authority. Every authorization consumer must first
+validate the entire fresh payload against independent actual inputs and resolve
+all relevant caller/lifetime/effect obligations.
+
+Simple source wrappers are complete only when their whole body is an admitted
+helper/complete wrapper call with direct i64 parameter/literal arguments and
+the declared scalar result. General methods/loops/lambda/field aliases are
+partial module callers, not proof of complete safety. Future actual borrow
+integration must consume this distinction rather than treat all pending
+receiver obligations as noescape, suppress Drop or clear old diagnostics.
+All old builtin6/deferred4/actions8/9/10 and qualified source layers stay intact.
+
+Module contract diagnostic query returns5956 on missing coverage rather than
+silently returning clean. Concrete caller receipts preserve whole iterator moves
+and reborrows using the same validated NLL token lineage. The exact-source
+qualification chain separately pins production collection_provider.sg and
+semantic_origins.sg against the old qualified provider report; new source
+hashes are not treated as historical provider qualification.

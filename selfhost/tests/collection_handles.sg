@@ -1,0 +1,139 @@
+import selfhost_semantic_collection_handles;
+
+import std::args;
+
+import std::assert;
+
+extern "C" {
+    fn sengoo_string_live_handle_count() -> i64;
+    fn sengoo_buffer_live_handle_count() -> i64;
+    fn sengoo_opaque_live_handle_count() -> i64;
+    fn sengoo_file_snapshot_live_handle_count() -> i64;
+    fn sengoo_file_snapshot_live_bytes() -> i64;
+}
+
+def sh_ht_arg(i: i64) -> Result<String, i64> {
+    let b = ffi_buffer_new(arg_len(i)?)?;
+    let n = arg_copy(i, b)?;
+    string_from_utf8(b, n);
+}
+
+def sh_ht_call(analyzed: &ShModuleChecked, owner: &str, target: &str) -> i64 {
+    let checked = &analyzed.checked;
+    let function = sh_o_unique(analyzed, analyzed.front.source, owner, 2);
+    let mut node = 0;
+    let mut result = -1;
+    while node < sh_ast_count(&analyzed.front.parsed.ast) { if sh_ast_word(&analyzed.front.parsed.ast, node, 0) == 53 and sh_ch_owner(checked, node) == function and sh_o_name(checked, sh_node_binding(checked, node), target) { if result >= 0 { return -1; }; result = node; }; node = node + 1; };
+    result;
+}
+
+def sh_ht_case(facts: &ShCollectionHandles, analyzed: &ShModuleChecked, function: &str, target: &str, status: i64, code: i64) {
+    let node = sh_ht_call(analyzed, function, target);
+    assert_true(node >= 0, "collection_handles.sg", 1);
+    let actual = sh_collection_handle_status(facts, node);
+    let owner = sh_ch_owner(&analyzed.checked, node);
+    let error = sh_collection_handle_function_error(facts, owner);
+    if actual != status or error != code { println(function); println(actual); println(status); println(error); println(code); };
+    assert_eq_i64(actual, status, "collection_handles.sg", 2);
+    assert_eq_i64(error, code, "collection_handles.sg", 3);
+    ();
+}
+
+def sh_ht_copy(values: &Vec<i64>) -> Vec<i64> {
+    let copy = vec_new_i64();
+    let mut i = 0;
+    while i < values.len() { copy.push(sh_origin_at(values, i)); i = i + 1; };
+    copy;
+}
+
+def sh_ht_scope(provider_root: &String, manifest_sha: &String, artifact_sha: &String, program: &String, poison: bool) -> Result<bool, i64> {
+    let manifest = path_join_string(provider_root.as_str(), "selfhost/sdk/collections_x64_abi1/manifest.json")?;
+    let stdlib = path_join_string(provider_root.as_str(), "tools/stdlib")?;
+    let prelude = path_join_string(provider_root.as_str(), "selfhost/sdk/collections_x64_abi1/prelude.sg")?;
+    let collection = path_join_string(provider_root.as_str(), "tools/stdlib/collections.sg")?;
+    let option = path_join_string(provider_root.as_str(), "tools/stdlib/option.sg")?;
+    let cs = file_snapshot_open(collection.as_str(), 1048576)?;
+    let identity = cs.identity()?;
+    let digest = cs.sha256()?;
+    let os = file_snapshot_open(option.as_str(), 1048576)?;
+    let option_identity = os.identity()?;
+    let option_digest = os.sha256()?;
+    let provider = sh_collection_provider_load(provider_root.as_str(), manifest.as_str(), manifest_sha.as_str(), artifact_sha.as_str(), "x86_64-pc-windows-msvc", 1, true);
+    assert_eq_i64(provider.error, 0, "collection_handles.sg", 4);
+    let config = string_from_str("collection_runtime=")?;
+    config.push_str(prelude.as_str())?;
+    let graph = sh_modules_load(program.as_str(), stdlib.as_str(), &config, 64, 1048576);
+    assert_eq_i64(graph.error, 0, "collection_handles.sg", 5);
+    let analyzed = sh_modules_check(&graph, 100000, 1000);
+    if analyzed.error != 0 { println(analyzed.error); println(analyzed.start); };
+    assert_eq_i64(analyzed.error, 0, "collection_handles.sg", 6);
+    let words = sh_ht_copy(&analyzed.checked.types.words);
+    let arguments = sh_ht_copy(&analyzed.checked.types.arguments);
+    let mapping = sh_collection_provider_map(&provider, provider_root.as_str(), &graph, &analyzed, manifest_sha.as_str(), artifact_sha.as_str(), identity.as_str(), digest.as_str(), "x86_64-pc-windows-msvc", 1, true);
+    assert_eq_i64(mapping.error, 0, "collection_handles.sg", 7);
+    let proto = "fn sengoo_raw_vec_iter_new(handle: i64) -> i64;";
+    let origins = sh_origins_analyze(&graph, &analyzed, identity.as_str(), digest.as_str(), proto, 100000);
+    assert_eq_i64(origins.error, 0, "collection_handles.sg", 8);
+    let loans = sh_loans_analyze(&origins, &graph, &analyzed, identity.as_str(), digest.as_str(), proto, option_identity.as_str(), option_digest.as_str(), 100000, 1);
+    assert_eq_i64(loans.error, 0, "collection_handles.sg", 9);
+    let nll = sh_loan_liveness(&origins, &loans, &graph, &analyzed, identity.as_str(), digest.as_str(), proto, option_identity.as_str(), option_digest.as_str(), 20000);
+    if nll.error != 0 { println(nll.error); };
+    assert_eq_i64(nll.error, 0, "collection_handles.sg", 10);
+    let mut facts = sh_collection_handles(&provider, &mapping, provider_root.as_str(), manifest_sha.as_str(), artifact_sha.as_str(), &origins, &loans, &nll, &graph, &analyzed, identity.as_str(), digest.as_str(), proto, option_identity.as_str(), option_digest.as_str(), 100000, true);
+    if facts.error != 0 { println("handles fatal"); println(facts.error); };
+    assert_eq_i64(facts.error, 0, "collection_handles.sg", 11);
+    assert_eq_i64(sh_collection_handles_validate(&facts, &provider, &mapping, provider_root.as_str(), manifest_sha.as_str(), artifact_sha.as_str(), &origins, &loans, &nll, &graph, &analyzed, identity.as_str(), digest.as_str(), proto, option_identity.as_str(), option_digest.as_str(), true), 0, "collection_handles.sg", 12);
+    sh_ht_case(&facts, &analyzed, "good_i64", "raw_vec_iter_next_i64", 1, 0);
+    sh_ht_case(&facts, &analyzed, "good_bool", "raw_vec_iter_next_bool_i64", 1, 0);
+    sh_ht_case(&facts, &analyzed, "relay_good", "forward", 1, 0);
+    sh_ht_case(&facts, &analyzed, "conditional", "raw_vec_iter_next_i64", 2, 0);
+    sh_ht_case(&facts, &analyzed, "raw_forward", "raw_vec_iter_next_i64", 2, 0);
+    sh_ht_case(&facts, &analyzed, "unknown", "raw_vec_iter_next_i64", 0, 5953);
+    sh_ht_case(&facts, &analyzed, "fake", "raw_vec_iter_next_i64", 0, 5955);
+    sh_ht_case(&facts, &analyzed, "owner_handle", "raw_vec_iter_next_i64", 0, 5954);
+    sh_ht_case(&facts, &analyzed, "wrong_t", "raw_vec_iter_next_i64", 0, 5954);
+    sh_ht_case(&facts, &analyzed, "dead", "raw_vec_iter_next_i64", 0, 5955);
+    sh_ht_case(&facts, &analyzed, "zero", "raw_vec_iter_next_i64", 0, 5955);
+    sh_ht_case(&facts, &analyzed, "relay_unknown", "forward", 0, 5953);
+    sh_ht_case(&facts, &analyzed, "relay_conditional", "forward", 2, 0);
+    sh_ht_case(&facts, &analyzed, "moved", "raw_vec_iter_next_i64", 1, 0);
+    sh_ht_case(&facts, &analyzed, "reborrowed", "raw_vec_iter_next_i64", 1, 0);
+    let foreign = sh_ht_call(&analyzed, "call_foreign", "fake_helper");
+    assert_true(foreign >= 0, "collection_handles.sg", 24);
+    assert_eq_i64(sh_collection_handle_status(&facts, foreign), 0, "collection_handles.sg", 25);
+    let foreign_function = sh_o_unique(&analyzed, graph.root, "fake_helper", 2);
+    assert_eq_i64(sh_ch_coverage(&facts, foreign_function), -1, "collection_handles.sg", 26);
+    assert_eq_i64(sh_collection_handle_function_error(&facts, foreign_function), 5956, "collection_handles.sg", 27);
+    assert_eq_i64(facts.unlowerable, 1, "collection_handles.sg", 45);
+    let mut helper_count = 0;
+    let mut module_count = 0;
+    let mut conditional_count = 0;
+    let mut row = 0;
+    while row < facts.coverage.len() / 8 { if sh_ch_at(&facts.coverage, row, 8, 2) == origins.module { module_count = module_count + 1; }; if sh_ch_at(&facts.coverage, row, 8, 3) == 1 and sh_ch_at(&facts.coverage, row, 8, 5) == 1 { helper_count = helper_count + 1; }; row = row + 1; };
+    row = 0;
+    while row < facts.receipts.len() / 16 { if sh_ch_at(&facts.receipts, row, 16, 5) == origins.module and sh_collection_handle_status(&facts, sh_ch_at(&facts.receipts, row, 16, 0)) == 2 { conditional_count = conditional_count + 1; }; row = row + 1; };
+    assert_true(helper_count == 2 and module_count > 2 and conditional_count > 0, "collection_handles.sg", 13);
+    if poison { println("handle_counts"); println(facts.coverage.len() / 8); println(facts.obligations.len() / 12); println(facts.receipts.len() / 16); println(conditional_count); let call = sh_ht_call(&analyzed, "good_i64", "raw_vec_iter_next_i64"); let saved = sh_ht_copy(&facts.obligations); facts.obligations.clear(); assert_eq_i64(sh_collection_handle_status(&facts, call), 0, "collection_handles.sg", 14); assert_eq_i64(sh_collection_handles_validate(&facts, &provider, &mapping, provider_root.as_str(), manifest_sha.as_str(), artifact_sha.as_str(), &origins, &loans, &nll, &graph, &analyzed, identity.as_str(), digest.as_str(), proto, option_identity.as_str(), option_digest.as_str(), true), 5952, "collection_handles.sg", 15); let mut i = 0; while i < saved.len() { facts.obligations.push(sh_origin_at(&saved, i)); i = i + 1; }; let receipts = sh_ht_copy(&facts.receipts); facts.receipts.clear(); assert_eq_i64(sh_collection_handle_status(&facts, call), 0, "collection_handles.sg", 16); assert_eq_i64(sh_collection_handles_validate(&facts, &provider, &mapping, provider_root.as_str(), manifest_sha.as_str(), artifact_sha.as_str(), &origins, &loans, &nll, &graph, &analyzed, identity.as_str(), digest.as_str(), proto, option_identity.as_str(), option_digest.as_str(), true), 5952, "collection_handles.sg", 40); i = 0; while i < receipts.len() { facts.receipts.push(sh_origin_at(&receipts, i)); i = i + 1; }; facts.unlowerable = 0; assert_eq_i64(sh_collection_handle_status(&facts, call), 0, "collection_handles.sg", 46); facts.unlowerable = 1; let provider_binding = sh_ch_at(&facts.provider_rows, 2, 8, 2); facts.provider_rows.set(2 * 8 + 2, -1); assert_eq_i64(sh_collection_handle_status(&facts, call), 0, "collection_handles.sg", 17); assert_eq_i64(sh_collection_handles_validate(&facts, &provider, &mapping, provider_root.as_str(), manifest_sha.as_str(), artifact_sha.as_str(), &origins, &loans, &nll, &graph, &analyzed, identity.as_str(), digest.as_str(), proto, option_identity.as_str(), option_digest.as_str(), true), 5952, "collection_handles.sg", 41); facts.provider_rows.set(2 * 8 + 2, provider_binding); let field = sh_node_binding(&analyzed.checked, sh_ast_child(&analyzed.front.parsed.ast, call, 1)); let owner = sh_binding_word(&analyzed.checked, field, 6); analyzed.checked.bindings.set(field * 8 + 6, -1); assert_eq_i64(sh_collection_handles_validate(&facts, &provider, &mapping, provider_root.as_str(), manifest_sha.as_str(), artifact_sha.as_str(), &origins, &loans, &nll, &graph, &analyzed, identity.as_str(), digest.as_str(), proto, option_identity.as_str(), option_digest.as_str(), true), 5951, "collection_handles.sg", 18); analyzed.checked.bindings.set(field * 8 + 6, owner); let before = sh_s_flags(&analyzed.checked, analyzed.checked.integer_type); analyzed.checked.types.words.set(analyzed.checked.integer_type * 6 + 2, 0); assert_eq_i64(sh_collection_handles_validate(&facts, &provider, &mapping, provider_root.as_str(), manifest_sha.as_str(), artifact_sha.as_str(), &origins, &loans, &nll, &graph, &analyzed, identity.as_str(), digest.as_str(), proto, option_identity.as_str(), option_digest.as_str(), true), 5951, "collection_handles.sg", 19); analyzed.checked.types.words.set(analyzed.checked.integer_type * 6 + 2, before); let denied = sh_collection_handles(&provider, &mapping, provider_root.as_str(), manifest_sha.as_str(), artifact_sha.as_str(), &origins, &loans, &nll, &graph, &analyzed, identity.as_str(), digest.as_str(), proto, option_identity.as_str(), option_digest.as_str(), 100000, false); assert_eq_i64(denied.error, 5951, "collection_handles.sg", 20); assert_eq_i64(sh_collection_handles_validate(&facts, &provider, &mapping, provider_root.as_str(), manifest_sha.as_str(), artifact_sha.as_str(), &origins, &loans, &nll, &graph, &analyzed, identity.as_str(), digest.as_str(), proto, option_identity.as_str(), option_digest.as_str(), true), 0, "collection_handles.sg", 21); (); };
+    if poison { let exact_call = sh_ht_call(&analyzed, "good_i64", "raw_vec_iter_next_i64"); let mut receipt = 0; while receipt < facts.receipts.len() / 16 and sh_ch_at(&facts.receipts, receipt, 16, 0) != exact_call { receipt = receipt + 1; }; assert_true(receipt < facts.receipts.len() / 16, "collection_handles.sg", 42); let mut poisoned = 0; while poisoned < 16 { let retained = sh_ch_at(&facts.receipts, receipt, 16, poisoned); facts.receipts.set(receipt * 16 + poisoned, if retained == -1 { 0; } else { -1; }); assert_eq_i64(sh_collection_handles_validate(&facts, &provider, &mapping, provider_root.as_str(), manifest_sha.as_str(), artifact_sha.as_str(), &origins, &loans, &nll, &graph, &analyzed, identity.as_str(), digest.as_str(), proto, option_identity.as_str(), option_digest.as_str(), true), 5952, "collection_handles.sg", 43); facts.receipts.set(receipt * 16 + poisoned, retained); poisoned = poisoned + 1; }; let map_saved = sh_ht_copy(&mapping.rows); mapping.rows.clear(); let missing_provider = sh_collection_handles(&provider, &mapping, provider_root.as_str(), manifest_sha.as_str(), artifact_sha.as_str(), &origins, &loans, &nll, &graph, &analyzed, identity.as_str(), digest.as_str(), proto, option_identity.as_str(), option_digest.as_str(), 100000, true); assert_eq_i64(missing_provider.error, 5951, "collection_handles.sg", 44); let mut restored = 0; while restored < map_saved.len() { mapping.rows.push(sh_origin_at(&map_saved, restored)); restored = restored + 1; }; (); };
+    if poison { let source = graph.sources.texts.get(graph.root).text; source.push_str(" ")?; assert_eq_i64(sh_collection_handles_validate(&facts, &provider, &mapping, provider_root.as_str(), manifest_sha.as_str(), artifact_sha.as_str(), &origins, &loans, &nll, &graph, &analyzed, identity.as_str(), digest.as_str(), proto, option_identity.as_str(), option_digest.as_str(), true), 5951, "collection_handles.sg", 22); (); };
+    assert_true(sh_o_equal(&words, &analyzed.checked.types.words) and sh_o_equal(&arguments, &analyzed.checked.types.arguments), "collection_handles.sg", 23);
+    result_ok_bool(true);
+}
+
+def main() -> i64 {
+    if args_len() != 4 { return 64; };
+    let root = sh_ht_arg(0);
+    let manifest = sh_ht_arg(1);
+    let artifact = sh_ht_arg(2);
+    let program = sh_ht_arg(3);
+    if not root.is_ok() or not manifest.is_ok() or not artifact.is_ok() or not program.is_ok() { return 64; };
+    let strings = sengoo_string_live_handle_count();
+    let buffers = sengoo_buffer_live_handle_count();
+    let opaque = sengoo_opaque_live_handle_count();
+    let files = sengoo_file_snapshot_live_handle_count();
+    let bytes = sengoo_file_snapshot_live_bytes();
+    let mut round = 0;
+    while round < 3 { let result = sh_ht_scope(&root.value, &manifest.value, &artifact.value, &program.value, round == 0); if not result.is_ok() { println(result.error); return 1; }; assert_eq_i64(sengoo_string_live_handle_count(), strings, "collection_handles.sg", 30); assert_eq_i64(sengoo_buffer_live_handle_count(), buffers, "collection_handles.sg", 31); assert_eq_i64(sengoo_opaque_live_handle_count(), opaque, "collection_handles.sg", 32); assert_eq_i64(sengoo_file_snapshot_live_handle_count(), files, "collection_handles.sg", 33); assert_eq_i64(sengoo_file_snapshot_live_bytes(), bytes, "collection_handles.sg", 34); round = round + 1; };
+    println("collection handles: module obligations and three exact resource scopes passed");
+    0;
+}

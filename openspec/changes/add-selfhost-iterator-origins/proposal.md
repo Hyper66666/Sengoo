@@ -24,3 +24,10 @@ The next independent stage owns actual CFG last-reachable-use proof over those
 validated source candidates. It preserves old conservative diagnostic rows and
 records exact supersession evidence instead of deleting them. No old
 ShBackingLoans schema/width or HIR5/MIR/borrow source is changed by this overlay.
+
+The following module-level source phase owns typed physical-handle obligations
+and exact helper-call receipts. It recognizes the actual checked raw-next
+Option<&i64/bool> helper body and canonical receiver member relationships,
+while preserving conditional caller/backing requirements. Namespace2 provider
+admission remains owned by the collection-intrinsics child. No production
+borrow/HIR/MIR permissions or scalar-Copy generalization follow from this phase.
