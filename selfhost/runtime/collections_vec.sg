@@ -1,0 +1,306 @@
+extern "C" {
+    unsafe fn sengoo_collections_word(state: * mut u8, index: i64) -> i64;
+    unsafe fn sengoo_collections_put(state: * mut u8, index: i64, value: i64);
+    unsafe fn sengoo_collections_pointer(state: * mut u8, index: i64) -> * mut u8;
+    unsafe fn sengoo_collections_pointer_put(state: * mut u8, index: i64, value: * mut u8);
+    unsafe fn sengoo_collections_at(bytes: * mut u8, offset: i64) -> * mut u8;
+    unsafe fn sengoo_collections_null() -> * mut u8;
+    unsafe fn sengoo_collections_present(bytes: * mut u8) -> i64;
+    unsafe fn sengoo_collections_equal(left: * mut u8, right: * mut u8) -> i64;
+    unsafe fn sengoo_collections_allocate(bytes: i64, align: i64) -> * mut u8;
+    unsafe fn sengoo_collections_release(bytes: * mut u8);
+    unsafe fn sengoo_collections_move(callback: i64, target: * mut u8, source: * mut u8);
+    unsafe fn sengoo_collections_drop(callback: i64, value: * mut u8);
+}
+extern "C" {
+    unsafe fn sengoo_sg_cr_valid(state: * mut u8, extent: i64) -> bool;
+    unsafe fn sengoo_sg_cr_slot(state: * mut u8, extent: i64, handle: i64, kind: i64) -> i64;
+    unsafe fn sengoo_sg_cr_acquire(state: * mut u8, extent: i64, kind: i64) -> i64;
+    unsafe fn sengoo_sg_cr_close(state: * mut u8, extent: i64, handle: i64, kind: i64) -> i64;
+}
+pub unsafe extern "C" fn sengoo_sg_collections_vec_new(state: * mut u8, extent: i64, size: i64, align: i64,
+mover: i64, dropper: i64) -> i64 {
+    if not sengoo_sg_cr_valid(state, extent) or size < 1 or size > 1048576 or align < 1 or align > 4096 or (align & (align - 1)) != 0 or mover <= 0 or dropper <= 0 {
+        return 0;
+    };
+    let handle = sengoo_sg_cr_acquire(state, extent, 1);
+    if handle == 0 {
+        return 0;
+    };
+    let at = sengoo_sg_cr_slot(state, extent, handle, 1);
+    sengoo_collections_put(state, at + 6, size);
+    sengoo_collections_put(state, at + 7, align);
+    sengoo_collections_put(state, at + 8, mover);
+    sengoo_collections_put(state, at + 9, dropper);
+    handle;
+}
+unsafe extern "C" fn sh_cv_element(state: * mut u8, at: i64, index: i64) -> * mut u8 {
+    sengoo_collections_at(sengoo_collections_pointer(state, at + 3), index * sengoo_collections_word(state,
+    at + 6));
+}
+unsafe extern "C" fn sh_cv_reserve(state: * mut u8, at: i64, wanted: i64) -> bool {
+    if wanted <= sengoo_collections_word(state, at + 5) {
+        return true;
+    };
+    let size = sengoo_collections_word(state, at + 6);
+    if wanted < 1 or wanted > 67108864 / size {
+        return false;
+    };
+    let mut capacity = sengoo_collections_word(state, at + 5);
+    if capacity == 0 {
+        capacity = 4;
+    };
+    while capacity < wanted {
+        if capacity > 33554432 / size {
+            return false;
+        };
+        capacity = capacity * 2;
+    };
+    if capacity > 67108864 / size {
+        return false;
+    };
+    let replacement = sengoo_collections_allocate(capacity * size, sengoo_collections_word(state, at + 7));
+    if sengoo_collections_present(replacement) == 0 {
+        return false;
+    };
+    let mut index = 0;
+    while index < sengoo_collections_word(state, at + 4) {
+        sengoo_collections_move(sengoo_collections_word(state, at + 8), sengoo_collections_at(replacement,
+        index * size), sh_cv_element(state, at, index));
+        index = index + 1;
+    };
+    sengoo_collections_release(sengoo_collections_pointer(state, at + 3));
+    sengoo_collections_pointer_put(state, at + 3, replacement);
+    sengoo_collections_put(state, at + 5, capacity);
+    true;
+}
+pub unsafe extern "C" fn sengoo_sg_collections_vec_len(state: * mut u8, extent: i64, handle: i64) -> i64 {
+    let at = sengoo_sg_cr_slot(state, extent, handle, 1);
+    if at < 0 {
+        0;
+    } else {
+        sengoo_collections_word(state, at + 4);
+    };
+}
+pub unsafe extern "C" fn sengoo_sg_collections_vec_get(state: * mut u8, extent: i64, handle: i64, index: i64) -> * mut u8 {
+    let at = sengoo_sg_cr_slot(state, extent, handle, 1);
+    if at < 0 or index < 0 {
+        return sengoo_collections_null();
+    };
+    if index >= sengoo_collections_word(state, at + 4) {
+        return sengoo_collections_null();
+    };
+    sh_cv_element(state, at, index);
+}
+pub unsafe extern "C" fn sengoo_sg_collections_vec_push(state: * mut u8, extent: i64, handle: i64, value: * mut u8) -> i64 {
+    let at = sengoo_sg_cr_slot(state, extent, handle, 1);
+    if at < 0 or sengoo_collections_present(value) == 0 {
+        return 2;
+    };
+    let length = sengoo_collections_word(state, at + 4);
+    if not sh_cv_reserve(state, at, length + 1) {
+        sengoo_collections_drop(sengoo_collections_word(state, at + 9), value);
+        return 14;
+    };
+    sengoo_collections_move(sengoo_collections_word(state, at + 8), sh_cv_element(state, at, length),
+    value);
+    sengoo_collections_put(state, at + 4, length + 1);
+    0;
+}
+pub unsafe extern "C" fn sengoo_sg_collections_vec_set(state: * mut u8, extent: i64, handle: i64, index: i64,
+value: * mut u8) -> i64 {
+    let at = sengoo_sg_cr_slot(state, extent, handle, 1);
+    if at < 0 or sengoo_collections_present(value) == 0 {
+        return 2;
+    };
+    if index < 0 or index >= sengoo_collections_word(state, at + 4) {
+        sengoo_collections_drop(sengoo_collections_word(state, at + 9), value);
+        return 2;
+    };
+    let slot = sh_cv_element(state, at, index);
+    if sengoo_collections_equal(slot, value) != 0 {
+        return 0;
+    };
+    sengoo_collections_drop(sengoo_collections_word(state, at + 9), slot);
+    sengoo_collections_move(sengoo_collections_word(state, at + 8), slot, value);
+    0;
+}
+pub unsafe extern "C" fn sengoo_sg_collections_vec_insert(state: * mut u8, extent: i64, handle: i64,
+index: i64, value: * mut u8) -> i64 {
+    let at = sengoo_sg_cr_slot(state, extent, handle, 1);
+    if at < 0 or sengoo_collections_present(value) == 0 {
+        return 2;
+    };
+    let length = sengoo_collections_word(state, at + 4);
+    if index < 0 or index > length {
+        sengoo_collections_drop(sengoo_collections_word(state, at + 9), value);
+        return 2;
+    };
+    if not sh_cv_reserve(state, at, length + 1) {
+        sengoo_collections_drop(sengoo_collections_word(state, at + 9), value);
+        return 14;
+    };
+    let mut cursor = length;
+    while cursor > index {
+        sengoo_collections_move(sengoo_collections_word(state, at + 8), sh_cv_element(state, at, cursor),
+        sh_cv_element(state, at, cursor - 1));
+        cursor = cursor - 1;
+    };
+    sengoo_collections_move(sengoo_collections_word(state, at + 8), sh_cv_element(state, at, index),
+    value);
+    sengoo_collections_put(state, at + 4, length + 1);
+    0;
+}
+pub unsafe extern "C" fn sengoo_sg_collections_vec_pop(state: * mut u8, extent: i64, handle: i64, out: * mut u8) -> i64 {
+    let at = sengoo_sg_cr_slot(state, extent, handle, 1);
+    if at < 0 or sengoo_collections_present(out) == 0 {
+        return 5;
+    };
+    let length = sengoo_collections_word(state, at + 4);
+    if length == 0 {
+        return 5;
+    };
+    sengoo_collections_put(state, at + 4, length - 1);
+    sengoo_collections_move(sengoo_collections_word(state, at + 8), out, sh_cv_element(state, at, length - 1));
+    0;
+}
+pub unsafe extern "C" fn sengoo_sg_collections_vec_remove(state: * mut u8, extent: i64, handle: i64,
+index: i64, out: * mut u8) -> i64 {
+    let at = sengoo_sg_cr_slot(state, extent, handle, 1);
+    if at < 0 or sengoo_collections_present(out) == 0 or index < 0 {
+        return 5;
+    };
+    let length = sengoo_collections_word(state, at + 4);
+    if index >= length {
+        return 5;
+    };
+    sengoo_collections_move(sengoo_collections_word(state, at + 8), out, sh_cv_element(state, at, index));
+    let mut cursor = index + 1;
+    while cursor < length {
+        sengoo_collections_move(sengoo_collections_word(state, at + 8), sh_cv_element(state, at, cursor - 1),
+        sh_cv_element(state, at, cursor));
+        cursor = cursor + 1;
+    };
+    sengoo_collections_put(state, at + 4, length - 1);
+    0;
+}
+pub unsafe extern "C" fn sengoo_sg_collections_vec_clear(state: * mut u8, extent: i64, handle: i64) -> i64 {
+    let at = sengoo_sg_cr_slot(state, extent, handle, 1);
+    if at < 0 {
+        return 3;
+    };
+    let mut length = sengoo_collections_word(state, at + 4);
+    while length > 0 {
+        length = length - 1;
+        sengoo_collections_put(state, at + 4, length);
+        sengoo_collections_drop(sengoo_collections_word(state, at + 9), sh_cv_element(state, at, length));
+    };
+    0;
+}
+pub unsafe extern "C" fn sengoo_sg_collections_vec_free(state: * mut u8, extent: i64, handle: i64) -> i64 {
+    let at = sengoo_sg_cr_slot(state, extent, handle, 1);
+    if at < 0 {
+        return 3;
+    };
+    sengoo_sg_collections_vec_clear(state, extent, handle);
+    sengoo_collections_release(sengoo_collections_pointer(state, at + 3));
+    sengoo_sg_cr_close(state, extent, handle, 1);
+}
+pub unsafe extern "C" fn sengoo_sg_collections_vec_iter_new(state: * mut u8, extent: i64, handle: i64) -> i64 {
+    if sengoo_sg_cr_slot(state, extent, handle, 1) < 0 {
+        return 0;
+    };
+    let iter = sengoo_sg_cr_acquire(state, extent, 2);
+    if iter == 0 {
+        return 0;
+    };
+    let at = sengoo_sg_cr_slot(state, extent, iter, 2);
+    sengoo_collections_put(state, at + 10, handle);
+    iter;
+}
+pub unsafe extern "C" fn sengoo_sg_collections_vec_iter_next(state: * mut u8, extent: i64, handle: i64) -> * mut u8 {
+    let at = sengoo_sg_cr_slot(state, extent, handle, 2);
+    if at < 0 {
+        return sengoo_collections_null();
+    };
+    let owner = sengoo_collections_word(state, at + 10);
+    let index = sengoo_collections_word(state, at + 11);
+    let value = sengoo_sg_collections_vec_get(state, extent, owner, index);
+    if sengoo_collections_present(value) != 0 {
+        sengoo_collections_put(state, at + 11, index + 1);
+    };
+    value;
+}
+pub unsafe extern "C" fn sengoo_sg_collections_vec_iter_done(state: * mut u8, extent: i64, handle: i64) -> i64 {
+    let at = sengoo_sg_cr_slot(state, extent, handle, 2);
+    if at < 0 {
+        return 1;
+    };
+    let owner = sengoo_collections_word(state, at + 10);
+    if sengoo_sg_cr_slot(state, extent, owner, 1) < 0 {
+        return 1;
+    };
+    if sengoo_collections_word(state, at + 11) >= sengoo_sg_collections_vec_len(state, extent, owner) {
+        1;
+    } else {
+        0;
+    };
+}
+pub unsafe extern "C" fn sengoo_sg_collections_vec_iter_reset(state: * mut u8, extent: i64, handle: i64) -> i64 {
+    let at = sengoo_sg_cr_slot(state, extent, handle, 2);
+    if at < 0 {
+        return 3;
+    };
+    sengoo_collections_put(state, at + 11, 0);
+    0;
+}
+pub unsafe extern "C" fn sengoo_sg_collections_vec_iter_index(state: * mut u8, extent: i64, handle: i64) -> i64 {
+    let at = sengoo_sg_cr_slot(state, extent, handle, 2);
+    if at < 0 {
+        0;
+    } else {
+        sengoo_collections_word(state, at + 11);
+    };
+}
+pub unsafe extern "C" fn sengoo_sg_collections_vec_iter_free(state: * mut u8, extent: i64, handle: i64) -> i64 {
+    let at = sengoo_sg_cr_slot(state, extent, handle, 2);
+    if at < 0 {
+        return 2;
+    };
+    sengoo_sg_cr_close(state, extent, handle, 2);
+}
+pub unsafe extern "C" fn sengoo_sg_collections_vec_live(state: * mut u8, extent: i64) -> i64 {
+    if not sengoo_sg_cr_valid(state, extent) {
+        return - 1;
+    };
+    sengoo_collections_word(state, 2);
+}
+pub unsafe extern "C" fn sengoo_sg_collections_context_dispose(state: * mut u8, extent: i64) -> i64 {
+    if extent != 12352 or sengoo_collections_present(state) == 0 {
+        return 2;
+    };
+    if not sengoo_sg_cr_valid(state, extent) {
+        return 3;
+    };
+    let mut index = 0;
+    while index < 128 {
+        let at = 8 + index * 12;
+        if sengoo_collections_word(state, at + 1) == 1 {
+            sengoo_sg_collections_vec_free(state, extent, sengoo_collections_word(state, 3) * 4294967296 + sengoo_collections_word(state,
+            at) * 256 + index + 1);
+            ();
+        };
+        if sengoo_collections_word(state, at + 1) == 2 {
+            sengoo_sg_collections_vec_iter_free(state, extent, sengoo_collections_word(state, 3) * 4294967296 + sengoo_collections_word(state,
+            at) * 256 + index + 1);
+            ();
+        };
+        index = index + 1;
+    };
+    index = 0;
+    while index < 1544 {
+        sengoo_collections_put(state, index, 0);
+        index = index + 1;
+    };
+    0;
+}

@@ -1,0 +1,55 @@
+extern "C" {
+    unsafe fn sengoo_collections_allocate(bytes: i64, align: i64) -> * mut u8;
+    unsafe fn sengoo_collections_release(bytes: * mut u8);
+    unsafe fn sengoo_collections_present(bytes: * mut u8) -> i64;
+    unsafe fn sengoo_collections_fixture_move() -> i64;
+    unsafe fn sengoo_collections_fixture_drop() -> i64;
+    unsafe fn sengoo_collections_fixture_put(value: * mut u8, number: i64);
+    unsafe fn sengoo_collections_fixture_get(value: * mut u8) -> i64;
+    unsafe fn sengoo_sg_collections_context_init(state: * mut u8, extent: i64, identity: i64) -> i64;
+    unsafe fn sengoo_sg_collections_context_validate(state: * mut u8, extent: i64) -> i64;
+    unsafe fn sengoo_sg_collections_context_dispose(state: * mut u8, extent: i64) -> i64;
+    unsafe fn sengoo_sg_collections_vec_new(state: * mut u8, extent: i64, size: i64, align: i64, mover: i64,
+    dropper: i64) -> i64;
+    unsafe fn sengoo_sg_collections_vec_push(state: * mut u8, extent: i64, handle: i64, value: * mut u8) -> i64;
+    unsafe fn sengoo_sg_collections_vec_get(state: * mut u8, extent: i64, handle: i64, index: i64) -> * mut u8;
+    unsafe fn sengoo_sg_collections_vec_iter_new(state: * mut u8, extent: i64, handle: i64) -> i64;
+    unsafe fn sengoo_sg_collections_vec_iter_next(state: * mut u8, extent: i64, handle: i64) -> * mut u8;
+    unsafe fn sengoo_sg_collections_vec_iter_done(state: * mut u8, extent: i64, handle: i64) -> i64;
+}
+unsafe extern "C" fn smoke() -> i64 {
+    let state = sengoo_collections_allocate(12352, 8);
+    let value = sengoo_collections_allocate(8, 8);
+    if sengoo_collections_present(state) == 0 or sengoo_collections_present(value) == 0 {
+        sengoo_collections_release(state);
+        sengoo_collections_release(value);
+        return 1;
+    };
+    let mut result = 1;
+    if sengoo_sg_collections_context_init(state, 12352, 19) == 0 {
+        let vector = sengoo_sg_collections_vec_new(state, 12352, 8, 8, sengoo_collections_fixture_move(),
+        sengoo_collections_fixture_drop());
+        sengoo_collections_fixture_put(value, 40);
+        let first = sengoo_sg_collections_vec_push(state, 12352, vector, value);
+        sengoo_collections_fixture_put(value, 2);
+        let second = sengoo_sg_collections_vec_push(state, 12352, vector, value);
+        let iter = sengoo_sg_collections_vec_iter_new(state, 12352, vector);
+        let left = sengoo_sg_collections_vec_iter_next(state, 12352, iter);
+        let right = sengoo_sg_collections_vec_iter_next(state, 12352, iter);
+        if first == 0 and second == 0 and sengoo_collections_fixture_get(value) == 0 and sengoo_sg_collections_vec_iter_done(state,
+        12352, iter) == 1 and sengoo_sg_collections_context_validate(state, 12352) == 0 {
+            if sengoo_collections_fixture_get(left) + sengoo_collections_fixture_get(right) == 42 {
+                result = 42;
+            };
+        };
+        if sengoo_sg_collections_context_dispose(state, 12352) != 0 {
+            result = 1;
+        };
+    };
+    sengoo_collections_release(value);
+    sengoo_collections_release(state);
+    result;
+}
+pub unsafe extern "C" fn main() -> i64 {
+    smoke();
+}

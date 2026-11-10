@@ -1,0 +1,187 @@
+extern "C" {
+    unsafe fn sengoo_collections_word(state: * mut u8, index: i64) -> i64;
+    unsafe fn sengoo_collections_put(state: * mut u8, index: i64, value: i64);
+    unsafe fn sengoo_collections_pointer(state: * mut u8, index: i64) -> * mut u8;
+    unsafe fn sengoo_collections_pointer_put(state: * mut u8, index: i64, value: * mut u8);
+    unsafe fn sengoo_collections_at(bytes: * mut u8, offset: i64) -> * mut u8;
+    unsafe fn sengoo_collections_null() -> * mut u8;
+    unsafe fn sengoo_collections_present(bytes: * mut u8) -> i64;
+    unsafe fn sengoo_collections_equal(left: * mut u8, right: * mut u8) -> i64;
+    unsafe fn sengoo_collections_allocate(bytes: i64, align: i64) -> * mut u8;
+    unsafe fn sengoo_collections_release(bytes: * mut u8);
+    unsafe fn sengoo_collections_move(callback: i64, target: * mut u8, source: * mut u8);
+    unsafe fn sengoo_collections_drop(callback: i64, value: * mut u8);
+} // Explicit context ABI: 8 control words followed by 128 twelve-word slots.
+// The unsafe caller provides a non-reused positive 31-bit lifetime identity.
+pub unsafe extern "C" fn sengoo_sg_collections_context_init(state: * mut u8, extent: i64, identity: i64) -> i64 {
+    if extent != 12352 or identity < 1 or identity > 2147483647 or sengoo_collections_present(state) == 0 {
+        return 2;
+    };
+    let mut index = 0;
+    while index < 1544 {
+        sengoo_collections_put(state, index, 0);
+        index = index + 1;
+    };
+    sengoo_collections_put(state, 0, 1397184086);
+    sengoo_collections_put(state, 1, 128);
+    sengoo_collections_put(state, 3, identity);
+    0;
+}
+pub unsafe extern "C" fn sengoo_sg_cr_valid(state: * mut u8, extent: i64) -> bool {
+    if extent != 12352 or sengoo_collections_present(state) == 0 {
+        return false;
+    };
+    if sengoo_collections_word(state, 0) != 1397184086 {
+        return false;
+    };
+    sengoo_collections_word(state, 1) == 128 and sengoo_collections_word(state, 2) >= 0 and sengoo_collections_word(state,
+    2) <= 128 and sengoo_collections_word(state, 3) >= 1 and sengoo_collections_word(state, 3) <= 2147483647;
+}
+pub unsafe extern "C" fn sengoo_sg_cr_slot(state: * mut u8, extent: i64, handle: i64, kind: i64) -> i64 {
+    if not sengoo_sg_cr_valid(state, extent) or handle <= 0 {
+        return - 1;
+    };
+    let index = handle % 256;
+    if handle / 4294967296 != sengoo_collections_word(state, 3) {
+        return - 1;
+    };
+    let generation = (handle / 256) % 16777216;
+    if index < 1 or index > 128 or generation < 1 or generation > 16777215 {
+        return - 1;
+    };
+    let at = 8 + (index - 1) * 12;
+    if sengoo_collections_word(state, at) != generation or sengoo_collections_word(state, at + 1) != kind {
+        return - 1;
+    };
+    at;
+}
+pub unsafe extern "C" fn sengoo_sg_cr_acquire(state: * mut u8, extent: i64, kind: i64) -> i64 {
+    if not sengoo_sg_cr_valid(state, extent) or kind < 1 or kind > 2 {
+        return 0;
+    };
+    let mut index = 0;
+    while index < 128 {
+        let at = 8 + index * 12;
+        let generation = sengoo_collections_word(state, at);
+        if sengoo_collections_word(state, at + 1) == 0 and generation < 16777215 {
+            let mut field = 1;
+            while field < 12 {
+                sengoo_collections_put(state, at + field, 0);
+                field = field + 1;
+            };
+            sengoo_collections_put(state, at, generation + 1);
+            sengoo_collections_put(state, at + 1, kind);
+            sengoo_collections_put(state, 2, sengoo_collections_word(state, 2) + 1);
+            return sengoo_collections_word(state, 3) * 4294967296 + (generation + 1) * 256 + index + 1;
+        };
+        index = index + 1;
+    };
+    0;
+}
+pub unsafe extern "C" fn sengoo_sg_cr_close(state: * mut u8, extent: i64, handle: i64, kind: i64) -> i64 {
+    let at = sengoo_sg_cr_slot(state, extent, handle, kind);
+    if at < 0 {
+        return 3;
+    };
+    let mut field = 1;
+    while field < 12 {
+        sengoo_collections_put(state, at + field, 0);
+        field = field + 1;
+    };
+    sengoo_collections_put(state, 2, sengoo_collections_word(state, 2) - 1);
+    0;
+}
+pub unsafe extern "C" fn sengoo_sg_collections_context_validate(state: * mut u8, extent: i64) -> i64 {
+    if not sengoo_sg_cr_valid(state, extent) {
+        return 3;
+    };
+    if sengoo_collections_word(state, 4) != 0 or sengoo_collections_word(state, 5) != 0 or sengoo_collections_word(state,
+    6) != 0 or sengoo_collections_word(state, 7) != 0 {
+        return 2;
+    };
+    let mut live = 0;
+    let mut index = 0;
+    while index < 128 {
+        let at = 8 + index * 12;
+        let generation = sengoo_collections_word(state, at);
+        let kind = sengoo_collections_word(state, at + 1);
+        if generation < 0 or generation > 16777215 or kind < 0 or kind > 2 or sengoo_collections_word(state,
+        at + 2) != 0 {
+            return 2;
+        };
+        if kind == 0 {
+            let mut field = 1;
+            while field < 12 {
+                if sengoo_collections_word(state, at + field) != 0 {
+                    return 2;
+                };
+                field = field + 1;
+            };
+        } else {
+            live = live + 1;
+            if generation == 0 {
+                return 2;
+            };
+        };
+        if kind == 1 {
+            let length = sengoo_collections_word(state, at + 4);
+            let capacity = sengoo_collections_word(state, at + 5);
+            let size = sengoo_collections_word(state, at + 6);
+            let align = sengoo_collections_word(state, at + 7);
+            if size < 1 or size > 1048576 or align < 1 or align > 4096 or (align & (align - 1)) != 0 or length < 0 or capacity < length or capacity > 67108864 / size or sengoo_collections_word(state,
+            at + 8) <= 0 or sengoo_collections_word(state, at + 9) <= 0 or sengoo_collections_word(state,
+            at + 10) != 0 or sengoo_collections_word(state, at + 11) != 0 {
+                return 2;
+            };
+            if (capacity == 0) != (sengoo_collections_present(sengoo_collections_pointer(state, at + 3)) == 0) {
+                return 2;
+            };
+        };
+        if kind == 2 {
+            let mut field = 3;
+            while field < 10 {
+                if sengoo_collections_word(state, at + field) != 0 {
+                    return 2;
+                };
+                field = field + 1;
+            };
+            let owner = sengoo_collections_word(state, at + 10);
+            if owner <= 0 or owner / 4294967296 != sengoo_collections_word(state, 3) or owner % 256 < 1 or owner % 256 > 128 or (owner / 256) % 16777216 == 0 or sengoo_collections_word(state,
+            at + 11) < 0 {
+                return 2;
+            };
+        };
+        index = index + 1;
+    };
+    if live != sengoo_collections_word(state, 2) {
+        return 2;
+    };
+    0;
+}
+pub unsafe extern "C" fn sengoo_sg_collections_context_query(state: * mut u8, extent: i64, field: i64) -> i64 {
+    if extent != 12352 or field < 0 or field > 2 or sengoo_collections_present(state) == 0 {
+        return - 2;
+    };
+    if not sengoo_sg_cr_valid(state, extent) {
+        return - 3;
+    };
+    if field == 0 {
+        return sengoo_collections_word(state, 3);
+    };
+    if field == 1 {
+        return sengoo_collections_word(state, 2);
+    };
+    128;
+}
+pub unsafe extern "C" fn sengoo_sg_collections_context_reset(state: * mut u8, extent: i64, identity: i64) -> i64 {
+    if extent != 12352 or identity < 1 or identity > 2147483647 or sengoo_collections_present(state) == 0 {
+        return 2;
+    };
+    if not sengoo_sg_cr_valid(state, extent) {
+        return 3;
+    };
+    if sengoo_collections_word(state, 2) != 0 or identity == sengoo_collections_word(state, 3) {
+        return 2;
+    };
+    sengoo_sg_collections_context_init(state, extent, identity);
+}
