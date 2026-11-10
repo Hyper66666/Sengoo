@@ -103,7 +103,10 @@ static int gzip_large(const char *directory) {
 #endif
     return 0;
 }
-int main(int argc,char **argv) {
+#ifndef SENGOO_GZIP_PROBE_MAIN
+#define SENGOO_GZIP_PROBE_MAIN main
+#endif
+int SENGOO_GZIP_PROBE_MAIN(int argc,char **argv) {
     if(argc==3&&!strcmp(argv[1],"--large"))return gzip_large(argv[2]);
     if(argc!=2)return 64;
     FILE *file=NULL;if(fopen_s(&file,argv[1],"rb")||!file)fail("gzip-corpus-open",1,0);

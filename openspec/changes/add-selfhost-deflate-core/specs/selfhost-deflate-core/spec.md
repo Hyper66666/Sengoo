@@ -32,6 +32,28 @@ provide only primitive memory access. Init/reset/dispose SHALL allocate nothing.
 - **THEN** this SHALL NOT by itself qualify replacement of the existing raw/gzip exports
 - **AND** their final shared-core migration SHALL require fresh complete raw and gzip regression qualifications
 
+### Requirement: Existing one-shot exports SHALL use the single continuation core
+
+The raw exact and prefix compatibility exports SHALL use the same SG
+bit/Huffman/LZ implementation as the continuation API, with bounded SG-owned
+temporary state and explicit complete native object dependencies. Existing
+64 MiB limits, shift-27 counts and failure behavior SHALL remain compatible.
+
+#### Scenario: One-shot lifetime and allocation failure
+- **WHEN** an export acquires its fixed 45,056-byte state or allocation fails
+- **THEN** SG SHALL dispose and release every acquired state on success and failure, and allocation failure SHALL return -2 before raw input/output access
+- **AND** independent real OS memory observations SHALL verify exact commit size, erased bytes, zero live allocations and actual release
+
+#### Scenario: Gzip raw-state allocation fails
+- **WHEN** gzip has read its valid fixed ten-byte header and its raw-state allocation fails
+- **THEN** the gzip call SHALL return -2 without reading raw DEFLATE bytes or writing output
+- **AND** the evidence SHALL distinguish header reads from zero-access raw/prefix controls
+
+#### Scenario: A native caller omits the shared core object
+- **WHEN** the synchronous wrapper is linked without its continuation core dependency
+- **THEN** the qualified SG linker SHALL reject unresolved symbols and SHALL NOT publish an executable
+- **AND** deployment documentation SHALL list all required SG and memory-provider objects
+
 ### Requirement: SG raw DEFLATE decoding SHALL support all defined block kinds
 
 The SG decoder SHALL implement stored, fixed and dynamic Huffman raw DEFLATE

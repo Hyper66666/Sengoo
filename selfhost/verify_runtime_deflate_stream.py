@@ -15,7 +15,7 @@ def main():
     a=p.parse_args();out=a.output.resolve()
     if not out.is_relative_to(ROOT/'target'):raise ValueError('fresh output must be in target')
     out.mkdir(parents=True,exist_ok=False)
-    report={'schema':1,'stage':'sg-runtime-deflate-continuation-prototype','result':'running','revision_start':revision(),'git_status_start':git_status(),'host':platform.platform(),'started_at':dt.datetime.now(dt.timezone.utc).isoformat(),'sources':{},'external_sources':{},'tools':{},'artifacts':{},'steps':[],'old_exports_migrated':False,'package_integration_complete':False,'remaining':['migrate one-shot raw/prefix/gzip to this shared core and rerun46/51 complete qualifications','streaming gzip CRC/header/trailer','incremental tar and staging/full validation/atomic publication','performance and final SDK/self-build qualification']}
+    report={'schema':1,'stage':'sg-runtime-deflate-continuation','result':'running','revision_start':revision(),'git_status_start':git_status(),'host':platform.platform(),'started_at':dt.datetime.now(dt.timezone.utc).isoformat(),'sources':{},'external_sources':{},'tools':{},'artifacts':{},'steps':[],'old_exports_migrated':False,'package_integration_complete':False,'remaining':['fresh gzip wrapper qualification for the migrated raw branch','streaming gzip CRC/header/trailer','incremental tar and staging/full validation/atomic publication','performance and final SDK/self-build qualification']}
     cache={}
     def save():(out/'evidence.json').write_text(json.dumps(report,indent=2)+'\n',encoding='utf8')
     def read(path,expected=None):
@@ -41,6 +41,10 @@ def main():
         for data in [text,raw,rust]:
             if type(data.get('schema')) is not int or data['schema']!=1 or data.get('result')!='passed' or any(value!=[] for key,value in data.items() if key.startswith('changed_')):raise ValueError('parent qualification not passed/unchanged')
         if text['stage']!='sg-runtime-text-utf8' or raw['stage']!='sg-runtime-raw-deflate' or rust['stage']!='independent-miniz-deflate-policy':raise ValueError('qualification branch stage differs')
+        if raw.get('single_shared_deflate_core')is not True:raise ValueError('raw branch is not a migrated shared-core qualification')
+        for group in ['sources','external_sources']:
+            for name,fingerprint in raw[group].items():read(ROOT/name if group=='sources'else Path(name),fingerprint)
+        for name,identity in raw['tools'].items():tool('raw-producer-'+name,identity)
         for group in ['sources','external_sources']:
             for name,fingerprint in text[group].items():read(ROOT/name if group=='sources' else Path(name),fingerprint)
         for name,identity in text['tools'].items():tool('text-producer-'+name,identity)
@@ -122,6 +126,7 @@ def main():
                 obj=folder/(stem+'.obj');made=run(str(index)+'-emit-'+stem,[native,saved,obj,'--wrap'])
                 if made.stderr or strict_json(made.stdout)!={'schema_version':1,'ok':True,'phase':'object'}:raise ValueError('native emitter result differs')
                 objects[stem]=obj
+                if stem=='deflate_stream'and sha(obj)!=raw['cases'][0]['sha256']['deflate_stream']:raise ValueError('continuation SG object differs from qualified one-shot core')
             for stem in ['deflate_stream_memory','deflate_stream_fixture']:
                 saved=folder/(stem+'.c');saved.write_bytes(read(snapshot/(stem+'.c')));read(saved)
                 rawobj=compile_c(str(index)+'-'+stem,saved,folder/(stem+'.raw.obj'),['-fomit-frame-pointer','-fno-asynchronous-unwind-tables','-fno-unwind-tables','-fno-vectorize','-fno-slp-vectorize'])
@@ -147,7 +152,7 @@ def main():
             if mode=='instrumented' and(type(value['history_reads'])is not int or value['history_reads']<=0)or mode=='production'and value['history_reads']is not None:raise ValueError('observed/unobserved history flags differ')
             results[mode]=value
         if results['production']!={**results['instrumented'],'mode':'production','history_reads':None}:raise ValueError('production/instrumented completion diverged')
-        report['probe_results']=results;report['state_bytes']=45056;report['heap_allocations_in_algorithm']=0;report['result']='passed'
+        report['probe_results']=results;report['state_bytes']=45056;report['heap_allocations_in_algorithm']=0;report['result']='passed';report['old_exports_migrated']=True;report['raw_wrapper_qualification']={'path':str(a.raw_evidence.resolve()),'sha256':digest(read(a.raw_evidence)),'sg_wrapper_owns_fixed_state_allocation':True,'stream_core_allocates_heap':False}
     except BaseException as error:report['result']='failed';report['error']=repr(error);raise
     finally:
         for group in ['sources','external_sources']:

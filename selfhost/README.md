@@ -244,12 +244,13 @@ recorded in `openspec/changes/add-selfhost-runtime-text-core/tasks.md`.
 
 ## SG raw DEFLATE foundation
 
-`runtime/deflate.sg` implements stored, fixed and dynamic Huffman raw DEFLATE,
-including overlapping copies and history across blocks. Its unsafe C export
+`runtime/deflate_stream.sg` implements stored, fixed and dynamic Huffman raw
+DEFLATE, overlapping copies and cross-block history in one fixed-state core.
+`runtime/deflate.sg` is its synchronous compatibility wrapper. Its unsafe C export
 `sengoo_sg_raw_inflate(source, input_length, target, capacity)` requires separate
 readable/writable caller ranges, each bounded to 64 MiB. Success returns the
 decoded byte count; failures are -1 for malformed/truncated/trailing streams,
--2 for exhausted output capacity and -3 for invalid limits. Failure may leave
+-2 for exhausted output capacity or state allocation failure and -3 for invalid limits. Failure may leave
 an output prefix. Successful decoding consumes exactly the supplied raw stream
 bytes, allowing unused padding in its final byte.
 
@@ -259,7 +260,36 @@ expectations, explicit format edge cases, protected ranges and actual 64 MiB
 input/output limits. Two fresh artifact directories must produce identical
 unmodified SG objects, normalized C memory/fixture objects and SG-linked PE
 bytes. The recorded checkpoint is
-`target/selfhost/runtime-deflate-final-checkpoint/evidence.json`.
+`target/selfhost/runtime-deflate-shared-final/evidence.json`. The earlier
+`runtime-deflate-final-checkpoint` and `runtime-deflate-prefix-final` reports
+remain historical qualifications for their original source bytes.
+
+The raw component requires **both** SG objects, `deflate.sg` and
+`deflate_stream.sg`, plus `deflate_stream_memory.c` and `deflate_storage.c`
+memory providers, the qualified Kernel32 import library and the explicit
+development NTDLL `__chkstk` import library. Compiling/linking only
+`deflate.sg` omits its core dependency; the qualification executes this
+negative control and requires unresolved-symbol failure with no published PE.
+The gates explicitly build the complete object closure; installed automatic
+dependency discovery and final SDK packaging are not claimed.
+
+SG requests exactly 45,056 bytes of temporary state, disposes all bytes and
+releases it on every acquired-state exit. The minimal C storage adapter only
+calls VirtualAlloc/VirtualFree; actual instructions are verified stack-free
+tail-jump wrappers before metadata normalization. Tests check committed size,
+erasure and real release with VirtualQuery, as well as allocation-failure
+handling. No second C or SG LZ/Huffman implementation is used.
+
+The direct continuation API keeps that same 45,056-byte state in caller-owned
+memory, uses a 32 KiB ring history, retains no input/output pointers and
+allocates nothing itself. `verify_runtime_deflate_stream.py --text-evidence
+REPORT --raw-evidence REPORT --rust-evidence REPORT --output DIRECTORY` checks
+single-byte/random/all-small-two-part cuts and the full original raw corpus;
+the current report is
+`target/selfhost/runtime-deflate-stream-shared-final/evidence.json`. A direct
+continuation state does not require the one-shot storage allocator. Native
+stack frames are additional fixed storage, not part of the 45,056-byte state
+claim, and performance/RSS qualification remains open.
 
 The corpus retains the explicit HDIST 31/32 format/oracle differences and the
 duplicate length-258 encoding compatibility case.
@@ -270,7 +300,12 @@ strict-single and strict-concatenation modes. Success packs the consumed byte
 count above 27 decoded-length bits. `verify_runtime_gzip.py --raw-evidence REPORT
 --rust-evidence REPORT --output DIRECTORY` compares the exact corpus with both
 Python/zlib and the repository-pinned Rust flate2 implementation. The checkpoint
-is `target/selfhost/runtime-gzip-final-posttrim/evidence.json`.
+is `target/selfhost/runtime-gzip-shared-final/evidence.json`; the posttrim
+report remains immutable historical evidence. Its component adds `gzip.sg`,
+`deflate_memory.c` and `gzip_memory.c` to the raw object closure for framing
+and CRC byte access. This framing API is still synchronous. Raw/prefix OOM
+controls observe no input/output accesses; gzip reads its ten-byte fixed
+header before a raw-state OOM, then performs no raw reads or output writes.
 
 Tar/package integration, final SDK packaging, self-building and performance
 remain open. In particular, sgpm permits 256 MiB of unpacked content and 10,000

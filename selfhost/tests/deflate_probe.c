@@ -119,7 +119,10 @@ static int large(const char *directory) {
     return 0;
 }
 
-int main(int argc,char **argv) {
+#ifndef SENGOO_RAW_PROBE_MAIN
+#define SENGOO_RAW_PROBE_MAIN main
+#endif
+int SENGOO_RAW_PROBE_MAIN(int argc,char **argv) {
     if(argc==3&&!strcmp(argv[1],"--large"))return large(argv[2]);
     if(argc!=2)return 64;
     FILE *file=NULL;if(fopen_s(&file,argv[1],"rb")||!file)fail("open-corpus",1,0);

@@ -3,12 +3,50 @@
 ## Incremental implementation owner and transition
 
 `selfhost_core` owns the new SG continuation core and its subsequent shared
-raw/gzip integration. The first prototype is `runtime/deflate_stream.sg`;
-the qualified `deflate.sg` and `gzip.sg` remain unchanged until independent
-chunked proof and explicit source-freeze coordination. A prototype does not
-claim that the existing one-shot exports already use it. Final integration
-must remove the duplicate implementation path and rerun all existing raw and
-gzip qualifications before replacing those exports.
+raw/gzip integration. The independently qualified prototype is
+`runtime/deflate_stream.sg`. After its chunked proof and source-freeze barrier,
+`deflate.sg` becomes a thin synchronous SG wrapper around that same core;
+it contains no second LZ/Huffman implementation. `gzip.sg` retains its framing
+algorithm and calls the migrated prefix export. Shared-core replacement is
+qualified only by fresh complete raw, gzip and continuation regression runs;
+earlier one-shot/prototype reports remain historical evidence.
+
+### Synchronous compatibility wrapper and deployment
+
+The existing raw four-argument exports keep their 64 MiB extents, exact/raw
+versus prefix policy, decoded count or shift-27 packed counts and -1/-2/-3
+errors. SG validates extents before allocation, requests exactly 45,056 bytes,
+initializes the stream with output budget equal to caller capacity, submits
+the whole input/output with finish asserted, queries counts, disposes every
+state byte and releases the owner on every acquired-state exit. Need-output
+maps to old -2 and malformed/truncated/trailing behavior remains covered by
+all original fixtures. Allocation failure also returns -2 before raw input
+or output access. This new resource failure boundary is explicit.
+
+`deflate_storage.c` supplies only generic raw acquisition/presence/release via
+VirtualAlloc/VirtualFree. SG owns the fixed request and lifetime; no C decoder
+or hidden global state is added. Actual committed state is 45,056 bytes and
+release is independently checked with VirtualQuery after SG erasure. The
+compiler emits tail-jump, stack-free wrappers for the OS primitives; leaf
+status is checked on actual instructions before metadata normalization. Real
+OS provider paths, hashes and RVAs and the Kernel32 import library are bound.
+
+This is a component build: raw requires SG `deflate.sg` +
+`deflate_stream.sg`, C `deflate_stream_memory.c` + `deflate_storage.c`,
+Kernel32 and the qualified explicit NTDLL stack provider. Gzip adds SG
+`gzip.sg` and C `deflate_memory.c` + `gzip_memory.c` for framing/CRC memory
+access. Compiling/linking `deflate.sg` alone is incomplete; an actual omitted-
+core link must fail unresolved and publish no executable. All native/SDK
+consumers and gates must supply this complete object closure. No installed
+automatic component resolution or final SDK packaging is inferred.
+
+Original independent raw/prefix/gzip C validators are included unmodified in
+test semantics through entry-name macros and resource drivers. Each acquired
+state is checked for exact committed size, complete SG dispose, release and
+zero live bytes. Raw/prefix OOM controls observe zero input/output accesses;
+gzip OOM legitimately reads exactly its ten framing-header bytes before raw
+allocation fails, with zero raw DEFLATE reads/output. Production counters that
+are not instrumented are not reported as observed.
 
 ### Caller-owned continuation ABI
 
@@ -60,7 +98,7 @@ staging or atomic publication. It does not widen existing raw/gzip arenas.
 Implement the raw format from [RFC 1951](https://www.rfc-editor.org/rfc/rfc1951),
 including stored, fixed and dynamic Huffman blocks, code-length repeats,
 length/distance extra bits, overlapping copies and history across blocks.
-Use bounded stack tables for canonical Huffman decoding. Input and output are
+Use bounded state tables for canonical Huffman decoding. Input and output are
 separate caller-owned readable/writable ranges, each at most 64 MiB. The unsafe
 caller guarantees those extents and non-overlap; arbitrary pointers are not
 validated by the decoder.

@@ -4,7 +4,10 @@
 #undef main
 extern int64_t sengoo_sg_raw_inflate_prefix(const uint8_t *,int64_t,uint8_t *,int64_t);
 
-int main(void) {
+#ifndef SENGOO_PREFIX_PROBE_MAIN
+#define SENGOO_PREFIX_PROBE_MAIN main
+#endif
+int SENGOO_PREFIX_PROBE_MAIN(void) {
     const uint8_t empty[]={3,0};
     const uint8_t fixed[]={0x73,0x1c,0xf9,0,0};
     const uint8_t stored[]={1,3,0,252,255,65,66,67};

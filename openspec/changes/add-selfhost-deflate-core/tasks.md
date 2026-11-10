@@ -193,7 +193,7 @@ record and is not rewritten to qualify the new fixture bytes.
 - [x] Verify exact/prefix consumption, sticky finish, zero buffers, reset/copy/dispose and invalid API no-access controls.
 - [x] Execute independent Python/Rust complete-output and malformed/history comparisons with guard pages.
 - [x] Qualify bounded peak state and source/native artifacts; record an honest prototype boundary.
-- [ ] Migrate old raw/prefix/gzip exports to the one shared core and rerun complete original raw/gzip gates.
+- [x] Migrate old raw/prefix/gzip exports to the one shared core and rerun complete original raw/gzip gates.
 - [ ] Add SG gzip framing/CRC continuation and incremental tar/staging integration.
 
 ### Continuation prototype exact-source evidence
@@ -266,3 +266,87 @@ checkpoint does NOT claim a final single implementation across their old
 exports and the new prototype. Shared-core migration and complete raw46/
 gzip51 regressions are unchecked next steps, followed by real gzip/tar
 continuations and private staging/atomic publication.
+
+### Single-core migration qualification
+
+The preceding paragraph describes the immutable prototype checkpoint; the
+following new-source reports qualify its subsequent migration. The exact
+current one-shot wrapper is `deflate.sg`, whose old LZ/Huffman implementation
+has been removed. All bit/tree/repeat/length/distance/history policy lives in
+`deflate_stream.sg`. Its source bytes and `gzip.sg` framing bytes are unchanged
+from the pre-migration barrier. The historical reports above are not edited
+or reused as current-source qualifications.
+
+The new raw qualification is
+`target/selfhost/runtime-deflate-shared-final/evidence.json`, SHA256
+`cd8f88f5e2d56f6e9b7a715061ad1d780d1442b3817705656ae8543e3a5fe672`.
+It actually ran **70 commands**, including every original raw/prefix/corpus/
+64 MiB/oracle check plus the full new object closure and state-resource
+controls. Actual full revision starts
+`52ca3dcbaa9d6360007b7ebadfb1991e6ea0d919` and ends
+`0b797a88391fe8e28a7bb35d2255ab79b3da02ca`; independent root commits occurred
+outside the consumed closure, whose guards are all empty. The report does not
+claim one clean revision. Host is Windows-11-10.0.26300-SP0. It binds 2,484
+sources, 133 external sources, 45 tools and 35 object/executable/library
+artifacts. Each 5,290-fixture mode retains the original 10,006 calls and exact
+old statuses, access counts and known failure prefixes; all three actual
+64 MiB cases and prefix/exact/no-read controls are unchanged in meaning.
+
+The gzip qualification is
+`target/selfhost/runtime-gzip-shared-final/evidence.json`, SHA256
+`e4ad46613228f4558eff960e8d5b1301067ea6e4407cb0a5adb3930fcfdaba18`.
+It actually ran **73 commands**, including every original 8,061-fixture,
+22,731-call, optional-header/checksum/tail-policy, wrong-oracle and four actual
+64 MiB tests in both modes. All original expected JSON fields remain equal.
+Actual start/end revision is
+`0b797a88391fe8e28a7bb35d2255ab79b3da02ca`. Its 2,719 sources, 320 external
+sources, 66 tools and 38 artifacts have empty source/tool/checkout/config
+change guards. It binds the new raw report and checks the actual raw wrapper
+and core object hashes against that qualification, not against old code.
+
+The complete continuation regression is
+`target/selfhost/runtime-deflate-stream-shared-final/evidence.json`, SHA256
+`820138aa04902a00a585af9240b0c9b9b39c4a0e061a7f50001c2ba7b5bd7f9b`.
+Its **35 commands** run at the same actual start/end revision above, with
+2,712 sources, 263 external sources, 89 tools and 88 artifacts and empty
+source/external/tool/artifact guards. Both modes retain 17,337 schedules,
+8,125,565 calls and all protocol/cut/history results from the prototype. The
+emitted core object must equal the one actually used by the new one-shot raw
+qualification. Only this later report marks `old_exports_migrated=true`.
+
+All three reports execute two fresh qualified SG-linker deployments with
+identical SG objects, normalized leaf C objects and PE bytes, and cold empty-
+PATH execution returns 42 without stdout/stderr. Raw deployment explicitly
+contains wrapper/core SG objects and stream-memory/OS-storage C providers;
+gzip adds framing SG and its memory adapters. A missing core object really
+returns exit 65 / unresolved diagnostic 7204 and publishes no executable.
+Normal one-file compilation is not represented as automatic dependency
+resolution. The actual C driver selects the qualified LLD (independent -###
+path check), and actual archive reads/header dependencies are hashed.
+
+SG alone requests exactly 45,056 bytes, initializes/drains/queries/disposes
+the core and releases the state on every acquired-owner exit. Minimal generic
+C acquisition/release uses VirtualAlloc/VirtualFree, with no decoding policy
+or global state. Actual C instructions are tail-jump stack-free leaf wrappers;
+the gate preserves code/data/symbol/relocation identity while removing metadata
+and recording raw timestamps. Kernel32 and the actual loaded OS memory
+provider paths/hashes/RVAs are bound. Instrumented tests reuse the actual
+provider source, query a 45,056-byte committed region, inspect complete SG
+zero erasure and confirm MEM_FREE after release. Each corpus mode has exactly
+10,006 raw / 13,692 gzip state lifetimes, large cases 3 raw / 130 gzip and
+prefix 7, with created=freed, zero live bytes and peak committed state 45,056.
+
+OOM controls inject one failed acquisition and observe attempt=1, created=
+freed=0, live=0, peak=0 and old -2. Exact raw and prefix perform zero input/
+output accesses. The real gzip OOM path first reads exactly its ten framing-
+header bytes, then performs no raw DEFLATE reads or output writes; this is not
+a claim of zero reads for the entire gzip call. Production access counters
+remain unobserved/null. Invalid limits still reject before allocation.
+
+Initial target migration trials retained all original raw/gzip error priorities
+and outputs, proved actual SG linking and included allocator fault injection;
+their reports remain separate from these final exact-source qualifications.
+Synchronous state allocation is separate from the caller-owned continuation
+API's zero heap allocation. These checkpoints do not implement gzip framing
+continuation, incremental tar, 256 MiB package-content budgets, private staging
+or atomic publication, and do not close final SDK/performance/self-build work.

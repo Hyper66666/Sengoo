@@ -4,6 +4,7 @@ import argparse,collections,ctypes,datetime as dt,hashlib,json,os,platform,re,st
 from pathlib import Path
 from linker_evidence import copy_linker
 from verify_runtime_text import coff_image,dependencies,digest,exact_json,git_status,revision,sha,strict_json
+from runtime_evidence import bind_memory_providers,c_link,resource_receipt
 
 ROOT=Path(__file__).resolve().parents[1]
 CORPUS_SHA='6f6ae1cca20bf43074d80892afdcf6db6e813f22815bb9878fa19b91f1f59728'
@@ -126,12 +127,13 @@ def main():
         report['qualification']={'path':str(evidence),'sha256':digest(read(evidence)),'revision_start':prior['source_revision'],'revision_end':prior['source_revision_end'],'native_binary':report['tools']['native'],'formatter_preview':report['tools']['formatter'],'actual_ntdll':prior['stack_probe_provider'],'scope':'all prior consumed sources/external headers/tools guarded; actual emitter/preview binaries and stack SDK copied by exact digest; historical SG linker chain independently resolved'}
         cenv=dict(clean,PATH=str(clang.parent)+os.pathsep+clean.get('PATH',''),SOURCE_DATE_EPOCH='0')
         implementation=out/'implementation'
-        names=['selfhost/runtime/deflate.sg','selfhost/runtime/deflate_memory.c','selfhost/tests/deflate_cases.py','selfhost/tests/deflate_probe.c','selfhost/tests/deflate_prefix_probe.c','selfhost/tests/deflate_fixture.c','selfhost/tests/deflate_smoke.sg']
+        names=['selfhost/runtime/deflate.sg','selfhost/runtime/deflate_stream.sg','selfhost/runtime/deflate_stream_memory.c','selfhost/runtime/deflate_storage.c','selfhost/runtime/deflate_memory.c','selfhost/tests/deflate_cases.py','selfhost/tests/deflate_probe.c','selfhost/tests/deflate_prefix_probe.c','selfhost/tests/deflate_resource_probe.c','selfhost/tests/deflate_prefix_resource_probe.c','selfhost/tests/deflate_resource_probe.h','selfhost/tests/deflate_fixture.c','selfhost/tests/deflate_smoke.sg','selfhost/runtime_evidence.py']
         for name in names:snap(ROOT/name,implementation/name)
         for path in (ROOT/'openspec/changes/add-selfhost-deflate-core').rglob('*.md'):
             if path.name!='tasks.md':snap(path,implementation/path.relative_to(ROOT))
         report['ledger_exclusion']='child tasks.md and unrelated concurrent edits are excluded from consumed inputs; Git dirty state is disclosed'
-        for name in ['selfhost/runtime/deflate.sg','selfhost/tests/deflate_smoke.sg']:run('format-'+Path(name).stem,[formatter,'--check',implementation/name],empty=True)
+        for name in ['selfhost/runtime/deflate.sg','selfhost/runtime/deflate_stream.sg','selfhost/tests/deflate_smoke.sg']:run('format-'+Path(name).stem,[formatter,'--check',implementation/name],empty=True)
+        report['actual_os_memory_providers']=bind_memory_providers(read)
         corpus_rows=[]
         for filename in ['corpus.bin','corpus-repeat.bin']:
             path=out/filename;generated=run('generate-'+filename,[python,'-B','-X','utf8',implementation/'selfhost/tests/deflate_cases.py','--output',path])
@@ -174,16 +176,20 @@ def main():
         first={};objects=[]
         for number,roundname in enumerate(['first fresh 世界 &','second fresh 世界 &']):
             directory=out/roundname;directory.mkdir();built={}
-            for stem,original in [('deflate','selfhost/runtime/deflate.sg'),('deflate_smoke','selfhost/tests/deflate_smoke.sg')]:
+            for stem,original in [('deflate','selfhost/runtime/deflate.sg'),('deflate_stream','selfhost/runtime/deflate_stream.sg'),('deflate_smoke','selfhost/tests/deflate_smoke.sg')]:
                 source=snap(implementation/original,directory/(stem+'.sg'));obj=directory/(stem+'.obj')
                 done=run(str(number)+'-emit-'+stem,[native,source,obj,'--wrap']);exact_json(done.stdout,{'schema_version':1,'ok':True,'phase':'object'})
                 if done.stderr:raise AssertionError('emitter stderr')
                 built[stem]=obj
-            for stem,original in [('deflate_memory','selfhost/runtime/deflate_memory.c'),('deflate_fixture','selfhost/tests/deflate_fixture.c')]:
+            for stem,original in [('deflate_memory','selfhost/runtime/deflate_memory.c'),('deflate_stream_memory','selfhost/runtime/deflate_stream_memory.c'),('deflate_storage','selfhost/runtime/deflate_storage.c'),('deflate_fixture','selfhost/tests/deflate_fixture.c')]:
                 source=snap(implementation/original,directory/(stem+'.c'));obj=directory/(stem+'.obj');compile_c(str(number)+'-'+stem,source,obj,True);built[stem]=obj
             image=directory/'deflate.exe';run(str(number)+'-sg-link',[linker,'link',image,'main',*built.values(),kernel,stack])
             inspected=run(str(number)+'-inspect-imports',[extra['readobj'],'--coff-imports',image],cenv)
-            if b'ntdll.dll' not in inspected.stdout.lower() or b'__chkstk' not in inspected.stdout:raise AssertionError('actual stack SDK import absent')
+            if b'ntdll.dll' not in inspected.stdout.lower() or any(name not in inspected.stdout for name in [b'__chkstk',b'VirtualAlloc',b'VirtualFree']):raise AssertionError('actual memory/stack SDK import absent')
+            if number==0:
+                missing=directory/'missing-core.exe';rejected=run('missing-core-link',[linker,'link',missing,'main',*[p for n,p in built.items()if n!='deflate_stream'],kernel,stack],expected=65)
+                if rejected.stdout.strip()!=b'7204'or rejected.stderr or missing.exists():raise AssertionError('missing shared core was not unresolved/unpublished')
+                report['missing_core_negative']={'exit':65,'diagnostic':7204,'unresolved_shared_core':True,'image_published':False}
             run(str(number)+'-cold-execute',[image],expected=42,empty=True)
             identities={name:sha(path) for name,path in built.items()};identities['image']=sha(image)
             if number==0:first=identities
@@ -192,20 +198,22 @@ def main():
         record_expected={key:value for key,value in report['corpus'].items() if key in ['records','calls','successes','malformed','capacity_failures','invalid_limits','guard_cases']}
         report['probe_results']={}
         prefix_obj,prefix_binary=out/'prefix-probe.obj',out/'prefix-probe.exe'
-        compile_c('compile-prefix-probe',implementation/'selfhost/tests/deflate_prefix_probe.c',prefix_obj)
-        run('link-prefix-probe',[clang,'--ld-path='+str(extra['lld']),prefix_obj,objects[0]['deflate'],stack,'-o',prefix_binary],cenv)
+        compile_c('compile-prefix-probe',implementation/'selfhost/tests/deflate_prefix_resource_probe.c',prefix_obj)
+        c_link(run,read,report,'link-prefix-probe',clang,[prefix_obj,objects[0]['deflate'],objects[0]['deflate_stream'],stack],prefix_binary,cenv)
         prefix=run('prefix-counts',[prefix_binary]);exact_json(prefix.stdout,{'schema':1,'ok':True,'prefix_cases':4,'legacy_exact_cases':3,'invalid_limits':8,'null_empty_output':True,'no_trailing_reads':True,'decoded_bytes_equal':True})
-        if prefix.stderr:raise AssertionError('prefix probe stderr')
+        report.setdefault('state_resource_receipts',{})['prefix']=resource_receipt(prefix.stderr,7)
         report['probe_results']['prefix-counts']=strict_json(prefix.stdout)
+        oom=run('prefix-oom',[prefix_binary,'--oom-protocol']);exact_json(oom.stdout,{'schema':1,'ok':True,'oom':True,'no_raw_input_output_access':True});report['state_resource_receipts']['prefix-oom']=resource_receipt(oom.stderr,0,True)
         for mode in ['instrumented','production']:
-            obj=out/('probe-'+mode+'.obj');binary=out/('probe-'+mode+'.exe');compile_c('compile-probe-'+mode,implementation/'selfhost/tests/deflate_probe.c',obj,production=mode=='production')
-            run('link-probe-'+mode,[clang,'--ld-path='+str(extra['lld']),obj,objects[0]['deflate'],*([objects[0]['deflate_memory']] if mode=='production' else []),stack,'-o',binary],cenv)
+            obj=out/('probe-'+mode+'.obj');binary=out/('probe-'+mode+'.exe');compile_c('compile-probe-'+mode,implementation/'selfhost/tests/deflate_resource_probe.c',obj,production=mode=='production')
+            c_link(run,read,report,'link-probe-'+mode,clang,[obj,objects[0]['deflate'],objects[0]['deflate_stream'],*([objects[0]['deflate_stream_memory']]if mode=='production'else []),stack],binary,cenv)
             done=run(mode+'-corpus',[binary,out/'corpus.bin']);expected={'schema':1,'ok':True,**record_expected,'input_unchanged':True,'instrumented':mode=='instrumented','bounded_sequential_output':True if mode=='instrumented' else None,'known_failure_prefix_checked':mode=='instrumented','input_reads':4142320 if mode=='instrumented' else None,'history_reads':4802169 if mode=='instrumented' else None,'writes':8792668 if mode=='instrumented' else None}
-            if done.stderr:raise AssertionError('probe stderr')
+            report['state_resource_receipts'][mode+'-corpus']=resource_receipt(done.stderr,10006)
             report['probe_results'][mode+'-corpus']=exact_json(done.stdout,expected)
             done=run(mode+'-64MiB',[binary,'--large',large]);expected={'schema':1,'ok':True,'large_cases':3,'successes':2,'capacity_failures':1,'input_limit':67108864,'output_limit':67108864,'readonly_input_tailguard':True,'output_tailguard':True,'instrumented':mode=='instrumented','complete_sequential_input_output':True if mode=='instrumented' else None,'known_failure_prefix_checked':mode=='instrumented','input_reads':67239330 if mode=='instrumented' else None,'history_reads':134217500 if mode=='instrumented' else None,'writes':201321248 if mode=='instrumented' else None}
-            if done.stderr:raise AssertionError('large probe stderr')
+            report['state_resource_receipts'][mode+'-64MiB']=resource_receipt(done.stderr,3)
             report['probe_results'][mode+'-64MiB']=exact_json(done.stdout,expected)
+            oom=run(mode+'-oom',[binary,'--oom-protocol']);exact_json(oom.stdout,{'schema':1,'ok':True,'oom':True,'no_raw_input_output_access':True});report['state_resource_receipts'][mode+'-oom']=resource_receipt(oom.stderr,0,True)
         bad=bytearray(read(out/'corpus.bin'));struct.pack_into('<q',bad,24,-1);wrong=out/'wrong-empty-oracle.bin';wrong.write_bytes(bad)
         failed=run('wrong-result-oracle',[out/'probe-instrumented.exe',wrong],expected=1)
         if failed.stdout or b'reason=result-oracle expected=-1 actual=0' not in failed.stderr:raise AssertionError('wrong expected result did not reach algorithm oracle')
@@ -216,7 +224,7 @@ def main():
             except ValueError:pass
             else:raise AssertionError('JSON exact-mode oracle accepted '+key)
         report['artifacts']={str(path.relative_to(out)):sha(path) for path in out.rglob('*') if path.is_file() and path.suffix in ['.obj','.exe','.lib']}
-        report.update(result='passed',deterministic_sg_and_normalized_c_objects_and_images=True,raw_c_reproducibility_claimed=False)
+        report.update(result='passed',deterministic_sg_and_normalized_c_objects_and_images=True,raw_c_reproducibility_claimed=False,single_shared_deflate_core=True,one_shot_state_owner='SG fixed45056 request/dispose/free; OS memory-only primitive',deployment=['deflate.sg','deflate_stream.sg','deflate_stream_memory.c','deflate_storage.c','Kernel32','explicit NTDLL __chkstk'])
     except BaseException as error:report.update(result='failed',error=type(error).__name__+': '+str(error))
     finally:
         try:

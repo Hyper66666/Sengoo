@@ -5,6 +5,7 @@ from pathlib import Path
 from linker_evidence import copy_linker
 from verify_runtime_text import coff_image,dependencies,digest,exact_json,git_status,revision,sha,strict_json
 from verify_runtime_deflate import metadata_proof
+from runtime_evidence import bind_memory_providers,c_link,resource_receipt
 
 ROOT=Path(__file__).resolve().parents[1]
 CORPUS_SHA='539da730964da46cccae92e1adfe2e588acc67e192131b7b3a38921d2bd583a7'
@@ -146,9 +147,10 @@ def main():
         python=tool('runner-python',raw['tools']['runner-python']['path'],raw['tools']['runner-python']['sha256'])
         tool('zlib-implementation',raw['tools']['zlib-implementation']['path'],raw['tools']['zlib-implementation']['sha256']);report['zlib_implementation']=raw['zlib_implementation']
         cenv=dict(clean,PATH=str(clang.parent)+os.pathsep+clean.get('PATH',''),SOURCE_DATE_EPOCH='0')
-        impl=out/'implementation';sources=['selfhost/runtime/deflate.sg','selfhost/runtime/deflate_memory.c','selfhost/runtime/gzip.sg','selfhost/runtime/gzip_memory.c','selfhost/tests/deflate_cases.py','selfhost/tests/deflate_probe.c','selfhost/tests/gzip_cases.py','selfhost/tests/gzip_probe.c','selfhost/tests/gzip_fixture.c','selfhost/tests/gzip_smoke.sg']
+        impl=out/'implementation';sources=['selfhost/runtime/deflate.sg','selfhost/runtime/deflate_stream.sg','selfhost/runtime/deflate_stream_memory.c','selfhost/runtime/deflate_storage.c','selfhost/runtime/deflate_memory.c','selfhost/runtime/gzip.sg','selfhost/runtime/gzip_memory.c','selfhost/tests/deflate_cases.py','selfhost/tests/deflate_probe.c','selfhost/tests/deflate_resource_probe.h','selfhost/tests/gzip_resource_probe.c','selfhost/tests/gzip_cases.py','selfhost/tests/gzip_probe.c','selfhost/tests/gzip_fixture.c','selfhost/tests/gzip_smoke.sg','selfhost/runtime_evidence.py']
         for name in sources:snap(ROOT/name,impl/name)
-        for name in ['deflate','gzip']:run('format-'+name,[formatter,'--check',impl/'selfhost/runtime'/(name+'.sg')],empty=True)
+        for name in ['deflate','deflate_stream','gzip']:run('format-'+name,[formatter,'--check',impl/'selfhost/runtime'/(name+'.sg')],empty=True)
+        report['actual_os_memory_providers']=bind_memory_providers(read)
         run('format-smoke',[formatter,'--check',impl/'selfhost/tests/gzip_smoke.sg'],empty=True)
         corpora=[]
         for name in ['corpus.bin','repeat.bin']:
@@ -181,12 +183,12 @@ def main():
         first={};rounds=[]
         for index,name in enumerate(['first fresh 世界 &','second fresh 世界 &']):
             directory=out/name;directory.mkdir();objects={}
-            for stem,relative in [('deflate','selfhost/runtime/deflate.sg'),('gzip','selfhost/runtime/gzip.sg'),('gzip_smoke','selfhost/tests/gzip_smoke.sg')]:
+            for stem,relative in [('deflate','selfhost/runtime/deflate.sg'),('deflate_stream','selfhost/runtime/deflate_stream.sg'),('gzip','selfhost/runtime/gzip.sg'),('gzip_smoke','selfhost/tests/gzip_smoke.sg')]:
                 source=snap(impl/relative,directory/(stem+'.sg'));obj=directory/(stem+'.obj');made=run(str(index)+'-emit-'+stem,[native,source,obj,'--wrap']);exact_json(made.stdout,{'schema_version':1,'ok':True,'phase':'object'})
                 if made.stderr:raise AssertionError('gzip emitter stderr')
                 objects[stem]=obj
-                if stem=='deflate' and sha(obj)!=raw['cases'][0]['sha256']['deflate']:raise ValueError('gzip linked raw object differs from the full raw qualification')
-            for stem,relative in [('deflate_memory','selfhost/runtime/deflate_memory.c'),('gzip_memory','selfhost/runtime/gzip_memory.c'),('gzip_fixture','selfhost/tests/gzip_fixture.c')]:
+                if stem in ['deflate','deflate_stream'] and sha(obj)!=raw['cases'][0]['sha256'][stem]:raise ValueError('gzip linked raw/core object differs from the full raw qualification')
+            for stem,relative in [('deflate_memory','selfhost/runtime/deflate_memory.c'),('deflate_stream_memory','selfhost/runtime/deflate_stream_memory.c'),('deflate_storage','selfhost/runtime/deflate_storage.c'),('gzip_memory','selfhost/runtime/gzip_memory.c'),('gzip_fixture','selfhost/tests/gzip_fixture.c')]:
                 source=snap(impl/relative,directory/(stem+'.c'));obj=directory/(stem+'.obj');compile_c(str(index)+'-'+stem,source,obj,True);objects[stem]=obj
             image=directory/'gzip.exe';run(str(index)+'-sg-link',[linker,'link',image,'main',*objects.values(),kernel,stack]);run(str(index)+'-cold-execute',[image],expected=42,empty=True)
             identity={key:sha(path) for key,path in objects.items()};identity['image']=sha(image)
@@ -195,19 +197,21 @@ def main():
             report['cases'].append({'round':name,'sha256':identity,'cold_exit':42,'stdout_empty':True,'stderr_empty':True});rounds.append(objects)
         report['probe_results']={}
         for mode in ['instrumented','production']:
-            obj=out/('probe-'+mode+'.obj');exe=out/('probe-'+mode+'.exe');compile_c('compile-'+mode,impl/'selfhost/tests/gzip_probe.c',obj,production=mode=='production')
-            run('link-'+mode,[clang,'--ld-path='+str(extra['lld']),obj,rounds[0]['deflate'],rounds[0]['gzip'],*([rounds[0]['deflate_memory'],rounds[0]['gzip_memory']] if mode=='production' else []),stack,'-o',exe],cenv)
+            obj=out/('probe-'+mode+'.obj');exe=out/('probe-'+mode+'.exe');compile_c('compile-'+mode,impl/'selfhost/tests/gzip_resource_probe.c',obj,production=mode=='production')
+            c_link(run,read,report,'link-'+mode,clang,[obj,rounds[0]['deflate'],rounds[0]['deflate_stream'],rounds[0]['gzip'],*([rounds[0]['deflate_memory'],rounds[0]['deflate_stream_memory'],rounds[0]['gzip_memory']]if mode=='production'else []),stack],exe,cenv)
             done=run(mode+'-corpus',[exe,out/'corpus.bin']);expected={'schema':1,'ok':True,**{key:report['corpus'][key] for key in ['records','calls','successes','malformed','capacity_failures','guard_cases','invalid_limits_modes']},'null_empty_output':True,'input_unchanged':True,'instrumented':mode=='instrumented','sequential_bounded_access':True if mode=='instrumented' else None,'input_reads':2265606 if mode=='instrumented' else None,'initialized_output_reads':4754893 if mode=='instrumented' else None,'writes':3502474 if mode=='instrumented' else None}
-            if done.stderr:raise AssertionError('gzip probe stderr')
+            report.setdefault('state_resource_receipts',{})[mode+'-corpus']=resource_receipt(done.stderr,13692)
             report['probe_results'][mode+'-corpus']=exact_json(done.stdout,expected)
             done=run(mode+'-64MiB',[exe,'--large',large]);observed=strict_json(done.stdout)
             expected={'schema':1,'ok':True,'large_cases':4,'aggregate_members':64,'aggregate_decoded_bytes':67108864,'capacity_failure':True,'first_member_exact':True,'input_limit_bytes':67108864,'max_input_output_bytes':67103726,'readonly_input_tailguard':True,'output_tailguard':True,'instrumented':mode=='instrumented','complete_sequential_input_output':True if mode=='instrumented' else None,'input_reads':67244822 if mode=='instrumented' else None,'initialized_output_reads':336587438 if mode=='instrumented' else None,'writes':202369968 if mode=='instrumented' else None}
-            if done.stderr or mode=='instrumented' and any(type(observed.get(key)) is not int or observed[key]<=67108864 for key in ['input_reads','initialized_output_reads','writes']):raise AssertionError('large gzip instrumentation missing')
+            report['state_resource_receipts'][mode+'-64MiB']=resource_receipt(done.stderr,130)
+            if mode=='instrumented' and any(type(observed.get(key)) is not int or observed[key]<=67108864 for key in ['input_reads','initialized_output_reads','writes']):raise AssertionError('large gzip instrumentation missing')
             report['probe_results'][mode+'-64MiB']=exact_json(done.stdout,expected)
+            oom=run(mode+'-oom',[exe,'--oom-protocol']);exact_json(oom.stdout,{'schema':1,'ok':True,'oom':True,'no_raw_input_output_access':True});report['state_resource_receipts'][mode+'-oom']=resource_receipt(oom.stderr,0,True)
         poisoned=bytearray(read(out/'corpus.bin'));struct.pack_into('<q',poisoned,24,-1);wrong=out/'wrong-empty-oracle.bin';wrong.write_bytes(poisoned);bad=run('wrong-result-oracle',[out/'probe-instrumented.exe',wrong],expected=1)
         if bad.stdout or b'reason=gzip-result-oracle expected=-1 actual=' not in bad.stderr:raise AssertionError('gzip wrong oracle did not reach decoder result')
         report['wrong_oracle_control']={'actual_exit':1,'reason':'gzip-result-oracle','only_first_expected_result_changed':True}
-        report['artifacts']={str(path.relative_to(out)):sha(path) for path in out.rglob('*') if path.is_file() and path.suffix in ['.obj','.exe','.lib']};report.update(result='passed',deterministic_sg_and_normalized_c_objects_and_images=True)
+        report['artifacts']={str(path.relative_to(out)):sha(path) for path in out.rglob('*') if path.is_file() and path.suffix in ['.obj','.exe','.lib']};report.update(result='passed',deterministic_sg_and_normalized_c_objects_and_images=True,single_shared_deflate_core=True,raw_wrapper_qualification_sha256=digest(read(raw_path)))
     except BaseException as error:report.update(result='failed',error=repr(error))
     finally:
         try:

@@ -1,370 +1,54 @@
 extern "C" {
-    unsafe fn sengoo_deflate_input_read(source: * const u8, index: i64) -> u8;
-    unsafe fn sengoo_deflate_output_read(target: * mut u8, index: i64) -> u8;
-    unsafe fn sengoo_deflate_output_write(target: * mut u8, index: i64, value: u8);
-}
-struct ShDeflateBits {
-    source: * const u8, length: i64, used: i64, value: i64, count: i64,
-}
-struct ShDeflateTree {
-    counts: [i64; 16], symbols: [i64; 288], used: i64,
-}
-def sh_deflate_tree(tree: & mut ShDeflateTree, lengths: & [i64; 320], begin: i64, amount: i64, mode: i64) -> i64 {
-    let mut index = 0;
-    while index < 16 {
-        tree.counts [index] = 0;
-        index = index + 1;
-    };
-    index = 0;
-    let mut maximum = 0;
-    while index < amount {
-        let width = lengths [begin + index];
-        if width < 0 or width > 15 {
-            return - 1;
-        };
-        tree.counts [width] = tree.counts [width] + 1;
-        if width > maximum {
-            maximum = width;
-        };
-        index = index + 1;
-    };
-    tree.used = amount - tree.counts [0];
-    if tree.used == 0 {
-        if mode == 2 {
-            return 0;
-        };
-        return - 1;
-    };
-    let mut left = 1;
-    index = 1;
-    while index <= 15 {
-        left = (left << 1) - tree.counts [index];
-        if left < 0 {
-            return - 1;
-        };
-        index = index + 1;
-    };
-    if left != 0 and (mode == 0 or maximum != 1 or tree.used != 1) {
-        return - 1;
-    };
-    let mut offsets = [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0];
-    index = 1;
-    while index < 15 {
-        offsets [index + 1] = offsets [index] + tree.counts [index];
-        index = index + 1;
-    };
-    index = 0;
-    while index < amount {
-        let width = lengths [begin + index];
-        if width != 0 {
-            let at = offsets [width];
-            tree.symbols [at] = index;
-            offsets [width] = at + 1;
-        };
-        index = index + 1;
-    };
-    0;
-}
-def sh_deflate_fixed(literal: & mut ShDeflateTree, distance: & mut ShDeflateTree) -> i64 {
-    let mut lengths: [i64; 320] = [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
-    0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
-    0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
-    0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
-    0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
-    0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
-    0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
-    0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
-    0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
-    0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
-    0];
-    let mut index = 0;
-    while index < 288 {
-        lengths [index] = if index < 144 {
-            8;
-        } else if index < 256 {
-            9;
-        } else if index < 280 {
-            7;
-        } else {
-            8;
-        };
-        index = index + 1;
-    };
-    if sh_deflate_tree(literal, & lengths, 0, 288, 1) != 0 {
-        return - 1;
-    };
-    index = 288;
-    while index < 320 {
-        lengths [index] = 5;
-        index = index + 1;
-    };
-    sh_deflate_tree(distance, & lengths, 288, 32, 2);
-} // Macros preserve the enclosing unsafe context; the current language does not
-// admit unsafe SG-ABI helpers or aggregate/reference types in the C ABI.
-macro_rules! sh_def_bits {
-    ($width: expr) => {
-        {
-            let wanted = $width;
-            while bits.count < wanted {
-                if bits.used >= bits.length {
-                    return - 1;
-                };
-                let byte = sengoo_deflate_input_read(bits.source, bits.used) as i64;
-                bits.value = bits.value | (byte << bits.count);
-                bits.count = bits.count + 8;
-                bits.used = bits.used + 1;
-            };
-            let bit_result = bits.value & ((1 << wanted) - 1);
-            bits.value = bits.value >> wanted;
-            bits.count = bits.count - wanted;
-            bit_result;
-        }
-    };
-}
-macro_rules! sh_def_symbol {
-    ($which: ident) => {
-        {
-            let code_tree = & $which;
-            if code_tree.used == 0 {
-                return - 1;
-            };
-            let mut code = 0;
-            let mut first = 0;
-            let mut symbol_index = 0;
-            let mut code_width = 1;
-            let mut decoded_symbol = - 1;
-            while code_width <= 15 {
-                let bit = sh_def_bits! (1);
-                code = (code << 1) | bit;
-                let amount = code_tree.counts [code_width];
-                if code >= first and code - first < amount {
-                    decoded_symbol = code_tree.symbols [symbol_index + code - first];
-                    break;
-                };
-                symbol_index = symbol_index + amount;
-                first = (first + amount) << 1;
-                code_width = code_width + 1;
-            };
-            if decoded_symbol < 0 {
-                return - 1;
-            };
-            decoded_symbol;
-        }
-    };
-}
-macro_rules! sh_def_dynamic {
-    () => {
-        {
-            let literal_count = sh_def_bits! (5) + 257;
-            let distance_count = sh_def_bits! (5) + 1;
-            let code_count = sh_def_bits! (4) + 4;
-            if literal_count > 286 {
-                return - 1;
-            };
-            let order = [16, 17, 18, 0, 8, 7, 9, 6, 10, 5, 11, 4, 12, 3, 13, 2, 14, 1, 15];
-            let mut lengths: [i64; 320] = [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
-            0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
-            0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
-            0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
-            0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
-            0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
-            0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
-            0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
-            0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
-            0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
-            0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0];
-            let mut index = 0;
-            while index < code_count {
-                let value = sh_def_bits! (3);
-                lengths [order [index]] = value;
-                index = index + 1;
-            };
-            if sh_deflate_tree(& mut literal, & lengths, 0, 19, 0) != 0 {
-                return - 1;
-            };
-            index = 0;
-            while index < literal_count + distance_count {
-                let symbol = sh_def_symbol! (literal);
-                if symbol <= 15 {
-                    lengths [index] = symbol;
-                    index = index + 1;
-                } else {
-                    let mut value = 0;
-                    let mut repeat = 0;
-                    if symbol == 16 {
-                        if index == 0 {
-                            return - 1;
-                        };
-                        value = lengths [index - 1];
-                        repeat = sh_def_bits! (2) + 3;
-                    } else if symbol == 17 {
-                        repeat = sh_def_bits! (3) + 3;
-                    } else if symbol == 18 {
-                        repeat = sh_def_bits! (7) + 11;
-                    } else {
-                        return - 1;
-                    };
-                    if repeat > literal_count + distance_count - index {
-                        return - 1;
-                    };
-                    let limit = index + repeat;
-                    while index < limit {
-                        lengths [index] = value;
-                        index = index + 1;
-                    };
-                };
-            };
-            if lengths [256] == 0 {
-                return - 1;
-            };
-            if sh_deflate_tree(& mut literal, & lengths, 0, literal_count, 1) != 0 {
-                return - 1;
-            };
-            if sh_deflate_tree(& mut distance, & lengths, literal_count, distance_count, 2) != 0 {
-                return - 1;
-            };
-            0;
-        }
-    };
-}
-macro_rules! sh_def_compressed {
-    () => {
-        {
-            let bases = [3, 4, 5, 6, 7, 8, 9, 10, 11, 13, 15, 17, 19, 23, 27, 31, 35, 43, 51, 59, 67,
-            83, 99, 115, 131, 163, 195, 227, 258];
-            let extras = [0, 0, 0, 0, 0, 0, 0, 0, 1, 1, 1, 1, 2, 2, 2, 2, 3, 3, 3, 3, 4, 4, 4, 4, 5,
-            5, 5, 5, 0];
-            let distance_bases = [1, 2, 3, 4, 5, 7, 9, 13, 17, 25, 33, 49, 65, 97, 129, 193, 257, 385,
-            513, 769, 1025, 1537, 2049, 3073, 4097, 6145, 8193, 12289, 16385, 24577];
-            let distance_extras = [0, 0, 0, 0, 1, 1, 2, 2, 3, 3, 4, 4, 5, 5, 6, 6, 7, 7, 8, 8, 9, 9,
-            10, 10, 11, 11, 12, 12, 13, 13];
-            loop {
-                let symbol = sh_def_symbol! (literal);
-                if symbol == 256 {
-                    break;
-                };
-                if symbol < 256 {
-                    if produced >= capacity {
-                        return - 2;
-                    };
-                    sengoo_deflate_output_write(target, produced, symbol as u8);
-                    produced = produced + 1;
-                } else {
-                    if symbol > 285 {
-                        return - 1;
-                    };
-                    let index = symbol - 257;
-                    let length = bases [index] + sh_def_bits! (extras [index]);
-                    let distance_symbol = sh_def_symbol! (distance);
-                    if distance_symbol < 0 or distance_symbol > 29 {
-                        return - 1;
-                    };
-                    let back = distance_bases [distance_symbol] + sh_def_bits! (distance_extras [distance_symbol]);
-                    if back > produced {
-                        return - 1;
-                    };
-                    if length > capacity - produced {
-                        return - 2;
-                    };
-                    let mut remaining = length;
-                    while remaining > 0 {
-                        let value = sengoo_deflate_output_read(target, produced - back);
-                        sengoo_deflate_output_write(target, produced, value);
-                        produced = produced + 1;
-                        remaining = remaining - 1;
-                    };
-                };
-            };
-            0;
-        }
-    };
+    unsafe fn sengoo_sg_deflate_stream_init(state: * mut u8, extent: i64, exact: i64, input_limit: i64,
+    output_limit: i64) -> i64;
+    unsafe fn sengoo_sg_deflate_stream_step(state: * mut u8, extent: i64, source: * const u8, length: i64,
+    output: * mut u8, capacity: i64, finish: i64) -> i64;
+    unsafe fn sengoo_sg_deflate_stream_query(state: * mut u8, extent: i64, field: i64) -> i64;
+    unsafe fn sengoo_sg_deflate_stream_dispose(state: * mut u8, extent: i64) -> i64;
+    unsafe fn sengoo_ds_storage_alloc(length: i64) -> * mut u8;
+    unsafe fn sengoo_ds_storage_present(state: * mut u8) -> i64;
+    unsafe fn sengoo_ds_storage_free(state: * mut u8);
 }
 unsafe extern "C" fn sh_deflate_inflate(source: * const u8, input_length: i64, target: * mut u8, capacity: i64,
-exact: bool) -> i64 {
+exact: i64) -> i64 {
     if input_length < 0 or input_length > 67108864 or capacity < 0 or capacity > 67108864 {
         return - 3;
     };
-    let mut bits = ShDeflateBits {
-        source: source, length: input_length, used: 0, value: 0, count: 0
+    let state = sengoo_ds_storage_alloc(45056);
+    if sengoo_ds_storage_present(state) == 0 {
+        return - 2;
     };
-    let mut literal = ShDeflateTree {
-        counts: [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0], symbols: [0, 0, 0, 0, 0, 0, 0, 0, 0,
-        0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
-        0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
-        0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
-        0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
-        0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
-        0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
-        0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
-        0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
-        0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0],
-        used: 0
-    };
-    let mut distance = ShDeflateTree {
-        counts: [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0], symbols: [0, 0, 0, 0, 0, 0, 0, 0, 0,
-        0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
-        0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
-        0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
-        0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
-        0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
-        0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
-        0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
-        0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
-        0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0],
-        used: 0
-    };
-    let mut produced = 0;
-    let mut final_block = 0;
-    while final_block == 0 {
-        final_block = sh_def_bits! (1);
-        let kind = sh_def_bits! (2);
-        if kind == 0 {
-            bits.count = 0;
-            bits.value = 0;
-            let length = sh_def_bits! (16);
-            let complement = sh_def_bits! (16);
-            if (length ^ complement) != 65535 {
-                return - 1;
-            };
-            if length > bits.length - bits.used {
-                return - 1;
-            };
-            if length > capacity - produced {
-                return - 2;
-            };
-            let mut remaining = length;
-            while remaining > 0 {
-                let byte = sh_def_bits! (8);
-                sengoo_deflate_output_write(target, produced, byte as u8);
-                produced = produced + 1;
-                remaining = remaining - 1;
-            };
-        } else {
-            if kind == 3 {
-                return - 1;
-            };
-            let tree_error = if kind == 1 {
-                sh_deflate_fixed(& mut literal, & mut distance);
+    let initialized = sengoo_sg_deflate_stream_init(state, 45056, exact, 67108864, capacity);
+    let mut result = initialized;
+    if initialized == 0 {
+        let status = sengoo_sg_deflate_stream_step(state, 45056, source, input_length, target, capacity,
+        1);
+        result = if status == 2 {
+            let consumed = sengoo_sg_deflate_stream_query(state, 45056, 2);
+            let produced = sengoo_sg_deflate_stream_query(state, 45056, 3);
+            if consumed < 0 or consumed > input_length or produced < 0 or produced > capacity {
+                - 1;
             } else {
-                sh_def_dynamic! ();
+                (consumed << 27) | produced;
             };
-            if tree_error != 0 {
-                return - 1;
-            };
-            let decoded = sh_def_compressed! ();
-            if decoded != 0 {
-                return decoded;
-            };
+        } else if status == 1 {
+            - 2;
+        } else if status == 0 or status == - 4 {
+            - 1;
+        } else {
+            status;
         };
     };
-    if exact and bits.used != input_length {
+    let disposed = sengoo_sg_deflate_stream_dispose(state, 45056);
+    sengoo_ds_storage_free(state);
+    if disposed != 0 {
         return - 1;
     };
-    (bits.used << 27) | produced;
+    result;
 }
 pub unsafe extern "C" fn sengoo_sg_raw_inflate(source: * const u8, input_length: i64, target: * mut u8,
 capacity: i64) -> i64 {
-    let result = sh_deflate_inflate(source, input_length, target, capacity, true);
+    let result = sh_deflate_inflate(source, input_length, target, capacity, 1);
     if result < 0 {
         return result;
     };
@@ -372,5 +56,5 @@ capacity: i64) -> i64 {
 }
 pub unsafe extern "C" fn sengoo_sg_raw_inflate_prefix(source: * const u8, input_length: i64, target: * mut u8,
 capacity: i64) -> i64 {
-    sh_deflate_inflate(source, input_length, target, capacity, false);
+    sh_deflate_inflate(source, input_length, target, capacity, 0);
 }
