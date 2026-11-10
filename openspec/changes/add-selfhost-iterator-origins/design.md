@@ -67,3 +67,78 @@ to an unknown C call, and clearing the entire node-origin table. These all lack
 new concrete eligibility or fail validation. Call, obligation and diagnostic
 record tables are capped by the explicit origin limit. A tiny source limit fails
 before admission/analysis.
+
+
+## Stage two: independent backing leases and source effects
+
+`semantic_loans.sg` owns a separate ShBackingLoans. Caller supplies real origins,
+module/checked input, canonical collections identity/SHA/raw-iter-new prototype,
+and a separate Option physical identity/SHA. Validation rechecks both external
+pins. Option membership is actual ADT binding/module plus struct bool-tag and
+value-T field shape, not nominal spelling. Raw-next and iterator free/Drop
+candidates validate actual pinned declaration/body, function ABI/flags/result,
+receiver mutability, field owner/type and real receiver parameter relationship.
+
+Node records retain state/role/T/backing/producer/lease/conditional parameter.
+Leases retain callable, holder, backing, T, producer, scope, creation/end and
+kind/parent. Returned-parameter and source-call effect records substitute actual
+arguments; arbitrary i64 parameters do not become physical handle origins.
+Scratch bindings and active bits are cleared before persisted facts are exposed.
+
+Scope-end retention is deliberately conservative. Explicit iterator release
+requires an exact candidate release body and no dependent element/reborrow
+lease. A tail element candidate stored outside its producing block retains its
+own lease when the inner iterator scope ends. A dead local or unsaved temporary
+Vec backing is rejected. Whole backing owner moves during a live iterator are
+conflicts; iterator whole moves transfer lease holders and reborrows preserve
+backing relationships. Raw scalar handles retain taint, and nonzero record
+reconstruction does not re-seal a lease.
+
+Every actual source parameter has an independently inferred bitmask summary:
+bit1 may invalidate/escape, bit2 requires a verified canonical origin or iterator
+lease; release is3. Zero means a source body has no recognized effect or origin
+obligation. Every required-origin bit is discharged even for scalar returns and
+for parameters other than the returned one; conditional inputs remain conditional. Calls propagate these effects through all actual arguments,
+not merely a returned parameter. Unknown C or bodyless calls are conservative.
+A source body returning a constant and making no effectful call can prove a
+no-effect parameter; this does not bless arbitrary shared references. A mode
+zero causal control ignores summaries and rejects the otherwise allowed pure
+observer call while a lease is live. Mutating saved summaries fails validation.
+
+This phase authenticates logical source safety candidates only. All payloads
+retain unlowerable=1. Actual Vecnew source is still a zero placeholder whose
+allocation semantics live in S0's constructor intrinsic. Raw-next source is
+still the admitted recursive intrinsic placeholder. Neither body establishes
+an actual runtime allocation or safe returned pointer. No String26 cast, raw
+integer, slot width or nonnull callback constructs a reference in this phase.
+
+Before HIR6/MIR optional borrowing, the old i64/bool public raw wrappers require
+conditional physical-handle obligations carrying T/backing/lease from a real
+canonical receiver.handle projection at every caller, or a separate admitted
+internal typed wrapper while retaining old public entries as ordinary unsafe/
+unlowerable boundaries. The early typed-reference rewrite's scalar-copy effect
+is not this provider-return-loan proof. One coordinated HIR6 integration will
+preserve builtin6/deferred4/actions8/9/10 and reject old HIR5 with5502; MIR must
+carry independently certified constructor, pointer and Some/null facts.
+
+The scope-end lease model deliberately over-rejects `last_use_overreject`: a
+mutation after the iterator's last reachable use produces5803 in this candidate
+phase. Canonical memory-management requires last-reachable-use NLL; this case
+must become accepted before final language compatibility is claimed. General
+CFG candidate source rejects5806. By-value iterator calls remain conservative
+transfer effects; no reduction of the production actualcore112 ledger is claimed.
+
+Existing generic explicit `.drop()` method resolution can reject5123 before
+loan analysis; a separate typed fixture retains this boundary. Canonical
+`.free()` and source owner transfer independently prove live-lease conflicts.
+Unsupported ordinary C reference-parameter syntax has its own5122 fixture;
+neither error is suppressed to reach loan analysis. A direct non-Copy owned
+pointee move rejects5807; Owner candidate borrowing emits no copy or Drop.
+
+The current pinned S0 has a separately reproduced lexical-shadow defect:
+a branch-local `element` can incorrectly replace an outer local after a false
+branch, reading uninitialized storage. This module uses a distinct
+`borrowed_element`; the exact minimal source, LLVM, real outputs and unique-name
+control are preserved in target/selfhost/m3-iterator-loans/stage0-shadow. This
+is a narrow seed compatibility ledger, not a redefinition of SG lexical scopes
+or a claim about every scope pattern.

@@ -1,0 +1,309 @@
+import selfhost_semantic_origins;
+
+struct ShBackingLoans {
+    schema: i64,
+    limit: i64,
+    error: i64,
+    partial: i64,
+    mode: i64,
+    unlowerable: i64,
+    option_binding: i64,
+    option_module: i64,
+    option_identity: String,
+    option_digest: String,
+    nodes: Vec<i64>,
+    leases: Vec<i64>,
+    effects: Vec<i64>,
+    summaries: Vec<i64>,
+    returns: Vec<i64>,
+    calls: Vec<i64>,
+    diagnostics: Vec<i64>,
+    admissions: Vec<i64>,
+    origin_input: Vec<i64>,
+    bindings: Vec<i64>,
+    active: Vec<i64>,
+    function: i64,
+    scope: i64,
+    depth: i64,
+    flow: i64,
+    return_node: i64,
+}
+
+def sh_loans_new(limit: i64, mode: i64) -> ShBackingLoans {
+    ShBackingLoans { schema: 1, limit: limit, error: 0, partial: 1, mode: mode, unlowerable: 1, option_binding: -1, option_module: -1, option_identity: string_new(), option_digest: string_new(), nodes: vec_new_i64(), leases: vec_new_i64(), effects: vec_new_i64(), summaries: vec_new_i64(), returns: vec_new_i64(), calls: vec_new_i64(), diagnostics: vec_new_i64(), admissions: vec_new_i64(), origin_input: vec_new_i64(), bindings: vec_new_i64(), active: vec_new_i64(), function: -1, scope: -1, depth: 0, flow: 0, return_node: -1 };
+}
+
+def sh_loan_node(facts: &ShBackingLoans, node: i64, field: i64) -> i64 {
+    sh_origin_word(&facts.nodes, node, 8, field);
+}
+
+def sh_loan_lease(facts: &ShBackingLoans, row: i64, field: i64) -> i64 {
+    sh_origin_word(&facts.leases, row, 10, field);
+}
+
+def sh_loan_diagnostic_count(facts: &ShBackingLoans) -> i64 {
+    facts.diagnostics.len() / 5;
+}
+
+def sh_loan_function_error(facts: &ShBackingLoans, binding: i64) -> i64 {
+    let mut row = 0;
+    while row < sh_loan_diagnostic_count(facts) { if sh_origin_word(&facts.diagnostics, row, 5, 0) == binding { return sh_origin_word(&facts.diagnostics, row, 5, 1); }; row = row + 1; };
+    0;
+}
+
+def sh_bl_error(facts: &mut ShBackingLoans, code: i64, node: i64, root: i64, prior: i64) {
+    let mut row = 0;
+    while row < sh_loan_diagnostic_count(facts) { if sh_origin_word(&facts.diagnostics, row, 5, 0) == facts.function and sh_origin_word(&facts.diagnostics, row, 5, 1) == code and sh_origin_word(&facts.diagnostics, row, 5, 2) == node and sh_origin_word(&facts.diagnostics, row, 5, 3) == root { return; }; row = row + 1; };
+    if facts.diagnostics.len() / 5 >= facts.limit { facts.error = 5800; return; };
+    if not (facts.diagnostics.push(facts.function) and facts.diagnostics.push(code) and facts.diagnostics.push(node) and facts.diagnostics.push(root) and facts.diagnostics.push(prior)) { facts.error = 5800; };
+    ();
+}
+
+def sh_bl_write(facts: &mut ShBackingLoans, node: i64, state: i64, role: i64, element: i64, root: i64, producer: i64, lease: i64, parameter: i64) {
+    if node < 0 or node >= facts.nodes.len() / 8 { return; };
+    facts.nodes.set(node * 8, state);
+    facts.nodes.set(node * 8 + 1, role);
+    facts.nodes.set(node * 8 + 2, element);
+    facts.nodes.set(node * 8 + 3, root);
+    facts.nodes.set(node * 8 + 4, producer);
+    facts.nodes.set(node * 8 + 5, lease);
+    facts.nodes.set(node * 8 + 6, parameter);
+    facts.nodes.set(node * 8 + 7, 1);
+    ();
+}
+
+def sh_bl_copy(facts: &mut ShBackingLoans, node: i64, parent: i64) {
+    if parent < 0 { return; };
+    sh_bl_write(facts, node, sh_loan_node(facts, parent, 0), sh_loan_node(facts, parent, 1), sh_loan_node(facts, parent, 2), sh_loan_node(facts, parent, 3), sh_loan_node(facts, parent, 4), sh_loan_node(facts, parent, 5), sh_loan_node(facts, parent, 6));
+}
+
+def sh_bl_scope(checked: &ShChecked, ast: &ShAst, node: i64) -> i64 {
+    let first = sh_ast_child(ast, node, 0);
+    if first >= 0 { sh_node_scope(checked, first); } else { sh_node_scope(checked, node); };
+}
+
+def sh_bl_alive(facts: &ShBackingLoans, root: i64, exclude: i64) -> i64 {
+    let mut row = 0;
+    while row < facts.leases.len() / 10 { if row != exclude and sh_origin_at(&facts.active, row) == 1 and sh_loan_lease(facts, row, 0) == facts.function and sh_loan_lease(facts, row, 2) == root { return row; }; row = row + 1; };
+    -1;
+}
+
+def sh_bl_outside(facts: &ShBackingLoans, root: i64, scope: i64) -> i64 {
+    let mut row = 0;
+    while row < facts.leases.len() / 10 { if sh_origin_at(&facts.active, row) == 1 and sh_loan_lease(facts, row, 0) == facts.function and sh_loan_lease(facts, row, 2) == root and sh_loan_lease(facts, row, 5) != scope { return row; }; row = row + 1; };
+    -1;
+}
+
+def sh_bl_lease(facts: &mut ShBackingLoans, node: i64, root: i64, element: i64, kind: i64, parent: i64) -> i64 {
+    let row = facts.leases.len() / 10;
+    if row >= facts.limit { facts.error = 5800; return -1; };
+    let stored = facts.leases.push(facts.function) and facts.leases.push(-node - 1) and facts.leases.push(root) and facts.leases.push(element) and facts.leases.push(node) and facts.leases.push(facts.scope) and facts.leases.push(node) and facts.leases.push(-1) and facts.leases.push(kind) and facts.leases.push(parent) and facts.active.push(1);
+    if not stored { facts.error = 5800; return -1; };
+    row;
+}
+
+def sh_bl_effect(facts: &mut ShBackingLoans, node: i64, root: i64, kind: i64, evidence: i64, conditional: i64) {
+    if root == -1 { return; };
+    let prior = sh_bl_alive(facts, root, -1);
+    if prior >= 0 { sh_bl_error(facts, 5803, node, root, prior); };
+    if facts.effects.len() / 6 >= facts.limit { facts.error = 5800; return; };
+    if not (facts.effects.push(facts.function) and facts.effects.push(node) and facts.effects.push(root) and facts.effects.push(kind) and facts.effects.push(evidence) and facts.effects.push(conditional)) { facts.error = 5800; };
+    let mut binding = 0;
+    while binding < facts.bindings.len() { let value = sh_origin_at(&facts.bindings, binding); if sh_loan_node(facts, value, 3) == root { facts.bindings.set(binding, -1); (); }; binding = binding + 1; };
+    ();
+}
+
+def sh_bl_option_ref(facts: &ShBackingLoans, checked: &ShChecked, ty: i64) -> i64 {
+    let actual = sh_s_resolve(checked, ty);
+    if sh_s_kind(checked, actual) != 12 or sh_s_arity(checked, actual) != 1 { return -1; };
+    if sh_adt_binding(checked, actual) != facts.option_binding { return -1; };
+    let inner = sh_s_resolve(checked, sh_s_argument(checked, actual, 0));
+    if sh_s_kind(checked, inner) != 6 or sh_s_flags(checked, inner) != 0 { return -1; };
+    sh_s_resolve(checked, sh_s_argument(checked, inner, 0));
+}
+
+def sh_bl_option_admit(facts: &mut ShBackingLoans, graph: &ShModules, analyzed: &ShModuleChecked, identity: &str, digest: &str) {
+    let module = sh_o_pin(graph, analyzed, identity, digest);
+    if module < 0 { facts.error = 5801; return; };
+    let binding = sh_o_unique(analyzed, module, "Option", 3);
+    let checked = &analyzed.checked;
+    let ast = &analyzed.front.parsed.ast;
+    let ty = sh_binding_word(checked, binding, 3);
+    if binding < 0 or sh_ast_word(ast, sh_binding_word(checked, binding, 4), 0) != 22 or sh_s_kind(checked, ty) != 12 or sh_s_arity(checked, ty) != 1 or sh_s_nominal(checked, ty) != sh_binding_word(checked, binding, 0) or sh_adt_binding(checked, ty) != binding or sh_s_kind(checked, sh_s_argument(checked, ty, 0)) != 13 { facts.error = 5801; return; };
+    let mut field = 0;
+    let mut found = 0;
+    let mut count = 0;
+    while field < sh_binding_count(checked) { if sh_binding_word(checked, field, 2) == 6 and sh_binding_word(checked, field, 6) == binding { let ordinal = sh_binding_word(checked, field, 7); let field_type = sh_s_resolve(checked, sh_binding_word(checked, field, 3)); if ordinal == 0 and sh_o_name(checked, field, "is_some") and sh_s_kind(checked, field_type) == 1 { found = found | 1; } else if ordinal == 1 and sh_o_name(checked, field, "value") and field_type == sh_s_argument(checked, ty, 0) { found = found | 2; } else { facts.error = 5801; return; }; count = count + 1; }; field = field + 1; };
+    if found != 3 or count != 2 { facts.error = 5801; return; };
+    let copy_identity = string_from_str(identity);
+    let copy_digest = string_from_str(digest);
+    if not copy_identity.is_ok() or not copy_digest.is_ok() { facts.error = 5800; return; };
+    facts.option_binding = binding;
+    facts.option_module = module;
+    facts.option_identity = copy_identity.value;
+    facts.option_digest = copy_digest.value;
+}
+
+def sh_bl_admitted(facts: &ShBackingLoans, origins: &ShOriginFacts, analyzed: &ShModuleChecked, binding: i64, kind: i64) -> bool {
+    let checked = &analyzed.checked;
+    let ast = &analyzed.front.parsed.ast;
+    if binding < 0 or sh_module_binding_source(analyzed, binding) != origins.module or sh_binding_word(checked, binding, 2) != 2 { return false; };
+    let signature = sh_s_resolve(checked, sh_binding_word(checked, binding, 3));
+    if sh_s_kind(checked, signature) != 11 or sh_s_data(checked, signature) != 0 or sh_s_flags(checked, signature) != 0 { return false; };
+    let returned = sh_s_argument(checked, signature, sh_s_arity(checked, signature) - 1);
+    let body = sh_o_body_value(ast, binding, checked);
+    if kind == 1 { if not sh_o_name(checked, binding, "raw_vec_iter_next") or sh_s_arity(checked, signature) != 2 or not sh_o_i64(checked, sh_s_argument(checked, signature, 0)) or sh_bl_option_ref(facts, checked, returned) < 0 or sh_ast_word(ast, body, 0) != 53 or sh_node_binding(checked, body) != binding or sh_ast_word(ast, body, 6) != 2 { return false; }; let argument = sh_node_binding(checked, sh_ast_child(ast, body, 1)); sh_binding_word(checked, argument, 2) == 1 and sh_binding_word(checked, argument, 6) == binding and sh_binding_word(checked, argument, 7) == 0; } else { let receiver = sh_s_resolve(checked, sh_s_argument(checked, signature, 0)); let role = sh_o_role(origins, checked, receiver); if sh_s_arity(checked, signature) != 2 or sh_s_kind(checked, receiver) != 6 or (role != 2 and role != 3) { return false; }; if kind == 2 { if role != 2 or sh_s_flags(checked, receiver) != 0 or not sh_o_name(checked, binding, "next") or sh_bl_option_ref(facts, checked, returned) != sh_o_element(checked, receiver) or sh_ast_word(ast, body, 0) != 53 or sh_ast_word(ast, body, 6) != 2 { return false; }; let raw = sh_node_binding(checked, body); let projection = sh_ast_child(ast, body, 1); let parameter = sh_node_binding(checked, sh_ast_child(ast, projection, 0)); let field = sh_node_binding(checked, projection); sh_bl_admitted(facts, origins, analyzed, raw, 1) and sh_ast_word(ast, projection, 0) == 55 and sh_binding_word(checked, field, 6) == sh_origin_at(&origins.canonical, 1) and sh_binding_word(checked, field, 7) == 0 and sh_o_i64(checked, sh_binding_word(checked, field, 3)) and sh_s_resolve(checked, sh_binding_word(checked, parameter, 3)) == receiver and sh_binding_word(checked, parameter, 2) == 1 and sh_binding_word(checked, parameter, 6) == binding and sh_binding_word(checked, parameter, 7) == 0; } else { let dropping = sh_o_name(checked, binding, "drop"); let releasing = sh_o_name(checked, binding, "free"); if not dropping and not releasing { return false; }; if dropping and (sh_s_flags(checked, receiver) != 1 or sh_s_kind(checked, sh_s_resolve(checked, returned)) != 0) or releasing and (sh_s_flags(checked, receiver) != 0 or sh_s_kind(checked, sh_s_resolve(checked, returned)) != 1) { return false; }; let mut call = body; if sh_ast_word(ast, call, 0) == 51 { call = sh_ast_child(ast, call, 0); }; if sh_ast_word(ast, call, 0) != 53 or sh_ast_word(ast, call, 6) != 2 { return false; }; let runtime = sh_node_binding(checked, call); let projection = sh_ast_child(ast, call, 1); let parameter = sh_node_binding(checked, sh_ast_child(ast, projection, 0)); let field = sh_node_binding(checked, projection); let runtime_type = sh_s_resolve(checked, sh_binding_word(checked, runtime, 3)); sh_module_binding_source(analyzed, runtime) == origins.module and sh_o_name(checked, runtime, "sengoo_raw_vec_iter_free") and (sh_binding_word(checked, runtime, 5) & 8) != 0 and sh_s_data(checked, runtime_type) == 1 and sh_s_flags(checked, runtime_type) == 0 and sh_s_arity(checked, runtime_type) == 2 and sh_o_i64(checked, sh_s_argument(checked, runtime_type, 0)) and sh_o_i64(checked, sh_s_argument(checked, runtime_type, 1)) and sh_ast_word(ast, projection, 0) == 55 and sh_binding_word(checked, field, 6) == sh_origin_at(&origins.canonical, role - 1) and sh_binding_word(checked, field, 7) == 0 and sh_o_i64(checked, sh_binding_word(checked, field, 3)) and sh_s_resolve(checked, sh_binding_word(checked, parameter, 3)) == receiver and sh_binding_word(checked, parameter, 2) == 1 and sh_binding_word(checked, parameter, 6) == binding and sh_binding_word(checked, parameter, 7) == 0; }; };
+}
+
+def sh_bl_root(facts: &ShBackingLoans, origins: &ShOriginFacts, analyzed: &ShModuleChecked, aliases: &Vec<i64>, node: i64, depth: i64) -> i64 {
+    if depth > 128 { return -1; };
+    let checked = &analyzed.checked;
+    let ast = &analyzed.front.parsed.ast;
+    let kind = sh_ast_word(ast, node, 0);
+    if kind == 12 { return sh_origin_at(aliases, sh_node_binding(checked, node)); };
+    if kind == 50 or kind == 55 or kind == 58 and sh_ast_word(ast, node, 4) == 0 and sh_ast_word(ast, node, 6) == 1 { return sh_bl_root(facts, origins, analyzed, aliases, sh_ast_child(ast, node, 0), depth + 1); };
+    if kind == 53 { let target = sh_node_binding(checked, node); let mut parameter = if sh_origin_return(origins, target, 0) == 2 { sh_origin_return(origins, target, 3); } else { -1; }; let mut row = 0; while row < sh_origin_factory_count(origins) { if sh_origin_word(&origins.factories, row, 6, 0) == target { parameter = 0; }; row = row + 1; }; if sh_bl_admitted(facts, origins, analyzed, target, 1) or sh_bl_admitted(facts, origins, analyzed, target, 2) { parameter = 0; }; if parameter >= 0 { let callee = sh_ast_child(ast, node, 0); let argument = if sh_ast_word(ast, callee, 0) == 55 { if parameter == 0 { sh_ast_child(ast, callee, 0); } else { sh_ast_child(ast, node, parameter); }; } else { sh_ast_child(ast, node, parameter + 1); }; return sh_bl_root(facts, origins, analyzed, aliases, argument, depth + 1); }; };
+    -1;
+}
+
+def sh_bl_summary_walk(facts: &ShBackingLoans, origins: &ShOriginFacts, analyzed: &ShModuleChecked, node: i64, aliases: &Vec<i64>, effects: &Vec<i64>, depth: i64) -> bool {
+    if depth > 128 { return false; };
+    let ast = &analyzed.front.parsed.ast;
+    let checked = &analyzed.checked;
+    let kind = sh_ast_word(ast, node, 0);
+    if kind == 41 { let binding = sh_node_binding(checked, sh_ast_child(ast, node, 0)); let value = sh_ast_child(ast, node, sh_ast_word(ast, node, 6) - 1); sh_bl_summary_walk(facts, origins, analyzed, value, aliases, effects, depth + 1); aliases.set(binding, sh_bl_root(facts, origins, analyzed, aliases, value, 0)); return true; };
+    if kind == 53 { let called = sh_node_binding(checked, node); let callee = sh_ast_child(ast, node, 0); let args = vec_new_i64(); if sh_ast_word(ast, callee, 0) == 55 { args.push(sh_ast_child(ast, callee, 0)); (); }; let mut position = 1; while position < sh_ast_word(ast, node, 6) { args.push(sh_ast_child(ast, node, position)); position = position + 1; }; let mut factory = false; let mut row = 0; while row < sh_origin_factory_count(origins) { if called == sh_origin_word(&origins.factories, row, 6, 0) { factory = true; }; row = row + 1; }; let admitted = factory or sh_bl_admitted(facts, origins, analyzed, called, 1) or sh_bl_admitted(facts, origins, analyzed, called, 2) or sh_bl_admitted(facts, origins, analyzed, called, 3); let unknown_return = not admitted and sh_bl_option_ref(facts, checked, sh_node_type(checked, node)) >= 0 and sh_bl_root(facts, origins, analyzed, aliases, node, 0) < 0; let mut ordinal = 0; while ordinal < args.len() { let actual = sh_origin_at(&args, ordinal); let root = sh_bl_root(facts, origins, analyzed, aliases, actual, 0); let mut mask = if admitted { if sh_bl_admitted(facts, origins, analyzed, called, 3) { 3; } else { 2; }; } else { 1; }; if sh_module_binding_source(analyzed, called) == analyzed.front.source { let mut parameter = 0; while parameter < sh_binding_count(checked) { if sh_binding_word(checked, parameter, 2) == 1 and sh_binding_word(checked, parameter, 6) == called and sh_binding_word(checked, parameter, 7) == ordinal { mask = sh_origin_at(&facts.summaries, parameter); if mask < 0 { mask = 1; }; }; parameter = parameter + 1; }; }; if mask != 0 { if root >= 0 { let previous = sh_origin_at(effects, root); effects.set(root, previous | mask); (); } else { sh_bl_mentions(checked, ast, actual, aliases, effects, 0); }; }; if unknown_return { sh_bl_mentions(checked, ast, actual, aliases, effects, 0); }; sh_bl_summary_walk(facts, origins, analyzed, actual, aliases, effects, depth + 1); ordinal = ordinal + 1; }; return true; };
+    if kind == 55 { let root = sh_bl_root(facts, origins, analyzed, aliases, node, 0); if root >= 0 and sh_o_name(checked, sh_node_binding(checked, node), "handle") { let previous = sh_origin_at(effects, root); effects.set(root, previous | 1); (); }; };
+    if kind == 57 or kind == 59 or kind == 60 or kind == 58 and sh_ast_word(ast, node, 4) != 0 { sh_bl_mentions(checked, ast, node, aliases, effects, 0); };
+    if kind == 52 or kind == 61 or kind == 62 or kind == 63 or kind == 64 or kind == 65 or kind == 66 or kind == 67 { let mut binding = 0; while binding < aliases.len() { let root = sh_origin_at(aliases, binding); if root >= 0 { let previous = sh_origin_at(effects, root); effects.set(root, previous | 1); (); }; binding = binding + 1; }; };
+    let mut child = 0;
+    while child < sh_ast_word(ast, node, 6) { let target = sh_ast_child(ast, node, child); if sh_ast_word(ast, target, 0) < 70 { sh_bl_summary_walk(facts, origins, analyzed, target, aliases, effects, depth + 1); (); }; child = child + 1; };
+    true;
+}
+
+def sh_bl_mentions(checked: &ShChecked, ast: &ShAst, node: i64, aliases: &Vec<i64>, effects: &Vec<i64>, depth: i64) {
+    if depth > 128 { return; };
+    if sh_ast_word(ast, node, 0) == 12 { let root = sh_origin_at(aliases, sh_node_binding(checked, node)); if root >= 0 { let previous = sh_origin_at(effects, root); effects.set(root, previous | 1); (); }; };
+    let mut child = 0;
+    while child < sh_ast_word(ast, node, 6) { let target = sh_ast_child(ast, node, child); if sh_ast_word(ast, target, 0) < 70 { sh_bl_mentions(checked, ast, target, aliases, effects, depth + 1); (); }; child = child + 1; };
+}
+
+def sh_bl_summarize(facts: &mut ShBackingLoans, origins: &ShOriginFacts, graph: &ShModules, analyzed: &ShModuleChecked) {
+    let checked = &analyzed.checked;
+    let ast = &analyzed.front.parsed.ast;
+    let mut binding = 0;
+    while binding < sh_binding_count(checked) { facts.summaries.push(-1); binding = binding + 1; };
+    binding = 0;
+    while binding < sh_binding_count(checked) { if sh_binding_word(checked, binding, 2) == 1 and sh_module_binding_source(analyzed, sh_binding_word(checked, binding, 6)) == graph.root { let fn_binding = sh_binding_word(checked, binding, 6); let body = sh_s_child_kind(ast, sh_binding_word(checked, fn_binding, 4), 40); facts.summaries.set(binding, if body >= 0 { 0; } else { 1; }); (); }; binding = binding + 1; };
+    let mut iteration = 0;
+    let mut changed = true;
+    while changed and iteration < 16 { changed = false; let aliases = vec_new_i64(); let masks = vec_new_i64(); binding = 0; while binding < sh_binding_count(checked) { aliases.push(-1); masks.push(0); binding = binding + 1; }; binding = 0; while binding < sh_binding_count(checked) { if sh_binding_word(checked, binding, 2) == 2 and sh_module_binding_source(analyzed, binding) == graph.root { let mut cleared = 0; while cleared < aliases.len() { aliases.set(cleared, -1); cleared = cleared + 1; }; let mut parameter = 0; while parameter < sh_binding_count(checked) { if sh_binding_word(checked, parameter, 2) == 1 and sh_binding_word(checked, parameter, 6) == binding { aliases.set(parameter, parameter); (); }; parameter = parameter + 1; }; let body = sh_s_child_kind(ast, sh_binding_word(checked, binding, 4), 40); if body >= 0 { sh_bl_summary_walk(facts, origins, analyzed, body, &aliases, &masks, 0); (); let signature = sh_binding_word(checked, binding, 3); let returned = sh_s_resolve(checked, sh_s_argument(checked, signature, sh_s_arity(checked, signature) - 1)); if sh_s_kind(checked, returned) == 2 or sh_s_kind(checked, returned) == 7 { let tail = sh_ast_child(ast, body, sh_ast_word(ast, body, 6) - 1); sh_bl_mentions(checked, ast, tail, &aliases, &masks, 0); }; }; }; binding = binding + 1; }; binding = 0; while binding < sh_binding_count(checked) { let previous = sh_origin_at(&facts.summaries, binding); let incoming = sh_origin_at(&masks, binding); if previous >= 0 and (previous | incoming) != previous { facts.summaries.set(binding, previous | incoming); changed = true; }; binding = binding + 1; }; iteration = iteration + 1; };
+    if changed { facts.error = 5800; };
+}
+
+def sh_bl_drop_iterator(facts: &mut ShBackingLoans, node: i64, value: i64) {
+    let lease = sh_loan_node(facts, value, 5);
+    let root = sh_loan_node(facts, value, 3);
+    if lease < 0 or sh_origin_at(&facts.active, lease) != 1 { sh_bl_error(facts, 5804, node, root, lease); return; };
+    let mut row = 0;
+    while row < facts.leases.len() / 10 { if row != lease and sh_origin_at(&facts.active, row) == 1 and sh_loan_lease(facts, row, 2) == root and (sh_loan_lease(facts, row, 8) == 2 or sh_loan_lease(facts, row, 8) == 3) { sh_bl_error(facts, 5803, node, root, row); return; }; row = row + 1; };
+    facts.active.set(lease, 0);
+    facts.leases.set(lease * 10 + 7, node);
+    let mut binding = 0;
+    while binding < facts.bindings.len() { if sh_loan_node(facts, sh_origin_at(&facts.bindings, binding), 5) == lease { facts.bindings.set(binding, -1); (); }; binding = binding + 1; };
+    ();
+}
+
+def sh_bl_expr(facts: &mut ShBackingLoans, origins: &ShOriginFacts, analyzed: &ShModuleChecked, node: i64, moving: bool) -> i64 {
+    if node < 0 or facts.error != 0 { return -1; };
+    facts.depth = facts.depth + 1;
+    if facts.depth > 128 { facts.error = 5800; facts.depth = facts.depth - 1; return -1; };
+    let checked = &analyzed.checked;
+    let ast = &analyzed.front.parsed.ast;
+    let kind = sh_ast_word(ast, node, 0);
+    let ty = sh_node_type(checked, node);
+    if kind == 12 { let binding = sh_node_binding(checked, node); let parent = sh_origin_at(&facts.bindings, binding); if parent >= 0 { sh_bl_copy(facts, node, parent); if moving and sh_s_kind(checked, sh_s_resolve(checked, ty)) == 12 { if sh_loan_node(facts, node, 1) == 1 { sh_bl_effect(facts, node, sh_loan_node(facts, node, 3), 2, binding, sh_loan_node(facts, node, 0)); }; facts.bindings.set(binding, -1); (); }; }; } else if kind == 50 and (sh_ast_word(ast, node, 4) % 1000 == sh_kind("&") or sh_ast_word(ast, node, 4) % 1000 == sh_kind("*")) { let child = sh_bl_expr(facts, origins, analyzed, sh_ast_child(ast, node, 0), false); sh_bl_copy(facts, node, child); if sh_ast_word(ast, node, 4) % 1000 == sh_kind("*") and sh_loan_node(facts, child, 1) == 4 { let value_kind = sh_s_kind(checked, sh_s_resolve(checked, ty)); if value_kind == 12 or value_kind == 13 or value_kind == 8 or value_kind == 10 { sh_bl_error(facts, 5807, node, sh_loan_node(facts, child, 3), sh_loan_node(facts, child, 5)); facts.nodes.set(node * 8, 0); (); } else if value_kind >= 0 and value_kind <= 4 { facts.nodes.set(node * 8, 0); (); }; }; if sh_ast_word(ast, node, 4) % 1000 == sh_kind("&") and (sh_loan_node(facts, node, 1) == 2 or sh_loan_node(facts, node, 1) == 3) { let lease = sh_bl_lease(facts, node, sh_loan_node(facts, node, 3), sh_loan_node(facts, node, 2), 3, sh_loan_node(facts, node, 5)); facts.nodes.set(node * 8 + 5, lease); (); }; } else if kind == 58 and sh_ast_word(ast, node, 4) == 0 and sh_ast_word(ast, node, 6) == 1 { let grouped_value = sh_bl_expr(facts, origins, analyzed, sh_ast_child(ast, node, 0), moving); sh_bl_copy(facts, node, grouped_value); } else if kind == 57 { let cast_value = sh_bl_expr(facts, origins, analyzed, sh_ast_child(ast, node, 0), false); if sh_loan_node(facts, cast_value, 1) == 5 and (sh_s_kind(checked, ty) == 2 or sh_s_kind(checked, ty) == 7) { sh_bl_copy(facts, node, cast_value); } else if sh_loan_node(facts, cast_value, 0) > 0 { facts.partial = facts.partial | 4; sh_bl_effect(facts, node, sh_loan_node(facts, cast_value, 3), 4, -1, sh_loan_node(facts, cast_value, 0)); }; } else if kind == 41 { let binding = sh_node_binding(checked, sh_ast_child(ast, node, 0)); let value = sh_bl_expr(facts, origins, analyzed, sh_ast_child(ast, node, sh_ast_word(ast, node, 6) - 1), true); if sh_loan_node(facts, value, 0) > 0 { if sh_loan_node(facts, value, 1) == 1 and sh_loan_node(facts, value, 3) < 0 { facts.nodes.set(value * 8 + 3, binding); (); }; facts.bindings.set(binding, value); let lease = sh_loan_node(facts, value, 5); if lease >= 0 { facts.leases.set(lease * 10 + 1, binding); facts.leases.set(lease * 10 + 5, sh_binding_word(checked, binding, 1)); (); }; }; } else if kind == 43 { let value = sh_bl_expr(facts, origins, analyzed, sh_ast_child(ast, node, 0), moving); sh_bl_copy(facts, node, value); } else if kind == 42 { let value = sh_bl_expr(facts, origins, analyzed, sh_ast_child(ast, node, 0), true); facts.return_node = value; facts.flow = 1; sh_bl_copy(facts, node, value); } else if kind == 40 { let previous = facts.scope; facts.scope = sh_bl_scope(checked, ast, node); let mut child = 0; let mut value = -1; while child < sh_ast_word(ast, node, 6) and facts.flow == 0 { value = sh_bl_expr(facts, origins, analyzed, sh_ast_child(ast, node, child), true); child = child + 1; }; if value >= 0 { sh_bl_copy(facts, node, value); let returned_lease = sh_loan_node(facts, value, 5); if returned_lease >= 0 and sh_loan_lease(facts, returned_lease, 5) == facts.scope { facts.leases.set(returned_lease * 10 + 5, previous); (); }; }; let mut binding = 0; while binding < facts.bindings.len() { if sh_binding_word(checked, binding, 1) == facts.scope { let actual = sh_origin_at(&facts.bindings, binding); if sh_loan_node(facts, actual, 1) == 1 { let prior = sh_bl_outside(facts, sh_loan_node(facts, actual, 3), facts.scope); if prior >= 0 { sh_bl_error(facts, 5805, node, sh_loan_node(facts, actual, 3), prior); }; }; }; binding = binding + 1; }; let mut lease = 0; while lease < facts.leases.len() / 10 { if sh_loan_lease(facts, lease, 0) == facts.function and sh_loan_lease(facts, lease, 5) == facts.scope and sh_origin_at(&facts.active, lease) == 1 { facts.active.set(lease, 0); facts.leases.set(lease * 10 + 7, node); (); }; lease = lease + 1; }; facts.scope = previous; } else if kind == 53 { sh_bl_call(facts, origins, analyzed, node); } else if kind == 55 { let base = sh_bl_expr(facts, origins, analyzed, sh_ast_child(ast, node, 0), false); let root = sh_loan_node(facts, base, 3); if sh_o_name(checked, sh_node_binding(checked, node), "handle") and sh_loan_node(facts, base, 0) > 0 { sh_bl_write(facts, node, sh_loan_node(facts, base, 0), 5, sh_loan_node(facts, base, 2), root, sh_loan_node(facts, base, 4), sh_loan_node(facts, base, 5), sh_loan_node(facts, base, 6)); if moving and sh_s_kind(checked, sh_s_resolve(checked, sh_node_type(checked, sh_ast_child(ast, node, 0)))) != 6 { sh_bl_effect(facts, node, root, 3, -1, sh_loan_node(facts, base, 0)); }; } else if sh_loan_node(facts, base, 1) == 4 { sh_bl_copy(facts, node, base); }; } else if kind == 60 { let mut child = 1; while child < sh_ast_word(ast, node, 6) { let stored_value = sh_bl_expr(facts, origins, analyzed, sh_ast_child(ast, sh_ast_child(ast, node, child), 1), true); if sh_loan_node(facts, stored_value, 0) > 0 { facts.partial = facts.partial | 4; sh_bl_effect(facts, node, sh_loan_node(facts, stored_value, 3), 4, -1, sh_loan_node(facts, stored_value, 0)); }; child = child + 1; }; let state = sh_origin_node(origins, node, 0); if state == 3 { sh_bl_write(facts, node, 3, sh_origin_node(origins, node, 1), sh_origin_node(origins, node, 2), -1, -1, -1, -1); }; } else if kind == 52 { let assigned_value = sh_bl_expr(facts, origins, analyzed, sh_ast_child(ast, node, 1), true); if sh_loan_node(facts, assigned_value, 0) > 0 { facts.partial = facts.partial | 4; sh_bl_effect(facts, node, sh_loan_node(facts, assigned_value, 3), 4, -1, sh_loan_node(facts, assigned_value, 0)); }; let target = sh_ast_child(ast, node, 0); let base = if sh_ast_word(ast, target, 0) == 55 { sh_ast_child(ast, target, 0); } else { target; }; let value = sh_bl_expr(facts, origins, analyzed, base, false); if sh_loan_node(facts, value, 0) > 0 { sh_bl_effect(facts, node, sh_loan_node(facts, value, 3), 1, sh_node_binding(checked, target), sh_loan_node(facts, value, 0)); }; } else if kind == 61 or kind == 62 or kind == 63 or kind == 64 or kind == 65 or kind == 66 or kind == 67 { facts.partial = facts.partial | 2; sh_bl_error(facts, 5806, node, -1, -1); let mut binding = 0; while binding < facts.bindings.len() { facts.bindings.set(binding, -1); binding = binding + 1; }; } else { let mut child = 0; while child < sh_ast_word(ast, node, 6) { let value = sh_ast_child(ast, node, child); if sh_ast_word(ast, value, 0) < 70 { let unmodeled_value = sh_bl_expr(facts, origins, analyzed, value, false); if sh_loan_node(facts, unmodeled_value, 0) > 0 { facts.partial = facts.partial | 4; sh_bl_effect(facts, node, sh_loan_node(facts, unmodeled_value, 3), 4, -1, sh_loan_node(facts, unmodeled_value, 0)); }; (); }; child = child + 1; }; };
+    facts.depth = facts.depth - 1;
+    node;
+}
+
+def sh_bl_call(facts: &mut ShBackingLoans, origins: &ShOriginFacts, analyzed: &ShModuleChecked, node: i64) {
+    let checked = &analyzed.checked;
+    let ast = &analyzed.front.parsed.ast;
+    let binding = sh_node_binding(checked, node);
+    let callee = sh_ast_child(ast, node, 0);
+    let signature = sh_s_resolve(checked, sh_node_callable_type(checked, node));
+    let args = vec_new_i64();
+    if sh_s_kind(checked, signature) != 11 { return; };
+    if sh_ast_word(ast, callee, 0) == 55 { let receiver = sh_ast_child(ast, callee, 0); sh_bl_expr(facts, origins, analyzed, receiver, sh_s_kind(checked, sh_s_argument(checked, signature, 0)) != 6); args.push(receiver); (); };
+    let mut child = 1;
+    while child < sh_ast_word(ast, node, 6) { let value = sh_ast_child(ast, node, child); let ordinal = args.len(); let raw_observer = sh_bl_admitted(facts, origins, analyzed, binding, 1) and ordinal == 0 and sh_ast_word(ast, value, 0) == 55; sh_bl_expr(facts, origins, analyzed, value, not raw_observer and sh_s_kind(checked, sh_s_argument(checked, signature, ordinal)) != 6); args.push(value); child = child + 1; };
+    let actual = sh_origin_at(&args, 0);
+    let returned = sh_node_type(checked, node);
+    let role = sh_o_role(origins, checked, returned);
+    let element = if role > 0 { sh_o_element(checked, returned); } else { -1; };
+    if binding == sh_origin_at(&origins.canonical, 3) and sh_origin_node(origins, node, 0) == 1 { sh_bl_write(facts, node, 1, 1, element, -node - 1, node, -1, -1); return; };
+    let mut factory = 0;
+    while factory < sh_origin_factory_count(origins) { if sh_origin_word(&origins.factories, factory, 6, 0) == binding { let state = sh_loan_node(facts, actual, 0); if (state == 1 or state == 2) and sh_loan_node(facts, actual, 1) == 1 and sh_loan_node(facts, actual, 2) == element { let root = sh_loan_node(facts, actual, 3); if root < 0 { sh_bl_error(facts, 5805, node, root, -1); return; }; let lease = sh_bl_lease(facts, node, root, element, 1, -1); sh_bl_write(facts, node, state, role, element, root, node, lease, sh_loan_node(facts, actual, 6)); } else { sh_bl_error(facts, 5804, node, sh_loan_node(facts, actual, 3), -1); }; return; }; factory = factory + 1; };
+    if sh_bl_admitted(facts, origins, analyzed, binding, 3) { sh_bl_drop_iterator(facts, node, actual); return; };
+    if sh_bl_admitted(facts, origins, analyzed, binding, 1) or sh_bl_admitted(facts, origins, analyzed, binding, 2) { let source = if sh_bl_admitted(facts, origins, analyzed, binding, 1) and sh_ast_word(ast, actual, 0) == 55 { sh_ast_child(ast, actual, 0); } else { actual; }; let state = sh_loan_node(facts, source, 0); let parent = sh_loan_node(facts, source, 5); let target_element = sh_bl_option_ref(facts, checked, returned); if (state != 1 and state != 2) or (sh_loan_node(facts, source, 1) != 2 and sh_loan_node(facts, source, 1) != 3) or parent < 0 or sh_origin_at(&facts.active, parent) != 1 or target_element != sh_loan_node(facts, source, 2) { sh_bl_error(facts, 5804, node, sh_loan_node(facts, source, 3), parent); return; }; let root = sh_loan_node(facts, source, 3); let lease = sh_bl_lease(facts, node, root, target_element, 2, parent); sh_bl_write(facts, node, state, 4, target_element, root, node, lease, sh_loan_node(facts, source, 6)); return; };
+    let mut invalidating = false;
+    let mut ordinal = 0;
+    while ordinal < args.len() { let argument = sh_origin_at(&args, ordinal); let state = sh_loan_node(facts, argument, 0); let root = sh_loan_node(facts, argument, 3); let mut parameter = -1; let mut candidate = 0; while candidate < sh_binding_count(checked) { if sh_binding_word(checked, candidate, 2) == 1 and sh_binding_word(checked, candidate, 6) == binding and sh_binding_word(checked, candidate, 7) == ordinal { parameter = candidate; }; candidate = candidate + 1; }; let mask = if facts.mode == 1 and parameter >= 0 and sh_origin_at(&facts.summaries, parameter) >= 0 { sh_origin_at(&facts.summaries, parameter); } else { 1; }; if (mask & 2) != 0 { let expected_type = sh_s_argument(checked, signature, ordinal); let expected_role = sh_o_role(origins, checked, expected_type); let actual_role = sh_loan_node(facts, argument, 1); let parent = sh_loan_node(facts, argument, 5); if expected_role < 1 or actual_role != expected_role or (state != 1 and state != 2) or sh_loan_node(facts, argument, 2) != sh_o_element(checked, expected_type) or (expected_role == 2 or expected_role == 3) and (parent < 0 or sh_origin_at(&facts.active, parent) != 1) { sh_bl_error(facts, 5804, node, root, parent); invalidating = true; }; }; if state > 0 { let argument_role = sh_loan_node(facts, argument, 1); if (argument_role == 2 or argument_role == 3) and sh_s_kind(checked, sh_s_argument(checked, signature, ordinal)) != 6 { invalidating = true; sh_bl_effect(facts, node, root, 2, binding, state); }; if facts.calls.len() / 6 >= facts.limit { facts.error = 5800; return; }; facts.calls.push(node); facts.calls.push(parameter); facts.calls.push(argument); facts.calls.push(root); facts.calls.push(mask); facts.calls.push(state); if (mask & 1) != 0 { invalidating = true; sh_bl_effect(facts, node, root, 4, binding, state); }; }; ordinal = ordinal + 1; };
+    if invalidating { return; };
+    let loan_state = sh_origin_word(&facts.returns, binding, 6, 0);
+    let loan_role = sh_origin_word(&facts.returns, binding, 6, 1);
+    let loan_parameter = sh_origin_word(&facts.returns, binding, 6, 3);
+    if loan_state == 2 and loan_role == 4 and loan_parameter >= 0 { let source = sh_origin_at(&args, loan_parameter); let state = sh_loan_node(facts, source, 0); let borrowed_element = sh_bl_option_ref(facts, checked, returned); let parent = sh_loan_node(facts, source, 5); if (state == 1 or state == 2) and borrowed_element == sh_loan_node(facts, source, 2) and (sh_loan_node(facts, source, 1) == 1 or parent >= 0 and sh_origin_at(&facts.active, parent) == 1) { let root = sh_loan_node(facts, source, 3); let lease = sh_bl_lease(facts, node, root, borrowed_element, 2, parent); sh_bl_write(facts, node, state, 4, borrowed_element, root, node, lease, sh_loan_node(facts, source, 6)); } else { sh_bl_error(facts, 5804, node, sh_loan_node(facts, source, 3), parent); }; return; };
+    if role == 1 and sh_origin_node(origins, node, 0) == 1 and sh_origin_return(origins, binding, 3) < 0 { sh_bl_write(facts, node, 1, 1, element, -node - 1, node, -1, -1); return; };
+    if role > 0 { let parameter = sh_origin_return(origins, binding, 3); if parameter >= 0 { let source = sh_origin_at(&args, parameter); let state = sh_loan_node(facts, source, 0); if (state == 1 or state == 2) and sh_loan_node(facts, source, 2) == element and sh_origin_return(origins, binding, 0) == 2 { let root = sh_loan_node(facts, source, 3); let lease = if role == 2 or role == 3 { sh_bl_lease(facts, node, root, element, 1, -1); } else { -1; }; sh_bl_write(facts, node, state, role, element, root, node, lease, sh_loan_node(facts, source, 6)); }; }; };
+}
+
+def sh_bl_input(facts: &mut ShBackingLoans, values: &Vec<i64>) {
+    if not sh_o_push(&facts.origin_input, values.len(), facts.limit) { facts.error = 5800; return; };
+    let mut i = 0;
+    while i < values.len() { if not sh_o_push(&facts.origin_input, sh_origin_at(values, i), facts.limit) { facts.error = 5800; return; }; i = i + 1; };
+}
+
+def sh_loans_analyze(origins: &ShOriginFacts, graph: &ShModules, analyzed: &ShModuleChecked, identity: &str, digest: &str, prototype: &str, option_identity: &str, option_digest: &str, limit: i64, mode: i64) -> ShBackingLoans {
+    let mut facts = sh_loans_new(limit, mode);
+    if limit < 1 or limit > 100000 or mode < 0 or mode > 1 or sh_origins_validate(origins, graph, analyzed, identity, digest, prototype) != 0 { facts.error = 5801; return facts; };
+    sh_bl_option_admit(&mut facts, graph, analyzed, option_identity, option_digest);
+    if facts.error != 0 { return facts; };
+    let checked = &analyzed.checked;
+    let ast = &analyzed.front.parsed.ast;
+    let mut binding = 0;
+    while binding < sh_binding_count(checked) { let mut kind = 1; while kind <= 3 { let candidate = sh_bl_admitted(&facts, origins, analyzed, binding, kind); if candidate { facts.admissions.push(kind); facts.admissions.push(binding); facts.admissions.push(sh_binding_word(checked, binding, 3)); facts.admissions.push(sh_binding_word(checked, binding, 6)); facts.admissions.push(sh_binding_word(checked, binding, 4)); (); }; kind = kind + 1; }; binding = binding + 1; };
+    sh_bl_summarize(&mut facts, origins, graph, analyzed);
+    let mut node = 0;
+    while node < sh_ast_count(ast) * 8 { facts.nodes.push(if node % 8 == 0 { 0; } else { -1; }); node = node + 1; };
+    binding = 0;
+    while binding < sh_binding_count(checked) { facts.bindings.push(-1); let mut field = 0; while field < 6 { facts.returns.push(if field == 0 { 0; } else { -1; }); field = field + 1; }; binding = binding + 1; };
+    let mut iteration = 0;
+    let mut changed = true;
+    while changed and iteration < 16 and facts.error == 0 { changed = false; facts.leases.clear(); facts.active.clear(); facts.effects.clear(); facts.calls.clear(); facts.diagnostics.clear(); node = 0; while node < facts.nodes.len() { facts.nodes.set(node, if node % 8 == 0 { 0; } else { -1; }); node = node + 1; }; binding = 0; while binding < sh_binding_count(checked) { if sh_binding_word(checked, binding, 2) == 2 and sh_module_binding_source(analyzed, binding) == graph.root { let body = sh_s_child_kind(ast, sh_binding_word(checked, binding, 4), 40); if body >= 0 { facts.function = binding; facts.scope = sh_binding_word(checked, binding, 7); facts.flow = 0; facts.return_node = -1; let mut local = 0; while local < facts.bindings.len() { facts.bindings.set(local, -1); local = local + 1; }; local = 0; while local < sh_binding_count(checked) { if sh_binding_word(checked, local, 2) == 1 and sh_binding_word(checked, local, 6) == binding { let ty = sh_binding_word(checked, local, 3); let role = sh_o_role(origins, checked, ty); if role > 0 { let declaration = sh_binding_word(checked, local, 4); let element = sh_o_element(checked, ty); let lease = if role == 2 or role == 3 { sh_bl_lease(&mut facts, declaration, local, element, 1, -1); } else { -1; }; sh_bl_write(&mut facts, declaration, 2, role, element, local, declaration, lease, local); facts.bindings.set(local, declaration); (); }; }; local = local + 1; }; let value = sh_bl_expr(&mut facts, origins, analyzed, body, true); let returned = if facts.return_node >= 0 { facts.return_node; } else { value; }; let root = sh_loan_node(&facts, returned, 3); let role = sh_loan_node(&facts, returned, 1); let mut state = sh_loan_node(&facts, returned, 0); let mut parameter = -1; if root >= 0 and sh_binding_word(checked, root, 2) == 1 and sh_binding_word(checked, root, 6) == binding { parameter = sh_binding_word(checked, root, 7); }; if role == 2 or role == 3 or role == 4 { if parameter < 0 { sh_bl_error(&mut facts, 5805, returned, root, -1); state = 0; }; }; let summary = vec_new_i64(); summary.push(state); summary.push(role); summary.push(sh_loan_node(&facts, returned, 2)); summary.push(parameter); summary.push(returned); summary.push(1); let mut field = 0; while field < 6 { let value = sh_origin_at(&summary, field); let previous = sh_origin_word(&facts.returns, binding, 6, field); if previous != value { facts.returns.set(binding * 6 + field, value); changed = true; }; field = field + 1; }; }; }; binding = binding + 1; }; iteration = iteration + 1; };
+    if changed { facts.error = 5800; };
+    sh_bl_input(&mut facts, &origins.canonical);
+    sh_bl_input(&mut facts, &origins.factories);
+    sh_bl_input(&mut facts, &origins.nodes);
+    sh_bl_input(&mut facts, &origins.returns);
+    sh_bl_input(&mut facts, &origins.obligations);
+    sh_bl_input(&mut facts, &origins.calls);
+    sh_bl_input(&mut facts, &origins.input);
+    facts.bindings.clear();
+    facts.active.clear();
+    facts.function = -1;
+    facts.scope = -1;
+    facts.depth = 0;
+    facts.flow = 0;
+    facts.return_node = -1;
+    facts;
+}
+
+def sh_loans_validate(facts: &ShBackingLoans, origins: &ShOriginFacts, graph: &ShModules, analyzed: &ShModuleChecked, identity: &str, digest: &str, prototype: &str, option_identity: &str, option_digest: &str) -> i64 {
+    if facts.schema != 1 or facts.error != 0 or facts.unlowerable != 1 or facts.bindings.len() != 0 or facts.active.len() != 0 or facts.function != -1 or facts.scope != -1 or facts.depth != 0 or facts.flow != 0 or facts.return_node != -1 { return 5802; };
+    let expected = sh_loans_analyze(origins, graph, analyzed, identity, digest, prototype, option_identity, option_digest, facts.limit, facts.mode);
+    if expected.error != 0 { return expected.error; };
+    if facts.option_binding != expected.option_binding or facts.option_module != expected.option_module or facts.option_identity.as_str() != option_identity or facts.option_digest.as_str() != option_digest or facts.partial != expected.partial or not sh_o_equal(&facts.nodes, &expected.nodes) or not sh_o_equal(&facts.leases, &expected.leases) or not sh_o_equal(&facts.effects, &expected.effects) or not sh_o_equal(&facts.summaries, &expected.summaries) or not sh_o_equal(&facts.returns, &expected.returns) or not sh_o_equal(&facts.calls, &expected.calls) or not sh_o_equal(&facts.diagnostics, &expected.diagnostics) or not sh_o_equal(&facts.admissions, &expected.admissions) or not sh_o_equal(&facts.origin_input, &expected.origin_input) { return 5802; };
+    0;
+}

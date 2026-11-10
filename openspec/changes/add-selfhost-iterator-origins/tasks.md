@@ -96,3 +96,85 @@ phase must implement backing-loan/effect checking (including shared-receiver
 native mutation and raw handle escape to unknown C) before one coordinated
 HIR6/MIR optional-borrow integration. The remaining tasks above stay open;
 partial stage-one success does not complete M3 or self-hosting.
+
+
+## Stage-two source backing leases and effect summaries
+
+- [x] Query independent concrete bool, i64 and owned-element origins in real typed source.
+- [x] Implement separate validated backing/element/iterator-reborrow lease records, whole moves, scope-end cleanup and conditional returned-parameter relationships.
+- [x] Reject tested live-backing mutation/free/owner-transfer/raw-handle escape and unknown parameter effects, including all parameters of scalar-return callees; retain explicit generic Drop 5123 as a separate typed boundary.
+- [x] Authenticate actual Option source/layout and precise iterator borrow/release candidate declarations; retain all runtime bridges unlowerable.
+- [x] Execute summary/no-summary causal control, exact source rejection oracles, temporary and nested-scope cases, input/table/source/type poisons and read-only arenas.
+- [x] Run source/tool/revision-bound native resource gates and freeze the stage-two owned files for independent review.
+
+This stage does not close HIR6/MIR/runtime provider/constructor/optional-reference
+integration. The earlier source-origin checkpoint remains historical evidence.
+
+### Stage-two qualification and remaining integration boundary
+
+The final source candidate report is
+target/selfhost/m3-iterator-loans/escaped-forms-final/evidence.json,
+SHA256 befc520f624e043664d9b48b5245861f9f4a25feec4d92af772ebf8eadb1a8db.
+It ran on Windows 11 10.0.26300-SP0, Python 3.12.14, with full revision
+f91b98639ba67d800a83468d45c89356b808e911 at both start and finish, actual UTC
+2026-11-10T00:12:06.155130+00:00 through
+2026-11-10T00:17:58.984011+00:00. Nine commands passed: pinned S0, clang,
+real rustc and cargo versions, native SG test construction, and four fixtures
+run through three first-call scopes each. String, Buffer, opaque, file-snapshot
+handles and snapshot bytes returned exactly to their initial counts after each
+scope, with no warmup. All 184 input hashes, 133 producer snapshots (including
+the executable), four selected tool hashes, external Cargo config candidates
+and checkout source hashes stayed unchanged. This is source-development native
+verification, not release/performance or new-seed qualification.
+
+The main typed-success fixture checks 14 accepted source functions and 30 exact
+loan rejections. It independently obtains i64/bool from checked builtins and
+Owner from the actual root ADT declaration; it does not compare an Owner fact
+against itself. Whole moves, reborrows, conditional return parameters, repeated
+next candidates and nested element-scope survival pass. All callee origin bits
+and effects are checked, including scalar-result and two-parameter callees.
+The no-summary control rejects the proven observer call; modified saved
+summaries, leases, admissions, headers/scratch, origin input, Option nominal/
+binding/type association, wrong caller pins and changed source bytes are
+rejected without growing or changing the typed arena.
+
+Unknown aggregate storage, tracked RHS assignment, grouped/cast/arithmetic
+handle escape, obscured C-call parameters and source-returned aliases have
+explicit source 5803 controls. Unknown returned borrow-container relationships
+and other unmodeled expressions remain conservative; this is not complete alias
+inference. The source Option identity comes from an independent caller pin and
+real canonical bool-tag/value-T fields. The source-release shadow fixture is
+rejected 5803. Two separately successful typed-boundary fixtures retain 5122
+(ordinary C reference parameter) and 5123 (explicit generic Drop method ambiguity)
+rather than suppressing those type errors to reach loans.
+
+The previous qualified candidate misses the new wrapped-escape assertion:
+target/selfhost/m3-iterator-loans/old-escape-negative/evidence.json,
+SHA256 293396743327b1f078834fb6f7eac05826ed3d6c350dca8304f63764d36dd037.
+Its native build succeeds; execution exits1 with wrapped_escape, actual0,
+expected5803 and the assertion filename. The separate qualification-binding.json
+verifies the exact consumed source hashes against the earlier qualified 133-
+snapshot report, rather than treating a fresh local hash as old qualification.
+
+target/selfhost/m3-iterator-loans/identity-negative-final/control.json proves
+that a wrong seed identity is rejected before any tool execution (zero steps)
+and replaces an existing passed report with failed. Its failed-report SHA256 is
+b61230932a8785dd433a8804580c685d4d90b5573e66cfae815cc48e4ab66522.
+The exact S0 lexical-shadow compatibility probe and unique-name LLVM/native
+control are in target/selfhost/m3-iterator-loans/stage0-shadow/; their report
+SHA256 is 53aabe95923dfac81ef8075b5d6a3b5cb38df09005bda933e14ed66ffac3df09.
+Prior development failures remain intact. This tasks evidence ledger is
+excluded from the report input set to avoid report-hash self-reference.
+
+target/selfhost/m3-iterator-loans/tables-draft.md gives fixed table widths,
+external Option/collections pin requirements and cleared scratch;
+next-integration.md gives the coordinated HIR6/provider/constructor/NLL/MIR27
+handoff. Validation 0 means faithful candidate analysis and may retain source
+diagnostics; future authority consumers must separately require the relevant
+source functions to be clean. All candidates retain unlowerable=1.
+
+- [ ] Replace phase scope-end over-rejection with canonical last-reachable-use NLL before final compatibility; retain last_use_overreject as the named current boundary.
+- [ ] Resolve/qualify generic explicit Drop source-method ambiguity and complete by-value iterator method ABI/cleanup and general alias/CFG inference.
+- [ ] Integrate actual constructor allocation/typed descriptors and independently qualified C provider declarations/artifacts; zero source bodies are logical intrinsic origins only.
+- [ ] Integrate mandatory HIR6 candidate/authority facts and MIR27 optional borrowing with Some/null guards, physical-handle obligations and non-Copy runtime Drop-exactly-once proof.
+- [ ] Reconcile and eliminate actualcore112 and complete compiler closure/self-hosting; this standalone stage does not change that production ledger.

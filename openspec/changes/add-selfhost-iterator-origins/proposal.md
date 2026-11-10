@@ -12,3 +12,10 @@ scalar-copy bridge stays incomplete and independent. No S0 replacement,
 provider-registry expansion, production borrow change or safe-reference cast
 is authorized by this initial layer. Final borrowed-next/ownership/HIR6/MIR
 integration is a later reviewed phase.
+
+
+The following standalone stage adds validated backing/element leases and
+parameter effect/origin obligations, with independently pinned physical Option
+identity and exact source candidates. It owns no new runtime references:
+constructor allocation, actual provider pointer validity, NLL production
+integration and HIR6/MIR optional borrowing remain explicit later conditions.
