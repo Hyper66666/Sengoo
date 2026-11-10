@@ -31,3 +31,15 @@ Option<&i64/bool> helper body and canonical receiver member relationships,
 while preserving conditional caller/backing requirements. Namespace2 provider
 admission remains owned by the collection-intrinsics child. No production
 borrow/HIR/MIR permissions or scalar-Copy generalization follow from this phase.
+
+## Stage five: fresh actual ownership and bounded function coverage
+
+Add an independent collection-aware ownership entry while preserving the legacy
+checker and its 22-field result. It consumes fresh module/source/type facts and
+independent provider pins, then checks exact scalar-helper projection receipts
+in the actual source traversal. An explicit function-set entry supplies newly
+analyzed scoped results and coverage; it does not delete global diagnostics.
+An explicit bounded typed finalization stage precedes all frozen source facts,
+so readonly ownership checks do not silently append missing generic field types.
+This phase still grants no constructor allocation or runtime borrowed pointer,
+no generic-job certificate, and no claim that actualcore112 is eliminated.

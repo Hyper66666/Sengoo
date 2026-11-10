@@ -271,3 +271,62 @@ and reborrows using the same validated NLL token lineage. The exact-source
 qualification chain separately pins production collection_provider.sg and
 semantic_origins.sg against the old qualified provider report; new source
 hashes are not treated as historical provider qualification.
+
+## Stage five: explicit finalization and fresh actual ownership
+
+`semantic_collection_borrow.sg` imports the unchanged legacy ownership module and
+the qualified physical-handle source layer. Four recursive walkers receive an
+explicit readonly handle context; existing path, drop, initialization, contracts,
+loan, last-use and temporary rules remain in use. No saved trust flag or new
+ShOwnership field is added. The ordinary legacy entry is untouched.
+
+Before producing origin/loan/NLL/handle facts, callers explicitly run
+`sh_collection_ownership_finalize(checked, actualAST, maxTypes, maxQueries)`.
+Ownership previously materialized six concrete MapIter mapper / FilterIter
+predicate callable/reference types through `sh_resolved_field_type`, making
+earlier frozen facts stale. The pass follows actual binding and value types,
+closes type arguments, actual class parents and actual ADT field substitutions,
+and records resolved field triples and reachable TypeIDs under explicit caps.
+It excludes unreachable early forward placeholders, not malformed reachable
+instances. Failure/cap results are fatal6123, not readiness. Its second explicit
+call tests idempotence; this is not a resource warmup or hidden ownership run.
+Original words/arguments must remain byte-exact after facts are frozen. Future
+lowering may intern only in its separately owned HIR arena.
+
+The all-function entry validates independent provider root/manifest/object,
+physical collection/Option source pins and actual graph/checked inputs against
+qualified origins, loans, NLL and handle payloads before exceptions are used.
+An exact receipt must match actual call, argument, parameter, member, owner, T
+and complete callee evidence. It permits that primitive field read as
+observation; it does not change owning cleanup. Complete scalar-helper bodies
+have exactly two primitive i64 parameters and one non-dropping Option<&primitive>
+local, with the already validated Some-guard/read/fallback body proof. Their
+physical handle preconditions remain pending, not unconditional safe Ref facts.
+
+`sh_check_ownership_collection_functions` independently initializes the ordinary
+prior contracts and last uses, then checks only the exact requested actual
+functions. Empty, duplicate, negative, nonfunction, abstract or bodyless requests
+fail6120. Its ShCollectionOwnership owns the unchanged ShOwnership, requested
+functions and coverage8 rows: function, declarationAST, bodyAST, moduleID,
+declaredFnType, bodyMode, pendingConditionCount, functionError. Mode1 denotes
+ordinary full source traversal; mode2 denotes the complete scalar helper under
+its still-pending premise. Declared generic FnType is not a monomorphic job
+certificate. Complete reachable jobs and concrete substitutions remain required.
+
+The same-context validator reconstructs scoped ownership from the actual inputs
+and compares the entire 22-field result plus requested functions/coverage; it
+does not rerun semantic analysis on a different source or clear error arrays.
+6120 means invalid context/request, 6121 a source handle-obligation rejection,
+6122 reconstructed-output mismatch, 6123 typed finalization/freeze failure.
+Cleared receipts, source/type/provider pin changes and development-policy changes
+lose admission. All actions8/9/10 and existing contract bits retain their meaning.
+
+Whole-module errors remain errors. The qualified old core ledger112 and new
+source analysis ledger68 are separately retained; the difference is diagnostic
+records, not 44 independent soundness fixes or complete standard safety.
+Source constructor/scalar-helper scoped cleanliness does not authorize native
+allocation or MIR27. Old NLL still conservatively kills owner validity on
+mutation; later owner-preserving effect/renewed-lease and exact projection
+supersession overlays must use their own independent validation, never bypass
+this entry with a saved boolean. This stage does not change any qualified
+origin/loan/NLL source, HIR codec, MIR, provider runtime or legacy borrow file.

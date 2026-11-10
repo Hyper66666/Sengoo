@@ -334,8 +334,8 @@ Earlier development1 correctly remains failed because guarded proposal/design
 bytes changed while its behavior test ran; that old behavioral exit0 is not a
 formal pass. Subsequent qualification uses the exact final immutable inputs.
 
-- [ ] Connect fresh validated handle contracts to actual ownership analysis, retaining the same 22-field ShOwnership and existing action/contract semantics; production borrow changes require a baseline/scope barrier.
-- [ ] Prove complete primitive helper premises without owned locals or borrowed escape, and consume exact callsite receipts without treating partial standard caller obligations as complete ownership/NLL coverage.
+- [x] Connect fresh validated handle contracts to actual ownership analysis, retaining the same 22-field ShOwnership and existing action/contract semantics; production borrow changes require a baseline/scope barrier.
+- [x] Prove complete primitive helper premises without owned locals or borrowed escape, and consume exact callsite receipts without treating partial standard caller obligations as complete ownership/NLL coverage.
 - [ ] Bind actual ownership and fresh physical-handle/NLL/provider context into HIR6/source lowering while ordinary module-witness-only lowering remains 5008.
 - [ ] Integrate qualified constructor/descriptors and MIR27 guarded optional borrowing, then reconcile actualcore112 by actual source checking/lowering rather than clearing diagnosis arrays.
 
@@ -345,3 +345,75 @@ target/selfhost/m3-collection-handles/interface-draft.md. Contract query results
 are useful only after independent payload validation, and state 2 remains an
 obligation to real callers. Module coverage rows do not invent backing storage
 validity where root NLL lacks actual coverage.
+
+## Stage five: actual fresh ownership entry and exact scoped results
+
+- [x] Implement explicit reachable-type finalization before frozen facts, with caps, prefix preservation, idempotence and post-analysis readonly typed arenas.
+- [x] Preserve the legacy checker and ShOwnership22 while checking exact complete-helper/projection conditions in a new actual source traversal.
+- [x] Produce scoped ownership by new function-set analysis, reject invalid roots and retain conditional obligations in explicit coverage8 rows.
+- [x] Validate same-context scoped output, all22 owned fields, source/type/provider/receipt causal rejection and actions8/9/10 retention.
+- [x] Run actual fixture/core first-call resource scopes and retain legacy112 plus fresh68 diagnostic ledger without error clearing.
+- [x] Qualify exact immutable source/tool inputs, reject wrong executable identity before execution, and freeze seven owned files for integration review.
+
+Actual reachable generic jobs, complete standard-library NLL/effects, constructor
+allocation and native guarded optional borrowing remain later integration gates.
+A clean source-only scoped result is not permission to emit a safe reference.
+
+### Stage-five qualified actual ownership evidence
+
+Final report: target/selfhost/m3-collection-borrow/checkpoint/evidence.json,
+SHA256 ac61c469da579ee17f8cd9ed9685c75dfd854c932c923329491dfe950b16369d.
+Actual full revision 81837746932d49eedc74922f110e20a9101911ac at start and end,
+Windows 11 10.0.26300-SP0/Python3.12.14, actual UTC
+2026-11-10T02:05:13.614192+00:00 through
+2026-11-10T02:13:40.851572+00:00. Seven commands passed, with 602 input hashes,
+137 producer origins, 140 immutable snapshots/artifacts and four selected tools.
+All source, producer-checkout, snapshot, tool and external Cargo config change
+lists are empty. The test executable is built from the captured SG/stdlib
+closure using the pinned S0/clang and selected actual Rust toolchain.
+
+The fixture and actual selfhost_core import graph each run three independent
+scopes. String/Buffer/opaque/FileSnapshot handle counts and file bytes are
+recorded before the first call and return exactly after each scope, without
+warmup. Peak observed Windows working set is 181252096 bytes for the compiler,
+66428928 for fixture analysis and 67399680 for actual core analysis. These
+measurements are not M8/performance qualification.
+
+The actual core finalization explicitly materializes eight additional TypeIDs
+(6057 to6065, 600 field queries); a second explicit pass appends none. Original
+type words and argument words stay byte-exact through legacy/fresh/scoped
+analysis and all restored poisons. The fixture uses5690 to5698/578 queries.
+Below-initial-count and zero-work budgets fail6123. The legacy core ledger112
+remains complete and the new all-function analysis records68 diagnostics with
+error6101; these68 records, including actual AST/source/span/owner, are in the
+report. They are not cleared or reported as clean standard-library ownership.
+
+Fresh construct/good caller scopes are checked independently. A receiver
+parameter and the actual complete scalar helper remain explicit pending
+conditions; helper coverage mode2 is not a runtime or generic-job certificate.
+Unknown C integers, Owner handles, cross-T, repack, zero and invalidated backing
+source scopes are rejected6121 after actual typed checking succeeds. Empty,
+negative, duplicate, actual nonfunction and abstract function sets fail6120
+without acquiring coverage. Missing receipts, wrong provider/source pins,
+changed Fn type flags and nondevelopment policy fail6120. DeclaredFnType and
+action output poison fail6122, all22 result fields are compared under
+individual poison/restore, and an empty low-level source-contract context
+produces the entire unchanged legacy result. Actual core action8/9/10 counts
+are each nonzero and equal between old and new analyses.
+
+The durable wrong-seed control in
+target/selfhost/m3-collection-borrow/identity-negative/control.json verifies
+exit1 and zero executed tool steps, replacing an existing passed report with
+failed. Its failed report SHA256 is
+6f9088fcf34654ac7d0196f0db68ce1ad110a07530dbbcb508e526041c3bced1.
+Earlier failed stale-type/guard reports and production-development2 are retained;
+this final report alone binds the final seven-file phase. tasks.md is excluded
+from producer input guards because it records report hashes after qualification;
+proposal/design/spec remain guarded. Child strict and all strict108/0 pass.
+
+The new entry lives in semantic_collection_borrow.sg; borrow.sg remains exactly
+990fb05324a641ecd2ebee7cd696d3224e55f8992df5bdd4118718969bdff45c.
+Qualified origin/loan/NLL source schemas, HIR6 and MIR/provider sources are not
+modified. Actual source lowering must revalidate the same context and every
+reachable concrete job. Owner-preserving effects/renewed loans, remaining68
+standard diagnoses and MIR27 runtime references remain separate open gates.

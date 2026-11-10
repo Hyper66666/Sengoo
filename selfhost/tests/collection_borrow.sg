@@ -1,0 +1,197 @@
+import selfhost_semantic_collection_borrow;
+
+import std::args;
+
+import std::assert;
+
+extern "C" {
+    fn sengoo_string_live_handle_count() -> i64;
+    fn sengoo_buffer_live_handle_count() -> i64;
+    fn sengoo_opaque_live_handle_count() -> i64;
+    fn sengoo_file_snapshot_live_handle_count() -> i64;
+    fn sengoo_file_snapshot_live_bytes() -> i64;
+}
+
+def sh_cbt_arg(i: i64) -> Result<String, i64> {
+    let b = ffi_buffer_new(arg_len(i)?)?;
+    let n = arg_copy(i, b)?;
+    string_from_utf8(b, n);
+}
+
+def sh_cbt_find(analyzed: &ShModuleChecked, name: &str) -> i64 {
+    sh_o_unique(analyzed, analyzed.front.source, name, 2);
+}
+
+def sh_cbt_scope(provider: &ShCollectionProvider, mapping: &ShCollectionProviders, provider_root: &str, mp: &str, ap: &str, origins: &ShOriginFacts, loans: &ShBackingLoans, nll: &ShLoanLiveness, handles: &ShCollectionHandles, graph: &ShModules, analyzed: &ShModuleChecked, ci: &str, ch: &str, proto: &str, oi: &str, oh: &str, name: &str, expected: i64) -> ShCollectionOwnership {
+    let requested = vec_new_i64();
+    let function = sh_cbt_find(analyzed, name);
+    assert_true(function >= 0, "collection_borrow.sg", 1);
+    requested.push(function);
+    let result = sh_check_ownership_collection_functions(provider, mapping, provider_root, mp, ap, origins, loans, nll, handles, graph, analyzed, ci, ch, proto, oi, oh, &requested, 10000, true);
+    if result.error != expected { println(name); println(result.error); println(expected); };
+    assert_eq_i64(result.error, expected, "collection_borrow.sg", 2);
+    assert_eq_i64(result.coverage.len(), 8, "collection_borrow.sg", 3);
+    assert_eq_i64(sh_ch_at(&result.coverage, 0, 8, 0), function, "collection_borrow.sg", 4);
+    assert_eq_i64(sh_ch_at(&result.coverage, 0, 8, 4), sh_binding_word(&analyzed.checked, function, 3), "collection_borrow.sg", 5);
+    result;
+}
+
+def sh_cbt_poison_fields(actual: &mut ShOwnership, expected: &ShOwnership) {
+    assert_true(sh_collection_ownership_equal(actual, expected), "collection_borrow.sg", 50);
+    assert_true(actual.actions.push(1234567), "collection_borrow.sg", 51);
+    assert_true(not sh_collection_ownership_equal(actual, expected), "collection_borrow.sg", 70);
+    actual.actions.pop();
+    assert_true(actual.action_paths.push(1234567), "collection_borrow.sg", 52);
+    assert_true(not sh_collection_ownership_equal(actual, expected), "collection_borrow.sg", 71);
+    actual.action_paths.pop();
+    assert_true(actual.paths.push(1234567), "collection_borrow.sg", 53);
+    assert_true(not sh_collection_ownership_equal(actual, expected), "collection_borrow.sg", 72);
+    actual.paths.pop();
+    assert_true(actual.state.push(1234567), "collection_borrow.sg", 54);
+    assert_true(not sh_collection_ownership_equal(actual, expected), "collection_borrow.sg", 73);
+    actual.state.pop();
+    assert_true(actual.loans.push(1234567), "collection_borrow.sg", 55);
+    assert_true(not sh_collection_ownership_equal(actual, expected), "collection_borrow.sg", 74);
+    actual.loans.pop();
+    assert_true(actual.loan_parents.push(1234567), "collection_borrow.sg", 56);
+    assert_true(not sh_collection_ownership_equal(actual, expected), "collection_borrow.sg", 75);
+    actual.loan_parents.pop();
+    assert_true(actual.last_uses.push(1234567), "collection_borrow.sg", 57);
+    assert_true(not sh_collection_ownership_equal(actual, expected), "collection_borrow.sg", 76);
+    actual.last_uses.pop();
+    assert_true(actual.loops.push(1234567), "collection_borrow.sg", 58);
+    assert_true(not sh_collection_ownership_equal(actual, expected), "collection_borrow.sg", 77);
+    actual.loops.pop();
+    assert_true(actual.definitions.push(1234567), "collection_borrow.sg", 59);
+    assert_true(not sh_collection_ownership_equal(actual, expected), "collection_borrow.sg", 78);
+    actual.definitions.pop();
+    assert_true(actual.contracts.push(1234567), "collection_borrow.sg", 60);
+    assert_true(not sh_collection_ownership_equal(actual, expected), "collection_borrow.sg", 79);
+    actual.contracts.pop();
+    assert_true(actual.try_scopes.push(1234567), "collection_borrow.sg", 61);
+    assert_true(not sh_collection_ownership_equal(actual, expected), "collection_borrow.sg", 80);
+    actual.try_scopes.pop();
+    let injected = ShDiagnostic { code: 1234567, severity: 1, node: 0, start: 0, end: 0, expected: 0, actual: 0 };
+    actual.diagnostics.push(injected);
+    assert_true(not sh_collection_ownership_equal(actual, expected), "collection_borrow.sg", 90);
+    actual.diagnostics.pop();
+    let saved_access_mode = actual.access_mode;
+    actual.access_mode = saved_access_mode + 17;
+    assert_true(not sh_collection_ownership_equal(actual, expected), "collection_borrow.sg", 91);
+    actual.access_mode = saved_access_mode;
+    let saved_projection_context = actual.projection_context;
+    actual.projection_context = saved_projection_context + 17;
+    assert_true(not sh_collection_ownership_equal(actual, expected), "collection_borrow.sg", 92);
+    actual.projection_context = saved_projection_context;
+    let saved_error = actual.error;
+    actual.error = saved_error + 17;
+    assert_true(not sh_collection_ownership_equal(actual, expected), "collection_borrow.sg", 93);
+    actual.error = saved_error;
+    let saved_start = actual.start;
+    actual.start = saved_start + 17;
+    assert_true(not sh_collection_ownership_equal(actual, expected), "collection_borrow.sg", 94);
+    actual.start = saved_start;
+    let saved_end = actual.end;
+    actual.end = saved_end + 17;
+    assert_true(not sh_collection_ownership_equal(actual, expected), "collection_borrow.sg", 95);
+    actual.end = saved_end;
+    let saved_limit = actual.limit;
+    actual.limit = saved_limit + 17;
+    assert_true(not sh_collection_ownership_equal(actual, expected), "collection_borrow.sg", 96);
+    actual.limit = saved_limit;
+    let saved_function = actual.function;
+    actual.function = saved_function + 17;
+    assert_true(not sh_collection_ownership_equal(actual, expected), "collection_borrow.sg", 97);
+    actual.function = saved_function;
+    let saved_scope = actual.scope;
+    actual.scope = saved_scope + 17;
+    assert_true(not sh_collection_ownership_equal(actual, expected), "collection_borrow.sg", 98);
+    actual.scope = saved_scope;
+    let saved_flow = actual.flow;
+    actual.flow = saved_flow + 17;
+    assert_true(not sh_collection_ownership_equal(actual, expected), "collection_borrow.sg", 99);
+    actual.flow = saved_flow;
+    let saved_depth = actual.depth;
+    actual.depth = saved_depth + 17;
+    assert_true(not sh_collection_ownership_equal(actual, expected), "collection_borrow.sg", 100);
+    actual.depth = saved_depth;
+    assert_true(sh_collection_ownership_equal(actual, expected), "collection_borrow.sg", 101);
+    ();
+}
+
+def sh_cbt_run(root: &String, mp: &String, ap: &String, source: &String, mode: &String, core_path: &String, poison: bool) -> Result<bool, i64> {
+    let manifest = path_join_string(root.as_str(), "selfhost/sdk/collections_x64_abi1/manifest.json")?;
+    let stdlib = path_join_string(root.as_str(), "tools/stdlib")?;
+    let prelude = path_join_string(root.as_str(), "selfhost/sdk/collections_x64_abi1/prelude.sg")?;
+    let collection = path_join_string(root.as_str(), "tools/stdlib/collections.sg")?;
+    let option = path_join_string(root.as_str(), "tools/stdlib/option.sg")?;
+    let cs = file_snapshot_open(collection.as_str(), 1048576)?;
+    let ci = cs.identity()?;
+    let ch = cs.sha256()?;
+    let os = file_snapshot_open(option.as_str(), 1048576)?;
+    let oi = os.identity()?;
+    let oh = os.sha256()?;
+    let provider = sh_collection_provider_load(root.as_str(), manifest.as_str(), mp.as_str(), ap.as_str(), "x86_64-pc-windows-msvc", 1, true);
+    assert_eq_i64(provider.error, 0, "collection_borrow.sg", 6);
+    let config = string_from_str("collection_runtime=")?;
+    config.push_str(prelude.as_str())?;
+    if mode.as_str() == "core" { config.push_str(";selfhost_core=")?; config.push_str(core_path.as_str())?; (); };
+    let graph = sh_modules_load(source.as_str(), stdlib.as_str(), &config, 64, 1048576);
+    assert_eq_i64(graph.error, 0, "collection_borrow.sg", 7);
+    let analyzed = sh_modules_check(&graph, 100000, 1000);
+    if analyzed.error != 0 { println(analyzed.error); println(analyzed.start); };
+    assert_eq_i64(analyzed.error, 0, "collection_borrow.sg", 8);
+    let prefix_words = sh_cb_words(&analyzed.checked.types.words);
+    let prefix_arguments = sh_cb_words(&analyzed.checked.types.arguments);
+    if poison { let capped = sh_collection_ownership_finalize(&analyzed.checked, &analyzed.front.parsed.ast, sh_type_count(&analyzed.checked.types) - 1, 1000000); assert_eq_i64(capped.error, 6123, "collection_borrow.sg", 9); let zero_budget = sh_collection_ownership_finalize(&analyzed.checked, &analyzed.front.parsed.ast, 100000, 0); assert_eq_i64(zero_budget.error, 6123, "collection_borrow.sg", 10); (); };
+    let prepared = sh_collection_ownership_finalize(&analyzed.checked, &analyzed.front.parsed.ast, 100000, 1000000);
+    assert_eq_i64(prepared.error, 0, "collection_borrow.sg", 11);
+    assert_true(prepared.after_types >= prepared.before_types, "collection_borrow.sg", 12);
+    let mut prefix = 0;
+    while prefix < prefix_words.len() { assert_eq_i64(sh_origin_at(&prefix_words, prefix), sh_origin_at(&analyzed.checked.types.words, prefix), "collection_borrow.sg", 13); prefix = prefix + 1; };
+    prefix = 0;
+    while prefix < prefix_arguments.len() { assert_eq_i64(sh_origin_at(&prefix_arguments, prefix), sh_origin_at(&analyzed.checked.types.arguments, prefix), "collection_borrow.sg", 14); prefix = prefix + 1; };
+    let idempotent = sh_collection_ownership_finalize(&analyzed.checked, &analyzed.front.parsed.ast, 100000, 1000000);
+    assert_eq_i64(idempotent.error, 0, "collection_borrow.sg", 15);
+    assert_eq_i64(idempotent.before_types, idempotent.after_types, "collection_borrow.sg", 16);
+    assert_true(sh_o_equal(&prepared.fields, &idempotent.fields) and sh_o_equal(&prepared.reachable_types, &idempotent.reachable_types), "collection_borrow.sg", 17);
+    let frozen_words = sh_cb_words(&analyzed.checked.types.words);
+    let frozen_arguments = sh_cb_words(&analyzed.checked.types.arguments);
+    let mapping = sh_collection_provider_map(&provider, root.as_str(), &graph, &analyzed, mp.as_str(), ap.as_str(), ci.as_str(), ch.as_str(), "x86_64-pc-windows-msvc", 1, true);
+    assert_eq_i64(mapping.error, 0, "collection_borrow.sg", 18);
+    let proto = "fn sengoo_raw_vec_iter_new(handle: i64) -> i64;";
+    let origins = sh_origins_analyze(&graph, &analyzed, ci.as_str(), ch.as_str(), proto, 100000);
+    assert_eq_i64(origins.error, 0, "collection_borrow.sg", 19);
+    let loans = sh_loans_analyze(&origins, &graph, &analyzed, ci.as_str(), ch.as_str(), proto, oi.as_str(), oh.as_str(), 100000, 1);
+    assert_eq_i64(loans.error, 0, "collection_borrow.sg", 20);
+    let nll = sh_loan_liveness(&origins, &loans, &graph, &analyzed, ci.as_str(), ch.as_str(), proto, oi.as_str(), oh.as_str(), 20000);
+    assert_eq_i64(nll.error, 0, "collection_borrow.sg", 21);
+    let mut handles = sh_collection_handles(&provider, &mapping, root.as_str(), mp.as_str(), ap.as_str(), &origins, &loans, &nll, &graph, &analyzed, ci.as_str(), ch.as_str(), proto, oi.as_str(), oh.as_str(), 100000, true);
+    assert_eq_i64(handles.error, 0, "collection_borrow.sg", 22);
+    let legacy = sh_check_ownership(&analyzed.front.expanded.text, &analyzed.front.parsed.ast, &analyzed.checked, 10000);
+    let full = sh_check_ownership_collections(&provider, &mapping, root.as_str(), mp.as_str(), ap.as_str(), &origins, &loans, &nll, &handles, &graph, &analyzed, ci.as_str(), ch.as_str(), proto, oi.as_str(), oh.as_str(), 10000, true);
+    if poison { println("collection_borrow_counts"); println(prepared.before_types); println(prepared.after_types); println(prepared.queries); println(legacy.diagnostics.len()); println(full.diagnostics.len()); println(full.error); };
+    if mode.as_str() == "core" { assert_eq_i64(legacy.diagnostics.len(), 112, "collection_borrow.sg", 23); assert_eq_i64(full.diagnostics.len(), 68, "collection_borrow.sg", 24); assert_eq_i64(full.error, 6101, "collection_borrow.sg", 25); let mut action_kind = 8; while action_kind <= 10 { let mut old_count = 0; let mut new_count = 0; let mut action_index = 0; while action_index < sh_ownership_action_count(&legacy) { if sh_ownership_action(&legacy, action_index, 2) == action_kind { old_count = old_count + 1; }; action_index = action_index + 1; }; action_index = 0; while action_index < sh_ownership_action_count(&full) { if sh_ownership_action(&full, action_index, 2) == action_kind { new_count = new_count + 1; }; action_index = action_index + 1; }; assert_true(old_count > 0, "collection_borrow.sg", 110); assert_eq_i64(new_count, old_count, "collection_borrow.sg", 111); action_kind = action_kind + 1; }; if poison { let mut row = 0; while row < full.diagnostics.len() { let d = full.diagnostics.get(row); let site = sh_module_expanded_span(&graph, &analyzed.front, d.start, d.end); println("remaining_diagnostic"); println(d.code); println(d.node); println(site.source); println(site.start); println(site.end); println(sh_ch_owner(&analyzed.checked, d.node)); row = row + 1; }; }; } else { let mut construct = sh_cbt_scope(&provider, &mapping, root.as_str(), mp.as_str(), ap.as_str(), &origins, &loans, &nll, &handles, &graph, &analyzed, ci.as_str(), ch.as_str(), proto, oi.as_str(), oh.as_str(), "construct", 0); assert_eq_i64(sh_ch_at(&construct.coverage, 0, 8, 6), 0, "collection_borrow.sg", 26); let good = sh_cbt_scope(&provider, &mapping, root.as_str(), mp.as_str(), ap.as_str(), &origins, &loans, &nll, &handles, &graph, &analyzed, ci.as_str(), ch.as_str(), proto, oi.as_str(), oh.as_str(), "good", 0); let conditional = sh_cbt_scope(&provider, &mapping, root.as_str(), mp.as_str(), ap.as_str(), &origins, &loans, &nll, &handles, &graph, &analyzed, ci.as_str(), ch.as_str(), proto, oi.as_str(), oh.as_str(), "conditional", 0); assert_true(sh_ch_at(&conditional.coverage, 0, 8, 6) > 0, "collection_borrow.sg", 27); sh_cbt_scope(&provider, &mapping, root.as_str(), mp.as_str(), ap.as_str(), &origins, &loans, &nll, &handles, &graph, &analyzed, ci.as_str(), ch.as_str(), proto, oi.as_str(), oh.as_str(), "unknown", 6121); sh_cbt_scope(&provider, &mapping, root.as_str(), mp.as_str(), ap.as_str(), &origins, &loans, &nll, &handles, &graph, &analyzed, ci.as_str(), ch.as_str(), proto, oi.as_str(), oh.as_str(), "wrong_t", 6121); sh_cbt_scope(&provider, &mapping, root.as_str(), mp.as_str(), ap.as_str(), &origins, &loans, &nll, &handles, &graph, &analyzed, ci.as_str(), ch.as_str(), proto, oi.as_str(), oh.as_str(), "owner_handle", 6121); sh_cbt_scope(&provider, &mapping, root.as_str(), mp.as_str(), ap.as_str(), &origins, &loans, &nll, &handles, &graph, &analyzed, ci.as_str(), ch.as_str(), proto, oi.as_str(), oh.as_str(), "fake", 6121); sh_cbt_scope(&provider, &mapping, root.as_str(), mp.as_str(), ap.as_str(), &origins, &loans, &nll, &handles, &graph, &analyzed, ci.as_str(), ch.as_str(), proto, oi.as_str(), oh.as_str(), "zero", 6121); sh_cbt_scope(&provider, &mapping, root.as_str(), mp.as_str(), ap.as_str(), &origins, &loans, &nll, &handles, &graph, &analyzed, ci.as_str(), ch.as_str(), proto, oi.as_str(), oh.as_str(), "dead", 6121); let selected = vec_new_i64(); selected.push(sh_cbt_find(&analyzed, "construct")); assert_eq_i64(sh_collection_ownership_validate(&construct, &provider, &mapping, root.as_str(), mp.as_str(), ap.as_str(), &origins, &loans, &nll, &handles, &graph, &analyzed, ci.as_str(), ch.as_str(), proto, oi.as_str(), oh.as_str(), &selected, 10000, true), 0, "collection_borrow.sg", 28); if poison { let prior_type = sh_ch_at(&construct.coverage, 0, 8, 4); construct.coverage.set(4, analyzed.checked.bool_type); assert_eq_i64(sh_collection_ownership_validate(&construct, &provider, &mapping, root.as_str(), mp.as_str(), ap.as_str(), &origins, &loans, &nll, &handles, &graph, &analyzed, ci.as_str(), ch.as_str(), proto, oi.as_str(), oh.as_str(), &selected, 10000, true), 6122, "collection_borrow.sg", 29); construct.coverage.set(4, prior_type); assert_true(construct.ownership.actions.len() > 2, "collection_borrow.sg", 102); let action = construct.ownership.actions.get(2).unwrap_or(-1); construct.ownership.actions.set(2, 99); assert_eq_i64(sh_collection_ownership_validate(&construct, &provider, &mapping, root.as_str(), mp.as_str(), ap.as_str(), &origins, &loans, &nll, &handles, &graph, &analyzed, ci.as_str(), ch.as_str(), proto, oi.as_str(), oh.as_str(), &selected, 10000, true), 6122, "collection_borrow.sg", 30); construct.ownership.actions.set(2, action); let helper_selected = vec_new_i64(); let helper = sh_o_unique(&analyzed, origins.module, "raw_vec_iter_next_i64", 2); helper_selected.push(helper); let helper_result = sh_check_ownership_collection_functions(&provider, &mapping, root.as_str(), mp.as_str(), ap.as_str(), &origins, &loans, &nll, &handles, &graph, &analyzed, ci.as_str(), ch.as_str(), proto, oi.as_str(), oh.as_str(), &helper_selected, 10000, true); assert_eq_i64(helper_result.error, 0, "collection_borrow.sg", 31); assert_eq_i64(sh_ch_at(&helper_result.coverage, 0, 8, 5), 2, "collection_borrow.sg", 32); assert_true(sh_ch_at(&helper_result.coverage, 0, 8, 6) > 0, "collection_borrow.sg", 33); let independent = sh_check_ownership_collection_functions(&provider, &mapping, root.as_str(), mp.as_str(), ap.as_str(), &origins, &loans, &nll, &handles, &graph, &analyzed, ci.as_str(), ch.as_str(), proto, oi.as_str(), oh.as_str(), &selected, 10000, true); sh_cbt_poison_fields(&mut construct.ownership, &independent.ownership); let blank = sh_ch_new(100000); let no_selection = vec_new_i64(); let fallback = sh_cb_analyze(&blank, &analyzed, &no_selection, true, &analyzed.front.expanded.text, &analyzed.front.parsed.ast, &analyzed.checked, 10000); assert_true(sh_collection_ownership_equal(&fallback, &legacy), "collection_borrow.sg", 103); let saved = sh_cb_words(&handles.receipts); handles.receipts.clear(); let no_receipts = sh_check_ownership_collection_functions(&provider, &mapping, root.as_str(), mp.as_str(), ap.as_str(), &origins, &loans, &nll, &handles, &graph, &analyzed, ci.as_str(), ch.as_str(), proto, oi.as_str(), oh.as_str(), &selected, 10000, true); assert_eq_i64(no_receipts.error, 6120, "collection_borrow.sg", 34); let mut restore = 0; while restore < saved.len() { handles.receipts.push(sh_origin_at(&saved, restore)); restore = restore + 1; }; selected.push(sh_cbt_find(&analyzed, "construct")); let duplicate = sh_check_ownership_collection_functions(&provider, &mapping, root.as_str(), mp.as_str(), ap.as_str(), &origins, &loans, &nll, &handles, &graph, &analyzed, ci.as_str(), ch.as_str(), proto, oi.as_str(), oh.as_str(), &selected, 10000, true); assert_eq_i64(duplicate.error, 6120, "collection_borrow.sg", 35); selected.pop(); let no_release = sh_check_ownership_collection_functions(&provider, &mapping, root.as_str(), mp.as_str(), ap.as_str(), &origins, &loans, &nll, &handles, &graph, &analyzed, ci.as_str(), ch.as_str(), proto, oi.as_str(), oh.as_str(), &selected, 10000, false); assert_eq_i64(no_release.error, 6120, "collection_borrow.sg", 36); let invalid_request = vec_new_i64(); invalid_request.push(-1); let rejected_missing = sh_check_ownership_collection_functions(&provider, &mapping, root.as_str(), mp.as_str(), ap.as_str(), &origins, &loans, &nll, &handles, &graph, &analyzed, ci.as_str(), ch.as_str(), proto, oi.as_str(), oh.as_str(), &invalid_request, 10000, true); assert_eq_i64(rejected_missing.error, 6120, "collection_borrow.sg", 105); assert_eq_i64(rejected_missing.coverage.len(), 0, "collection_borrow.sg", 106); invalid_request.clear(); let rejected_empty = sh_check_ownership_collection_functions(&provider, &mapping, root.as_str(), mp.as_str(), ap.as_str(), &origins, &loans, &nll, &handles, &graph, &analyzed, ci.as_str(), ch.as_str(), proto, oi.as_str(), oh.as_str(), &invalid_request, 10000, true); assert_eq_i64(rejected_empty.error, 6120, "collection_borrow.sg", 105); assert_eq_i64(rejected_empty.coverage.len(), 0, "collection_borrow.sg", 106); let nonfunction_binding = sh_o_unique(&analyzed, analyzed.front.source, "Owner", 3); assert_true(nonfunction_binding >= 0 and sh_binding_word(&analyzed.checked, nonfunction_binding, 2) == 3, "collection_borrow.sg", 112); invalid_request.push(nonfunction_binding); let rejected_nonfunction = sh_check_ownership_collection_functions(&provider, &mapping, root.as_str(), mp.as_str(), ap.as_str(), &origins, &loans, &nll, &handles, &graph, &analyzed, ci.as_str(), ch.as_str(), proto, oi.as_str(), oh.as_str(), &invalid_request, 10000, true); assert_eq_i64(rejected_nonfunction.error, 6120, "collection_borrow.sg", 105); assert_eq_i64(rejected_nonfunction.coverage.len(), 0, "collection_borrow.sg", 106); invalid_request.clear(); let mut abstract_binding = 0; while abstract_binding < sh_binding_count(&analyzed.checked) { if sh_binding_word(&analyzed.checked, abstract_binding, 2) == 2 and sh_binding_word(&analyzed.checked, sh_binding_word(&analyzed.checked, abstract_binding, 6), 2) == 7 { break; }; abstract_binding = abstract_binding + 1; }; assert_true(abstract_binding < sh_binding_count(&analyzed.checked), "collection_borrow.sg", 104); invalid_request.push(abstract_binding); let rejected_abstract = sh_check_ownership_collection_functions(&provider, &mapping, root.as_str(), mp.as_str(), ap.as_str(), &origins, &loans, &nll, &handles, &graph, &analyzed, ci.as_str(), ch.as_str(), proto, oi.as_str(), oh.as_str(), &invalid_request, 10000, true); assert_eq_i64(rejected_abstract.error, 6120, "collection_borrow.sg", 105); assert_eq_i64(rejected_abstract.coverage.len(), 0, "collection_borrow.sg", 106); let wrong_manifest = sh_check_ownership_collection_functions(&provider, &mapping, root.as_str(), "invalid-manifest-pin", ap.as_str(), &origins, &loans, &nll, &handles, &graph, &analyzed, ci.as_str(), ch.as_str(), proto, oi.as_str(), oh.as_str(), &selected, 10000, true); assert_eq_i64(wrong_manifest.error, 6120, "collection_borrow.sg", 107); let wrong_source = sh_check_ownership_collection_functions(&provider, &mapping, root.as_str(), mp.as_str(), ap.as_str(), &origins, &loans, &nll, &handles, &graph, &analyzed, ci.as_str(), "invalid-collection-source-pin", proto, oi.as_str(), oh.as_str(), &selected, 10000, true); assert_eq_i64(wrong_source.error, 6120, "collection_borrow.sg", 108); let frozen_signature = sh_binding_word(&analyzed.checked, sh_cbt_find(&analyzed, "construct"), 3); let old_signature_flags = sh_s_flags(&analyzed.checked, frozen_signature); analyzed.checked.types.words.set(frozen_signature * 6 + 2, 99); let changed_type = sh_check_ownership_collection_functions(&provider, &mapping, root.as_str(), mp.as_str(), ap.as_str(), &origins, &loans, &nll, &handles, &graph, &analyzed, ci.as_str(), ch.as_str(), proto, oi.as_str(), oh.as_str(), &selected, 10000, true); assert_eq_i64(changed_type.error, 6120, "collection_borrow.sg", 109); analyzed.checked.types.words.set(frozen_signature * 6 + 2, old_signature_flags); (); }; };
+    assert_true(sh_o_equal(&frozen_words, &analyzed.checked.types.words) and sh_o_equal(&frozen_arguments, &analyzed.checked.types.arguments), "collection_borrow.sg", 37);
+    result_ok_bool(true);
+}
+
+def main() -> i64 {
+    if args_len() != 6 { return 64; };
+    let root = sh_cbt_arg(0);
+    let mp = sh_cbt_arg(1);
+    let ap = sh_cbt_arg(2);
+    let source = sh_cbt_arg(3);
+    let mode = sh_cbt_arg(4);
+    let core = sh_cbt_arg(5);
+    if not root.is_ok() or not mp.is_ok() or not ap.is_ok() or not source.is_ok() or not mode.is_ok() or not core.is_ok() { return 64; };
+    let strings = sengoo_string_live_handle_count();
+    let buffers = sengoo_buffer_live_handle_count();
+    let opaque = sengoo_opaque_live_handle_count();
+    let files = sengoo_file_snapshot_live_handle_count();
+    let bytes = sengoo_file_snapshot_live_bytes();
+    let mut round = 0;
+    while round < 3 { let result = sh_cbt_run(&root.value, &mp.value, &ap.value, &source.value, &mode.value, &core.value, round == 0); if not result.is_ok() { println(result.error); return 1; }; assert_eq_i64(sengoo_string_live_handle_count(), strings, "collection_borrow.sg", 40); assert_eq_i64(sengoo_buffer_live_handle_count(), buffers, "collection_borrow.sg", 41); assert_eq_i64(sengoo_opaque_live_handle_count(), opaque, "collection_borrow.sg", 42); assert_eq_i64(sengoo_file_snapshot_live_handle_count(), files, "collection_borrow.sg", 43); assert_eq_i64(sengoo_file_snapshot_live_bytes(), bytes, "collection_borrow.sg", 44); round = round + 1; };
+    println("collection borrow: three first-call resource scopes passed");
+    0;
+}
