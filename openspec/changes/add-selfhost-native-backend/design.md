@@ -282,3 +282,62 @@ Primary references:
 - Windows ABI: https://learn.microsoft.com/en-us/cpp/build/x64-calling-convention?view=msvc-170
 - Prologue/epilogue and stack probing: https://learn.microsoft.com/en-us/cpp/build/prolog-and-epilog?view=msvc-170
 - COFF: https://learn.microsoft.com/en-us/windows/win32/debug/pe-format
+
+
+## Checked physical C callbacks (MIR opcode 28)
+
+MIR schema 1 retains its existing layout and instruction meanings. The bounded
+builder additionally admits 28; opcode 27 stays unavailable in this checkpoint.
+Opcode 28 has one operand, zero extra/flags and aux 1 for move or 2 for drop.
+Its output is exactly `*mut u8` (raw kind 7, mutable flag 1, unsigned byte
+element). The operand must be a direct opcode-9 value whose actual function
+ID is valid and whose type equals that function's signature. The referenced
+function must have a real body in this MIR, function flags 0 and a nonvariadic
+C signature (function kind 11, ABI data 1, type flags 0). Move accepts exactly
+two `*mut u8` parameters and unit result; drop accepts one and unit result.
+Unknown/foreign functions, arbitrary scalar or raw-pointer addresses, SG ABI,
+wrong arity/result/pointee/mutability and altered producer metadata reject.
+The pure validator reads existing type/source/function arenas and does not
+intern types or mutate MIR. The complete ordinary CFG/SSA/body validator still
+runs, including operand dominance and real parameter/return checks.
+
+The MIR model does not encode source-level unsafe declarations separately; this
+physical checkpoint does not reconstruct an unsafe declaration authority from
+ABI bits. The separately selected collection provider and concrete callback
+body/lifetime facts remain the responsibility of the collection-intrinsics
+owner. Passing 28 alone does not prove the semantic correctness of a move/drop
+algorithm for T. No candidate HIR payload or unlowerable-bit edit can grant it
+constructor or optional-borrow authority. No Ref value is produced.
+
+The native branch copies the already validated address value into its raw
+pointer result. Actual opcode-9 RIP-relative address fixups stay unchanged.
+General cast opcode 12 continues to reject function-kind inputs; this explicit
+bridge does not widen that instruction. Existing consumers reject unknown 28
+without reinterpreting older opcodes: the recorded old builder boundary is
+5002 and old instruction-typecheck fallback is 5003. This admission does not
+claim that an old schema-one consumer understands the extension.
+
+The bounded verification constructs real C-ABI move8 and owned16 callback
+bodies from raw MIR, obtains their actual addresses, erases them with 28 and
+passes them through a six-argument external C call. An independent C caller
+invokes SG callbacks, which perform actual typed loads/stores and call back
+into C stack/resource probes. Owned-token release, source invalidation and
+fixed 8/16-byte data/stack alignment are observed directly. This fixture proves
+those bodies' behavior without substituting C for their move/drop algorithm.
+Full generic callback synthesis, selected provider/source binding, optional
+borrow permission, final SDK extraction and normal compiler self-build remain
+separate requirements.
+
+
+The qualified callback checkpoint is recorded in
+`target/selfhost/m4-callback-erasure-trial10/evidence.json`, SHA-256
+`74426d91341ab5949fc4767987f274c62f17dd1683d80f689b14231c03de92e5`.
+Its 54 commands include all 26 rejection forms, actual C/SG execution and the
+old-consumer checks. Its unchanged native/ABI child passes 38 commands and its
+existing typed HIR/MIR replay passes ten HIR5 and thirty raw CFG/SSA/ABI
+resource rounds.
+The exact fixture, host, revision, tool/source/artifact guards and retained
+limits are listed in tasks. The nominal owner fixture uses target size 16 and
+natural alignment 8 with a real destructor/Drop glue; the independent C caller
+provides 16-byte-aligned storage. This is observed callback-body behavior, not
+an authority certificate for arbitrary T or the separately selected provider.

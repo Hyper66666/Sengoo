@@ -1,0 +1,23 @@
+import selfhost_mir_validate;
+
+import std::assert;
+
+def main() -> i64 {
+    let mir = sh_mir_new(100);
+    let empty = vec_new_i64();
+    let unit = sh_type_primitive(&mir.types, 0, 0, 0).value;
+    let arguments = vec_new_i64();
+    arguments.push(unit);
+    let signature = sh_type_intern(&mir.types, 11, 1, 0, -1, &arguments).value;
+    let name = string_from_str("old_boundary");
+    let function = sh_mir_add_function(&mir, &name.value, signature, 0, -1, 0, 0).value;
+    let scope = sh_mir_add_scope(&mir, function, -1, 0).value;
+    let block = sh_mir_add_block(&mir, function, scope, 0, -1, 0, 0).value;
+    let rejected = sh_mir_add_instruction(&mir, block, 28, unit, &empty, 2, 0, 0, -1, 0, 0);
+    assert_eq_i64(rejected.error, 5002, "callback-old.sg", 1);
+    let plain = sh_mir_add_instruction(&mir, block, 3, unit, &empty, 0, 0, 0, -1, 0, 0).value;
+    mir.instructions.set(plain * 12 + 2, 28);
+    assert_eq_i64(sh_mir_inst_typecheck(&mir, plain), 5003, "callback-old.sg", 2);
+    println("old add_instruction=5002; old inst_typecheck=5003");
+    0;
+}

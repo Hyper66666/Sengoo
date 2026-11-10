@@ -446,3 +446,84 @@ the module report has the same end revision. The historical linker source
 qualification remains recursively bound through four report levels to its
 original 174 source hashes. Current-linker rebuilding and M3-M8 completion
 remain outside these integration replays.
+
+
+## Checked physical C callback erasure
+
+- [x] Preserve MIR schema/layout while admitting only the new opcode 28 in addition to existing instructions; retain explicit old-consumer and opcode-27 rejection.
+- [x] Validate direct opcode-9/local-body/C-signature identity and exact move/drop/raw-byte-pointer shapes without mutating type or MIR arenas.
+- [x] Preserve actual native function fixups and copy the checked address without widening cast 12 or minting a safe Ref/provider certificate.
+- [x] Execute independent C/SG callbacks with real move8/owned16 loads/stores, exact resource release and Windows register/stack/data alignment.
+- [x] Reject malformed address/signature/metadata inputs with complete-state immutability, first-call resources and preserved outputs.
+- [x] Regress existing raw MIR/native ABI behavior from captured source/tool/runtime inputs, then freeze exact artifacts and strict specs while full collection/compiler milestones remain open.
+
+
+Production qualification is
+`target/selfhost/m4-callback-erasure-trial10/evidence.json`, SHA-256
+`74426d91341ab5949fc4767987f274c62f17dd1683d80f689b14231c03de92e5`.
+All 54 top-level commands pass with 348 captured input hashes, 147 original
+producer paths, ten tools and fourteen retained artifacts. Start/end revision
+is `e4f30e28dea25211ed1aadd143dd8c88645feb3c` on
+`Windows-11-10.0.26300-SP0`; source, tool, Cargo-config, original-checkout and
+artifact change arrays are empty. Start/end UTC timestamps are retained in
+that immutable report. The selected actual Cargo/rustc versions and independent
+offline build-script/library compiler invocations are recorded with wrappers
+disabled and ancestor/user Cargo config present/absent guards.
+
+The independent C caller executes the real move8 and nominal owned16 callbacks
+and exits 42. `CallbackOwner` has real MIR fields at 0/8, size 16, natural
+alignment 8, a local SG-ABI destructor and kind-1 Drop glue. The C-ABI erased
+drop callback invokes that glue through existing opcode 21; only the actual
+SG destructor releases its token. Both source fields are invalidated after a
+move and the destination is cleared after Drop. One hundred iterations observe
+exactly one release each, while C storage is explicitly 16-byte aligned and
+nested C stack probes check Windows stack alignment and six-argument ABI
+behavior. This does not prove a generic T callback generator or selected
+collection provider, whose compiler integration belongs to its separate owner.
+
+One hundred first-call success scopes and five first-call scopes for each of
+26 rejected cases restore String, Buffer, opaque and FileSnapshot handles and
+snapshot bytes. There is no warmup. A full MIR scalar/vector/marker/handle/
+symbol-byte snapshot agrees word for word after pure validation; error paths
+also check native rejection before output publication. The corpus includes a
+well-formed foreign callback declaration whose physical C definition exists
+outside this MIR, in addition to contradictory function metadata, null/raw and
+integer producers, SG ABI, variadic/wrong signatures, altered function IDs,
+producer/output metadata, wrong callback kinds and ordinary cast 12. Direct
+callback shape checks reject 5006; complete consumers preserve their earlier
+5002/5003/5004 failures where appropriate. Every CLI failure preserves a prior
+object sentinel, and both actual assertion failure controls exit 1 with the
+fixture filename.
+
+Two fresh directories retain identical timestamp-zero SG object bytes. An
+independent Python COFF decoder resolves all four actual opcode-9 RIP-relative
+REL32 records to the exact defined callback symbols and offsets; a changed
+relocation-target negative control rejects. LLVM independently inspects
+sections, symbols, relocations, unwind and disassembly. C source/header inputs
+are captured with agreeing pre/post dependency closures; actual selected link
+libraries and tools are recorded and checked through completion. No external
+compiler assembles or replaces the emitted SG callback functions.
+
+The old builder and instruction checker are separately rebuilt from the exact
+pre-extension `mir.sg` and `mir_validate.sg` at revision
+`f8019ce94db24b241071ee9ff0156a8b4a120e69`, with their recorded complete
+current dependency/tool snapshots. Their real diagnostics for instruction 28
+are respectively 5002 and 5003. The current builder still rejects 27 and 29
+without mutation. The existing native/ABI gate runs unchanged from captured
+copies and passes all 38 commands; its report is
+`target/selfhost/m4-callback-erasure-trial10/implementation/target/native-regression/evidence.json`,
+SHA-256 `391fa0dfd080c6b2d54a4c690dc8875f24034f797716d12a096401cde837bd67`.
+Existing typed HIR/MIR tests additionally pass ten HIR5 roundtrip/lowering/
+cleanup rounds and thirty raw CFG/SSA/ABI resource rounds. Failed development
+trials remain failed; this named full report alone admits the new checkpoint.
+M4 completion, HIR6/source authority, generic descriptor/callback generation,
+optional borrowed values, SDK/provider extraction and native compiler
+self-rebuild remain open.
+
+
+The nested 38-command report is an existing native/ABI behavior regression,
+not complete MSVC child-linker or installed SDK qualification: its default
+clang-link commands do not separately record the MSVC child-linker closure.
+The new callback C ABI branch explicitly uses `-fuse-ld=lld`, records that tool
+and its actual `/verbose` library selections, and retains its own header/tool/
+artifact guards. Neither branch completes final SDK or bootstrap provenance.

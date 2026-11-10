@@ -60,3 +60,24 @@ SHALL not call an external compiler or assembler or silently fall back to LLVM.
 - **THEN** each emitted instruction, terminator, prologue and return epilogue has a bounded machine-code range
 - **AND** enabling address collection preserves the object's emitted bytes before debug records are attached
 - **AND** reusing populated construction state fails rather than appending conflicting addresses
+
+
+### Requirement: C callback address erasure SHALL preserve an explicitly checked physical ABI
+
+The backend SHALL accept function-address erasure only through an explicit
+validated MIR operation from a real local C-ABI function to raw mutable byte
+pointer storage. This operation SHALL NOT itself grant element, ownership,
+provider, constructor or safe-reference authority.
+
+#### Scenario: A local move or drop callback address crosses C ABI storage
+- **WHEN** a direct function-address value names a local nonvariadic C function with exactly the supported raw-byte-pointer parameters and unit result
+- **THEN** opcode 28 SHALL preserve that actual code address and its existing opcode-9 fixup
+- **AND** independent C callers SHALL execute the emitted SG callback bodies with the recorded alignment, stack and exact resource behavior
+- **AND** pure validation SHALL leave all original MIR arenas and tracked resources unchanged
+
+#### Scenario: A callback address or physical signature is not established
+- **WHEN** a scalar, null/raw pointer, foreign/unknown function, SG-ABI function or incompatible callback signature is submitted
+- **THEN** validation SHALL reject before publishing object bytes
+- **AND** modified auxiliary flags, function IDs, operand counts and pointer mutability/pointee claims SHALL reject
+- **AND** ordinary cast opcode 12 SHALL continue to reject function-kind conversion
+- **AND** unsupported opcodes SHALL retain explicit rejection in consumers that do not implement this extension

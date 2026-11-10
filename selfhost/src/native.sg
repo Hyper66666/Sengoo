@@ -410,6 +410,7 @@ def sh_native_instruction(native: &ShNative, mir: &ShMir, id: i64) -> Result<i64
     if opcode == 3 or opcode == 4 or opcode == 6 or opcode == 7 { sh_x64_mov_imm(&native.code, 0, if opcode == 3 { 0; } else { aux; })?; return sh_native_finish(native, mir, id); };
     if opcode == 9 { let patch = sh_x64_rip_address(&native.code, 0)?; if not native.calls.push(patch) or not native.calls.push(aux) { return sh_i64_error(6503); }; return sh_native_finish(native, mir, id); };
     if opcode == 10 { sh_native_load(native, first, 0)?; if sh_mir_type_word(mir, ty, 0) == 3 { if aux != sh_kind("-") { return sh_i64_error(6502); }; sh_x64_mov_imm(&native.code, 10, if sh_native_width(mir, ty) == 4 { 2147483648; } else { -9223372036854775807 - 1; })?; sh_x64_binary(&native.code, 4, 0, 10)?; return sh_native_finish(native, mir, id); }; if aux == sh_kind("-") or aux == sh_kind("~") { sh_x64_unary(&native.code, if aux == sh_kind("-") { 1; } else { 0; }, 0)?; } else { sh_x64_mov_imm(&native.code, 10, 1)?; sh_x64_binary(&native.code, 4, 0, 10)?; }; return sh_native_finish(native, mir, id); };
+    if opcode == 28 { sh_native_load(native, first, 0)?; return sh_native_finish(native, mir, id); };
     if opcode == 12 { return sh_native_cast(native, mir, id); };
     if opcode == 16 or opcode == 24 { return sh_native_aggregate(native, mir, id); };
     if opcode == 17 or opcode == 18 { return sh_native_field(native, mir, id); };

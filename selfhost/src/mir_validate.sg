@@ -96,6 +96,32 @@ def sh_mir_runtime_pointer(mir: &ShMir, id: i64) -> i64 {
     0;
 }
 
+def sh_mir_callback_byte_pointer(mir: &ShMir, ty: i64) -> bool {
+    if sh_mir_type_word(mir, ty, 0) != 7 or sh_mir_type_word(mir, ty, 1) != 0 or sh_mir_type_word(mir, ty, 2) != 1 or sh_mir_type_word(mir, ty, 3) != -1 or sh_mir_type_word(mir, ty, 5) != 1 { return false; };
+    let byte = sh_mir_type_arg(mir, ty, 0);
+    sh_mir_type_word(mir, byte, 0) == 2 and sh_mir_type_word(mir, byte, 1) == 8 and sh_mir_type_word(mir, byte, 2) == 0 and sh_mir_type_word(mir, byte, 3) == -1 and sh_mir_type_word(mir, byte, 5) == 0;
+}
+
+def sh_mir_callback_erasure(mir: &ShMir, id: i64) -> i64 {
+    let kind = sh_mir_inst(mir, id, 6);
+    let output = sh_mir_inst(mir, id, 3);
+    if sh_mir_inst(mir, id, 5) != 1 or (kind != 1 and kind != 2) or sh_mir_inst(mir, id, 7) != 0 or sh_mir_inst(mir, id, 8) != 0 or not sh_mir_callback_byte_pointer(mir, output) { return 5006; };
+    let address = sh_mir_inst_arg(mir, id, 0);
+    if address < 0 or address >= sh_mir_inst_count(mir) or sh_mir_inst(mir, address, 2) != 9 or sh_mir_inst(mir, address, 5) != 0 or sh_mir_inst(mir, address, 7) != 0 or sh_mir_inst(mir, address, 8) != 0 { return 5006; };
+    let target = sh_mir_inst(mir, address, 6);
+    if target < 0 or target >= sh_mir_fn_count(mir) or sh_mir_fn(mir, target, 3) != 0 { return 5006; };
+    let signature = sh_mir_fn(mir, target, 1);
+    let count = if kind == 1 { 2; } else { 1; };
+    if sh_mir_inst(mir, address, 3) != signature or sh_mir_type_word(mir, signature, 0) != 11 or sh_mir_type_word(mir, signature, 1) != 1 or sh_mir_type_word(mir, signature, 2) != 0 or sh_mir_type_word(mir, signature, 5) != count + 1 { return 5006; };
+    let entry = sh_mir_fn(mir, target, 2);
+    if entry < 0 or entry >= sh_mir_block_count(mir) or sh_mir_block(mir, entry, 0) != target or sh_mir_block(mir, entry, 4) < 0 { return 5006; };
+    let mut index = 0;
+    while index < count { if sh_mir_type_arg(mir, signature, index) != output { return 5006; }; index = index + 1; };
+    let returned = sh_mir_type_arg(mir, signature, count);
+    if sh_mir_type_word(mir, returned, 0) != 0 { return 5006; };
+    0;
+}
+
 def sh_mir_inst_typecheck(mir: &ShMir, id: i64) -> i64 {
     let opcode = sh_mir_inst(mir, id, 2);
     let ty = sh_mir_inst(mir, id, 3);
@@ -133,6 +159,7 @@ def sh_mir_inst_typecheck(mir: &ShMir, id: i64) -> i64 {
     if opcode == 21 { if count != 1 or kind != 0 or not sh_mir_pointer(mir, a) or sh_mir_type_word(mir, a, 2) != 1 or extra != sh_mir_type_arg(mir, a, 0) or flags < 0 or flags > 1 { return 5007; }; if aux >= 0 and (aux >= sh_mir_local_count(mir) or sh_mir_local(mir, aux, 0) != function or sh_mir_local(mir, aux, 1) != extra or sh_mir_local(mir, aux, 4) < 2 or sh_mir_inst(mir, first, 2) != 13 or sh_mir_inst(mir, first, 6) != aux) { return 5007; }; if aux < -1 { return 5007; }; return 0; };
     if opcode == 22 { let length = sh_mir_value_type(mir, sh_mir_inst_arg(mir, id, 2)); return if count == 3 and kind == 0 and sh_mir_type_word(mir, a, 0) == 7 and sh_mir_type_word(mir, b, 0) == 7 and sh_mir_type_word(mir, a, 2) == 1 and sh_mir_type_arg(mir, a, 0) == sh_mir_type_arg(mir, b, 0) and sh_mir_type_word(mir, length, 0) == 2 and sh_mir_type_word(mir, length, 1) == 64 and sh_mir_type_word(mir, length, 2) % 2 == 0 and flags == 1 and aux == 0 and extra == 0 { 0; } else { 5007; }; };
     if opcode == 23 { return if count == 1 and kind == 2 and sh_mir_type_word(mir, a, 0) == 12 and sh_mir_type_word(mir, a, 1) == 1 { 0; } else { 5003; }; };
+    if opcode == 28 { return sh_mir_callback_erasure(mir, id); };
     if opcode == 26 { return sh_mir_runtime_pointer(mir, id); };
     if opcode == 25 { return if count == 0 and kind == 0 and aux >= 0 and aux < sh_mir_local_count(mir) and sh_mir_local(mir, aux, 0) == function and (extra == 0 or extra == 1) { 0; } else { 5007; }; };
     5003;

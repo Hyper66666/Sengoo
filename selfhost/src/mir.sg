@@ -256,7 +256,7 @@ def sh_mir_add_block(mir: &ShMir, function: i64, scope: i64, flags: i64, file: i
 }
 
 def sh_mir_add_instruction(mir: &ShMir, block: i64, opcode: i64, ty: i64, operands: &Vec<i64>, aux: i64, extra: i64, flags: i64, file: i64, start: i64, end: i64) -> Result<i64, i64> {
-    if block < 0 or block >= sh_mir_block_count(mir) or opcode < 1 or opcode > 26 or not sh_mir_valid_type(mir, ty) or not sh_mir_span_valid(mir, file, start, end) { return sh_i64_error(5002); };
+    if block < 0 or block >= sh_mir_block_count(mir) or opcode < 1 or (opcode > 26 and opcode != 28) or not sh_mir_valid_type(mir, ty) or not sh_mir_span_valid(mir, file, start, end) { return sh_i64_error(5002); };
     if sh_mir_block(mir, block, 4) != -1 { return sh_i64_error(5004); };
     let function = sh_mir_block(mir, block, 0);
     let count = sh_mir_inst_count(mir);
