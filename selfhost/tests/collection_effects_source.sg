@@ -1,0 +1,43 @@
+import std::collections;
+import collection_runtime;
+extern "C"{fn opaque()->i64;}
+def forward(handle:i64)->i64{raw_vec_iter_next_i64(handle,0)}
+def raw_forward(handle:i64)->i64{raw_vec_iter_next_i64(handle,0)}
+def good_i64()->i64{let values:Vec<i64> =vec_new();let iterator=values.iter();raw_vec_iter_next_i64(iterator.handle,0)}
+def good_bool()->i64{let values:Vec<bool> =vec_new();let iterator=values.iter();raw_vec_iter_next_bool_i64(iterator.handle,0)}
+def relay_good()->i64{let values:Vec<i64> =vec_new();let iterator=values.iter();forward(iterator.handle)}
+def conditional(iterator:&VecIter<i64>)->i64{raw_vec_iter_next_i64(iterator.handle,0)}
+def unknown()->i64{raw_vec_iter_next_i64(opaque(),0)}
+def fake()->i64{let iterator:VecIter<i64> =VecIter{handle:opaque(),marker:0};raw_vec_iter_next_i64(iterator.handle,0)}
+struct Owner{handle:i64}impl Drop for Owner{def drop(&mut self){}}
+def owner_handle()->i64{let owner=Owner{handle:opaque()};raw_vec_iter_next_i64(owner.handle,0)}
+def wrong_t()->i64{let values:Vec<Owner> =vec_new();let iterator=values.iter();raw_vec_iter_next_i64(iterator.handle,0)}
+def dead()->i64{let values:Vec<i64> =vec_new();let iterator=values.iter();values.clear();raw_vec_iter_next_i64(iterator.handle,0)}
+def zero()->i64{let iterator:VecIter<i64> =VecIter{handle:0,marker:0};raw_vec_iter_next_i64(iterator.handle,0)}
+def relay_unknown()->i64{forward(opaque())}
+def relay_conditional(handle:i64)->i64{forward(handle)}
+def fake_helper(handle:i64,fallback:i64)->i64{let item:Option<&i64> =raw_vec_iter_next(handle);if item.is_some{*item.value}else{fallback}}
+def call_foreign()->i64{let values:Vec<i64> =vec_new();let iterator=values.iter();fake_helper(iterator.handle,0)}
+def moved()->i64{let values:Vec<i64> =vec_new();let iterator=values.iter();let transferred=iterator;raw_vec_iter_next_i64(transferred.handle,0)}
+def reborrowed()->i64{let values:Vec<i64> =vec_new();let iterator=values.iter();let alias=&iterator;raw_vec_iter_next_i64(alias.handle,0)}
+def main()->i64{42}
+def pushed()->i64{let values:Vec<i64> =vec_new();values.push(40);let iterator=values.iter();raw_vec_iter_next_i64(iterator.handle,-1)}
+def push_live()->i64{let values:Vec<i64> =vec_new();let iterator=values.iter();values.push(40);raw_vec_iter_next_i64(iterator.handle,-1)}
+struct BorrowOwner{handle:i64,value:i64}impl Drop for BorrowOwner{def drop(&mut self){}}
+def owner_next()->i64{let values:Vec<BorrowOwner> =vec_new();values.push(BorrowOwner{handle:1,value:40});let iterator=values.iter();let item=iterator.next();if item.is_some{item.value.value}else{-1}}
+def clear_then(values:&Vec<i64>)->i64{values.clear();0}
+def fallback_dead()->i64{let values:Vec<i64> =vec_new();let iterator=values.iter();raw_vec_iter_next_i64(iterator.handle,clear_then(&values))}
+def owner_live()->i64{let values:Vec<BorrowOwner> =vec_new();values.push(BorrowOwner{handle:1,value:40});let iterator=values.iter();let item=iterator.next();values.push(BorrowOwner{handle:2,value:2});if item.is_some{item.value.value}else{-1}}
+def pushed_bool()->i64{let values:Vec<bool> =vec_new();values.push(true);let iterator=values.iter();raw_vec_iter_next_bool_i64(iterator.handle,-1)}
+
+def named_after_push()->i64{let values:Vec<BorrowOwner> =vec_new();let item=BorrowOwner{handle:1,value:40};values.push(item);item.value}
+def named_before_push()->i64{let values:Vec<BorrowOwner> =vec_new();let item=BorrowOwner{handle:1,value:40};let read=item.value;values.push(item);read}
+def unguarded_owner()->i64{let values:Vec<BorrowOwner> =vec_new();values.push(BorrowOwner{handle:1,value:40});let iterator=values.iter();let item=iterator.next();item.value.value}
+def false_owner()->i64{let values:Vec<BorrowOwner> =vec_new();values.push(BorrowOwner{handle:1,value:40});let iterator=values.iter();let item=iterator.next();if item.is_some{-1}else{item.value.value}}
+def unguarded_store()->i64{let values:Vec<BorrowOwner> =vec_new();values.push(BorrowOwner{handle:1,value:40});let iterator=values.iter();let item=iterator.next();let read=item.value.value;read}
+def mutated_option()->i64{let values:Vec<BorrowOwner> =vec_new();values.push(BorrowOwner{handle:1,value:40});let iterator=values.iter();let mut item=iterator.next();if item.is_some{item=iterator.next();item.value.value}else{-1}}
+struct ForeignDropOwner{handle:i64}impl Drop for ForeignDropOwner{def drop(&mut self){opaque();}}
+def unknown_drop_effect()->i64{let values:Vec<ForeignDropOwner> =vec_new();values.push(ForeignDropOwner{handle:1});let iterator=values.iter();let item=iterator.next();if item.is_some{item.value.handle}else{-1}}
+class EffectBase{nested:ForeignDropOwner;}class EffectDerived:EffectBase{extra:i64;}
+def inherited_drop_effect()->i64{let values:Vec<EffectDerived> =vec_new();values.push(EffectDerived{nested:ForeignDropOwner{handle:1},extra:40});let iterator=values.iter();let item=iterator.next();if item.is_some{item.value.extra}else{-1}}
+enum EffectEnum{A{value:i64},B}

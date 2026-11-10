@@ -1,0 +1,297 @@
+import selfhost_semantic_collection_handles;
+
+struct ShCollectionEffects {
+    schema: i64,
+    limit: i64,
+    unlowerable: i64,
+    operations: Vec<i64>,
+    leases: Vec<i64>,
+    call_events: Vec<i64>,
+    adjusted: ShLoanLiveness,
+    handles: ShCollectionHandles,
+    supersessions: Vec<i64>,
+    loan_supersessions: Vec<i64>,
+    old_diagnostics: Vec<i64>,
+    error: i64,
+}
+
+def sh_ce_at(facts: &ShCollectionEffects, row: i64, column: i64) -> i64 {
+    sh_origin_word(&facts.operations, row, 16, column);
+}
+
+def sh_ce_copy(values: &Vec<i64>, maximum: i64, error: &mut i64) -> Vec<i64> {
+    let out = vec_new_i64();
+    if values.len() > maximum { *error = 5001; return out; };
+    let mut at = 0;
+    while at < values.len() { if not out.push(sh_origin_at(values, at)) { *error = 5001; return out; }; at = at + 1; };
+    out;
+}
+
+def sh_ce_contract(provider: &ShCollectionProvider) -> bool {
+    provider.files.len() == 5 and provider.files.get(1).sha256.as_str() == "e7eb7e867bdfe713b8a897b4376bceeced12b713c0fefb2a20e6272951df76e2" and provider.files.get(2).sha256.as_str() == "a49cda38fee3029bf296ff0a38337695a602380c82d58b37a65cadfa6cfebf0c" and provider.artifact_sha256.as_str() == "6186b302533aa26588534a0062ccbaa488b58df8561c692a8c0257c65193575a";
+}
+
+def sh_ce_raw_push(origins: &ShOriginFacts, analyzed: &ShModuleChecked) -> i64 {
+    let function = sh_o_unique(analyzed, origins.module, "raw_vec_push", 2);
+    let checked = &analyzed.checked;
+    let ast = &analyzed.front.parsed.ast;
+    let ty = sh_binding_word(checked, function, 3);
+    let body = sh_ch_unwrap(ast, sh_s_child_kind(ast, sh_binding_word(checked, function, 4), 40));
+    if function < 0 or sh_module_binding_source(analyzed, function) != origins.module or sh_s_kind(checked, ty) != 11 or sh_s_data(checked, ty) != 0 or sh_s_flags(checked, ty) != 0 or sh_s_arity(checked, ty) != 3 or not sh_o_i64(checked, sh_s_argument(checked, ty, 0)) or sh_s_kind(checked, sh_s_argument(checked, ty, 1)) != 13 or sh_s_kind(checked, sh_s_argument(checked, ty, 2)) != 1 or not sh_sdk_ast_text(&analyzed.front.expanded.text, ast, body, "false") { return -1; };
+    function;
+}
+
+def sh_ce_push_method(origins: &ShOriginFacts, analyzed: &ShModuleChecked, function: i64, raw: i64) -> bool {
+    let checked = &analyzed.checked;
+    let ast = &analyzed.front.parsed.ast;
+    let signature = sh_binding_word(checked, function, 3);
+    let receiver = sh_s_argument(checked, signature, 0);
+    let value = sh_s_argument(checked, signature, 1);
+    if sh_module_binding_source(analyzed, function) != origins.module or sh_s_kind(checked, signature) != 11 or sh_s_data(checked, signature) != 0 or sh_s_flags(checked, signature) != 0 or sh_s_arity(checked, signature) != 3 or sh_s_kind(checked, receiver) != 6 or sh_s_flags(checked, receiver) != 0 or sh_o_role(origins, checked, receiver) != 1 or sh_o_element(checked, receiver) != value or sh_s_kind(checked, sh_s_argument(checked, signature, 2)) != 1 { return false; };
+    let body = sh_ch_unwrap(ast, sh_s_child_kind(ast, sh_binding_word(checked, function, 4), 40));
+    let field = sh_ast_child(ast, body, 1);
+    let source = sh_ast_child(ast, body, 2);
+    let member = sh_node_binding(checked, field);
+    sh_ast_word(ast, body, 0) == 53 and sh_ast_word(ast, body, 6) == 3 and sh_node_binding(checked, body) == raw and sh_ast_word(ast, field, 0) == 55 and sh_node_binding(checked, sh_ast_child(ast, field, 0)) == sh_ch_param(checked, function, 0) and sh_binding_word(checked, member, 6) == sh_origin_at(&origins.canonical, 0) and sh_binding_word(checked, member, 7) == 0 and sh_o_name(checked, member, "handle") and sh_o_i64(checked, sh_binding_word(checked, member, 3)) and sh_ast_word(ast, source, 0) == 12 and sh_node_binding(checked, source) == sh_ch_param(checked, function, 1);
+}
+
+def sh_ce_record(facts: &mut ShCollectionEffects, call: i64, kind: i64, caller: i64, module: i64, target: i64, signature: i64, element: i64, argument: i64, base: i64, root: i64, token: i64, field: i64, provider: i64, helper: i64, receipt: i64) {
+    if facts.operations.len() / 16 >= facts.limit or not (facts.operations.push(call) and facts.operations.push(kind) and facts.operations.push(caller) and facts.operations.push(module) and facts.operations.push(target) and facts.operations.push(signature) and facts.operations.push(element) and facts.operations.push(argument) and facts.operations.push(base) and facts.operations.push(root) and facts.operations.push(token) and facts.operations.push(field) and facts.operations.push(provider) and facts.operations.push(helper) and facts.operations.push(receipt) and facts.operations.push(0)) { facts.error = 5001; };
+    ();
+}
+
+def sh_ce_operations(facts: &mut ShCollectionEffects, mapping: &ShCollectionProviders, origins: &ShOriginFacts, loans: &ShBackingLoans, nll: &ShLoanLiveness, handles: &ShCollectionHandles, graph: &ShModules, analyzed: &ShModuleChecked) {
+    let checked = &analyzed.checked;
+    let ast = &analyzed.front.parsed.ast;
+    let raw_push = sh_ce_raw_push(origins, analyzed);
+    if raw_push < 0 { facts.error = 5008; return; };
+    let mut node = 0;
+    while node < sh_ast_count(ast) { if sh_ast_word(ast, node, 0) == 53 and sh_module_node_source(analyzed, node) == graph.root { let target = sh_node_binding(checked, node); let signature = sh_node_callable_type(checked, node); let method = sh_ce_push_method(origins, analyzed, target, raw_push); if target == raw_push or method { let callee = sh_ast_child(ast, node, 0); let argument = if method { sh_ast_child(ast, callee, 0); } else { sh_ast_child(ast, node, 1); }; let base = if method { argument; } else { sh_ast_child(ast, argument, 0); }; let field = if method { -1; } else { sh_node_binding(checked, argument); }; let receiver_type = sh_o_base(checked, sh_node_type(checked, base)); let element = sh_o_element(checked, receiver_type); let actual = if method { sh_ast_child(ast, node, 1); } else { sh_ast_child(ast, node, 2); }; let token = sh_nll_node(nll, base, 0); let root = sh_nll_node(nll, base, 1); if sh_o_role(origins, checked, receiver_type) == 1 and element >= 0 and sh_ce_owned_element(analyzed, element, 0) and sh_s_resolve(checked, sh_node_type(checked, actual)) == sh_s_resolve(checked, element) and sh_s_kind(checked, sh_node_type(checked, node)) == 1 and token >= 0 and sh_nll_token(nll, token, 7) == 0 and sh_nll_token(nll, token, 2) == element and sh_nll_node(nll, base, 4) == 1 and sh_nll_node(nll, base, 2) == 1 and (method or (sh_ast_word(ast, argument, 0) == 55 and sh_binding_word(checked, field, 6) == sh_origin_at(&origins.canonical, 0) and sh_binding_word(checked, field, 7) == 0 and sh_o_name(checked, field, "handle"))) { sh_ce_record(facts, node, 1, sh_ch_owner(checked, node), graph.root, target, signature, element, argument, base, root, token, field, sh_ch_at(&mapping.rows, 5, 8, 2), raw_push, -1); }; } else { let coverage = sh_ch_coverage(handles, target); if coverage >= 0 and sh_ch_at(&handles.coverage, coverage, 8, 3) == 1 and sh_ch_at(&handles.coverage, coverage, 8, 5) == 1 { let mut receipt = 0; while receipt < handles.receipts.len() / 16 { if sh_ch_at(&handles.receipts, receipt, 16, 0) == node { let argument = sh_ch_at(&handles.receipts, receipt, 16, 3); let base = sh_ast_child(ast, argument, 0); let token = sh_nll_node(nll, base, 0); let root = sh_nll_node(nll, base, 1); let element = sh_ch_at(&handles.receipts, receipt, 16, 6); let field = sh_node_binding(checked, argument); if sh_ch_field(origins, checked, ast, argument, element) and token >= 0 and sh_nll_token(nll, token, 7) == 1 and sh_nll_token(nll, token, 2) == element and sh_nll_node(nll, base, 4) == 1 and sh_nll_node(nll, base, 3) == element { sh_ce_record(facts, node, 2, sh_ch_owner(checked, node), graph.root, target, signature, element, argument, base, root, token, field, sh_ch_at(&mapping.rows, 2, 8, 2), target, receipt); }; }; receipt = receipt + 1; }; }; }; }; node = node + 1; };
+    node = 0;
+    while node < sh_ast_count(ast) { if sh_ast_word(ast, node, 0) == 53 and sh_module_node_source(analyzed, node) == graph.root { let target = sh_node_binding(checked, node); if sh_bl_admitted(loans, origins, analyzed, target, 1) or sh_bl_admitted(loans, origins, analyzed, target, 2) { let callee = sh_ast_child(ast, node, 0); let method = sh_ast_word(ast, callee, 0) == 55; let argument = if method { sh_ast_child(ast, callee, 0); } else { sh_ast_child(ast, node, 1); }; let base = if not method and sh_ast_word(ast, argument, 0) == 55 { sh_ast_child(ast, argument, 0); } else { argument; }; let element = sh_bl_option_ref(loans, checked, sh_node_type(checked, node)); let token = sh_nll_node(nll, base, 0); let root = sh_nll_node(nll, base, 1); let role = sh_nll_node(nll, base, 2); if element >= 0 and token >= 0 and sh_nll_token(nll, token, 7) == 1 and sh_nll_token(nll, token, 2) == element and sh_nll_node(nll, base, 4) == 1 and (role == 2 or role == 3) and sh_nll_node(nll, base, 3) == element and (method or sh_ch_field(origins, checked, ast, argument, element)) { sh_ce_record(facts, node, 3, sh_ch_owner(checked, node), graph.root, target, sh_node_callable_type(checked, node), element, argument, base, root, token, if method { -1; } else { sh_node_binding(checked, argument); }, sh_ch_at(&mapping.rows, 2, 8, 2), target, -1); }; }; }; node = node + 1; };
+    ();
+}
+
+def sh_ce_operation(facts: &ShCollectionEffects, node: i64, root: i64) -> i64 {
+    let mut row = 0;
+    while row < facts.operations.len() / 16 { if sh_ce_at(facts, row, 0) == node and sh_ce_at(facts, row, 9) == root { return row; }; row = row + 1; };
+    -1;
+}
+
+def sh_ce_observation(facts: &ShCollectionEffects, node: i64, root: i64) -> i64 {
+    let mut row = 0;
+    while row < facts.operations.len() / 16 { if sh_ce_at(facts, row, 7) == node and sh_ce_at(facts, row, 9) == root { return row; }; row = row + 1; };
+    -1;
+}
+
+def sh_ce_adjust(work: &mut ShLoanLiveness, facts: &mut ShCollectionEffects) -> i64 {
+    let mut at = 0;
+    while at < facts.operations.len() / 16 { if not facts.call_events.push(-1) { return 5001; }; at = at + 1; };
+    at = 0;
+    while at < work.events.len() / 10 { if not (work.live_in.push(0) and work.live_out.push(0) and work.valid_in.push(0) and work.valid_out.push(0) and work.reachable.push(0)) { return 5001; }; at = at + 1; };
+    at = 0;
+    while at < work.events.len() / 10 { let op = sh_ce_operation(facts, sh_nll_event(work, at, 1), sh_nll_event(work, at, 4)); if op >= 0 { let bit = sh_nll_bit(work, sh_ce_at(facts, op, 10)); let before = sh_nll_event(work, at, 6); work.events.set(at * 10 + 6, before | bit); facts.call_events.set(op, at); (); }; if op >= 0 and sh_nll_event(work, at, 2) == 3 { if sh_ce_at(facts, op, 1) == 2 or sh_ce_at(facts, op, 1) == 3 { work.events.set(at * 10 + 2, 0); work.events.set(at * 10 + 8, 0); (); } else { let mut keep = 0; let mut token = 0; while token < work.tokens.len() / 10 { if sh_nll_token(work, token, 0) == sh_ce_at(facts, op, 2) and sh_nll_token(work, token, 1) == sh_ce_at(facts, op, 9) and sh_nll_token(work, token, 7) == 0 { keep = keep | sh_nll_bit(work, token); }; token = token + 1; }; let old_kill = sh_nll_event(work, at, 8); work.events.set(at * 10 + 8, old_kill & ~keep); (); }; }; at = at + 1; };
+    at = 0;
+    while at < work.functions.len() / 4 { work.function = sh_origin_word(&work.functions, at, 4, 0); let first = sh_origin_word(&work.functions, at, 4, 2); let finish = first + sh_origin_word(&work.functions, at, 4, 3); let entry = sh_origin_word(&work.functions, at, 4, 1); sh_nll_solve(work, first, finish, entry); at = at + 1; };
+    work.function = -1;
+    work.depth = 0;
+    work.error;
+}
+
+def sh_ce_flow(facts: &mut ShCollectionEffects, nll: &ShLoanLiveness) {
+    let mut work = sh_nll_new(nll.limit);
+    work.nodes = sh_ce_copy(&nll.nodes, 4000000, &mut facts.error);
+    work.tokens = sh_ce_copy(&nll.tokens, 4000000, &mut facts.error);
+    work.effects = sh_ce_copy(&nll.effects, 4000000, &mut facts.error);
+    work.events = sh_ce_copy(&nll.events, 4000000, &mut facts.error);
+    work.edges = sh_ce_copy(&nll.edges, 4000000, &mut facts.error);
+    work.functions = sh_ce_copy(&nll.functions, 4000000, &mut facts.error);
+    let code = sh_ce_adjust(&mut work, facts);
+    if facts.error == 0 { facts.error = code; };
+    facts.adjusted = work;
+    ();
+}
+
+def sh_ce_live_at(facts: &ShCollectionEffects, node: i64, token: i64) -> bool {
+    if token < 0 { return false; };
+    let mut at = 0;
+    while at < facts.adjusted.events.len() / 10 { if sh_nll_event(&facts.adjusted, at, 1) == node and sh_origin_at(&facts.adjusted.reachable, at) == 1 and (sh_origin_at(&facts.adjusted.valid_in, at) & sh_nll_bit(&facts.adjusted, token)) != 0 { return true; }; at = at + 1; };
+    false;
+}
+
+def sh_ce_handles(mapping: &ShCollectionProviders, origins: &ShOriginFacts, loans: &ShBackingLoans, nll: &ShLoanLiveness, analyzed: &ShModuleChecked, limit: i64) -> ShCollectionHandles {
+    let mut facts = sh_ch_new(limit);
+    facts.module = origins.module;
+    let checked = &analyzed.checked;
+    let ast = &analyzed.front.parsed.ast;
+    facts.raw_next = sh_o_unique(analyzed, facts.module, "raw_vec_iter_next", 2);
+    if not sh_bl_admitted(loans, origins, analyzed, facts.raw_next, 1) { facts.error = 5951; return facts; };
+    let mut at = 0;
+    while at < mapping.rows.len() { if not facts.provider_rows.push(sh_origin_at(&mapping.rows, at)) { facts.error = 5950; return facts; }; at = at + 1; };
+    at = 0;
+    while at < origins.canonical.len() { if not facts.canonical.push(sh_origin_at(&origins.canonical, at)) { facts.error = 5950; return facts; }; at = at + 1; };
+    let runtime = sh_ch_at(&mapping.rows, 2, 8, 2);
+    let mut function = 0;
+    while function < sh_binding_count(checked) { if sh_binding_word(checked, function, 2) == 2 { sh_ch_helper(&mut facts, loans, analyzed, function, runtime); }; function = function + 1; };
+    if facts.coverage.len() / 8 < 2 { facts.error = 5956; return facts; };
+    let mut iteration = 0;
+    let mut changed = true;
+    while changed and iteration < 16 and facts.error == 0 { let before = facts.obligations.len(); let mut node = 0; while node < sh_ast_count(ast) { if sh_ast_word(ast, node, 0) == 53 { let target = sh_node_binding(checked, node); let required = facts.obligations.len() / 12; let mut row = 0; while row < required { if sh_ch_at(&facts.obligations, row, 12, 0) == target { let mut prior = 0; let mut existing = false; while prior < facts.receipts.len() / 16 { if sh_ch_at(&facts.receipts, prior, 16, 0) == node and sh_ch_at(&facts.receipts, prior, 16, 12) == row { existing = true; }; prior = prior + 1; }; if not existing { sh_ch_receipt(&mut facts, loans, origins, nll, analyzed, node, row); }; }; row = row + 1; }; }; node = node + 1; }; changed = facts.obligations.len() != before; iteration = iteration + 1; };
+    if changed { facts.error = 5950; };
+    facts;
+}
+
+def sh_ce_mark(facts: &mut ShCollectionEffects, row: i64, function: i64, node: i64, root: i64, token: i64, kind: i64, operation: i64, event: i64) {
+    if not (facts.supersessions.push(row) and facts.supersessions.push(function) and facts.supersessions.push(node) and facts.supersessions.push(root) and facts.supersessions.push(token) and facts.supersessions.push(kind) and facts.supersessions.push(operation) and facts.supersessions.push(event)) { facts.error = 5001; };
+    ();
+}
+
+def sh_ce_proofs(facts: &mut ShCollectionEffects, nll: &ShLoanLiveness, loans: &ShBackingLoans, analyzed: &ShModuleChecked) {
+    let mut row = 0;
+    while row < nll.diagnostics.len() / 5 { let function = sh_origin_word(&nll.diagnostics, row, 5, 0); let code = sh_origin_word(&nll.diagnostics, row, 5, 1); let node = sh_origin_word(&nll.diagnostics, row, 5, 2); let root = sh_origin_word(&nll.diagnostics, row, 5, 3); let token = sh_origin_word(&nll.diagnostics, row, 5, 4); if code == 5906 and token == -1 and sh_ast_word(&analyzed.front.parsed.ast, node, 0) == 55 { let operation = sh_ce_observation(facts, node, root); if operation >= 0 and sh_ce_at(facts, operation, 2) == function and sh_ce_live_at(facts, sh_ce_at(facts, operation, 8), sh_ce_at(facts, operation, 10)) { let mut loan = 0; let mut found = 0; while loan < loans.diagnostics.len() / 5 { if sh_origin_word(&loans.diagnostics, loan, 5, 0) == function and sh_origin_word(&loans.diagnostics, loan, 5, 1) == 5803 and sh_origin_word(&loans.diagnostics, loan, 5, 2) == node and sh_origin_word(&loans.diagnostics, loan, 5, 3) == root { found = found + 1; }; loan = loan + 1; }; if found == 1 { sh_ce_mark(facts, row, function, node, root, token, 2, operation, -1); }; }; }; if code == 5904 { let mut event = 0; let mut proof = -1; while event < nll.events.len() / 10 { if sh_nll_event(nll, event, 0) == function and sh_nll_event(nll, event, 1) == node and sh_nll_event(nll, event, 4) == root and sh_nll_event(nll, event, 3) == token and token >= 0 and sh_nll_node(nll, node, 0) == token and (sh_nll_event(nll, event, 6) & ~sh_origin_at(&nll.valid_in, event)) != 0 and (sh_nll_event(&facts.adjusted, event, 6) & ~sh_origin_at(&facts.adjusted.valid_in, event)) == 0 and sh_origin_at(&facts.adjusted.reachable, event) == 1 { proof = event; }; event = event + 1; }; if proof >= 0 { sh_ce_mark(facts, row, function, node, root, token, 1, -1, proof); }; }; if code == 5903 { let operation = sh_ce_operation(facts, node, root); if operation >= 0 and sh_ce_at(facts, operation, 1) == 2 and token >= 0 and sh_nll_token(nll, token, 0) == function and sh_nll_token(nll, token, 1) == root and sh_ce_live_at(facts, sh_ce_at(facts, operation, 8), sh_ce_at(facts, operation, 10)) { sh_ce_mark(facts, row, function, node, root, token, 3, operation, -1); }; }; row = row + 1; };
+    row = 0;
+    while row < loans.diagnostics.len() / 5 { if sh_origin_word(&loans.diagnostics, row, 5, 1) == 5803 { let function = sh_origin_word(&loans.diagnostics, row, 5, 0); let node = sh_origin_word(&loans.diagnostics, row, 5, 2); let root = sh_origin_word(&loans.diagnostics, row, 5, 3); let operation = sh_ce_observation(facts, node, root); if operation >= 0 and sh_ce_at(facts, operation, 2) == function and sh_ast_word(&analyzed.front.parsed.ast, node, 0) == 55 and sh_ce_live_at(facts, sh_ce_at(facts, operation, 8), sh_ce_at(facts, operation, 10)) { if not (facts.loan_supersessions.push(row) and facts.loan_supersessions.push(function) and facts.loan_supersessions.push(node) and facts.loan_supersessions.push(root) and facts.loan_supersessions.push(4) and facts.loan_supersessions.push(operation)) { facts.error = 5001; }; }; }; row = row + 1; };
+    let mut lease = 0;
+    while lease < facts.leases.len() / 12 { let old = sh_origin_word(&facts.leases, lease, 12, 10); let function = sh_origin_word(&facts.leases, lease, 12, 0); let node = sh_origin_word(&facts.leases, lease, 12, 1); let root = sh_origin_word(&loans.diagnostics, old, 5, 3); if not (facts.loan_supersessions.push(old) and facts.loan_supersessions.push(function) and facts.loan_supersessions.push(node) and facts.loan_supersessions.push(root) and facts.loan_supersessions.push(5) and facts.loan_supersessions.push(lease)) { facts.error = 5001; }; let mut d = 0; while d < nll.diagnostics.len() / 5 { if sh_origin_word(&nll.diagnostics, d, 5, 0) == function and sh_origin_word(&nll.diagnostics, d, 5, 1) == 5804 and sh_origin_word(&nll.diagnostics, d, 5, 2) == node and sh_origin_word(&nll.diagnostics, d, 5, 3) == root and sh_origin_word(&nll.diagnostics, d, 5, 4) == sh_origin_word(&loans.diagnostics, old, 5, 4) { sh_ce_mark(facts, d, function, node, root, sh_origin_word(&nll.diagnostics, d, 5, 4), 4, lease, -1); }; d = d + 1; }; lease = lease + 1; };
+    ();
+}
+
+def sh_collection_effect_function_error(facts: &ShCollectionEffects, nll: &ShLoanLiveness, loans: &ShBackingLoans, function: i64) -> i64 {
+    if facts.schema != 1 or facts.unlowerable != 1 or facts.error != 0 { return if facts.error != 0 { facts.error; } else { 5008; }; };
+    let mut row = 0;
+    let mut coverage = 0;
+    while row < facts.adjusted.functions.len() / 4 { if sh_origin_word(&facts.adjusted.functions, row, 4, 0) == function { coverage = coverage + 1; }; row = row + 1; };
+    if coverage != 1 { return 5008; };
+    let solved = sh_nll_function_error(&facts.adjusted, function);
+    if solved != 0 { return solved; };
+    row = 0;
+    while row < nll.diagnostics.len() / 5 { if sh_origin_word(&nll.diagnostics, row, 5, 0) == function { let mut at = 0; let mut proof = 0; while at < facts.supersessions.len() / 8 { if sh_origin_word(&facts.supersessions, at, 8, 0) == row { proof = proof + 1; }; at = at + 1; }; if proof != 1 { return sh_origin_word(&nll.diagnostics, row, 5, 1); }; }; row = row + 1; };
+    row = 0;
+    while row < loans.diagnostics.len() / 5 { if sh_origin_word(&loans.diagnostics, row, 5, 0) == function { let mut at = 0; let mut proven = false; while at < nll.supersessions.len() / 5 { if sh_origin_word(&nll.supersessions, at, 5, 0) == row { let status = sh_origin_word(&nll.supersessions, at, 5, 4); if status == 0 or status == 3 { proven = true; }; }; at = at + 1; }; at = 0; while at < facts.loan_supersessions.len() / 6 { if sh_origin_word(&facts.loan_supersessions, at, 6, 0) == row { proven = true; }; at = at + 1; }; if not proven { return sh_origin_word(&loans.diagnostics, row, 5, 1); }; }; row = row + 1; };
+    0;
+}
+
+def sh_collection_effects(provider: &ShCollectionProvider, mapping: &ShCollectionProviders, provider_root: &str, manifest_pin: &str, artifact_pin: &str, origins: &ShOriginFacts, loans: &ShBackingLoans, nll: &ShLoanLiveness, handles: &ShCollectionHandles, graph: &ShModules, analyzed: &ShModuleChecked, identity: &str, digest: &str, prototype: &str, option_identity: &str, option_digest: &str, limit: i64, development: bool) -> ShCollectionEffects {
+    let mut facts = ShCollectionEffects { schema: 1, limit: limit, unlowerable: 1, operations: vec_new_i64(), leases: vec_new_i64(), call_events: vec_new_i64(), adjusted: sh_nll_new(0), handles: sh_ch_new(0), supersessions: vec_new_i64(), loan_supersessions: vec_new_i64(), old_diagnostics: vec_new_i64(), error: 0 };
+    if limit < 1 or limit > 20000 or not sh_ce_contract(provider) or sh_collection_handles_validate(handles, provider, mapping, provider_root, manifest_pin, artifact_pin, origins, loans, nll, graph, analyzed, identity, digest, prototype, option_identity, option_digest, development) != 0 { facts.error = 5008; return facts; };
+    facts.old_diagnostics = sh_ce_copy(&nll.diagnostics, 4000000, &mut facts.error);
+    sh_ce_operations(&mut facts, mapping, origins, loans, nll, handles, graph, analyzed);
+    if facts.error != 0 { return facts; };
+    sh_ce_flow(&mut facts, nll);
+    if facts.error != 0 { return facts; };
+    sh_ce_renewed(&mut facts, mapping, origins, loans, analyzed);
+    sh_ce_renewed_borrow(&mut facts, loans, analyzed);
+    sh_ce_proofs(&mut facts, nll, loans, analyzed);
+    sh_ce_control_proofs(&mut facts, nll, loans, analyzed);
+    facts.handles = sh_ce_handles(mapping, origins, loans, &facts.adjusted, analyzed, handles.limit);
+    if facts.handles.error != 0 { facts.error = facts.handles.error; };
+    facts;
+}
+
+def sh_ce_nll_equal(a: &ShLoanLiveness, b: &ShLoanLiveness) -> bool {
+    if a.schema != b.schema { return false; };
+    if a.limit != b.limit { return false; };
+    if a.error != b.error { return false; };
+    if a.unlowerable != b.unlowerable { return false; };
+    if not sh_o_equal(&a.nodes, &b.nodes) { return false; };
+    if not sh_o_equal(&a.tokens, &b.tokens) { return false; };
+    if not sh_o_equal(&a.effects, &b.effects) { return false; };
+    if not sh_o_equal(&a.events, &b.events) { return false; };
+    if not sh_o_equal(&a.edges, &b.edges) { return false; };
+    if not sh_o_equal(&a.functions, &b.functions) { return false; };
+    if not sh_o_equal(&a.live_in, &b.live_in) { return false; };
+    if not sh_o_equal(&a.live_out, &b.live_out) { return false; };
+    if not sh_o_equal(&a.valid_in, &b.valid_in) { return false; };
+    if not sh_o_equal(&a.valid_out, &b.valid_out) { return false; };
+    if not sh_o_equal(&a.reachable, &b.reachable) { return false; };
+    if not sh_o_equal(&a.supersessions, &b.supersessions) { return false; };
+    if not sh_o_equal(&a.diagnostics, &b.diagnostics) { return false; };
+    if not sh_o_equal(&a.input, &b.input) { return false; };
+    if not sh_o_equal(&a.aliases, &b.aliases) { return false; };
+    if a.function != b.function { return false; };
+    if a.depth != b.depth { return false; };
+    true;
+}
+
+def sh_ce_handles_equal(a: &ShCollectionHandles, b: &ShCollectionHandles) -> bool {
+    if a.schema != b.schema { return false; };
+    if a.limit != b.limit { return false; };
+    if a.error != b.error { return false; };
+    if a.unlowerable != b.unlowerable { return false; };
+    if a.raw_next != b.raw_next { return false; };
+    if a.module != b.module { return false; };
+    if not sh_o_equal(&a.coverage, &b.coverage) { return false; };
+    if not sh_o_equal(&a.obligations, &b.obligations) { return false; };
+    if not sh_o_equal(&a.receipts, &b.receipts) { return false; };
+    if not sh_o_equal(&a.diagnostics, &b.diagnostics) { return false; };
+    if not sh_o_equal(&a.provider_rows, &b.provider_rows) { return false; };
+    if not sh_o_equal(&a.canonical, &b.canonical) { return false; };
+    true;
+}
+
+def sh_collection_effects_validate(saved: &ShCollectionEffects, provider: &ShCollectionProvider, mapping: &ShCollectionProviders, provider_root: &str, manifest_pin: &str, artifact_pin: &str, origins: &ShOriginFacts, loans: &ShBackingLoans, nll: &ShLoanLiveness, handles: &ShCollectionHandles, graph: &ShModules, analyzed: &ShModuleChecked, identity: &str, digest: &str, prototype: &str, option_identity: &str, option_digest: &str, development: bool) -> i64 {
+    if saved.schema != 1 or saved.unlowerable != 1 or saved.error != 0 { return 5008; };
+    let actual = sh_collection_effects(provider, mapping, provider_root, manifest_pin, artifact_pin, origins, loans, nll, handles, graph, analyzed, identity, digest, prototype, option_identity, option_digest, saved.limit, development);
+    if actual.error != 0 { return actual.error; };
+    if not sh_o_equal(&saved.call_events, &actual.call_events) or not sh_o_equal(&saved.leases, &actual.leases) or not sh_o_equal(&saved.operations, &actual.operations) or not sh_ce_nll_equal(&saved.adjusted, &actual.adjusted) or not sh_ce_handles_equal(&saved.handles, &actual.handles) or not sh_o_equal(&saved.supersessions, &actual.supersessions) or not sh_o_equal(&saved.loan_supersessions, &actual.loan_supersessions) or not sh_o_equal(&saved.old_diagnostics, &actual.old_diagnostics) { return 5008; };
+    0;
+}
+
+def sh_collection_effect_sites(facts: &ShCollectionEffects, nll: &ShLoanLiveness, loans: &ShBackingLoans, requested: &Vec<i64>) -> Result<Vec<i64>, i64> {
+    let result = vec_new_i64();
+    let mut at = 0;
+    while at < requested.len() { let function = sh_origin_at(requested, at); let code = sh_collection_effect_function_error(facts, nll, loans, function); if code != 0 { return result_err_with(result, code); }; at = at + 1; };
+    let mut row = 0;
+    while row < facts.operations.len() / 16 { let mut selected = false; at = 0; while at < requested.len() { if sh_origin_at(requested, at) == sh_ce_at(facts, row, 2) { selected = true; }; at = at + 1; }; if selected { if not sh_ce_call_live(facts, row) { return result_err_with(result, 5008); }; let mut receipt = row; let operation = sh_ce_at(facts, row, 1); if operation == 2 { receipt = -1; at = 0; while at < facts.handles.receipts.len() / 16 { if sh_ch_at(&facts.handles.receipts, at, 16, 0) == sh_ce_at(facts, row, 0) { if receipt >= 0 { return result_err_with(result, 5008); }; receipt = at; }; at = at + 1; }; if receipt < 0 or sh_collection_handle_status(&facts.handles, sh_ce_at(facts, row, 0)) != 1 { return result_err_with(result, 5008); }; }; if not (result.push(sh_ce_at(facts, row, 0)) and result.push(if operation == 1 { 3; } else if operation == 2 { 2; } else { 4; }) and result.push(sh_ce_at(facts, row, 4)) and result.push(sh_ce_at(facts, row, 5)) and result.push(sh_ce_at(facts, row, 6)) and result.push(sh_ce_at(facts, row, 12)) and result.push(receipt)) { return result_err_with(result, 5001); }; }; row = row + 1; };
+    result_ok_with(result, 0);
+}
+
+def sh_ce_renewed(facts: &mut ShCollectionEffects, mapping: &ShCollectionProviders, origins: &ShOriginFacts, loans: &ShBackingLoans, analyzed: &ShModuleChecked) {
+    let checked = &analyzed.checked;
+    let ast = &analyzed.front.parsed.ast;
+    let mut row = 0;
+    while row < loans.diagnostics.len() / 5 { if sh_origin_word(&loans.diagnostics, row, 5, 1) == 5804 { let function = sh_origin_word(&loans.diagnostics, row, 5, 0); let node = sh_origin_word(&loans.diagnostics, row, 5, 2); let target = sh_node_binding(checked, node); let token = sh_nll_node(&facts.adjusted, node, 0); let parent = sh_nll_token(&facts.adjusted, token, 5); let root = sh_nll_token(&facts.adjusted, token, 1); let element = sh_nll_token(&facts.adjusted, token, 2); let callee = sh_ast_child(ast, node, 0); let receiver = sh_ast_child(ast, callee, 0); let signature = sh_node_callable_type(checked, node); let mut factory = 0; while factory < sh_origin_factory_count(origins) { if sh_origin_word(&origins.factories, factory, 6, 0) == target and sh_ast_word(ast, node, 0) == 53 and sh_ast_word(ast, callee, 0) == 55 and token >= 0 and parent >= 0 and sh_nll_token(&facts.adjusted, token, 0) == function and sh_nll_token(&facts.adjusted, token, 3) == node and sh_nll_token(&facts.adjusted, token, 7) == 1 and sh_nll_token(&facts.adjusted, token, 6) == 1 and sh_nll_token(&facts.adjusted, parent, 7) == 0 and sh_nll_token(&facts.adjusted, parent, 2) == element and sh_nll_node(&facts.adjusted, receiver, 0) == parent and sh_nll_node(&facts.adjusted, receiver, 4) == 1 and sh_o_element(checked, sh_node_type(checked, receiver)) == element and sh_o_element(checked, sh_node_type(checked, node)) == element and sh_ce_live_at(facts, receiver, parent) and sh_ch_at(&mapping.rows, 1, 8, 2) == sh_origin_at(&origins.canonical, 4) { if facts.leases.len() / 12 >= facts.limit or not (facts.leases.push(function) and facts.leases.push(node) and facts.leases.push(target) and facts.leases.push(signature) and facts.leases.push(element) and facts.leases.push(root) and facts.leases.push(token) and facts.leases.push(parent) and facts.leases.push(sh_nll_token(&facts.adjusted, parent, 3)) and facts.leases.push(sh_ch_at(&mapping.rows, 1, 8, 2)) and facts.leases.push(row) and facts.leases.push(0)) { facts.error = 5001; }; }; factory = factory + 1; }; }; row = row + 1; };
+    ();
+}
+
+def sh_ce_drop_effect_free(analyzed: &ShModuleChecked, ty: i64) -> bool {
+    let checked = &analyzed.checked;
+    let ast = &analyzed.front.parsed.ast;
+    let mut at = 0;
+    let mut drops = 0;
+    while at < checked.constraints.len() { if sh_origin_at(&checked.constraints, at + 2) == -2 { let target = sh_s_resolve(checked, sh_origin_at(&checked.constraints, at)); let label = sh_symbol_text(&checked.symbols, sh_origin_at(&checked.constraints, at + 1)); if label.is_ok() and label.value.as_str() == "Drop" and sh_s_nominal(checked, target) == sh_s_nominal(checked, ty) { if target != ty { return false; }; drops = drops + 1; if drops != 1 { return false; }; let owner = sh_origin_at(&checked.constraints, at + 3); let mut binding = 0; let mut methods = 0; while binding < sh_binding_count(checked) { if sh_binding_word(checked, binding, 2) == 2 and sh_binding_word(checked, binding, 6) == owner and sh_o_name(checked, binding, "drop") { methods = methods + 1; let signature = sh_binding_word(checked, binding, 3); let receiver = sh_s_argument(checked, signature, 0); let declaration = sh_binding_word(checked, binding, 4); let body = sh_s_child_kind(ast, declaration, 40); if methods != 1 or sh_s_kind(checked, signature) != 11 or sh_s_data(checked, signature) != 0 or sh_s_flags(checked, signature) != 0 or sh_s_arity(checked, signature) != 2 or sh_s_kind(checked, receiver) != 6 or sh_s_flags(checked, receiver) != 1 or sh_s_resolve(checked, sh_s_argument(checked, receiver, 0)) != ty or sh_s_kind(checked, sh_s_argument(checked, signature, 1)) != 0 or sh_ast_word(ast, declaration, 0) != 20 or body < 0 or sh_ast_word(ast, body, 6) != 0 { return false; }; }; binding = binding + 1; }; if methods != 1 { return false; }; }; }; at = at + 4; };
+    true;
+}
+
+def sh_ce_owned_element(analyzed: &ShModuleChecked, input: i64, depth: i64) -> bool {
+    let checked = &analyzed.checked;
+    if depth >= 64 { return false; };
+    let ty = sh_s_resolve(checked, input);
+    let kind = sh_s_kind(checked, ty);
+    if kind >= 1 and kind <= 4 or kind == 7 { return true; };
+    if kind != 8 and kind != 10 and kind != 12 { return false; };
+    let mut at = 0;
+    while at < sh_s_arity(checked, ty) { if not sh_ce_owned_element(analyzed, sh_s_argument(checked, ty, at), depth + 1) { return false; }; at = at + 1; };
+    if kind == 12 { let owner = sh_adt_binding(checked, ty); let declaration = sh_binding_word(checked, owner, 4); if owner < 0 or sh_binding_word(checked, owner, 2) != 3 or sh_ast_word(&analyzed.front.parsed.ast, declaration, 0) != 22 { return false; }; let mut parent = 0; while parent < checked.class_parents.len() { if sh_origin_at(&checked.class_parents, parent) == owner { return false; }; parent = parent + 2; }; if not sh_ce_drop_effect_free(analyzed, ty) { return false; }; at = 0; while at < sh_binding_count(checked) { let parent = sh_binding_word(checked, at, 6); if sh_binding_word(checked, at, 2) == 6 and (parent == owner or sh_binding_word(checked, parent, 2) == 5 and sh_binding_word(checked, parent, 6) == owner) { if not sh_ce_owned_element(analyzed, sh_binding_word(checked, at, 3), depth + 1) { return false; }; }; at = at + 1; }; };
+    true;
+}
+
+def sh_ce_renewed_borrow(facts: &mut ShCollectionEffects, loans: &ShBackingLoans, analyzed: &ShModuleChecked) {
+    let mut row = 0;
+    while row < loans.diagnostics.len() / 5 { if sh_origin_word(&loans.diagnostics, row, 5, 1) == 5804 { let node = sh_origin_word(&loans.diagnostics, row, 5, 2); let function = sh_origin_word(&loans.diagnostics, row, 5, 0); let mut op = 0; while op < facts.operations.len() / 16 { if sh_ce_at(facts, op, 0) == node and sh_ce_at(facts, op, 1) == 3 and sh_ce_at(facts, op, 2) == function { let token = sh_nll_node(&facts.adjusted, node, 0); let parent = sh_ce_at(facts, op, 10); if token >= 0 and sh_nll_token(&facts.adjusted, token, 7) == 2 and sh_nll_token(&facts.adjusted, token, 5) == parent and sh_nll_token(&facts.adjusted, token, 2) == sh_ce_at(facts, op, 6) and sh_nll_token(&facts.adjusted, token, 3) == node and sh_ce_live_at(facts, sh_ce_at(facts, op, 8), parent) { if not (facts.leases.push(function) and facts.leases.push(node) and facts.leases.push(sh_ce_at(facts, op, 4)) and facts.leases.push(sh_ce_at(facts, op, 5)) and facts.leases.push(sh_ce_at(facts, op, 6)) and facts.leases.push(sh_ce_at(facts, op, 9)) and facts.leases.push(token) and facts.leases.push(parent) and facts.leases.push(sh_nll_token(&facts.adjusted, parent, 3)) and facts.leases.push(sh_ce_at(facts, op, 12)) and facts.leases.push(row) and facts.leases.push(1)) { facts.error = 5001; }; }; }; op = op + 1; }; }; row = row + 1; };
+    ();
+}
+
+def sh_ce_call_live(facts: &ShCollectionEffects, op: i64) -> bool {
+    let event = sh_origin_at(&facts.call_events, op);
+    let token = sh_ce_at(facts, op, 10);
+    if event < 0 or token < 0 or sh_nll_event(&facts.adjusted, event, 1) != sh_ce_at(facts, op, 0) or sh_nll_event(&facts.adjusted, event, 0) != sh_ce_at(facts, op, 2) or sh_origin_at(&facts.adjusted.reachable, event) != 1 { return false; };
+    let bit = sh_nll_bit(&facts.adjusted, token);
+    (sh_nll_event(&facts.adjusted, event, 6) & bit) != 0 and (sh_origin_at(&facts.adjusted.valid_in, event) & bit) != 0;
+}
+
+def sh_ce_control_proofs(facts: &mut ShCollectionEffects, nll: &ShLoanLiveness, loans: &ShBackingLoans, analyzed: &ShModuleChecked) {
+    let mut row = 0;
+    while row < loans.diagnostics.len() / 5 { if sh_origin_word(&loans.diagnostics, row, 5, 1) == 5806 { let function = sh_origin_word(&loans.diagnostics, row, 5, 0); let node = sh_origin_word(&loans.diagnostics, row, 5, 2); let root = sh_origin_word(&loans.diagnostics, row, 5, 3); let kind = sh_ast_word(&analyzed.front.parsed.ast, node, 0); let result = sh_s_kind(&analyzed.checked, sh_s_resolve(&analyzed.checked, sh_node_type(&analyzed.checked, node))); let mut supported = sh_nll_function_error(&facts.adjusted, function) == 0 and (kind == 61 or kind == 62 or kind == 64) and result >= 0 and result <= 4; let mut d = 0; while d < nll.diagnostics.len() / 5 { if sh_origin_word(&nll.diagnostics, d, 5, 0) == function { let mut proof = 0; let mut at = 0; while at < facts.supersessions.len() / 8 { if sh_origin_word(&facts.supersessions, at, 8, 0) == d { proof = proof + 1; }; at = at + 1; }; if proof != 1 { supported = false; }; }; d = d + 1; }; let mut coverage = -1; d = 0; while d < facts.adjusted.functions.len() / 4 { if sh_origin_word(&facts.adjusted.functions, d, 4, 0) == function { if coverage >= 0 { supported = false; }; coverage = d; }; d = d + 1; }; if coverage < 0 { supported = false; }; if supported { if not (facts.loan_supersessions.push(row) and facts.loan_supersessions.push(function) and facts.loan_supersessions.push(node) and facts.loan_supersessions.push(root) and facts.loan_supersessions.push(6) and facts.loan_supersessions.push(coverage)) { facts.error = 5001; }; }; }; row = row + 1; };
+    ();
+}
