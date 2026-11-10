@@ -1,0 +1,60 @@
+import selfhost_borrow;
+
+import std::args;
+
+import std::assert;
+
+extern "C" {
+    fn sengoo_string_live_handle_count() -> i64;
+    fn sengoo_buffer_live_handle_count() -> i64;
+    fn sengoo_opaque_live_handle_count() -> i64;
+}
+
+def se_case(raw: &str, expected: i64, positive: bool, baseline: bool) -> Result<bool, i64> {
+    let text = string_from_str(raw)?;
+    let parsed = sh_parse(&text, 0, 10000);
+    assert_eq_i64(parsed.error, 0, "scalar_escape", 1);
+    let checked = sh_check(&text, &parsed.ast, 100);
+    if checked.error != 0 { println("typed"); println(checked.error); println(raw); };
+    assert_eq_i64(checked.error, 0, "scalar_escape", 2);
+    let ownership = sh_check_ownership(&text, &parsed.ast, &checked, 100);
+    let wanted = if positive and baseline { 6105; } else { expected; };
+    if ownership.error != wanted { println("ownership"); println(ownership.error); println(wanted); println(raw); };
+    assert_eq_i64(ownership.error, wanted, "scalar_escape", 3);
+    if wanted != 0 { assert_true(ownership.diagnostics.len() > 0 and ownership.start >= 0 and ownership.end > ownership.start, "scalar_escape", 4); (); };
+    result_ok_bool(true);
+}
+
+def se_round(baseline: bool) -> Result<bool, i64> {
+    se_case("struct Owner{value:i64} impl Drop for Owner{def drop(&mut self){}} struct Option<T>{is_some:bool,value:T} def next(value:&Owner)->Option<&Owner>{Option{is_some:true,value:value}} def run()->i64{let owner=Owner{value:42};let item=next(&owner);if item.is_some{item.value.value}else{0}}", 0, true, baseline)?;
+    se_case("struct Cell{value:i64} def run()->i64{let owner=Cell{value:42};let borrowed=&owner;borrowed.value}", 0, true, baseline)?;
+    se_case("struct Cell{value:bool} def run()->bool{let owner=Cell{value:true};let borrowed=&owner;borrowed.value}", 0, true, baseline)?;
+    se_case("struct Cell{value:f64} def run()->f64{let owner=Cell{value:42.0};let borrowed=&owner;borrowed.value}", 0, true, baseline)?;
+    se_case("struct Cell{value:char} def run()->char{let owner=Cell{value:'x'};let borrowed=&owner;borrowed.value}", 0, true, baseline)?;
+    se_case("def run()->i64{let owner=42;let borrowed=&owner;*borrowed}", 0, false, baseline)?;
+    se_case("struct Cell{value:i64} def run()->i64{let owner=Cell{value:42};let borrowed=&owner;return borrowed.value;}", 0, false, baseline)?;
+    se_case("struct Cell{value:i64} def run(flag:bool)->i64{let owner=Cell{value:42};let borrowed=&owner;if flag{borrowed.value}else{0}}", 0, true, baseline)?;
+    se_case("struct Cell{value:i64} def run()->&i64{let owner=Cell{value:42};let borrowed=&owner;&borrowed.value}", 6105, false, baseline)?;
+    se_case("struct Cell{value:i64} def run()->&Cell{let owner=Cell{value:42};let borrowed=&owner;borrowed}", 6105, false, baseline)?;
+    se_case("struct View{value:&i64} def run()->View{let owner=42;let borrowed=&owner;View{value:borrowed}}", 6105, false, baseline)?;
+    se_case("struct Owner{value:i64} impl Drop for Owner{def drop(&mut self){}} def run()->Owner{let owner=Owner{value:42};let borrowed=&owner;*borrowed}", 6112, false, baseline)?;
+    se_case("struct Cell{value:*const i64} def run(pointer:*const i64)->*const i64{let owner=Cell{value:pointer};let borrowed=&owner;borrowed.value}", 6105, false, baseline)?;
+    se_case("struct Pair{value:i64} struct Cell{value:Pair} def run()->Pair{let owner=Cell{value:Pair{value:42}};let borrowed=&owner;borrowed.value}", 6105, false, baseline)?;
+    se_case("struct Cell<T>{value:T} def run<T>(owner:Cell<T>)->T{let borrowed=&owner;borrowed.value}", 6105, false, baseline)?;
+    se_case("struct Owner{value:i64} impl Drop for Owner{def drop(&mut self){}} def consume(value:Owner){} def run()->i64{let owner=Owner{value:42};let borrowed=&owner;consume(owner);borrowed.value}", 6104, false, baseline)?;
+    se_case("struct Buffer{handle:i64} impl Drop for Buffer{def drop(&mut self){}} def transfer(value:Buffer)->i64{value.handle} def run(){let owner=Buffer{handle:1};let handle=transfer(owner);let reused=owner;();}", 6101, false, baseline)?;
+    se_case("struct Cell{value:[i64;2]} def run()->[i64;2]{let owner=Cell{value:[1,2]};let borrowed=&owner;borrowed.value}", 6105, false, baseline)?;
+    se_case("struct Cell{value:(i64,i64)} def run()->(i64,i64){let owner=Cell{value:(1,2)};let borrowed=&owner;borrowed.value}", 6105, false, baseline)?;
+    result_ok_bool(true);
+}
+
+def main() -> i64 {
+    let baseline = args_len() == 1;
+    let strings = sengoo_string_live_handle_count();
+    let buffers = sengoo_buffer_live_handle_count();
+    let opaque = sengoo_opaque_live_handle_count();
+    let mut round = 0;
+    while round < 50 { { let result = se_round(baseline); if not result.is_ok() { println(result.error); return 1; }; }; assert_eq_i64(sengoo_string_live_handle_count(), strings, "scalar_escape", 10); assert_eq_i64(sengoo_buffer_live_handle_count(), buffers, "scalar_escape", 11); assert_eq_i64(sengoo_opaque_live_handle_count(), opaque, "scalar_escape", 12); round = round + 1; };
+    println("scalar escape: fifty first-call resource scopes passed");
+    0;
+}
