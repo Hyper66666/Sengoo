@@ -95,6 +95,55 @@ Huffman symbols, repeats, extras and overlapping matches across calls.
 This stage does not implement gzip header/CRC continuation, incremental tar,
 staging or atomic publication. It does not widen existing raw/gzip arenas.
 
+### Gzip framing continuation increment
+
+The next component, `gzip_stream.sg`, keeps a fixed 46,080-byte caller-owned
+state: 1,024 bytes (128 little-endian i64 words) for framing and cumulative
+facts, then the existing 45,056-byte DEFLATE state at byte offset 1,024. Its
+init/reset/step/query/dispose ABI and statuses follow the raw continuation
+protocol, with init's policy argument 0 first-member / 1 strict-single /
+2 strict-concatenated. Query fields 0/1 last-call consumed/produced, 2/3
+cumulative counts, 4 status, 5 phase, 6 state bytes and 7 validated-member
+count are explicit. Zero buffers, sticky finish, inactive-state copying,
+disjoint extents and no pointer retention follow the same unsafe contract.
+
+The framing prefix stores magic/version, phase, flags and finish, limits,
+last/cumulative counts, fixed-header index, header CRC32, extra-field length,
+name/comment lengths, partial FHCRC/trailer words, member output CRC32/ISIZE
+and validated-member count. DEFLATE history is reset for every new member.
+The phases consume the fixed ten-byte header, optional extra, zero-terminated
+bounded name/comment, optional CRC16, raw body and eight-byte CRC32/ISIZE
+trailer across arbitrary chunk boundaries. Output CRC consumes only newly
+emitted initialized bytes in the current call; output pointers are discarded
+at return. A partial trailer never validates a member or reports completion.
+
+Mode zero finishes immediately after the first verified footer without
+reading following bytes. Mode one waits for final EOF after one footer and
+rejects any trailing complete byte. Mode two waits at each verified boundary
+and either reads a new member or finishes when final EOF is asserted. Empty
+input is invalid in every mode; zero padding between/after members is not
+silently accepted. Metadata limits retain the current 65,535 non-NUL byte
+name/comment policy, including its classified Python difference.
+
+The compressed input cumulative budget is at most 64 MiB; the decoded wire
+output budget is at most 512 MiB, separate from later tar file-content limits.
+Both are counters, not preallocated arenas. Each call's input/output extent
+is bounded to 64 MiB, normally much smaller. Need-output may retain a literal
+or partial overlapping match; retry uses unconsumed input and keeps finish
+asserted. Invalid extents/flags/query fields reject before any range access.
+Init/dispose allocate nothing and clear the complete fixed state.
+
+Initially the component imports the unchanged `gzip.sg` module to call its
+single existing pure-SG CRC helper. Native module loading and compiled source
+identity are part of the gate. The object also contains the existing old
+synchronous exports, so callers must not additionally link a duplicate
+`gzip.sg` object. It still requires raw wrapper/core objects and their memory
+providers to resolve those imports. This is an explicit transitional build,
+not proof the old exports already use the new framing core. Final old-API
+migration must extract the one CRC owner, remove the old framing path and
+rerun full gzip/raw/continuation qualifications. No C framing, checksum or
+compression implementation is introduced.
+
 Implement the raw format from [RFC 1951](https://www.rfc-editor.org/rfc/rfc1951),
 including stored, fixed and dynamic Huffman blocks, code-length repeats,
 length/distance extra bits, overlapping copies and history across blocks.

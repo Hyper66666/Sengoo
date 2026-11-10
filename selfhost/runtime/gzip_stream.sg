@@ -1,0 +1,341 @@
+// Reuse the existing pure-SG CRC implementation; do not duplicate it here.
+// This first-stage component includes the old synchronous exports as imported
+// code. Their later migration to this framing core is a separate checkpoint.
+import gzip;
+extern "C" {
+    unsafe fn sengoo_ds_word_get(state: * mut u8, index: i64) -> i64;
+    unsafe fn sengoo_ds_word_put(state: * mut u8, index: i64, value: i64);
+    unsafe fn sengoo_gzs_state_offset(state: * mut u8, offset: i64) -> * mut u8;
+    unsafe fn sengoo_sg_deflate_stream_init(state: * mut u8, extent: i64, exact: i64, input_limit: i64,
+    output_limit: i64) -> i64;
+    unsafe fn sengoo_sg_deflate_stream_step(state: * mut u8, extent: i64, input: * const u8, length: i64,
+    output: * mut u8, capacity: i64, finish: i64) -> i64;
+    unsafe fn sengoo_sg_deflate_stream_query(state: * mut u8, extent: i64, field: i64) -> i64;
+    unsafe fn sengoo_sg_deflate_stream_dispose(state: * mut u8, extent: i64) -> i64;
+}
+pub unsafe extern "C" fn sengoo_sg_gzip_stream_init(state: * mut u8, extent: i64, mode: i64, input_limit: i64,
+output_limit: i64) -> i64 {
+    if extent != 46080 or mode < 0 or mode > 2 or input_limit < 0 or input_limit > 67108864 or output_limit < 0 or output_limit > 536870912 {
+        return - 3;
+    };
+    let mut index = 0;
+    while index < 5760 {
+        sengoo_ds_word_put(state, index, 0);
+        index = index + 1;
+    };
+    sengoo_ds_word_put(state, 0, 1397183281);
+    sengoo_ds_word_put(state, 4, mode);
+    sengoo_ds_word_put(state, 6, input_limit);
+    sengoo_ds_word_put(state, 7, output_limit);
+    sengoo_ds_word_put(state, 13, 4294967295);
+    0;
+}
+pub unsafe extern "C" fn sengoo_sg_gzip_stream_reset(state: * mut u8, extent: i64, mode: i64, input_limit: i64,
+output_limit: i64) -> i64 {
+    sengoo_sg_gzip_stream_init(state, extent, mode, input_limit, output_limit);
+}
+pub unsafe extern "C" fn sengoo_sg_gzip_stream_dispose(state: * mut u8, extent: i64) -> i64 {
+    if extent != 46080 {
+        return - 3;
+    };
+    let mut index = 0;
+    while index < 5760 {
+        sengoo_ds_word_put(state, index, 0);
+        index = index + 1;
+    };
+    0;
+}
+pub unsafe extern "C" fn sengoo_sg_gzip_stream_query(state: * mut u8, extent: i64, field: i64) -> i64 {
+    if extent != 46080 or field < 0 or field > 7 {
+        return - 3;
+    };
+    if sengoo_ds_word_get(state, 0) != 1397183281 {
+        return - 4;
+    };
+    if field < 4 {
+        return sengoo_ds_word_get(state, 8 + field);
+    };
+    if field == 4 {
+        return sengoo_ds_word_get(state, 26);
+    };
+    if field == 5 {
+        return sengoo_ds_word_get(state, 1);
+    };
+    if field == 6 {
+        return 46080;
+    };
+    sengoo_ds_word_get(state, 19);
+}
+unsafe extern "C" fn sh_gzs_return(state: * mut u8, result: i64) -> i64 {
+    sengoo_ds_word_put(state, 26, result);
+    if result < 0 {
+        sengoo_ds_word_put(state, 27, result);
+    };
+    result;
+}
+unsafe extern "C" fn sh_gzs_byte(state: * mut u8, source: * const u8, length: i64) -> i64 {
+    let at = sengoo_ds_word_get(state, 8);
+    if at >= length {
+        return - 5;
+    };
+    let total = sengoo_ds_word_get(state, 10);
+    if total >= sengoo_ds_word_get(state, 6) {
+        return - 2;
+    };
+    let byte = sengoo_deflate_input_read(source, at) as i64;
+    sengoo_ds_word_put(state, 8, at + 1);
+    sengoo_ds_word_put(state, 10, total + 1);
+    byte;
+}
+macro_rules! sh_gzs_byte {
+    () => {
+        {
+            let byte = sh_gzs_byte(state, source, length);
+            if byte < 0 {
+                let result = if byte == - 5 {
+                    if finish == 1 {
+                        - 1;
+                    } else {
+                        0;
+                    };
+                } else {
+                    byte;
+                };
+                return sh_gzs_return(state, result);
+            };
+            byte;
+        }
+    };
+}
+macro_rules! sh_gzs_header_byte {
+    () => {
+        {
+            let byte = sh_gzs_byte! ();
+            let crc = sh_gzip_crc_byte(sengoo_ds_word_get(state, 13), byte);
+            sengoo_ds_word_put(state, 13, crc);
+            byte;
+        }
+    };
+}
+pub unsafe extern "C" fn sengoo_sg_gzip_stream_step(state: * mut u8, extent: i64, source: * const u8,
+length: i64, target: * mut u8, capacity: i64, finish: i64) -> i64 {
+    if extent != 46080 or length < 0 or length > 67108864 or capacity < 0 or capacity > 67108864 or finish < 0 or finish > 1 {
+        return - 3;
+    };
+    if sengoo_ds_word_get(state, 0) != 1397183281 {
+        return - 4;
+    };
+    if sengoo_ds_word_get(state, 5) == 1 and finish == 0 {
+        return - 3;
+    };
+    sengoo_ds_word_put(state, 5, finish);
+    sengoo_ds_word_put(state, 8, 0);
+    sengoo_ds_word_put(state, 9, 0);
+    let old_error = sengoo_ds_word_get(state, 27);
+    if old_error < 0 {
+        return old_error;
+    };
+    let total_in = sengoo_ds_word_get(state, 10);
+    let total_out = sengoo_ds_word_get(state, 11);
+    let mode = sengoo_ds_word_get(state, 4);
+    if total_in < 0 or total_in > 67108864 or total_out < 0 or total_out > 536870912 or mode < 0 or mode > 2 {
+        return sh_gzs_return(state, - 4);
+    };
+    loop {
+        let phase = sengoo_ds_word_get(state, 1);
+        if phase == 0 {
+            let index = sengoo_ds_word_get(state, 12);
+            if index < 0 or index > 9 {
+                return sh_gzs_return(state, - 4);
+            };
+            let byte = sh_gzs_header_byte! ();
+            if (index == 0 and byte != 31) or (index == 1 and byte != 139) or (index == 2 and byte != 8) or (index == 3 and (byte & 224) != 0) {
+                return sh_gzs_return(state, - 1);
+            };
+            if index == 3 {
+                sengoo_ds_word_put(state, 14, byte);
+            };
+            sengoo_ds_word_put(state, 12, index + 1);
+            if index == 9 {
+                sengoo_ds_word_put(state, 1, 1);
+                sengoo_ds_word_put(state, 15, 0);
+                sengoo_ds_word_put(state, 16, 0);
+            };
+        } else if phase == 1 {
+            if (sengoo_ds_word_get(state, 14) & 4) == 0 {
+                sengoo_ds_word_put(state, 1, 3);
+                sengoo_ds_word_put(state, 15, 0);
+            } else {
+                let index = sengoo_ds_word_get(state, 15);
+                if index < 0 or index > 1 {
+                    return sh_gzs_return(state, - 4);
+                };
+                let byte = sh_gzs_header_byte! ();
+                let value = sengoo_ds_word_get(state, 16) | (byte << (index * 8));
+                sengoo_ds_word_put(state, 16, value);
+                sengoo_ds_word_put(state, 15, index + 1);
+                if index == 1 {
+                    sengoo_ds_word_put(state, 1, 2);
+                };
+            };
+        } else if phase == 2 {
+            let remaining = sengoo_ds_word_get(state, 16);
+            if remaining < 0 or remaining > 65535 {
+                return sh_gzs_return(state, - 4);
+            };
+            if remaining == 0 {
+                sengoo_ds_word_put(state, 1, 3);
+                sengoo_ds_word_put(state, 15, 0);
+            } else {
+                sh_gzs_header_byte! ();
+                sengoo_ds_word_put(state, 16, remaining - 1);
+            };
+        } else if phase == 3 or phase == 4 {
+            let flag = if phase == 3 {
+                8;
+            } else {
+                16;
+            };
+            if (sengoo_ds_word_get(state, 14) & flag) == 0 {
+                sengoo_ds_word_put(state, 1, phase + 1);
+                sengoo_ds_word_put(state, 15, 0);
+            } else {
+                let count = sengoo_ds_word_get(state, 15);
+                if count < 0 or count > 65535 {
+                    return sh_gzs_return(state, - 4);
+                };
+                let byte = sh_gzs_header_byte! ();
+                if byte == 0 {
+                    sengoo_ds_word_put(state, 1, phase + 1);
+                    sengoo_ds_word_put(state, 15, 0);
+                } else {
+                    if count >= 65535 {
+                        return sh_gzs_return(state, - 1);
+                    };
+                    sengoo_ds_word_put(state, 15, count + 1);
+                };
+            };
+        } else if phase == 5 {
+            if (sengoo_ds_word_get(state, 14) & 2) == 0 {
+                sengoo_ds_word_put(state, 1, 6);
+            } else {
+                let index = sengoo_ds_word_get(state, 15);
+                if index < 0 or index > 1 {
+                    return sh_gzs_return(state, - 4);
+                };
+                let byte = sh_gzs_byte! ();
+                let value = sengoo_ds_word_get(state, 17) | (byte << (index * 8));
+                sengoo_ds_word_put(state, 17, value);
+                sengoo_ds_word_put(state, 15, index + 1);
+                if index == 1 {
+                    if value != ((sengoo_ds_word_get(state, 13) ^ 4294967295) & 65535) {
+                        return sh_gzs_return(state, - 1);
+                    };
+                    sengoo_ds_word_put(state, 1, 6);
+                };
+            };
+        } else if phase == 6 {
+            let raw = sengoo_gzs_state_offset(state, 1024);
+            let error = sengoo_sg_deflate_stream_init(raw, 45056, 0, sengoo_ds_word_get(state, 6) - sengoo_ds_word_get(state,
+            10), sengoo_ds_word_get(state, 7) - sengoo_ds_word_get(state, 11));
+            if error < 0 {
+                return sh_gzs_return(state, error);
+            };
+            sengoo_ds_word_put(state, 18, 4294967295);
+            sengoo_ds_word_put(state, 20, 0);
+            sengoo_ds_word_put(state, 1, 7);
+        } else if phase == 7 {
+            let input_at = sengoo_ds_word_get(state, 8);
+            let output_at = sengoo_ds_word_get(state, 9);
+            let input = sengoo_gzip_input_offset(source, input_at);
+            let output = sengoo_gzip_output_offset(target, output_at);
+            let raw = sengoo_gzs_state_offset(state, 1024);
+            let status = sengoo_sg_deflate_stream_step(raw, 45056, input, length - input_at, output,
+            capacity - output_at, finish);
+            let consumed = sengoo_sg_deflate_stream_query(raw, 45056, 0);
+            let made = sengoo_sg_deflate_stream_query(raw, 45056, 1);
+            if consumed < 0 or consumed > length - input_at or made < 0 or made > capacity - output_at {
+                return sh_gzs_return(state, - 4);
+            };
+            sengoo_ds_word_put(state, 8, input_at + consumed);
+            sengoo_ds_word_put(state, 10, sengoo_ds_word_get(state, 10) + consumed);
+            sengoo_ds_word_put(state, 9, output_at + made);
+            sengoo_ds_word_put(state, 11, sengoo_ds_word_get(state, 11) + made);
+            sengoo_ds_word_put(state, 20, sengoo_ds_word_get(state, 20) + made);
+            let mut crc = sengoo_ds_word_get(state, 18);
+            let mut index = output_at;
+            while index < output_at + made {
+                crc = sh_gzip_crc_byte(crc, sengoo_deflate_output_read(target, index) as i64);
+                index = index + 1;
+            };
+            sengoo_ds_word_put(state, 18, crc);
+            if status < 0 {
+                return sh_gzs_return(state, status);
+            };
+            if status == 0 or status == 1 {
+                return sh_gzs_return(state, status);
+            };
+            if status != 2 {
+                return sh_gzs_return(state, - 4);
+            };
+            let error = sengoo_sg_deflate_stream_dispose(raw, 45056);
+            if error < 0 {
+                return sh_gzs_return(state, error);
+            };
+            sengoo_ds_word_put(state, 1, 8);
+            sengoo_ds_word_put(state, 15, 0);
+            sengoo_ds_word_put(state, 21, 0);
+        } else if phase == 8 or phase == 9 {
+            let index = sengoo_ds_word_get(state, 15);
+            if index < 0 or index > 3 {
+                return sh_gzs_return(state, - 4);
+            };
+            let byte = sh_gzs_byte! ();
+            let value = sengoo_ds_word_get(state, 21) | (byte << (index * 8));
+            sengoo_ds_word_put(state, 21, value);
+            sengoo_ds_word_put(state, 15, index + 1);
+            if index == 3 {
+                if phase == 8 {
+                    if value != (sengoo_ds_word_get(state, 18) ^ 4294967295) {
+                        return sh_gzs_return(state, - 1);
+                    };
+                    sengoo_ds_word_put(state, 1, 9);
+                    sengoo_ds_word_put(state, 15, 0);
+                    sengoo_ds_word_put(state, 21, 0);
+                } else {
+                    if value != (sengoo_ds_word_get(state, 20) & 4294967295) {
+                        return sh_gzs_return(state, - 1);
+                    };
+                    sengoo_ds_word_put(state, 19, sengoo_ds_word_get(state, 19) + 1);
+                    sengoo_ds_word_put(state, 1, 10);
+                };
+            };
+        } else if phase == 10 {
+            if mode == 0 {
+                sengoo_ds_word_put(state, 1, 11);
+                return sh_gzs_return(state, 2);
+            };
+            if sengoo_ds_word_get(state, 8) == length {
+                if finish == 1 {
+                    sengoo_ds_word_put(state, 1, 11);
+                    return sh_gzs_return(state, 2);
+                };
+                return sh_gzs_return(state, 0);
+            };
+            if mode == 1 {
+                return sh_gzs_return(state, - 1);
+            };
+            sengoo_ds_word_put(state, 12, 0);
+            sengoo_ds_word_put(state, 13, 4294967295);
+            sengoo_ds_word_put(state, 14, 0);
+            sengoo_ds_word_put(state, 15, 0);
+            sengoo_ds_word_put(state, 16, 0);
+            sengoo_ds_word_put(state, 17, 0);
+            sengoo_ds_word_put(state, 1, 0);
+        } else if phase == 11 {
+            return sh_gzs_return(state, 2);
+        } else {
+            return sh_gzs_return(state, - 4);
+        };
+    };
+}

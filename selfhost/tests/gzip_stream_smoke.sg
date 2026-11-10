@@ -1,0 +1,55 @@
+extern "C" {
+    unsafe fn sengoo_sg_gzip_stream_init(state: * mut u8, extent: i64, mode: i64, input_limit: i64, output_limit: i64) -> i64;
+    unsafe fn sengoo_sg_gzip_stream_step(state: * mut u8, extent: i64, input: * const u8, length: i64,
+    output: * mut u8, capacity: i64, finish: i64) -> i64;
+    unsafe fn sengoo_sg_gzip_stream_query(state: * mut u8, extent: i64, field: i64) -> i64;
+    unsafe fn sengoo_sg_gzip_stream_dispose(state: * mut u8, extent: i64) -> i64;
+    unsafe fn sengoo_gzs_fixture_state() -> * mut u8;
+    unsafe fn sengoo_gzs_fixture_output() -> * mut u8;
+    unsafe fn sengoo_gzs_fixture_input(offset: i64) -> * const u8;
+    fn sengoo_gzs_fixture_output_byte() -> u8;
+    fn sengoo_gzs_fixture_state_byte(offset: i64) -> u8;
+}
+pub unsafe extern "C" fn main() -> i64 {
+    let state = sengoo_gzs_fixture_state();
+    if sengoo_sg_gzip_stream_init(state, 46080, 2, 67108864, 536870912) != 0 {
+        return 1;
+    };
+    let mut used = 0;
+    let mut made = 0;
+    let mut calls = 0;
+    loop {
+        let status = sengoo_sg_gzip_stream_step(state, 46080, sengoo_gzs_fixture_input(used), 22 - used,
+        sengoo_gzs_fixture_output(), 1, 1);
+        used = used + sengoo_sg_gzip_stream_query(state, 46080, 0);
+        let produced = sengoo_sg_gzip_stream_query(state, 46080, 1);
+        if produced < 0 or produced > 1 {
+            return 2;
+        };
+        if produced == 1 and (sengoo_gzs_fixture_output_byte() as i64) != 65 {
+            return 3;
+        };
+        made = made + produced;
+        calls = calls + 1;
+        if status == 2 {
+            break;
+        };
+        if status != 1 or calls > 260 {
+            return 4;
+        };
+    };
+    if used != 22 or made != 259 or calls != 259 or sengoo_sg_gzip_stream_query(state, 46080, 7) != 1 {
+        return 5;
+    };
+    if sengoo_sg_gzip_stream_dispose(state, 46080) != 0 {
+        return 6;
+    };
+    let mut index = 0;
+    while index < 46080 {
+        if (sengoo_gzs_fixture_state_byte(index) as i64) != 0 {
+            return 7;
+        };
+        index = index + 1;
+    };
+    42;
+}

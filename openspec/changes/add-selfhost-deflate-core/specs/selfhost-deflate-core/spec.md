@@ -129,3 +129,30 @@ and validate header CRC16, output CRC32 and ISIZE when present or required.
 - **WHEN** a name or comment exceeds 65,535 non-NUL bytes or an optional field exceeds the available input
 - **THEN** the selected flate2-compatible entry SHALL fail within its authorized extents
 - **AND** independent-oracle differences from more tolerant Python policies SHALL remain explicitly recorded
+
+### Requirement: Gzip framing continuation SHALL preserve bounded protocol state
+
+The continuation entry SHALL preserve header/optional-field/checksum/trailer
+and member-policy state in fixed caller-owned storage, call the one SG raw
+continuation core and reuse a single pure-SG CRC implementation. It SHALL
+retain no caller input/output pointer and allocate no storage itself.
+
+#### Scenario: Headers and trailers straddle every chunk boundary
+- **WHEN** fixed headers, FEXTRA, FNAME, FCOMMENT, FHCRC, raw blocks or footer words are cut across independent input/output chunks
+- **THEN** the decoder SHALL return exact per-call/cumulative consumed and produced counts and preserve pending parsing/output state
+- **AND** completion SHALL require the full member CRC32 and ISIZE to validate
+
+#### Scenario: First, strict and concatenated policies reach a boundary
+- **WHEN** a validated member ends before more supplied bytes or before final EOF
+- **THEN** first-member mode SHALL finish without reading the tail, strict-single SHALL reject extra bytes, and concatenated mode SHALL reset history for each next member
+- **AND** empty input, truncated final fields and zero padding SHALL preserve the existing explicit rejection policy
+
+#### Scenario: Streaming output exceeds the old one-shot capacity
+- **WHEN** valid adjacent members produce more than 64 MiB through small reused output buffers within configured cumulative budgets
+- **THEN** output and CRC/ISIZE verification SHALL complete with fixed state and bounded chunks
+- **AND** no full-output arena or automatic 256 MiB tar-content authorization SHALL be inferred
+
+#### Scenario: Transitional component versus old API replacement
+- **WHEN** the new framing continuation component passes independently
+- **THEN** evidence SHALL disclose its imported shared CRC/dependency closure and SHALL NOT claim that the old synchronous framing exports were migrated
+- **AND** final old-API replacement SHALL require a later shared-framing source change and complete regression qualification

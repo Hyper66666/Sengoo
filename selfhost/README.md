@@ -307,6 +307,25 @@ and CRC byte access. This framing API is still synchronous. Raw/prefix OOM
 controls observe no input/output accesses; gzip reads its ten-byte fixed
 header before a raw-state OOM, then performs no raw reads or output writes.
 
+`runtime/gzip_stream.sg` adds caller-owned framing continuation with a fixed
+46,080-byte state, small reused input/output chunks, exact per-call/cumulative
+counts and explicit need-input/need-output/finished/error states. Header and
+footer CRC/ISIZE, optional fields and all three member policies continue
+across calls; each member resets the raw history. Its configured decoded-wire
+budget may exceed 64 MiB without allocating a complete-output arena. This is
+distinct from the package manager's cumulative file-content budget.
+
+The transitional component imports unchanged `gzip.sg` to reuse its single SG
+CRC helper. Its object therefore also contains the old synchronous exports;
+link callers must include core/raw/memory dependencies and must not add a
+second `gzip.sg` object. The old synchronous framing API has not yet migrated
+to the new framing core. `verify_runtime_gzip_stream.py --text-evidence REPORT
+--gzip-evidence REPORT --stream-evidence REPORT --rust-evidence REPORT --output
+DIRECTORY` records that exact closure, checks allocation-trap controls and
+compares all original gzip fixtures under arbitrary chunks. The current
+checkpoint is `target/selfhost/runtime-gzip-stream-formal-02/evidence.json`,
+including actual 65 MiB output and 64 MiB input with bounded output chunks.
+
 Tar/package integration, final SDK packaging, self-building and performance
 remain open. In particular, sgpm permits 256 MiB of unpacked content and 10,000
 tar entries; these runtime foundations currently bound each output to 64 MiB.

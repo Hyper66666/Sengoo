@@ -194,7 +194,9 @@ record and is not rewritten to qualify the new fixture bytes.
 - [x] Execute independent Python/Rust complete-output and malformed/history comparisons with guard pages.
 - [x] Qualify bounded peak state and source/native artifacts; record an honest prototype boundary.
 - [x] Migrate old raw/prefix/gzip exports to the one shared core and rerun complete original raw/gzip gates.
-- [ ] Add SG gzip framing/CRC continuation and incremental tar/staging integration.
+- [x] Add and independently qualify SG gzip framing/CRC continuation with fixed caller-owned state.
+- [ ] Migrate old gzip export to the single framing core and run full gzip/raw/continuation regressions.
+- [ ] Add incremental tar/staging integration and private full-validation/atomic publication.
 
 ### Continuation prototype exact-source evidence
 
@@ -350,3 +352,89 @@ Synchronous state allocation is separate from the caller-owned continuation
 API's zero heap allocation. These checkpoints do not implement gzip framing
 continuation, incremental tar, 256 MiB package-content budgets, private staging
 or atomic publication, and do not close final SDK/performance/self-build work.
+
+### Gzip framing continuation qualification
+
+The new independent continuation qualification is
+`target/selfhost/runtime-gzip-stream-formal-02/evidence.json`, SHA256
+`aa4df62636ec93fa1a95c33258019fb6e43f9c8620a92d8b36dbd2ff77dc3df5`.
+It actually executes **88 commands** on Windows-11-10.0.26300-SP0. The actual
+full revision interval is `b7867614ce59d4e404c702784df52db6acb9db8a` through
+`e68be33abdf6955b1909dde2e3e8da7440ba12fc`; unrelated concurrent commits are
+disclosed rather than represented as one revision. The 1,433 source, 389
+external-source, 44 tool and 221 artifact fingerprints have empty source,
+external, tool and artifact change guards.
+
+Each instrumented and actual-memory-adapter executable completes all 8,061
+original independent gzip fixtures over 38,660 schedule runs and 2,663,697
+step calls. Schedules include one-byte input/output, fixed-seed variable
+chunks, full-input bounded-output and every two-part cut for successful
+streams at most 96 bytes long. Need-input / need-output counts are
+684,965 / 1,939,725. Every fixture ID, schedule and terminal status contributes
+to checked FNV64 `a5d343516df43dd7`. A Python/zlib-derived sidecar additionally
+requires every positive fixture's exact validated-member count. Existing
+format/metadata/Rust/Python policy differences are retained through actual
+source-bound flate2 command/stdout comparisons; no expected status is derived
+from the subject implementation.
+
+Instrumentation observes 10,730,340 initialized raw-history reads and
+11,636,249 newly-emitted-current-chunk CRC reads. Production reports those
+unobserved counters as null, with every transition/call/result count otherwise
+identical. Known output, including capacity and integrity failure prefixes,
+is compared per chunk to independent bytes. Read-only input ends at a guard;
+state alternates head/tail placement and output chunks end at independent
+guards. Explicit protocol tests check all three tail/member policies, empty
+input, partial final trailer, sticky finish and retry, zero-capacity pending
+output, zero-input draining, inactive-state copy, reset/dispose, member counts
+and eleven invalid API cases with no state/offset accesses. Wrong result and
+uninitialized-history controls actually exit one for the intended reasons.
+
+The six actual large-range cases reuse only a 32,749-byte output chunk and
+46,080-byte state. Sixty-five 1 MiB members produce 68,157,440 bytes, beyond
+the old synchronous 64 MiB output limit, with all bytes compared to the
+independently constructed repeating pattern and CRC/ISIZE validated. A budget
+minus one returns -2 with a correct bounded prefix; first-member mode consumes
+exactly 4,424 wire bytes / 1 MiB, strict-single rejects the tail and compressed
+budget minus one leaves the last member unvalidated. A separate actual
+67,108,864-byte compressed stored stream decodes 67,103,726 bytes in 593,884
+calls, with exact consumed/output counts and guard-page bounds. Python gzip
+and zlib independently validate generated complete bytes/digests. A crafted
+second member that references the previous member's history is rejected,
+leaving exactly the first member's one output byte and validated count one.
+
+All full corpus and large C probes link a trapping provider for the imported
+old one-shot storage symbols: any allocation/presence/free call exits 99.
+A separate forced-allocation control actually exits 99 with no output; all
+new framing paths complete normally through that exact same provider. This
+proves the new caller-owned algorithm reaches no hidden state allocation.
+It does not claim that the test caller, Python oracle or old synchronous API
+allocate nothing. SG cold executables instead link the real OS provider as
+part of the complete transitional object closure.
+
+Two fresh SG builds compare identical imported framing/core/wrapper/smoke
+objects, all normalized leaf C objects and SG-linked PE bytes. Cold executions
+have empty PATH/stdout/stderr and return 42. Source snapshots include the
+unchanged `gzip.sg` import; its one existing pure-SG CRC helper is reused and
+the actual compiled object contains exactly one `sh_gzip_crc_byte` symbol.
+The imported old synchronous framing exports are still present; they are not
+silently linked as another duplicate object. Full dependency and historical
+tool/SDK/linker branch identities are recorded, and old production source
+pins are checked separately. Earlier complete qualifications are not rewritten
+to pretend their old child-document hashes describe this increment.
+
+The fixed 46,080-byte state is separate from native stack/RSS. Read-only
+inspection of the actual new object shows a 29,120-byte gzip step frame,
+1,968-byte init, 1,392-byte byte-reader, 592-byte return helper and 1,056-byte
+shared CRC frame. The nested raw step retains its separately qualified fixed
+45,104-byte frame. These are bounded compiler temporary costs, not a claimed
+process-memory or 15-percent performance qualification. C implements only
+primitive memory access/offsets and independent fixtures/observation.
+
+The earlier 82-command `runtime-gzip-stream-formal-01` report, SHA256
+`922d36467cf1bb88ee1c1ccaf2be621f0ac5369e1497e97ca1555ce8ad822b2d`,
+is retained as genuine pre-enhancement evidence. The final increment adds
+known-failure-prefix checks, an actually effective allocation trap and the
+real 64 MiB input case; its source bytes are qualified by the new report only.
+All original `gzip.sg`, `deflate.sg`, `deflate_stream.sg` and memory-provider
+bytes remain unchanged. Old gzip export migration, incremental tar, private
+staging, full integrity drain and atomic package publication remain unchecked.
