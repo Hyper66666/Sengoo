@@ -131,3 +131,32 @@ The actual declaration AST must also retain the expected unsafe flag, function
 name/arity, absence of a body and unique parent C block in the pinned physical
 module. Matching a cached binding/type row alone cannot replace those source
 relationships.
+
+## Generated callback and physical constructor stage
+
+`collection_callbacks.sg` derives a concrete MIR element's size/alignment from
+the target layout. It generates actual C-ABI move and drop functions, including
+CFG loops for byte transfer/source clearing. Drop invokes existing typed MIR
+Drop glue before clearing storage. Owning types are never inferred Copy from
+their width; the generated move transfers bytes under the runtime's distinct,
+nonoverlapping, correctly aligned storage contract. A read-only checker verifies
+the exact generated parameter, instruction, operand, CFG-edge and return
+structure against the independently supplied concrete element and actual
+layout. Merely passing a same-signature C function is insufficient.
+
+The physical constructor emits real function-address instructions, checked
+callback erasure, the selected four-argument C call and a two-i64-field vector
+value with a zero marker. This raw MIR stage checks the physical signature and
+generated bodies; it cannot authenticate an arbitrary caller-supplied function
+ID as a source intrinsic. Final module lowering must additionally consume the
+independent provider mapping and fresh actual source/origin/loan/ownership
+facts. Until that integration exists, ordinary source lowering continues to
+reject candidate operations. A failed builder's partially constructed MIR is
+discarded; only validation is read-only.
+
+The initial callback generator rejects zero-sized elements, unresolved layouts
+and alignment above eight rather than manufacturing layout support. General
+over-aligned element handling remains required by the canonical specification
+and is not closed by an eight-aligned owning fixture stored at a sixteen-byte
+aligned address. Additional operation bodies, allocation failure and complete
+supported layout/resource qualification remain independent gates.

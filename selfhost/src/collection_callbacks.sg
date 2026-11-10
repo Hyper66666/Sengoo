@@ -1,0 +1,219 @@
+import selfhost_layout;
+
+struct ShCollectionCallbacks {
+    schema: i64,
+    element: i64,
+    size: i64,
+    alignment: i64,
+    moving: i64,
+    dropping: i64,
+    error: i64,
+}
+
+def sh_cc_at(values: &Vec<i64>, index: i64) -> i64 {
+    sengoo_vec_get_or_default_i64(values.handle, index, -1);
+}
+
+def sh_cc_shape(mir: &ShMir, id: i64, function: i64, block: i64, opcode: i64, ty: i64, a: i64, b: i64, count: i64, aux: i64, extra: i64, flags: i64) -> bool {
+    if id < 0 or id >= sh_mir_inst_count(mir) or sh_mir_inst(mir, id, 0) != function or sh_mir_inst(mir, id, 1) != block or sh_mir_inst(mir, id, 2) != opcode or sh_mir_inst(mir, id, 3) != ty or sh_mir_inst(mir, id, 5) != count or sh_mir_inst(mir, id, 6) != aux or sh_mir_inst(mir, id, 7) != extra or sh_mir_inst(mir, id, 8) != flags or sh_mir_inst(mir, id, 9) != -1 or sh_mir_inst(mir, id, 10) != 0 or sh_mir_inst(mir, id, 11) != 0 { return false; };
+    (count < 1 or sh_mir_inst_arg(mir, id, 0) == a) and (count < 2 or sh_mir_inst_arg(mir, id, 1) == b);
+}
+
+def sh_cc_edge(mir: &ShMir, term: i64, ordinal: i64, target: i64, value: i64, discriminator: i64) -> bool {
+    let edge = sh_mir_term(mir, term, 4) + ordinal;
+    let count = if value < 0 { 0; } else { 1; };
+    sh_mir_edge(mir, edge, 0) == term and sh_mir_edge(mir, edge, 1) == target and sh_mir_edge(mir, edge, 3) == count and sh_mir_edge(mir, edge, 4) == discriminator and sh_mir_edge(mir, edge, 5) == 0 and (count == 0 or sh_mir_operand(mir, sh_mir_edge(mir, edge, 2), count, 0) == value);
+}
+
+def sh_cc_body_valid(mir: &ShMir, function: i64, element: i64, size: i64, moving: bool) -> bool {
+    if function < 0 or function >= sh_mir_fn_count(mir) or sh_mir_fn(mir, function, 3) != 0 { return false; };
+    let signature = sh_mir_fn(mir, function, 1);
+    let parameter_count = if moving { 2; } else { 1; };
+    if sh_mir_type_word(mir, signature, 0) != 11 or sh_mir_type_word(mir, signature, 1) != 1 or sh_mir_type_word(mir, signature, 2) != 0 or sh_mir_type_word(mir, signature, 5) != parameter_count + 1 { return false; };
+    let pointer = sh_mir_type_arg(mir, signature, 0);
+    let unit = sh_mir_type_arg(mir, signature, parameter_count);
+    let byte = sh_mir_type_arg(mir, pointer, 0);
+    if not sh_mir_callback_byte_pointer(mir, pointer) or sh_mir_type_word(mir, unit, 0) != 0 or moving and sh_mir_type_arg(mir, signature, 1) != pointer { return false; };
+    let name = string_from_str(if moving { "__sg_collection_move_"; } else { "__sg_collection_drop_"; });
+    if not name.is_ok() or not name.value.push_i64(element).is_ok() { return false; };
+    let actual_name = sh_symbol_text(&mir.symbols, sh_mir_fn(mir, function, 0));
+    if not actual_name.is_ok() or actual_name.value.as_str() != name.value.as_str() { return false; };
+    let blocks = vec_new_i64();
+    let instructions = vec_new_i64();
+    let mut row = 0;
+    while row < sh_mir_block_count(mir) { if sh_mir_block(mir, row, 0) == function { blocks.push(row); (); }; row = row + 1; };
+    row = 0;
+    while row < sh_mir_inst_count(mir) { if sh_mir_inst(mir, row, 0) == function { instructions.push(row); (); }; row = row + 1; };
+    if blocks.len() != 4 or instructions.len() != if moving { 15; } else { 13; } or sh_mir_fn(mir, function, 2) != sh_cc_at(&blocks, 0) { return false; };
+    row = 0;
+    while row < sh_mir_local_count(mir) { if sh_mir_local(mir, row, 0) == function { return false; }; row = row + 1; };
+    let entry = sh_cc_at(&blocks, 0);
+    let head = sh_cc_at(&blocks, 1);
+    let body = sh_cc_at(&blocks, 2);
+    let done = sh_cc_at(&blocks, 3);
+    let first = sh_cc_at(&instructions, 0);
+    let mut destination = first;
+    if not sh_cc_shape(mir, destination, function, entry, 1, pointer, -1, -1, 0, 0, 0, 0) { return false; };
+    let mut cursor = 1;
+    let mut source = destination;
+    if moving { source = sh_cc_at(&instructions, cursor); cursor = cursor + 1; if not sh_cc_shape(mir, source, function, entry, 1, pointer, -1, -1, 0, 1, 0, 0) { return false; }; } else { let cast = sh_cc_at(&instructions, cursor); let typed_pointer = sh_mir_value_type(mir, cast); cursor = cursor + 1; if sh_mir_type_word(mir, typed_pointer, 0) != 7 or sh_mir_type_word(mir, typed_pointer, 2) != 1 or sh_mir_type_arg(mir, typed_pointer, 0) != element or not sh_cc_shape(mir, cast, function, entry, 12, typed_pointer, source, -1, 1, 0, 0, 1) { return false; }; let destroy = sh_cc_at(&instructions, cursor); cursor = cursor + 1; if not sh_cc_shape(mir, destroy, function, entry, 21, unit, cast, -1, 1, -1, element, 0) { return false; }; };
+    let zero = sh_cc_at(&instructions, cursor);
+    let length = sh_cc_at(&instructions, cursor + 1);
+    let one = sh_cc_at(&instructions, cursor + 2);
+    let zero_byte = sh_cc_at(&instructions, cursor + 3);
+    let integer = sh_mir_value_type(mir, zero);
+    if sh_mir_type_word(mir, integer, 0) != 2 or sh_mir_type_word(mir, integer, 1) != 64 or sh_mir_type_word(mir, integer, 2) != 1 or not sh_cc_shape(mir, zero, function, entry, 4, integer, -1, -1, 0, 0, 0, 0) or not sh_cc_shape(mir, length, function, entry, 4, integer, -1, -1, 0, size, 0, 0) or not sh_cc_shape(mir, one, function, entry, 4, integer, -1, -1, 0, 1, 0, 0) or not sh_cc_shape(mir, zero_byte, function, entry, 4, byte, -1, -1, 0, 0, 0, 0) { return false; };
+    cursor = cursor + 4;
+    let index = sh_cc_at(&instructions, cursor);
+    let condition = sh_cc_at(&instructions, cursor + 1);
+    let boolean = sh_mir_value_type(mir, condition);
+    if sh_mir_type_word(mir, boolean, 0) != 1 or not sh_cc_shape(mir, index, function, head, 2, integer, -1, -1, 0, 0, 0, 0) or not sh_cc_shape(mir, condition, function, head, 11, boolean, index, length, 2, sh_kind("<"), 0, 0) { return false; };
+    cursor = cursor + 2;
+    let source_byte = sh_cc_at(&instructions, cursor);
+    cursor = cursor + 1;
+    if not sh_cc_shape(mir, source_byte, function, body, 19, pointer, source, index, 2, 0, 0, 0) { return false; };
+    if moving { let value = sh_cc_at(&instructions, cursor); let target = sh_cc_at(&instructions, cursor + 1); let stored = sh_cc_at(&instructions, cursor + 2); cursor = cursor + 3; if not sh_cc_shape(mir, value, function, body, 14, byte, source_byte, -1, 1, 0, 0, 0) or not sh_cc_shape(mir, target, function, body, 19, pointer, destination, index, 2, 0, 0, 0) or not sh_cc_shape(mir, stored, function, body, 15, unit, target, value, 2, 0, 0, 0) { return false; }; };
+    let cleared = sh_cc_at(&instructions, cursor);
+    let next = sh_cc_at(&instructions, cursor + 1);
+    let returned = sh_cc_at(&instructions, cursor + 2);
+    if not sh_cc_shape(mir, cleared, function, body, 15, unit, source_byte, zero_byte, 2, 0, 0, 0) or not sh_cc_shape(mir, next, function, body, 11, integer, index, one, 2, sh_kind("+"), 0, 0) or not sh_cc_shape(mir, returned, function, done, 3, unit, -1, -1, 0, 0, 0, 0) { return false; };
+    let enter = sh_mir_block(mir, entry, 4);
+    let branch = sh_mir_block(mir, head, 4);
+    let again = sh_mir_block(mir, body, 4);
+    let leave = sh_mir_block(mir, done, 4);
+    sh_mir_term(mir, enter, 2) == 1 and sh_mir_term(mir, enter, 3) == -1 and sh_mir_term(mir, enter, 5) == 1 and sh_cc_edge(mir, enter, 0, head, zero, 0) and sh_mir_term(mir, branch, 2) == 2 and sh_mir_term(mir, branch, 3) == condition and sh_mir_term(mir, branch, 5) == 2 and sh_cc_edge(mir, branch, 0, body, -1, 1) and sh_cc_edge(mir, branch, 1, done, -1, 0) and sh_mir_term(mir, again, 2) == 1 and sh_mir_term(mir, again, 3) == -1 and sh_mir_term(mir, again, 5) == 1 and sh_cc_edge(mir, again, 0, head, next, 0) and sh_mir_term(mir, leave, 2) == 3 and sh_mir_term(mir, leave, 3) == returned and sh_mir_term(mir, leave, 5) == 0;
+}
+
+def sh_cc_emit(mir: &ShMir, block: i64, opcode: i64, ty: i64, operands: &Vec<i64>, aux: i64, extra: i64, flags: i64) -> Result<i64, i64> {
+    sh_mir_add_instruction(mir, block, opcode, ty, operands, aux, extra, flags, -1, 0, 0);
+}
+
+def sh_cc_function(mir: &ShMir, element: i64, size: i64, moving: bool) -> Result<i64, i64> {
+    let empty = vec_new_i64();
+    let args = vec_new_i64();
+    let unit = sh_type_primitive(&mir.types, 0, 0, 0)?;
+    let boolean = sh_type_primitive(&mir.types, 1, 0, 0)?;
+    let byte = sh_type_primitive(&mir.types, 2, 8, 0)?;
+    let integer = sh_type_primitive(&mir.types, 2, 64, 1)?;
+    args.push(byte);
+    let pointer = sh_type_intern(&mir.types, 7, 0, 1, -1, &args)?;
+    args.clear();
+    args.push(pointer);
+    if moving { args.push(pointer); (); };
+    args.push(unit);
+    let signature = sh_type_intern(&mir.types, 11, 1, 0, -1, &args)?;
+    let name = string_from_str(if moving { "__sg_collection_move_"; } else { "__sg_collection_drop_"; })?;
+    name.push_i64(element)?;
+    let mut prior = 0;
+    while prior < sh_mir_fn_count(mir) { let label = sh_symbol_text(&mir.symbols, sh_mir_fn(mir, prior, 0)); if label.is_ok() and label.value.as_str() == name.as_str() { return sh_i64_error(5431); }; prior = prior + 1; };
+    let function = sh_mir_add_function(mir, &name, signature, 0, -1, 0, 0)?;
+    let scope = sh_mir_add_scope(mir, function, -1, 0)?;
+    let entry = sh_mir_add_block(mir, function, scope, 0, -1, 0, 0)?;
+    let head = sh_mir_add_block(mir, function, scope, 0, -1, 0, 0)?;
+    let body = sh_mir_add_block(mir, function, scope, 0, -1, 0, 0)?;
+    let done = sh_mir_add_block(mir, function, scope, 0, -1, 0, 0)?;
+    let destination = sh_cc_emit(mir, entry, 1, pointer, &empty, 0, 0, 0)?;
+    let source = if moving { sh_cc_emit(mir, entry, 1, pointer, &empty, 1, 0, 0)?; } else { destination; };
+    if not moving { args.clear(); args.push(element); let typed_pointer = sh_type_intern(&mir.types, 7, 0, 1, -1, &args)?; args.clear(); args.push(source); let place = sh_cc_emit(mir, entry, 12, typed_pointer, &args, 0, 0, 1)?; args.clear(); args.push(place); sh_cc_emit(mir, entry, 21, unit, &args, -1, element, 0)?; (); };
+    let zero = sh_cc_emit(mir, entry, 4, integer, &empty, 0, 0, 0)?;
+    let length = sh_cc_emit(mir, entry, 4, integer, &empty, size, 0, 0)?;
+    let one = sh_cc_emit(mir, entry, 4, integer, &empty, 1, 0, 0)?;
+    let zero_byte = sh_cc_emit(mir, entry, 4, byte, &empty, 0, 0, 0)?;
+    let enter = sh_mir_add_terminator(mir, entry, 1, -1, -1, 0, 0)?;
+    args.clear();
+    args.push(zero);
+    sh_mir_add_edge(mir, enter, head, &args, 0, 0)?;
+    let index = sh_cc_emit(mir, head, 2, integer, &empty, 0, 0, 0)?;
+    args.clear();
+    args.push(index);
+    args.push(length);
+    let condition = sh_cc_emit(mir, head, 11, boolean, &args, sh_kind("<"), 0, 0)?;
+    let branch = sh_mir_add_terminator(mir, head, 2, condition, -1, 0, 0)?;
+    sh_mir_add_edge(mir, branch, body, &empty, 1, 0)?;
+    sh_mir_add_edge(mir, branch, done, &empty, 0, 0)?;
+    args.clear();
+    args.push(source);
+    args.push(index);
+    let source_byte = sh_cc_emit(mir, body, 19, pointer, &args, 0, 0, 0)?;
+    if moving { args.clear(); args.push(source_byte); let value = sh_cc_emit(mir, body, 14, byte, &args, 0, 0, 0)?; args.clear(); args.push(destination); args.push(index); let target_byte = sh_cc_emit(mir, body, 19, pointer, &args, 0, 0, 0)?; args.clear(); args.push(target_byte); args.push(value); sh_cc_emit(mir, body, 15, unit, &args, 0, 0, 0)?; (); };
+    args.clear();
+    args.push(source_byte);
+    args.push(zero_byte);
+    sh_cc_emit(mir, body, 15, unit, &args, 0, 0, 0)?;
+    args.clear();
+    args.push(index);
+    args.push(one);
+    let next = sh_cc_emit(mir, body, 11, integer, &args, sh_kind("+"), 0, 0)?;
+    let again = sh_mir_add_terminator(mir, body, 1, -1, -1, 0, 0)?;
+    args.clear();
+    args.push(next);
+    sh_mir_add_edge(mir, again, head, &args, 0, 0)?;
+    let result = sh_cc_emit(mir, done, 3, unit, &empty, 0, 0, 0)?;
+    sh_mir_add_terminator(mir, done, 3, result, -1, 0, 0)?;
+    sh_i64_ok(function);
+}
+
+def sh_collection_callbacks_generate(mir: &ShMir, element: i64, maximum: i64) -> ShCollectionCallbacks {
+    let mut result = ShCollectionCallbacks { schema: 1, element: element, size: -1, alignment: -1, moving: -1, dropping: -1, error: 5430 };
+    if sh_mir_validate(mir).error != 0 or not sh_mir_concrete_type(mir, element, 0) { return result; };
+    let layout = sh_target_layout(mir, element, maximum);
+    if layout.error != 0 { result.error = layout.error; return result; };
+    let size = sh_layout_at(&layout.sizes, element);
+    let alignment = sh_layout_at(&layout.alignments, element);
+    if size <= 0 or size > 1048576 or alignment < 1 or alignment > 8 { return result; };
+    result.size = size;
+    result.alignment = alignment;
+    let moving = sh_cc_function(mir, element, size, true);
+    if not moving.is_ok() { result.error = moving.error; return result; };
+    result.moving = moving.value;
+    let dropping = sh_cc_function(mir, element, size, false);
+    if not dropping.is_ok() { result.error = dropping.error; return result; };
+    result.dropping = dropping.value;
+    result.error = sh_mir_validate(mir).error;
+    result;
+}
+
+def sh_collection_callbacks_validate(mir: &ShMir, callbacks: &ShCollectionCallbacks) -> i64 {
+    if callbacks.schema != 1 or callbacks.error != 0 or callbacks.size <= 0 or callbacks.size > 1048576 or callbacks.alignment < 1 or callbacks.alignment > 8 or callbacks.moving == callbacks.dropping or sh_mir_validate(mir).error != 0 or not sh_mir_concrete_type(mir, callbacks.element, 0) { return 5431; };
+    let layout = sh_target_layout(mir, callbacks.element, 1048576);
+    if layout.error != 0 or sh_layout_at(&layout.sizes, callbacks.element) != callbacks.size or sh_layout_at(&layout.alignments, callbacks.element) != callbacks.alignment or not sh_cc_body_valid(mir, callbacks.moving, callbacks.element, callbacks.size, true) or not sh_cc_body_valid(mir, callbacks.dropping, callbacks.element, callbacks.size, false) { return 5431; };
+    0;
+}
+
+def sh_collection_constructor_emit(mir: &ShMir, block: i64, element: i64, size: i64, alignment: i64, moving: i64, dropping: i64, provider: i64, vector: i64) -> Result<i64, i64> {
+    let empty = vec_new_i64();
+    let args = vec_new_i64();
+    let unit = sh_type_primitive(&mir.types, 0, 0, 0)?;
+    let byte = sh_type_primitive(&mir.types, 2, 8, 0)?;
+    let integer = sh_type_primitive(&mir.types, 2, 64, 1)?;
+    args.push(byte);
+    let pointer = sh_type_intern(&mir.types, 7, 0, 1, -1, &args)?;
+    if sh_mir_type_word(mir, vector, 0) != 12 or sh_mir_type_word(mir, vector, 1) != 0 or sh_mir_field_count(mir, vector, -1) != 2 or sh_mir_field_type(mir, vector, -1, 0) != integer or sh_mir_field_type(mir, vector, -1, 1) != integer { return sh_i64_error(5430); };
+    let actual = sh_target_layout(mir, element, 1048576);
+    if size <= 0 or size > 1048576 or actual.error != 0 or sh_layout_at(&actual.sizes, element) != size or sh_layout_at(&actual.alignments, element) != alignment or not sh_cc_body_valid(mir, moving, element, size, true) or not sh_cc_body_valid(mir, dropping, element, size, false) { return sh_i64_error(5430); };
+    let signature = sh_mir_fn(mir, provider, 1);
+    if provider < 0 or provider >= sh_mir_fn_count(mir) or sh_mir_fn(mir, provider, 3) != 1 or sh_mir_type_word(mir, signature, 0) != 11 or sh_mir_type_word(mir, signature, 1) != 1 or sh_mir_type_word(mir, signature, 2) != 0 or sh_mir_type_word(mir, signature, 5) != 5 or sh_mir_type_arg(mir, signature, 0) != integer or sh_mir_type_arg(mir, signature, 1) != integer or sh_mir_type_arg(mir, signature, 2) != pointer or sh_mir_type_arg(mir, signature, 3) != pointer or sh_mir_type_arg(mir, signature, 4) != integer { return sh_i64_error(5430); };
+    let size_value = sh_cc_emit(mir, block, 4, integer, &empty, size, 0, 0)?;
+    let alignment_value = sh_cc_emit(mir, block, 4, integer, &empty, alignment, 0, 0)?;
+    let move_address = sh_cc_emit(mir, block, 9, sh_mir_fn(mir, moving, 1), &empty, moving, 0, 0)?;
+    args.clear();
+    args.push(move_address);
+    let erased_move = sh_cc_emit(mir, block, 28, pointer, &args, 1, 0, 0)?;
+    if sh_mir_callback_erasure(mir, erased_move) != 0 { return sh_i64_error(5430); };
+    let drop_address = sh_cc_emit(mir, block, 9, sh_mir_fn(mir, dropping, 1), &empty, dropping, 0, 0)?;
+    args.clear();
+    args.push(drop_address);
+    let erased_drop = sh_cc_emit(mir, block, 28, pointer, &args, 2, 0, 0)?;
+    if sh_mir_callback_erasure(mir, erased_drop) != 0 { return sh_i64_error(5430); };
+    args.clear();
+    args.push(size_value);
+    args.push(alignment_value);
+    args.push(erased_move);
+    args.push(erased_drop);
+    let handle = sh_cc_emit(mir, block, 20, integer, &args, provider, 1, 0)?;
+    let marker = sh_cc_emit(mir, block, 4, integer, &empty, 0, 0, 0)?;
+    args.clear();
+    args.push(handle);
+    args.push(marker);
+    sh_cc_emit(mir, block, 16, vector, &args, 0, 0, 0);
+}

@@ -34,6 +34,11 @@ callbacks for the actual concrete element without inferring Copy from width.
 - **THEN** its callbacks and descriptor SHALL preserve alignment, move transfer, source clearing and exactly-once Drop
 - **AND** zero-valued source placeholders and allocation-failure handles SHALL not be mistaken for successful storage allocation
 
+#### Scenario: A generated move or drop body is changed
+- **WHEN** callback layout, source-clearing instructions, typed Drop, CFG edges or parameter relationships differ from the actual concrete-element contract
+- **THEN** callback validation SHALL reject even if the function still has a valid C signature and valid general MIR
+- **AND** a physically valid raw-MIR constructor SHALL still require independent provider and actual source authority before language-level lowering
+
 ### Requirement: Borrowed iterator results SHALL preserve active payload and backing lifetime
 
 Borrowed-next lowering SHALL bind semantic element, producer, backing loan and
