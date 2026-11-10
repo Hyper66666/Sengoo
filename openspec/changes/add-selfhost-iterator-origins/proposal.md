@@ -19,3 +19,8 @@ parameter effect/origin obligations, with independently pinned physical Option
 identity and exact source candidates. It owns no new runtime references:
 constructor allocation, actual provider pointer validity, NLL production
 integration and HIR6/MIR optional borrowing remain explicit later conditions.
+
+The next independent stage owns actual CFG last-reachable-use proof over those
+validated source candidates. It preserves old conservative diagnostic rows and
+records exact supersession evidence instead of deleting them. No old
+ShBackingLoans schema/width or HIR5/MIR/borrow source is changed by this overlay.

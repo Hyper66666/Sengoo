@@ -142,3 +142,73 @@ branch, reading uninitialized storage. This module uses a distinct
 control are preserved in target/selfhost/m3-iterator-loans/stage0-shadow. This
 is a narrow seed compatibility ledger, not a redefinition of SG lexical scopes
 or a claim about every scope pattern.
+
+## Stage three: independent CFG last-reachable-use overlay
+
+semantic_loan_liveness.sg consumes actual typed AST, independently pinned real
+module source snapshots, origins and the qualified ShBackingLoans source.
+ShLoanLiveness schema1 is a separate owned structure, unlowerable1. Every
+physical graph source is compared byte-for-byte to its immutable FileSnapshot;
+existing caller collections/Option pins and all input candidates are revalidated
+without type interning or semantic rechecking.
+
+The module builds actual event-CFG edges for if/else joins, return exits,
+while/loop heads and backedges, break exits, continue backedges and boolean
+short-circuit branches. Backward liveIn is use OR (successor liveIn minus fresh
+definitions). A second forward predecessor-intersection fixed point checks
+definitely initialized/still-valid logical origin tokens. Unknown effects
+conservatively kill origins. Neither source byte order nor parameter nominal
+types establish a region. Conditional state2 stays conditional. Tokens require
+actual root/T/canonical factory or exact admitted next source; raw integers and
+Owner/Vec handles do not become iterator tokens.
+
+Borrowed Option/payload uses propagate their element lease; copying a checked
+primitive tag reads the lease at that projection and the copied bool has no
+reference provenance. A field named handle retains raw taint. Unknown tracked
+aggregate/assignment/unsupported CFG relationships remain blocked rather than
+erasing provenance. Match/for/async/closure, tracked CFG result joins and general
+storage alias inference remain explicit5906 boundaries in this phase. Known
+mutation effects currently kill vector-origin validity conservatively, so some
+repeated mutation/new-iterator patterns can still over-reject independently of
+last-use liveness; no final full memory-management compatibility is claimed.
+
+Owned tables are nodes6[token,root,role,T,state,param], tokens10[callable,root,T,
+producer,oldLease,parent,state,kind,param,slot], events10[callable,AST,kind,token,
+root,evidence,useBits,defBits,killBits,scope], edges2, functions4, parallel
+liveIn/liveOut/validIn/validOut/reachable vectors, effects5 and diagnostics5.
+Supersessions5[oldDiagRow,callable,AST,root,disposition] preserves every old
+candidate diagnosis:0 proven ended,1 still live,2 not superseded,3 supported
+actual CFG for old5806. Scratch aliases are empty and function=-1/depth0.
+Validation recomputes this bounded overlay and compares every table. Source
+acceptance additionally requires no relevant diagnostics and resolved old rows;
+validation0 is only faithful candidate reconstruction.
+
+Each callable is bounded to60 logical tokens in positive i64 bitsets, events
+to caller limit<=20000 and edges<=3*limit. Raw copied validation input has a
+development hardcap of16M i64 words. This fidelity-first stage duplicates some
+AST/type input already owned by its dependencies; final single-owned arena/
+validated ranges and M8 memory/performance qualification remain open. Reports
+record actual word counts and observed Windows peak working set, with no
+performance qualification claim. Limit failures are fatal5900 and cannot be
+covered by an otherwise clean source function.
+
+The same-source branch/return/break/continue/backedge cases and a deliberately
+incorrect continue-to-exit algorithm provide causal CFG evidence. Actual
+ownership, canonical NLL across all constructs, constructor allocation,
+provider/optional-pointer validity, HIR6 and MIR27 remain separate mandatory
+integration conditions. This overlay emits no runtime reference or cleanup.
+
+Every owned-table append checks its actual status. A controlled failed event-
+destination handle demonstrates the failure path without forcing real memory
+exhaustion. Fatal5900 is also returned by the public function-error query; a
+caller cannot accidentally obtain function-clean from a failed arena/limit
+analysis. The immutable existing ShBackingLoans getter remains untouched.
+
+The exact typed-success fixtures mutation_then_fresh and multiple_mutations
+retain5904 as current conservative boundaries: last use; clear; create a fresh
+iterator and call next, or perform a second clear. Proving the one preceding
+lease ended does not prove owner-preserving mutation/fresh reborrowing. No
+spelling-based restoration of origin validity is permitted. A later fresh
+operation/effect proof must distinguish owner-preserving mutation from release,
+move and unknown escape using actual canonical declarations/body/provider
+contracts. The production/full-compatibility NLL task remains unchecked.

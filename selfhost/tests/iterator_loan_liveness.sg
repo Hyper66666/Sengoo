@@ -1,0 +1,122 @@
+import selfhost_semantic_loan_liveness;
+
+import std::args;
+
+import std::assert;
+
+extern "C" {
+    fn sengoo_string_live_handle_count() -> i64;
+    fn sengoo_buffer_live_handle_count() -> i64;
+    fn sengoo_opaque_live_handle_count() -> i64;
+    fn sengoo_file_snapshot_live_handle_count() -> i64;
+    fn sengoo_file_snapshot_live_bytes() -> i64;
+}
+
+def sh_nt_arg(index: i64) -> Result<String, i64> {
+    let b = ffi_buffer_new(arg_len(index)?)?;
+    let n = arg_copy(index, b)?;
+    string_from_utf8(b, n);
+}
+
+def sh_nt_fn(analyzed: &ShModuleChecked, name: &str) -> i64 {
+    sh_o_unique(analyzed, analyzed.front.source, name, 2);
+}
+
+def sh_nt_case(facts: &ShLoanLiveness, analyzed: &ShModuleChecked, name: &str, expected: i64) {
+    let function = sh_nt_fn(analyzed, name);
+    assert_true(function >= 0, "iterator_loan_liveness.sg", 1);
+    let actual = sh_nll_function_error(facts, function);
+    if actual != expected { println(name); println(actual); println(expected); let mut row = 0; while row < facts.diagnostics.len() / 5 { if sh_origin_word(&facts.diagnostics, row, 5, 0) == function { println(sh_origin_word(&facts.diagnostics, row, 5, 1)); let node = sh_origin_word(&facts.diagnostics, row, 5, 2); println(node); let text = sh_s_name(&analyzed.front.expanded.text, &analyzed.front.parsed.ast, node); if text.is_ok() { println(text.value); }; }; row = row + 1; }; };
+    assert_eq_i64(actual, expected, "iterator_loan_liveness.sg", 2);
+    ();
+}
+
+def sh_nt_words(values: &Vec<i64>) -> Vec<i64> {
+    let copy = vec_new_i64();
+    let mut i = 0;
+    while i < values.len() { copy.push(sh_origin_at(values, i)); i = i + 1; };
+    copy;
+}
+
+def sh_nt_scope(root: &String, stdlib: &String, collection: &String, collection_sha: &String, option: &String, option_sha: &String, poison: bool) -> Result<bool, i64> {
+    let file = file_snapshot_open(collection.as_str(), 1048576)?;
+    let identity = file.identity()?;
+    let ofile = file_snapshot_open(option.as_str(), 1048576)?;
+    let oid = ofile.identity()?;
+    let config = string_new();
+    let graph = sh_modules_load(root.as_str(), stdlib.as_str(), &config, 64, 1048576);
+    assert_eq_i64(graph.error, 0, "iterator_loan_liveness.sg", 3);
+    let analyzed = sh_modules_check(&graph, 100000, 1000);
+    if analyzed.error != 0 { println(analyzed.error); println(analyzed.start); };
+    assert_eq_i64(analyzed.error, 0, "iterator_loan_liveness.sg", 4);
+    let words = sh_nt_words(&analyzed.checked.types.words);
+    let args = sh_nt_words(&analyzed.checked.types.arguments);
+    let proto = "fn sengoo_raw_vec_iter_new(handle: i64) -> i64;";
+    let origins = sh_origins_analyze(&graph, &analyzed, identity.as_str(), collection_sha.as_str(), proto, 100000);
+    assert_eq_i64(origins.error, 0, "iterator_loan_liveness.sg", 5);
+    let loans = sh_loans_analyze(&origins, &graph, &analyzed, identity.as_str(), collection_sha.as_str(), proto, oid.as_str(), option_sha.as_str(), 100000, 1);
+    assert_eq_i64(loans.error, 0, "iterator_loan_liveness.sg", 6);
+    let mut facts = sh_loan_liveness(&origins, &loans, &graph, &analyzed, identity.as_str(), collection_sha.as_str(), proto, oid.as_str(), option_sha.as_str(), 10000);
+    if facts.error != 0 { println("nll fatal"); println(facts.error); println("counts input tokens events edges diag"); println(facts.input.len()); println(facts.tokens.len() / 10); println(facts.events.len() / 10); println(facts.edges.len() / 2); println(facts.diagnostics.len() / 5); };
+    assert_eq_i64(facts.error, 0, "iterator_loan_liveness.sg", 7);
+    assert_eq_i64(sh_loan_liveness_validate(&facts, &origins, &loans, &graph, &analyzed, identity.as_str(), collection_sha.as_str(), proto, oid.as_str(), option_sha.as_str()), 0, "iterator_loan_liveness.sg", 8);
+    sh_nt_case(&facts, &analyzed, "last_use_overreject", 0);
+    sh_nt_case(&facts, &analyzed, "iterator_later", 5903);
+    sh_nt_case(&facts, &analyzed, "element_last", 0);
+    sh_nt_case(&facts, &analyzed, "element_later", 5903);
+    sh_nt_case(&facts, &analyzed, "branch_last", 0);
+    sh_nt_case(&facts, &analyzed, "branch_join", 5903);
+    sh_nt_case(&facts, &analyzed, "branch_return", 0);
+    sh_nt_case(&facts, &analyzed, "return_join", 5903);
+    sh_nt_case(&facts, &analyzed, "loop_break", 0);
+    sh_nt_case(&facts, &analyzed, "break_later", 5903);
+    sh_nt_case(&facts, &analyzed, "loop_backedge", 5903);
+    sh_nt_case(&facts, &analyzed, "continue_backedge", 5903);
+    sh_nt_case(&facts, &analyzed, "continue_unreachable", 0);
+    sh_nt_case(&facts, &analyzed, "short_circuit", 5903);
+    sh_nt_case(&facts, &analyzed, "unknown_source", 5904);
+    sh_nt_case(&facts, &analyzed, "unsupported_match", 5906);
+    sh_nt_case(&facts, &analyzed, "conditional", 0);
+    sh_nt_case(&facts, &analyzed, "owner_last", 0);
+    sh_nt_case(&facts, &analyzed, "owner_later", 5903);
+    sh_nt_case(&facts, &analyzed, "copy_owner", 5807);
+    sh_nt_case(&facts, &analyzed, "all_parameters_good", 0);
+    sh_nt_case(&facts, &analyzed, "all_parameters_bad", 5903);
+    sh_nt_case(&facts, &analyzed, "unknown_container", 5906);
+    sh_nt_case(&facts, &analyzed, "branch_container", 5906);
+    sh_nt_case(&facts, &analyzed, "copied_tag", 0);
+    sh_nt_case(&facts, &analyzed, "mutation_then_fresh", 5904);
+    sh_nt_case(&facts, &analyzed, "multiple_mutations", 5904);
+    let mut state2 = 0;
+    let mut exact = 0;
+    let mut token = 0;
+    while token < facts.tokens.len() / 10 { if sh_nll_token(&facts, token, 0) == sh_nt_fn(&analyzed, "conditional") { assert_eq_i64(sh_nll_token(&facts, token, 6), 2, "iterator_loan_liveness.sg", 9); state2 = state2 + 1; }; token = token + 1; };
+    let mut row = 0;
+    while row < facts.supersessions.len() / 5 { if sh_origin_word(&facts.supersessions, row, 5, 1) == sh_nt_fn(&analyzed, "last_use_overreject") { assert_eq_i64(sh_origin_word(&facts.supersessions, row, 5, 4), 0, "iterator_loan_liveness.sg", 10); exact = exact + 1; }; row = row + 1; };
+    assert_true(state2 > 0 and exact > 0, "iterator_loan_liveness.sg", 11);
+    if poison { println("nll_counts"); println(facts.input.len()); println(facts.tokens.len() / 10); println(facts.events.len() / 10); println(facts.edges.len() / 2); println(facts.supersessions.len() / 5); };
+    if poison { let limited = sh_loan_liveness(&origins, &loans, &graph, &analyzed, identity.as_str(), collection_sha.as_str(), proto, oid.as_str(), option_sha.as_str(), 1); assert_eq_i64(limited.error, 5900, "iterator_loan_liveness.sg", 40); assert_eq_i64(sh_nll_function_error(&limited, sh_nt_fn(&analyzed, "last_use_overreject")), 5900, "iterator_loan_liveness.sg", 44); let mut failed_destination = sh_nll_new(10); let retained = failed_destination.events.handle; failed_destination.events.handle = 0; let failed_event = sh_nll_add_event(&mut failed_destination, 0, 0, -1, -1, -1, 0, 0, 0, 0); assert_eq_i64(failed_event, 0, "iterator_loan_liveness.sg", 45); assert_eq_i64(failed_destination.error, 5900, "iterator_loan_liveness.sg", 46); assert_eq_i64(sh_nll_function_error(&failed_destination, 0), 5900, "iterator_loan_liveness.sg", 47); failed_destination.events.handle = retained; let flags = sh_s_flags(&analyzed.checked, analyzed.checked.integer_type); analyzed.checked.types.words.set(analyzed.checked.integer_type * 6 + 2, flags ^ 1); assert_eq_i64(sh_loan_liveness_validate(&facts, &origins, &loans, &graph, &analyzed, identity.as_str(), collection_sha.as_str(), proto, oid.as_str(), option_sha.as_str()), 5901, "iterator_loan_liveness.sg", 41); analyzed.checked.types.words.set(analyzed.checked.integer_type * 6 + 2, flags); facts.aliases.push(0); assert_eq_i64(sh_loan_liveness_validate(&facts, &origins, &loans, &graph, &analyzed, identity.as_str(), collection_sha.as_str(), proto, oid.as_str(), option_sha.as_str()), 5902, "iterator_loan_liveness.sg", 42); facts.aliases.clear(); let prior_effect = sh_origin_at(&facts.effects, 2); facts.effects.set(2, -1); assert_eq_i64(sh_loan_liveness_validate(&facts, &origins, &loans, &graph, &analyzed, identity.as_str(), collection_sha.as_str(), proto, oid.as_str(), option_sha.as_str()), 5902, "iterator_loan_liveness.sg", 43); facts.effects.set(2, prior_effect); (); };
+    if poison { let old = sh_origin_at(&facts.live_out, 0); facts.live_out.set(0, old ^ 1); assert_eq_i64(sh_loan_liveness_validate(&facts, &origins, &loans, &graph, &analyzed, identity.as_str(), collection_sha.as_str(), proto, oid.as_str(), option_sha.as_str()), 5902, "iterator_loan_liveness.sg", 12); facts.live_out.set(0, old); let destination = sh_origin_at(&facts.edges, 1); facts.edges.set(1, 999999); assert_eq_i64(sh_loan_liveness_validate(&facts, &origins, &loans, &graph, &analyzed, identity.as_str(), collection_sha.as_str(), proto, oid.as_str(), option_sha.as_str()), 5902, "iterator_loan_liveness.sg", 13); facts.edges.set(1, destination); let old_token = sh_origin_at(&facts.tokens, 1); facts.tokens.set(1, -1); assert_eq_i64(sh_loan_liveness_validate(&facts, &origins, &loans, &graph, &analyzed, identity.as_str(), collection_sha.as_str(), proto, oid.as_str(), option_sha.as_str()), 5902, "iterator_loan_liveness.sg", 14); facts.tokens.set(1, old_token); let stored = sh_origin_at(&loans.nodes, 0); loans.nodes.set(0, stored ^ 1); assert_eq_i64(sh_loan_liveness_validate(&facts, &origins, &loans, &graph, &analyzed, identity.as_str(), collection_sha.as_str(), proto, oid.as_str(), option_sha.as_str()), 5901, "iterator_loan_liveness.sg", 15); loans.nodes.set(0, stored); facts.unlowerable = 0; assert_eq_i64(sh_loan_liveness_validate(&facts, &origins, &loans, &graph, &analyzed, identity.as_str(), collection_sha.as_str(), proto, oid.as_str(), option_sha.as_str()), 5902, "iterator_loan_liveness.sg", 16); facts.unlowerable = 1; let bad = sh_loan_liveness(&origins, &loans, &graph, &analyzed, identity.as_str(), "bad", proto, oid.as_str(), option_sha.as_str(), 10000); assert_eq_i64(bad.error, 5901, "iterator_loan_liveness.sg", 17); assert_eq_i64(sh_loan_liveness_validate(&facts, &origins, &loans, &graph, &analyzed, identity.as_str(), collection_sha.as_str(), proto, oid.as_str(), option_sha.as_str()), 0, "iterator_loan_liveness.sg", 18); let source = graph.sources.texts.get(graph.root).text; source.push_str(" ")?; assert_eq_i64(sh_loan_liveness_validate(&facts, &origins, &loans, &graph, &analyzed, identity.as_str(), collection_sha.as_str(), proto, oid.as_str(), option_sha.as_str()), 5901, "iterator_loan_liveness.sg", 19); (); };
+    assert_true(sh_o_equal(&words, &analyzed.checked.types.words) and sh_o_equal(&args, &analyzed.checked.types.arguments), "iterator_loan_liveness.sg", 20);
+    result_ok_bool(true);
+}
+
+def main() -> i64 {
+    if args_len() != 6 { return 64; };
+    let root = sh_nt_arg(0);
+    let stdlib = sh_nt_arg(1);
+    let collection = sh_nt_arg(2);
+    let collection_sha = sh_nt_arg(3);
+    let option = sh_nt_arg(4);
+    let option_sha = sh_nt_arg(5);
+    if not root.is_ok() or not stdlib.is_ok() or not collection.is_ok() or not collection_sha.is_ok() or not option.is_ok() or not option_sha.is_ok() { return 64; };
+    let strings = sengoo_string_live_handle_count();
+    let buffers = sengoo_buffer_live_handle_count();
+    let opaque = sengoo_opaque_live_handle_count();
+    let files = sengoo_file_snapshot_live_handle_count();
+    let bytes = sengoo_file_snapshot_live_bytes();
+    let mut round = 0;
+    while round < 3 { let result = sh_nt_scope(&root.value, &stdlib.value, &collection.value, &collection_sha.value, &option.value, &option_sha.value, round == 0); if not result.is_ok() { println(result.error); return 1; }; assert_eq_i64(sengoo_string_live_handle_count(), strings, "iterator_loan_liveness.sg", 30); assert_eq_i64(sengoo_buffer_live_handle_count(), buffers, "iterator_loan_liveness.sg", 31); assert_eq_i64(sengoo_opaque_live_handle_count(), opaque, "iterator_loan_liveness.sg", 32); assert_eq_i64(sengoo_file_snapshot_live_handle_count(), files, "iterator_loan_liveness.sg", 33); assert_eq_i64(sengoo_file_snapshot_live_bytes(), bytes, "iterator_loan_liveness.sg", 34); round = round + 1; };
+    println("iterator NLL: CFG and three exact resource scopes passed");
+    0;
+}

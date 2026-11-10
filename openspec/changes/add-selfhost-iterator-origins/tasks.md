@@ -151,7 +151,7 @@ rather than suppressing those type errors to reach loans.
 The previous qualified candidate misses the new wrapped-escape assertion:
 target/selfhost/m3-iterator-loans/old-escape-negative/evidence.json,
 SHA256 293396743327b1f078834fb6f7eac05826ed3d6c350dca8304f63764d36dd037.
-Its native build succeeds; execution exits1 with wrapped_escape, actual0,
+Its native build succeeds; execution exits 1 with wrapped_escape, actual0,
 expected5803 and the assertion filename. The separate qualification-binding.json
 verifies the exact consumed source hashes against the earlier qualified 133-
 snapshot report, rather than treating a fresh local hash as old qualification.
@@ -178,3 +178,88 @@ source functions to be clean. All candidates retain unlowerable=1.
 - [ ] Integrate actual constructor allocation/typed descriptors and independently qualified C provider declarations/artifacts; zero source bodies are logical intrinsic origins only.
 - [ ] Integrate mandatory HIR6 candidate/authority facts and MIR27 optional borrowing with Some/null guards, physical-handle obligations and non-Copy runtime Drop-exactly-once proof.
 - [ ] Reconcile and eliminate actualcore112 and complete compiler closure/self-hosting; this standalone stage does not change that production ledger.
+
+## Stage-three independent CFG last-use overlay
+
+- [x] Build actual typed event CFG for if/while/loop/return/break/continue and short-circuit branches, with bounded backward liveness and forward definite-origin validity.
+- [x] Prove the canonical last_use_overreject fixture accepted and delayed iterator/element/Owner uses rejected, including branch/loop exit and backedge distinctions.
+- [x] Preserve every old candidate diagnosis with explicit supersession rows; keep unsupported provenance/storage/CFG and conditional parameters conservative.
+- [x] Execute CFG-edge causal negative control, input/type/source/table poisons, readonly arenas, fatal limit control and first-call exact resource scopes.
+- [x] Pin the qualified loan dependency, record actual input words/Windows peak working set, run source/tool/revision gates and freeze this overlay for independent review.
+
+This is an independent candidate overlay. Production NLL/ownership, all-construct
+memory-management compatibility, HIR6/provider/constructor/MIR27 integration and
+actualcore112 remain open after this stage.
+
+### Stage-three exact native evidence and open compatibility ledger
+
+Final report: target/selfhost/m3-iterator-nll/checkpoint-boundaries/evidence.json,
+SHA256 d06e4eb949c56b2389ddbb39f059745ccc0bcc8aca7b7e08aef7a84b2b4f0d08.
+Actual full revision 52ca3dcbaa9d6360007b7ebadfb1991e6ea0d919 at start and end;
+Windows 11 10.0.26300-SP0/Python 3.12.14, actual UTC
+2026-11-10T00:50:39.548565+00:00 through
+2026-11-10T00:53:01.456598+00:00. Six commands passed: four pinned tool versions,
+native SG overlay test construction, and native source-CFG analysis over three
+first-call resource scopes. All 186 inputs, 131 immutable snapshots including
+the executable, four tools, external Cargo configuration candidates and producer
+checkout source hashes stayed unchanged. String, Buffer, opaque, file-snapshot
+handles and snapshot bytes return exactly after every scope, without warmup.
+
+The real typed-success source contains 27 named oracles: 10 accepted and 17
+rejected. Last-use iterator/element/Owner candidates end before one mutation;
+moving a use later produces 5903. If joins, alternate return paths, break exits,
+while/loop backedges, continue edges, unreachable code and short-circuit paths
+have actual CFG outcomes. Per-parameter effects preserve the unaffected root
+and reject the affected root when it remains borrowed. Primitive Option tag
+copies no longer prolong a reference; non-Copy Owner movement retains 5807.
+Unknown source/ordinary raw i64 remains 5904, unknown tracked containers and
+unsupported match remain 5906, and conditional token state2 never becomes1.
+
+Saved edges, liveness bits, token roots, effects, source bytes, type arenas,
+input loan tables, scratch and unlowerable bits all have explicit poison
+rejections; arena words/arguments remain unchanged. Limit 1 is fatal 5900,
+including the public function-error query. A controlled invalid destination
+handle produces the checked append-failure fatal path; this is not a claim that
+real OS memory exhaustion was forced. The candidate source dependency is
+pinned to the earlier loan report befc520f... and source SHA256
+a9c350d7aac79c0c0e647624711f748d401b9b2693cdf2c7835be8fed2798f7e.
+
+Actual table receipt: 1,206,982 copied input i64 words, 64 total tokens distributed
+across functions (each<=60), 262 events, 241 edges and 27 explicit supersessions.
+Observed peak Windows working set is 63,635,456 bytes for the native analysis
+process and 140,046,336 bytes for the compiler child. The 16M-word input hardcap is
+a development fidelity bound; repeated input storage is not M8 memory or
+performance qualification. Single-owned arena/validated-range deduplication
+remains open without dropping checked fields.
+
+The actual algorithm-negative report
+target/selfhost/m3-iterator-nll/continue-edge-negative/evidence.json,
+SHA256 772551b99b6397f81e653f5a504f156601069cfe3e0d26650ca7d3a3a25a8099,
+changes only continue successor from loop head to exit. It builds successfully
+and exits 1 with continue_backedge actual0/expected5903 and the assertion file.
+Source/tool guards remain empty; qualification-binding.json binds the original
+source and 117 consumed snapshots to the earlier passed source report rather
+than self-stating a fresh hash. The independent wrong-tool control replaces an
+existing pass with failed before executing any tool (zero steps), failed report
+SHA256 47706c4708111b6b73351bf388177c2fb3fe7ec2605c5351631cce4fabc4832e.
+Prior development and pre-boundary reports remain historical. This tasks
+evidence ledger is excluded from guarded inputs to avoid a report-hash cycle.
+
+- [ ] Distinguish actual owner-preserving mutation from release/transfer/unknown escape, so canonical fresh reborrowing and repeated mutations stop over-rejecting. Named typed-success mutation_then_fresh (clear then fresh iterator and next) and multiple_mutations currently reject 5904.
+- [ ] Extend supported all-construct CFG/NLL/storage aliases and integrate actual ownership, rather than claiming this standalone root-module overlay is full canonical NLL.
+- [ ] Integrate mandatory physical-handle/T obligations, actual constructor/provider/runtime optional-pointer facts, HIR6 and MIR27; production actualcore112 remains unchanged.
+
+ShBackingLoans source/schema1/widths, old borrow/hir/mir/semantic source and all
+existing builtin6/deferred4/actions8/9/10 contracts remain untouched. Both
+candidate layers remain unlowerable=1; source validation or a query alone is not
+runtime reference authority.
+
+Coverage is a mandatory future-consumer condition: the current overlay analyzes
+root-module source function bodies only. sh_nll_function_error(facts,binding)==0
+does not prove that a standard-library, bodyless, external or otherwise absent
+binding was analyzed. Consumers must first validate the complete facts with
+fatal0 and locate an exact actual callable coverage row in functions4, require
+supported complete CFG coverage, then inspect its diagnostics and every relevant
+old-row supersession. A missing coverage row stays unsupported and cannot pass
+because the convenience diagnostic query returns0. Physical-handle module-level
+analysis must establish its own coverage rather than reuse this root-only gap.

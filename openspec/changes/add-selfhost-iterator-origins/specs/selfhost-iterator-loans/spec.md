@@ -56,3 +56,29 @@ existing placeholder bodies implement runtime allocation or borrowed pointers.
 - **WHEN** mutation follows the last reachable iterator use but occurs before lexical scope end
 - **THEN** the standalone phase MAY conservatively reject the source and SHALL retain that exact compatibility boundary
 - **AND** it SHALL NOT claim final canonical borrow compatibility until actual last-use liveness accepts this case
+
+### Requirement: The independent last-use overlay SHALL prove actual CFG relationships
+
+The source NLL overlay SHALL consume validated origins and loan candidates plus
+actual typed/module input and caller pins. It SHALL retain candidate diagnostic
+rows and provide explicit per-row proof rather than erase the old tables.
+
+#### Scenario: Last use ends before backing mutation
+- **WHEN** all reachable iterator or element uses precede a backing effect on every path reaching that effect
+- **THEN** the supported source overlay SHALL prove the conservative conflict ended
+- **AND** moving that use after the effect SHALL produce a live-backing conflict
+
+#### Scenario: Branch and loop edges affect liveness
+- **WHEN** a later source use belongs to another return path, or to a loop backedge or continue successor
+- **THEN** the result SHALL follow actual CFG reachability and successor liveness rather than source byte position
+- **AND** break/return exits and unreachable code SHALL be represented explicitly
+
+#### Scenario: Unknown provenance or unsupported storage is encountered
+- **WHEN** a token lacks verified root/T provenance or an unknown aggregate/CFG relation may hide it
+- **THEN** the overlay SHALL reject or remain explicitly unsupported instead of treating nominal types, raw handles or conditional parameters as concrete producers
+- **AND** no new runtime Ref authority SHALL follow from candidate validation
+
+#### Scenario: Saved CFG, liveness or source facts are altered
+- **WHEN** edges, token relationships, liveness bits, input arenas, source bytes or caller pins differ from the actual validated input
+- **THEN** pure overlay validation SHALL reject without modifying typed arenas
+- **AND** limit exhaustion SHALL remain a fatal result rather than source acceptance
