@@ -1,0 +1,239 @@
+import selfhost_native_sdk_artifact;
+
+import selfhost_semantic_origins;
+
+struct ShCollectionProvider {
+    namespace: i64,
+    schema: i64,
+    abi: i64,
+    files: Vec<ShSdkSource>,
+    artifact: FileSnapshot,
+    artifact_identity: String,
+    artifact_sha256: String,
+    bytes: Buffer,
+    error: i64,
+}
+
+struct ShCollectionProviders {
+    namespace: i64,
+    rows: Vec<i64>,
+    error: i64,
+}
+
+def sh_cp_symbol(entry: i64) -> &str {
+    if entry == 0 { return "sengoo_raw_vec_new_parts"; };
+    if entry == 1 { return "sengoo_raw_vec_iter_new"; };
+    if entry == 2 { return "sengoo_raw_vec_iter_next"; };
+    if entry == 3 { return "sengoo_raw_vec_iter_free"; };
+    if entry == 4 { return "sengoo_raw_vec_free"; };
+    if entry == 5 { return "sengoo_raw_vec_push"; };
+    "";
+}
+
+def sh_cp_count(entry: i64) -> i64 {
+    if entry == 0 { return 4; };
+    if entry == 5 { return 2; };
+    if entry >= 1 and entry <= 4 { return 1; };
+    -1;
+}
+
+def sh_cp_code(entry: i64, argument: i64) -> i64 {
+    if argument < 0 or argument > sh_cp_count(entry) { return -1; };
+    if entry == 0 and argument >= 2 and argument < 4 or entry == 2 and argument == 1 or entry == 5 and argument == 1 { return 4; };
+    1;
+}
+
+def sh_cp_source(entry: i64) -> i64 {
+    if entry == 0 or entry == 2 or entry == 5 { return 3; };
+    4;
+}
+
+def sh_cp_requires(entry: i64) -> i64 {
+    if entry < 0 or entry >= 6 { return -1; };
+    1 << entry;
+}
+
+def sh_cp_prototype(entry: i64) -> &str {
+    if entry == 0 { return "long long sengoo_raw_vec_new_parts( long long size, long long align, void* move_value, void* drop_value )"; };
+    if entry == 1 { return "long long sengoo_raw_vec_iter_new(long long handle)"; };
+    if entry == 2 { return "void* sengoo_raw_vec_iter_next(long long handle)"; };
+    if entry == 3 { return "long long sengoo_raw_vec_iter_free(long long handle)"; };
+    if entry == 4 { return "long long sengoo_raw_vec_free(long long handle)"; };
+    if entry == 5 { return "long long sengoo_raw_vec_push(long long handle, void* value)"; };
+    "";
+}
+
+def sh_cp_open(provider: &mut ShCollectionProvider, path: &str, pin: &str) -> i64 {
+    if provider.files.len() >= 5 or not sh_sdk_pin_valid(pin) { provider.error = 5420; return -1; };
+    let opened = file_snapshot_open(path, 1048576);
+    if not opened.is_ok() { provider.error = 5401; return -1; };
+    let snapshot = opened.value;
+    let digest = snapshot.sha256();
+    let identity = snapshot.identity();
+    let canonical = snapshot.path();
+    let length = snapshot.len();
+    if not digest.is_ok() or not identity.is_ok() or not canonical.is_ok() or not length.is_ok() { provider.error = 5401; return -1; };
+    if digest.value.as_str() != pin { provider.error = 5402; return -1; };
+    let allocated = ffi_buffer_new(length.value);
+    if not allocated.is_ok() { provider.error = 5404; return -1; };
+    let mut bytes = allocated.value;
+    let copied = snapshot.copy_bytes(&mut bytes);
+    if not copied.is_ok() or copied.value != length.value { provider.error = 5401; return -1; };
+    let text = string_from_utf8(bytes, copied.value);
+    if not text.is_ok() { provider.error = 5403; return -1; };
+    let mut prior = 0;
+    while prior < provider.files.len() { if provider.files.get(prior).identity.as_str() == identity.value.as_str() { provider.error = 5403; return -1; }; prior = prior + 1; };
+    let source = provider.files.len();
+    let unit = ShSdkSource { snapshot: snapshot, text: text.value, path: canonical.value, identity: identity.value, sha256: digest.value };
+    if not provider.files.push(unit) { provider.error = 5404; return -1; };
+    source;
+}
+
+def sh_cp_type(types: &ShTypes, ty: i64, code: i64) -> bool {
+    if code == 1 { return sh_type_word(types, ty, 0).unwrap_or(-1) == 2 and sh_type_word(types, ty, 1).unwrap_or(-1) == 64 and sh_type_word(types, ty, 2).unwrap_or(-1) == 1 and sh_type_word(types, ty, 3).unwrap_or(-2) == -1 and sh_type_word(types, ty, 5).unwrap_or(-1) == 0; };
+    if code != 4 or sh_type_word(types, ty, 0).unwrap_or(-1) != 7 or sh_type_word(types, ty, 1).unwrap_or(-1) != 0 or sh_type_word(types, ty, 2).unwrap_or(-1) != 1 or sh_type_word(types, ty, 3).unwrap_or(-2) != -1 or sh_type_word(types, ty, 5).unwrap_or(-1) != 1 { return false; };
+    let inner = sh_type_argument(types, ty, 0).unwrap_or(-1);
+    sh_type_word(types, inner, 0).unwrap_or(-1) == 2 and sh_type_word(types, inner, 1).unwrap_or(-1) == 8 and sh_type_word(types, inner, 2).unwrap_or(-1) == 0 and sh_type_word(types, inner, 3).unwrap_or(-2) == -1 and sh_type_word(types, inner, 5).unwrap_or(-1) == 0;
+}
+
+def sh_cp_signature(types: &ShTypes, ty: i64, entry: i64) -> bool {
+    if entry < 0 or entry >= 6 or sh_type_word(types, ty, 0).unwrap_or(-1) != 11 or sh_type_word(types, ty, 1).unwrap_or(-1) != 1 or sh_type_word(types, ty, 2).unwrap_or(-1) != 0 or sh_type_word(types, ty, 3).unwrap_or(-2) != -1 or sh_type_word(types, ty, 5).unwrap_or(-1) != sh_cp_count(entry) + 1 { return false; };
+    let mut argument = 0;
+    while argument <= sh_cp_count(entry) { if not sh_cp_type(types, sh_type_argument(types, ty, argument).unwrap_or(-1), sh_cp_code(entry, argument)) { return false; }; argument = argument + 1; };
+    true;
+}
+
+def sh_cp_defined(bytes: &Buffer, entry: i64) -> bool {
+    if entry < 0 or entry >= 6 or not sh_sdk_artifact_symbol(bytes, sh_cp_symbol(entry)) { return false; };
+    let wanted = ffi_buffer_from_bytes(sh_cp_symbol(entry));
+    if not wanted.is_ok() { return false; };
+    let table = sh_sdk_artifact_u32(bytes, 8);
+    let count = sh_sdk_artifact_u32(bytes, 12);
+    let strings = table + count * 18;
+    let string_length = sh_sdk_artifact_u32(bytes, strings);
+    let sections = bytes.get_u8(2).unwrap_or(0) + bytes.get_u8(3).unwrap_or(0) * 256;
+    let mut found = 0;
+    let mut symbol = 0;
+    while symbol < count { let record = table + symbol * 18; let mut begin = record; let mut limit = record + 8; if sh_sdk_artifact_u32(bytes, record) == 0 { let offset = sh_sdk_artifact_u32(bytes, record + 4); if offset < 4 or offset >= string_length { return false; }; begin = strings + offset; limit = strings + string_length; }; let mut length = 0; while begin + length < limit and bytes.get_u8(begin + length).unwrap_or(-1) != 0 { length = length + 1; }; if begin + length == limit and limit != record + 8 { return false; }; let mut matches = length == wanted.value.used_len(); let mut character = 0; while matches and character < length { matches = bytes.get_u8(begin + character).unwrap_or(-1) == wanted.value.get_u8(character).unwrap_or(-2); character = character + 1; }; if matches { let section = bytes.get_u8(record + 12).unwrap_or(0) + bytes.get_u8(record + 13).unwrap_or(0) * 256; if section < 1 or section > sections or bytes.get_u8(record + 16).unwrap_or(0) != 2 or (bytes.get_u8(record + 14).unwrap_or(0) & 48) != 32 { return false; }; let header = 20 + (section - 1) * 40; let flags = sh_sdk_artifact_u32(bytes, header + 36); let extent = sh_sdk_artifact_u32(bytes, header + 16); let value = sh_sdk_artifact_u32(bytes, record + 8); if (flags & 536870944) != 536870944 or value < 0 or value >= extent { return false; }; found = found + 1; }; let auxiliary = bytes.get_u8(record + 17).unwrap_or(0); if auxiliary >= count - symbol { return false; }; symbol = symbol + auxiliary + 1; };
+    found == 1;
+}
+
+def sh_cp_declaration(analyzed: &ShModuleChecked, declaration: i64, entry: i64, source: i64) -> bool {
+    let ast = &analyzed.front.parsed.ast;
+    let unsafe_flag = if sh_cp_source(entry) == 3 { 2; } else { 0; };
+    if declaration < 0 or sh_ast_word(ast, declaration, 0) != 20 or sh_ast_word(ast, declaration, 4) != unsafe_flag or sh_ast_word(ast, declaration, 6) != sh_cp_count(entry) + 2 or not sh_sdk_ast_text(&analyzed.front.expanded.text, ast, sh_ast_child(ast, declaration, 0), sh_cp_symbol(entry)) or sh_s_child_kind(ast, declaration, 40) >= 0 { return false; };
+    let mut parent_count = 0;
+    let mut node = 0;
+    while node < sh_ast_count(ast) { if sh_ast_word(ast, node, 0) == 31 and sh_module_node_source(analyzed, node) == source and sh_sdk_ast_text(&analyzed.front.expanded.text, ast, sh_ast_child(ast, node, 0), "\"C\"") { let mut child = 1; while child < sh_ast_word(ast, node, 6) { if sh_ast_child(ast, node, child) == declaration { parent_count = parent_count + 1; }; child = child + 1; }; }; node = node + 1; };
+    parent_count == 1;
+}
+
+def sh_cp_stable(provider: &ShCollectionProvider, root: &str, manifest_pin: &str, artifact_pin: &str, development: bool) -> bool {
+    if not development or provider.error != 0 or provider.namespace != 2 or provider.schema != 1 or provider.abi != 1 or provider.files.len() != 5 or not sh_sdk_pin_valid(manifest_pin) or not sh_sdk_pin_valid(artifact_pin) or provider.files.get(0).sha256.as_str() != manifest_pin or provider.artifact_sha256.as_str() != artifact_pin { return false; };
+    let mut file = 0;
+    while file < 5 { let unit = provider.files.get(file); let stable = unit.snapshot.still_matches(); let digest = unit.snapshot.sha256(); let identity = unit.snapshot.identity(); let length = unit.snapshot.len(); if not stable.is_ok() or not stable.value or not digest.is_ok() or not identity.is_ok() or not length.is_ok() or digest.value.as_str() != unit.sha256.as_str() or identity.value.as_str() != unit.identity.as_str() or length.value != unit.text.len() { return false; }; let allocated = ffi_buffer_new(length.value); if not allocated.is_ok() { return false; }; let mut copied_bytes = allocated.value; let copied = unit.snapshot.copy_bytes(&mut copied_bytes); if not copied.is_ok() or copied.value != length.value { return false; }; let text = string_from_utf8(copied_bytes, copied.value); if not text.is_ok() or text.value.as_str() != unit.text.as_str() { return false; }; file = file + 1; };
+    let mut selected = 1;
+    while selected < 5 { let relative = if selected == 1 { "tools/stdlib/runtime_collections.c"; } else if selected == 2 { "tools/stdlib/runtime_shared.h"; } else if selected == 3 { "selfhost/sdk/collections_x64_abi1/prelude.sg"; } else { "tools/stdlib/collections.sg"; }; let expected_path = path_join_string(root, relative); if not expected_path.is_ok() { return false; }; let selected_snapshot = file_snapshot_open(expected_path.value.as_str(), 1048576); if not selected_snapshot.is_ok() { return false; }; let selected_identity = selected_snapshot.value.identity(); if not selected_identity.is_ok() or selected_identity.value.as_str() != provider.files.get(selected).identity.as_str() { return false; }; selected = selected + 1; };
+    let selected_doc = sh_sdk_json_parse(&provider.files.get(0).text, 10000);
+    let selected_record = sh_sdk_j_at(&selected_doc, sh_sdk_j_get(&selected_doc, selected_doc.root, "artifacts"), 0);
+    let selected_path = sh_sdk_j_text(&selected_doc, sh_sdk_j_get(&selected_doc, selected_record, "path"));
+    if not selected_path.is_ok() or not sh_sdk_relative(&selected_path.value) { return false; };
+    let artifact_path = path_join_string(root, selected_path.value.as_str());
+    if not artifact_path.is_ok() { return false; };
+    let selected_artifact = file_snapshot_open(artifact_path.value.as_str(), 16777216);
+    if not selected_artifact.is_ok() { return false; };
+    let selected_artifact_identity = selected_artifact.value.identity();
+    if not selected_artifact_identity.is_ok() or selected_artifact_identity.value.as_str() != provider.artifact_identity.as_str() { return false; };
+    let stable = provider.artifact.still_matches();
+    let identity = provider.artifact.identity();
+    let digest = provider.artifact.sha256();
+    let length = provider.artifact.len();
+    if not stable.is_ok() or not stable.value or not identity.is_ok() or not digest.is_ok() or not length.is_ok() or identity.value.as_str() != provider.artifact_identity.as_str() or digest.value.as_str() != artifact_pin or length.value != provider.bytes.used_len() { return false; };
+    let allocated = ffi_buffer_new(64);
+    if not allocated.is_ok() { return false; };
+    let output = allocated.value;
+    let copied = sengoo_hash_sha256_bounded(sengoo_ffi_buffer_ptr(provider.bytes.handle), length.value, 16777216, output.handle, 64);
+    if copied != 64 { return false; };
+    let actual = string_from_utf8(output, copied);
+    actual.is_ok() and actual.value.as_str() == artifact_pin and sh_sdk_artifact_coff(&provider.bytes);
+}
+
+def sh_cp_catalog(provider: &ShCollectionProvider, artifact_pin: &str) -> bool {
+    if provider.files.len() != 5 { return false; };
+    let doc = sh_sdk_json_parse(&provider.files.get(0).text, 10000);
+    let root = doc.root;
+    if doc.error != 0 or sh_sdk_j_size(&doc, root) != 10 or not sh_sdk_string(&doc, root, "schema", "sengoo.collections-sdk.v1") or not sh_sdk_integer(&doc, root, "namespace", 2) or not sh_sdk_string(&doc, root, "target", "x86_64-pc-windows-msvc") or not sh_sdk_integer(&doc, root, "abi_version", 1) or not sh_sdk_integer(&doc, root, "pointer_bits", 64) or not sh_sdk_string(&doc, root, "endianness", "little") or not sh_sdk_string(&doc, root, "class", "reference-runtime") { return false; };
+    let sources = sh_sdk_j_get(&doc, root, "sources");
+    if sh_sdk_j_size(&doc, sources) != 4 { return false; };
+    let mut source = 0;
+    while source < 4 { let item = sh_sdk_j_at(&doc, sources, source); let expected = if source == 0 { "tools/stdlib/runtime_collections.c"; } else if source == 1 { "tools/stdlib/runtime_shared.h"; } else if source == 2 { "selfhost/sdk/collections_x64_abi1/prelude.sg"; } else { "tools/stdlib/collections.sg"; }; if sh_sdk_j_size(&doc, item) != 3 or not sh_sdk_string(&doc, item, "path", expected) or not sh_sdk_string(&doc, item, "sha256", provider.files.get(source + 1).sha256.as_str()) or not sh_sdk_integer(&doc, item, "bytes", provider.files.get(source + 1).text.len()) { return false; }; source = source + 1; };
+    let artifacts = sh_sdk_j_get(&doc, root, "artifacts");
+    if sh_sdk_j_size(&doc, artifacts) != 1 { return false; };
+    let artifact = sh_sdk_j_at(&doc, artifacts, 0);
+    if sh_sdk_j_size(&doc, artifact) != 4 or not sh_sdk_string(&doc, artifact, "sha256", artifact_pin) or not sh_sdk_string(&doc, artifact, "format", "coff-object") or not sh_sdk_string(&doc, artifact, "source", "tools/stdlib/runtime_collections.c") { return false; };
+    let exports = sh_sdk_j_get(&doc, root, "exports");
+    if sh_sdk_j_size(&doc, exports) != 6 { return false; };
+    let mut entry = 0;
+    while entry < 6 { let item = sh_sdk_j_at(&doc, exports, entry); let begin = sh_sdk_j_integer(&doc, sh_sdk_j_get(&doc, item, "prototype_begin")); let end = sh_sdk_j_integer(&doc, sh_sdk_j_get(&doc, item, "prototype_end")); if sh_sdk_j_size(&doc, item) != 6 or not sh_sdk_integer(&doc, item, "requires", sh_cp_requires(entry)) or not sh_sdk_integer(&doc, item, "id", entry) or not sh_sdk_string(&doc, item, "symbol", sh_cp_symbol(entry)) or not sh_sdk_string(&doc, item, "prototype", sh_cp_prototype(entry)) or not begin.is_ok() or not end.is_ok() or begin.value < 0 or end.value < begin.value or end.value > provider.files.get(1).text.len() or not sh_cp_defined(&provider.bytes, entry) { return false; }; let text = provider.files.get(1).text.get(begin.value, end.value); if not text.is_ok() { return false; }; let normalized = sh_sdk_normalize(&text.value); if not normalized.is_ok() or normalized.value.as_str() != sh_cp_prototype(entry) { return false; }; entry = entry + 1; };
+    true;
+}
+
+def sh_collection_provider_load(root: &str, manifest: &str, manifest_pin: &str, artifact_pin: &str, target: &str, abi: i64, development: bool) -> ShCollectionProvider {
+    let files: Vec<ShSdkSource> = vec_new();
+    let mut provider = ShCollectionProvider { namespace: 2, schema: 1, abi: 1, files: files, artifact: FileSnapshot { handle: 0 }, artifact_identity: string_new(), artifact_sha256: string_new(), bytes: Buffer { handle: 0 }, error: 0 };
+    if not development { provider.error = 5410; return provider; };
+    if target != "x86_64-pc-windows-msvc" or abi != 1 or not sh_sdk_pin_valid(artifact_pin) { provider.error = 5420; return provider; };
+    let manifest_open = sh_cp_open(&mut provider, manifest, manifest_pin);
+    if manifest_open < 0 { return provider; };
+    let doc = sh_sdk_json_parse(&provider.files.get(0).text, 10000);
+    if doc.error != 0 { provider.error = 5403; return provider; };
+    let sources = sh_sdk_j_get(&doc, doc.root, "sources");
+    if sh_sdk_j_size(&doc, sources) != 4 { provider.error = 5420; return provider; };
+    let mut source = 0;
+    while source < 4 { let item = sh_sdk_j_at(&doc, sources, source); let path = sh_sdk_j_text(&doc, sh_sdk_j_get(&doc, item, "path")); let pin = sh_sdk_j_text(&doc, sh_sdk_j_get(&doc, item, "sha256")); if not path.is_ok() or not pin.is_ok() or not sh_sdk_relative(&path.value) { provider.error = 5420; return provider; }; let joined = path_join_string(root, path.value.as_str()); if not joined.is_ok() { provider.error = 5401; return provider; }; let source_open = sh_cp_open(&mut provider, joined.value.as_str(), pin.value.as_str()); if source_open < 0 { return provider; }; source = source + 1; };
+    let artifacts = sh_sdk_j_get(&doc, doc.root, "artifacts");
+    if sh_sdk_j_size(&doc, artifacts) != 1 { provider.error = 5420; return provider; };
+    let path = sh_sdk_j_text(&doc, sh_sdk_j_get(&doc, sh_sdk_j_at(&doc, artifacts, 0), "path"));
+    if not path.is_ok() or not sh_sdk_relative(&path.value) { provider.error = 5420; return provider; };
+    let joined = path_join_string(root, path.value.as_str());
+    if not joined.is_ok() { provider.error = 5401; return provider; };
+    let opened = file_snapshot_open(joined.value.as_str(), 16777216);
+    if not opened.is_ok() { provider.error = 5401; return provider; };
+    let snapshot = opened.value;
+    let identity = snapshot.identity();
+    let digest = snapshot.sha256();
+    let length = snapshot.len();
+    if not identity.is_ok() or not digest.is_ok() or not length.is_ok() { provider.error = 5401; return provider; };
+    if digest.value.as_str() != artifact_pin { provider.error = 5402; return provider; };
+    let allocated = ffi_buffer_new(length.value);
+    if not allocated.is_ok() { provider.error = 5404; return provider; };
+    provider.bytes = allocated.value;
+    let copied = snapshot.copy_bytes(&mut provider.bytes);
+    if not copied.is_ok() or copied.value != length.value { provider.error = 5401; return provider; };
+    provider.artifact_identity = identity.value;
+    provider.artifact_sha256 = digest.value;
+    provider.artifact = snapshot;
+    if not sh_cp_stable(&provider, root, manifest_pin, artifact_pin, development) or not sh_cp_catalog(&provider, artifact_pin) { provider.error = 5420; };
+    provider;
+}
+
+def sh_collection_provider_map(provider: &ShCollectionProvider, root: &str, graph: &ShModules, analyzed: &ShModuleChecked, manifest_pin: &str, artifact_pin: &str, collections_identity: &str, collections_pin: &str, target: &str, abi: i64, development: bool) -> ShCollectionProviders {
+    let mut result = ShCollectionProviders { namespace: 2, rows: vec_new_i64(), error: 5421 };
+    if target != "x86_64-pc-windows-msvc" or abi != 1 or not sh_cp_stable(provider, root, manifest_pin, artifact_pin, development) or not sh_cp_catalog(provider, artifact_pin) { return result; };
+    let prelude = sh_o_pin(graph, analyzed, provider.files.get(3).identity.as_str(), provider.files.get(3).sha256.as_str());
+    let collections = sh_o_pin(graph, analyzed, collections_identity, collections_pin);
+    if prelude < 0 or collections < 0 or collections_pin != provider.files.get(4).sha256.as_str() or collections_identity != provider.files.get(4).identity.as_str() { return result; };
+    let checked = &analyzed.checked;
+    let ast = &analyzed.front.parsed.ast;
+    let mut entry = 0;
+    while entry < 6 { let source = if sh_cp_source(entry) == 3 { prelude; } else { collections; }; let binding = sh_o_unique(analyzed, source, sh_cp_symbol(entry), 2); let declaration = sh_binding_word(checked, binding, 4); let ty = sh_binding_word(checked, binding, 3); let flags = sh_binding_word(checked, binding, 5); if binding < 0 or declaration < 0 or sh_module_node_source(analyzed, declaration) != source or not sh_cp_declaration(analyzed, declaration, entry, source) or flags != if sh_cp_source(entry) == 3 { 10; } else { 8; } or not sh_cp_signature(&checked.types, ty, entry) { return result; }; if not (result.rows.push(2) and result.rows.push(entry) and result.rows.push(binding) and result.rows.push(source) and result.rows.push(declaration) and result.rows.push(ty) and result.rows.push(1) and result.rows.push(sh_cp_requires(entry))) { result.error = 5404; return result; }; entry = entry + 1; };
+    result.error = 0;
+    result;
+}
+
+def sh_collection_provider_map_validate(provider: &ShCollectionProvider, root: &str, mapping: &ShCollectionProviders, graph: &ShModules, analyzed: &ShModuleChecked, manifest_pin: &str, artifact_pin: &str, collections_identity: &str, collections_pin: &str, target: &str, abi: i64, development: bool) -> i64 {
+    if mapping.namespace != 2 or mapping.error != 0 or mapping.rows.len() != 48 { return 5421; };
+    let actual = sh_collection_provider_map(provider, root, graph, analyzed, manifest_pin, artifact_pin, collections_identity, collections_pin, target, abi, development);
+    if actual.error != 0 or not sh_o_equal(&mapping.rows, &actual.rows) { return 5421; };
+    0;
+}

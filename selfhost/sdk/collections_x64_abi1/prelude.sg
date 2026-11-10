@@ -1,0 +1,5 @@
+extern "C" {
+    unsafe fn sengoo_raw_vec_new_parts(size: i64, align: i64, move_value: *mut u8, drop_value: *mut u8) -> i64;
+    unsafe fn sengoo_raw_vec_iter_next(handle: i64) -> *mut u8;
+    unsafe fn sengoo_raw_vec_push(handle: i64, value: *mut u8) -> i64;
+}

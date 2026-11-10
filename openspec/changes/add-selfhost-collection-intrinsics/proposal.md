@@ -12,3 +12,8 @@ analysis; the native-backend child owns physical callback ABI encoding. Preserve
 the existing sixteen-entry native SDK and public collection layout and APIs.
 The initial provider is the actual development C collection runtime. Porting
 its algorithms to SG and final SDK qualification remain required separately.
+
+The initial implementation checkpoint qualifies six namespace-two C exports
+and their actual physical SG declarations. It authenticates caller-selected
+source/object inputs and explicit development context without granting any
+origin, loan, constructor or safe-reference permission.

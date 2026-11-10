@@ -89,3 +89,45 @@ Finally run current compiler sources, accepted/rejected compatibility cases and
 the full required constructor/get/push/set/remove/iteration path. A reduced
 ownership diagnostic count alone does not qualify native compiler self-building.
 M3/M4/M6 and final C-runtime replacement retain their complete independent gates.
+
+## Namespace-two provider mapping checkpoint
+
+`collection_provider.sg` separates the six selected C exports from the base
+SDK's sixteen-entry identity. Its source inventory covers the exact existing
+`runtime_collections.c`, `runtime_shared.h`, a three-declaration prelude and the
+standard collections module. The prelude adds only new_parts, iter_next and
+push; iter_new, iter_free and vec_free must bind to the actual declarations
+already present in the independently pinned standard module.
+
+The caller supplies the root, manifest/object hashes, target, ABI and explicit
+development selection. Mapping and read-only replay take those independent
+values again, plus the standard module's physical identity/hash. A cached
+development provider cannot enter final mode. Every source snapshot must
+match its full owned text and selected physical file; the object snapshot and
+mutable byte buffer must both match the independent object hash. The six
+definitions must each have a unique external function symbol with an in-bounds
+address in an executable code section. A matching name in a data section is
+not a function implementation.
+
+Rows retain export ordinals separately from actual program binding, physical
+source, declaration AST and callable type. Their eight words are namespace,
+export, binding, source, declaration, function type, provider source unit and
+required-contract mask. The mask declares the missing compiler obligation:
+layout/callbacks 1, live backing 2, iterator/backing/element loan 4, iterator
+release 8, backing release 16 and element transfer/mutation/failure cleanup 32.
+It never asserts that an origin, loan or ownership check has already passed.
+Unsafe declaration flags are checked independently of those semantic masks.
+
+The qualification build captures the actual three C runtime source objects,
+each complete pre/post header dependency closure, the independent C caller's
+closure, selected linker executable and actually read libraries. The SG mapper
+checks real module-loaded declarations and refuses altered namespace, row,
+binding, source mapping, callable ABI, object bytes, executable section,
+manifest/object pins, target, runtime ABI and final-mode reuse. These checks do
+not implement constructors, generated callbacks, optional borrows, further
+collection operations or the eventual SG runtime replacement.
+
+The actual declaration AST must also retain the expected unsafe flag, function
+name/arity, absence of a body and unique parent C block in the pinned physical
+module. Matching a cached binding/type row alone cannot replace those source
+relationships.

@@ -1,0 +1,82 @@
+{
+  "schema": "sengoo.collections-sdk.v1",
+  "namespace": 2,
+  "target": "x86_64-pc-windows-msvc",
+  "abi_version": 1,
+  "pointer_bits": 64,
+  "endianness": "little",
+  "class": "reference-runtime",
+  "sources": [
+    {
+      "path": "tools/stdlib/runtime_collections.c",
+      "sha256": "e7eb7e867bdfe713b8a897b4376bceeced12b713c0fefb2a20e6272951df76e2",
+      "bytes": 68210
+    },
+    {
+      "path": "tools/stdlib/runtime_shared.h",
+      "sha256": "a49cda38fee3029bf296ff0a38337695a602380c82d58b37a65cadfa6cfebf0c",
+      "bytes": 6963
+    },
+    {
+      "path": "selfhost/sdk/collections_x64_abi1/prelude.sg",
+      "sha256": "df595b86e19db0eacebcb39db3f45a6e93a31cf468e8b408fba8a231c5628360",
+      "bytes": 262
+    },
+    {
+      "path": "tools/stdlib/collections.sg",
+      "sha256": "f1ca634e9b39e626d0420bb874e29ddbb675b01b8e207982ed79d485767273dd",
+      "bytes": 120362
+    }
+  ],
+  "exports": [
+    {
+      "id": 0,
+      "symbol": "sengoo_raw_vec_new_parts",
+      "prototype": "long long sengoo_raw_vec_new_parts( long long size, long long align, void* move_value, void* drop_value )",
+      "requires": 1,
+      "prototype_begin": 26615,
+      "prototype_end": 26742
+    },
+    {
+      "id": 1,
+      "symbol": "sengoo_raw_vec_iter_new",
+      "prototype": "long long sengoo_raw_vec_iter_new(long long handle)",
+      "requires": 2,
+      "prototype_begin": 31776,
+      "prototype_end": 31828
+    },
+    {
+      "id": 2,
+      "symbol": "sengoo_raw_vec_iter_next",
+      "prototype": "void* sengoo_raw_vec_iter_next(long long handle)",
+      "requires": 4,
+      "prototype_begin": 32080,
+      "prototype_end": 32129
+    },
+    {
+      "id": 3,
+      "symbol": "sengoo_raw_vec_iter_free",
+      "prototype": "long long sengoo_raw_vec_iter_free(long long handle)",
+      "requires": 8,
+      "prototype_begin": 33156,
+      "prototype_end": 33209
+    },
+    {
+      "id": 4,
+      "symbol": "sengoo_raw_vec_free",
+      "prototype": "long long sengoo_raw_vec_free(long long handle)",
+      "requires": 16,
+      "prototype_begin": 31247,
+      "prototype_end": 31295
+    },
+    {
+      "id": 5,
+      "symbol": "sengoo_raw_vec_push",
+      "prototype": "long long sengoo_raw_vec_push(long long handle, void* value)",
+      "requires": 32,
+      "prototype_begin": 27294,
+      "prototype_end": 27355
+    }
+  ],
+  "artifacts": []
+}

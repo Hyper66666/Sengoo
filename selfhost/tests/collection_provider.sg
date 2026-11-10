@@ -1,0 +1,107 @@
+import selfhost_collection_provider;
+
+import std::args;
+
+import std::assert;
+
+extern "C" {
+    fn sengoo_string_live_handle_count() -> i64;
+    fn sengoo_buffer_live_handle_count() -> i64;
+    fn sengoo_opaque_live_handle_count() -> i64;
+    fn sengoo_file_snapshot_live_handle_count() -> i64;
+    fn sengoo_file_snapshot_live_bytes() -> i64;
+}
+
+def sh_cp_arg(index: i64) -> Result<String, i64> {
+    let buffer = ffi_buffer_new(arg_len(index)?)?;
+    let copied = arg_copy(index, buffer)?;
+    string_from_utf8(buffer, copied);
+}
+
+def sh_cp_code_poison(provider: &ShCollectionProvider, backup: &Buffer) -> Result<bool, i64> {
+    let length = backup.used_len();
+    let flags_byte = backup.get_u8(59)?;
+    assert_true((flags_byte & 32) != 0, "collection_provider.sg", 25);
+    provider.bytes.clear();
+    provider.bytes.append_copy(backup, 0, 59)?;
+    provider.bytes.push_u8(flags_byte & 223)?;
+    provider.bytes.append_copy(backup, 60, length - 60)?;
+    let mut entry = 0;
+    while entry < 6 { assert_true(not sh_cp_defined(&provider.bytes, entry), "collection_provider.sg", 26); entry = entry + 1; };
+    provider.bytes.clear();
+    provider.bytes.append_copy(backup, 0, length)?;
+    entry = 0;
+    while entry < 6 { assert_true(sh_cp_defined(&provider.bytes, entry), "collection_provider.sg", 27); entry = entry + 1; };
+    result_ok_bool(true);
+}
+
+def sh_cp_test(root: &String, manifest_pin: &String, artifact_pin: &String, program: &String, poison: bool) -> Result<bool, i64> {
+    let manifest = path_join_string(root.as_str(), "selfhost/sdk/collections_x64_abi1/manifest.json")?;
+    let stdlib = path_join_string(root.as_str(), "tools/stdlib")?;
+    let prelude = path_join_string(root.as_str(), "selfhost/sdk/collections_x64_abi1/prelude.sg")?;
+    let collections = path_join_string(root.as_str(), "tools/stdlib/collections.sg")?;
+    let snapshot = file_snapshot_open(collections.as_str(), 1048576)?;
+    let identity = snapshot.identity()?;
+    let digest = snapshot.sha256()?;
+    let mut provider = sh_collection_provider_load(root.as_str(), manifest.as_str(), manifest_pin.as_str(), artifact_pin.as_str(), "x86_64-pc-windows-msvc", 1, true);
+    if provider.error != 0 { println("provider load"); println(provider.error); };
+    assert_eq_i64(provider.error, 0, "collection_provider.sg", 1);
+    let config = string_from_str("collection_runtime=")?;
+    config.push_str(prelude.as_str())?;
+    let graph = sh_modules_load(program.as_str(), stdlib.as_str(), &config, 64, 1048576);
+    assert_eq_i64(graph.error, 0, "collection_provider.sg", 2);
+    let analyzed = sh_modules_check(&graph, 100000, 1000);
+    if analyzed.error != 0 { println("program check"); println(analyzed.error); println(analyzed.start); };
+    assert_eq_i64(analyzed.error, 0, "collection_provider.sg", 3);
+    let mut mapping = sh_collection_provider_map(&provider, root.as_str(), &graph, &analyzed, manifest_pin.as_str(), artifact_pin.as_str(), identity.as_str(), digest.as_str(), "x86_64-pc-windows-msvc", 1, true);
+    if mapping.error != 0 { println("program map"); println(mapping.error); };
+    assert_eq_i64(mapping.error, 0, "collection_provider.sg", 4);
+    assert_eq_i64(mapping.rows.len(), 48, "collection_provider.sg", 5);
+    let words = vec_new_i64();
+    let arguments = vec_new_i64();
+    let mut index = 0;
+    while index < analyzed.checked.types.words.len() { words.push(sh_origin_at(&analyzed.checked.types.words, index)); index = index + 1; };
+    index = 0;
+    while index < analyzed.checked.types.arguments.len() { arguments.push(sh_origin_at(&analyzed.checked.types.arguments, index)); index = index + 1; };
+    assert_eq_i64(sh_collection_provider_map_validate(&provider, root.as_str(), &mapping, &graph, &analyzed, manifest_pin.as_str(), artifact_pin.as_str(), identity.as_str(), digest.as_str(), "x86_64-pc-windows-msvc", 1, true), 0, "collection_provider.sg", 6);
+    let final_mapping = sh_collection_provider_map(&provider, root.as_str(), &graph, &analyzed, manifest_pin.as_str(), artifact_pin.as_str(), identity.as_str(), digest.as_str(), "x86_64-pc-windows-msvc", 1, false);
+    assert_eq_i64(final_mapping.error, 5421, "collection_provider.sg", 28);
+    let wrong_mapping_abi = sh_collection_provider_map(&provider, root.as_str(), &graph, &analyzed, manifest_pin.as_str(), artifact_pin.as_str(), identity.as_str(), digest.as_str(), "x86_64-pc-windows-msvc", 2, true);
+    assert_eq_i64(wrong_mapping_abi.error, 5421, "collection_provider.sg", 29);
+    let wrong_mapping_target = sh_collection_provider_map(&provider, root.as_str(), &graph, &analyzed, manifest_pin.as_str(), artifact_pin.as_str(), identity.as_str(), digest.as_str(), "x86_64-unknown-linux-gnu", 1, true);
+    assert_eq_i64(wrong_mapping_target.error, 5421, "collection_provider.sg", 30);
+    let declared_node = sh_origin_at(&mapping.rows, 4);
+    let declared_flags = sh_ast_word(&analyzed.front.parsed.ast, declared_node, 4);
+    analyzed.front.parsed.ast.words.set(declared_node * 7 + 4, 0);
+    let wrong_ast_flags = sh_collection_provider_map(&provider, root.as_str(), &graph, &analyzed, manifest_pin.as_str(), artifact_pin.as_str(), identity.as_str(), digest.as_str(), "x86_64-pc-windows-msvc", 1, true);
+    assert_eq_i64(wrong_ast_flags.error, 5421, "collection_provider.sg", 31);
+    analyzed.front.parsed.ast.words.set(declared_node * 7 + 4, declared_flags);
+    let declared_name = sh_ast_child(&analyzed.front.parsed.ast, declared_node, 0);
+    let declared_end = sh_ast_word(&analyzed.front.parsed.ast, declared_name, 3);
+    analyzed.front.parsed.ast.words.set(declared_name * 7 + 3, declared_end - 1);
+    let wrong_ast_name = sh_collection_provider_map(&provider, root.as_str(), &graph, &analyzed, manifest_pin.as_str(), artifact_pin.as_str(), identity.as_str(), digest.as_str(), "x86_64-pc-windows-msvc", 1, true);
+    assert_eq_i64(wrong_ast_name.error, 5421, "collection_provider.sg", 32);
+    analyzed.front.parsed.ast.words.set(declared_name * 7 + 3, declared_end);
+    if poison { index = 0; while index < 8 { let saved = sh_origin_at(&mapping.rows, index); mapping.rows.set(index, -1); assert_eq_i64(sh_collection_provider_map_validate(&provider, root.as_str(), &mapping, &graph, &analyzed, manifest_pin.as_str(), artifact_pin.as_str(), identity.as_str(), digest.as_str(), "x86_64-pc-windows-msvc", 1, true), 5421, "collection_provider.sg", 7); mapping.rows.set(index, saved); index = index + 1; }; mapping.namespace = 1; assert_eq_i64(sh_collection_provider_map_validate(&provider, root.as_str(), &mapping, &graph, &analyzed, manifest_pin.as_str(), artifact_pin.as_str(), identity.as_str(), digest.as_str(), "x86_64-pc-windows-msvc", 1, true), 5421, "collection_provider.sg", 8); mapping.namespace = 2; let binding = sh_origin_at(&mapping.rows, 2); let declaration = sh_origin_at(&mapping.rows, 4); let ty = sh_origin_at(&mapping.rows, 5); let source = sh_module_binding_source(&analyzed, binding); analyzed.binding_modules.set(binding, graph.root); let rejected_9 = sh_collection_provider_map(&provider, root.as_str(), &graph, &analyzed, manifest_pin.as_str(), artifact_pin.as_str(), identity.as_str(), digest.as_str(), "x86_64-pc-windows-msvc", 1, true); assert_eq_i64(rejected_9.error, 5421, "collection_provider.sg", 9); analyzed.binding_modules.set(binding, source); analyzed.node_modules.set(declaration, graph.root); let rejected_10 = sh_collection_provider_map(&provider, root.as_str(), &graph, &analyzed, manifest_pin.as_str(), artifact_pin.as_str(), identity.as_str(), digest.as_str(), "x86_64-pc-windows-msvc", 1, true); assert_eq_i64(rejected_10.error, 5421, "collection_provider.sg", 10); analyzed.node_modules.set(declaration, source); let abi = sh_origin_at(&analyzed.checked.types.words, ty * 6 + 1); analyzed.checked.types.words.set(ty * 6 + 1, 0); let rejected_11 = sh_collection_provider_map(&provider, root.as_str(), &graph, &analyzed, manifest_pin.as_str(), artifact_pin.as_str(), identity.as_str(), digest.as_str(), "x86_64-pc-windows-msvc", 1, true); assert_eq_i64(rejected_11.error, 5421, "collection_provider.sg", 11); analyzed.checked.types.words.set(ty * 6 + 1, abi); let object_length = provider.bytes.used_len(); let backup = ffi_buffer_new(object_length)?; backup.append_copy(&provider.bytes, 0, object_length)?; provider.bytes.clear(); provider.bytes.push_u8(0)?; provider.bytes.append_copy(&backup, 1, object_length - 1)?; let rejected_12 = sh_collection_provider_map(&provider, root.as_str(), &graph, &analyzed, manifest_pin.as_str(), artifact_pin.as_str(), identity.as_str(), digest.as_str(), "x86_64-pc-windows-msvc", 1, true); assert_eq_i64(rejected_12.error, 5421, "collection_provider.sg", 12); provider.bytes.clear(); provider.bytes.append_copy(&backup, 0, object_length)?; sh_cp_code_poison(&provider, &backup)?; assert_eq_i64(sh_collection_provider_map_validate(&provider, root.as_str(), &mapping, &graph, &analyzed, manifest_pin.as_str(), artifact_pin.as_str(), identity.as_str(), digest.as_str(), "x86_64-pc-windows-msvc", 1, true), 0, "collection_provider.sg", 13); let final_mode = sh_collection_provider_load(root.as_str(), manifest.as_str(), manifest_pin.as_str(), artifact_pin.as_str(), "x86_64-pc-windows-msvc", 1, false); assert_eq_i64(final_mode.error, 5410, "collection_provider.sg", 14); let wrong_target = sh_collection_provider_load(root.as_str(), manifest.as_str(), manifest_pin.as_str(), artifact_pin.as_str(), "x86_64-unknown-linux-gnu", 1, true); assert_eq_i64(wrong_target.error, 5420, "collection_provider.sg", 15); let wrong_manifest = sh_collection_provider_load(root.as_str(), manifest.as_str(), "0000000000000000000000000000000000000000000000000000000000000000", artifact_pin.as_str(), "x86_64-pc-windows-msvc", 1, true); assert_eq_i64(wrong_manifest.error, 5402, "collection_provider.sg", 16); let wrong_artifact = sh_collection_provider_load(root.as_str(), manifest.as_str(), manifest_pin.as_str(), "0000000000000000000000000000000000000000000000000000000000000000", "x86_64-pc-windows-msvc", 1, true); assert_eq_i64(wrong_artifact.error, 5402, "collection_provider.sg", 17); (); };
+    assert_true(sh_o_equal(&words, &analyzed.checked.types.words), "collection_provider.sg", 18);
+    assert_true(sh_o_equal(&arguments, &analyzed.checked.types.arguments), "collection_provider.sg", 19);
+    result_ok_bool(true);
+}
+
+def main() -> i64 {
+    if args_len() != 4 { return 64; };
+    let root = sh_cp_arg(0);
+    let manifest_pin = sh_cp_arg(1);
+    let artifact_pin = sh_cp_arg(2);
+    let program = sh_cp_arg(3);
+    if not root.is_ok() or not manifest_pin.is_ok() or not artifact_pin.is_ok() or not program.is_ok() { return 65; };
+    let strings = sengoo_string_live_handle_count();
+    let buffers = sengoo_buffer_live_handle_count();
+    let opaque = sengoo_opaque_live_handle_count();
+    let files = sengoo_file_snapshot_live_handle_count();
+    let bytes = sengoo_file_snapshot_live_bytes();
+    let mut round = 0;
+    while round < 5 { { let result = sh_cp_test(&root.value, &manifest_pin.value, &artifact_pin.value, &program.value, true); if not result.is_ok() { println(result.error); return 65; }; }; assert_eq_i64(sengoo_string_live_handle_count(), strings, "collection_provider.sg", 20); assert_eq_i64(sengoo_buffer_live_handle_count(), buffers, "collection_provider.sg", 21); assert_eq_i64(sengoo_opaque_live_handle_count(), opaque, "collection_provider.sg", 22); assert_eq_i64(sengoo_file_snapshot_live_handle_count(), files, "collection_provider.sg", 23); assert_eq_i64(sengoo_file_snapshot_live_bytes(), bytes, "collection_provider.sg", 24); round = round + 1; };
+    println("collection provider: six physical program bindings and five exact resource scopes passed");
+    42;
+}

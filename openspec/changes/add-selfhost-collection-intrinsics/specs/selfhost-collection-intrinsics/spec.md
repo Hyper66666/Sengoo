@@ -10,6 +10,20 @@ prototypes and actual program bindings independently of saved candidate data.
 - **THEN** lowering SHALL require the actual selected provider/source/type/field relationships before accepting it
 - **AND** missing or mismatched authority SHALL fail explicitly without a reference fallback
 
+#### Scenario: A development provider is mapped into a checked program
+- **WHEN** the namespace-two provider maps its six exports into actual module-loaded declarations
+- **THEN** it SHALL require independently selected root, manifest/object pins, target, ABI and development mode at mapping and replay entrypoints
+- **AND** it SHALL bind actual physical source, declaration, binding and callable types while leaving the base SDK's sixteen-entry identity unchanged
+- **AND** changed declaration AST flags, name/arity, body or C-block membership SHALL prevent admission despite an unchanged cached binding row
+
+#### Scenario: A symbol has the expected name without an executable definition
+- **WHEN** an object lacks a unique in-bounds external function definition in executable code or its mutable bytes differ from the selected object hash
+- **THEN** provider admission SHALL reject before granting mapping authority
+
+#### Scenario: A mapping declares an operation's required contract
+- **WHEN** the mapping records layout, backing, iterator, release or element-transfer preconditions
+- **THEN** those masks SHALL describe obligations for subsequent compiler checks and SHALL NOT stand in for satisfied origin, loan or ownership facts
+
 ### Requirement: Constructors SHALL produce real concrete storage contracts
 
 Canonical construction SHALL derive target layout and generated move/drop
