@@ -66,3 +66,12 @@ comparison remain separate retained development evidence.
 No public source optional-borrow/push path, complete compiler closure, final SG
 collection runtime, self-building fixed point or performance cutover is
 qualified by this constructor entry. Those umbrella tasks remain open.
+
+The follow-up `target/selfhost/m3-constructor-text-nul2/evidence.json` changes
+only the test's embedded-NUL spelling to Buffer append/push-u8/strict-UTF8
+construction. The locked formatter had inserted a literal zero byte into its
+char literal; the replacement keeps the test file reviewable UTF-8 text. A
+fresh test executable again rejects the NUL name with 5008, restores all five
+first-call resource counts, and emits a positive object byte-identical to the
+qualified source-0 object. The earlier attempted integer-to-char cast is a
+retained failed build; the compiler correctly rejects that unsupported cast.
