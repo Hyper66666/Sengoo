@@ -1,0 +1,104 @@
+import selfhost_mir_lower;
+
+import selfhost_semantic_collection_borrow;
+
+import selfhost_native;
+
+def sh_cs_root(analyzed: &ShModuleChecked, name: &str) -> i64 {
+    let mut binding = 0;
+    let mut found = -1;
+    while binding < sh_binding_count(&analyzed.checked) { if sh_binding_word(&analyzed.checked, binding, 2) == 2 and sh_binding_word(&analyzed.checked, binding, 6) < 0 and sh_module_binding_source(analyzed, binding) == analyzed.front.source and sh_o_name(&analyzed.checked, binding, name) { if found >= 0 { return -1; }; found = binding; }; binding = binding + 1; };
+    found;
+}
+
+def sh_cs_graph(entry: &str, library: &str, prelude: &String, maximum: i64) -> ShModules {
+    let config = string_new();
+    let prefix = config.push_str("collection_runtime=");
+    let mapped = if prefix.is_ok() { config.push_str(prelude.as_str()); } else { result_err_bool(5001); };
+    let mut graph = sh_modules_load(entry, library, &config, 64, maximum);
+    if not prefix.is_ok() or not mapped.is_ok() { sh_module_fail(&mut graph, 5001, -1, 0, 0); return graph; };
+    if graph.error != 0 { return graph; };
+    let previous = graph.units.len();
+    let root = graph.root;
+    let module = sh_module_load(&mut graph, prelude, 0, ShSpan { source: root, start: 0, end: 0 });
+    if graph.error == 0 and module >= previous { sh_module_visit(&mut graph, module, 0); sh_module_order(&graph, module); sh_module_emit(&mut graph, module); };
+    graph;
+}
+
+def sh_cs_drop_jobs(checked: &ShChecked, ast: &ShAst, prepared: &ShCollectionFinalized, element: i64, roots: &Vec<i64>, maximum: i64) -> i64 {
+    let queue = vec_new_i64();
+    if not queue.push(element) { return 5001; };
+    let mut position = 0;
+    while position < queue.len() { let ty = sh_s_resolve(checked, sh_origin_at(&queue, position)); if position >= maximum or ty < 0 or ty >= sh_type_count(&checked.types) or sh_l_has_parameter(checked, ty, 0) { return 5008; }; if sh_s_kind(checked, ty) == 12 { let owner = sh_adt_binding(checked, ty); let declaration = sh_binding_word(checked, owner, 4); if owner < 0 or sh_binding_word(checked, owner, 2) != 3 or sh_ast_word(ast, declaration, 0) != 22 { return 5008; }; let mut parent = 0; while parent < checked.class_parents.len() { if sh_origin_at(&checked.class_parents, parent) == owner { return 5008; }; parent = parent + 2; }; }; let mut constraint = 0; let mut selected = -1; while constraint < checked.constraints.len() { let trait_name = sh_symbol_text(&checked.symbols, sh_origin_at(&checked.constraints, constraint + 1)); if sh_origin_at(&checked.constraints, constraint + 2) == -2 and trait_name.is_ok() and trait_name.value.as_str() == "Drop" and sh_hir_types_equal(checked, sh_origin_at(&checked.constraints, constraint), ty, 0) { let implementation = sh_origin_at(&checked.constraints, constraint + 3); let mut binding = 0; while binding < sh_binding_count(checked) { if sh_binding_word(checked, binding, 2) == 2 and sh_binding_word(checked, binding, 6) == implementation and sh_o_name(checked, binding, "drop") { if selected >= 0 or sh_hir_function_body_state(ast, checked, binding) != 1 or sh_l_has_parameter(checked, sh_binding_word(checked, binding, 3), 0) { return 5008; }; selected = binding; }; binding = binding + 1; }; }; constraint = constraint + 4; }; if selected >= 0 { let known = sh_cb_in(roots, selected); if not known { if not roots.push(selected) { return 5001; }; }; }; let mut argument = 0; let kind = sh_s_kind(checked, ty); let compound = kind == 8 or kind == 9 or kind == 10 or kind == 12 or kind == 16; while compound and argument < sh_s_arity(checked, ty) { let child = sh_s_resolve(checked, sh_s_argument(checked, ty, argument)); let known = sh_cb_in(&queue, child); if not known { if not queue.push(child) { return 5001; }; }; argument = argument + 1; }; let mut field = 0; while field < prepared.fields.len() / 3 { if sh_origin_word(&prepared.fields, field, 3, 0) == ty { let child = sh_s_resolve(checked, sh_origin_word(&prepared.fields, field, 3, 2)); let known = sh_cb_in(&queue, child); if not known { if not queue.push(child) { return 5001; }; }; }; field = field + 1; }; position = position + 1; };
+    0;
+}
+
+def sh_cs_profile(analyzed: &ShModuleChecked, origins: &ShOriginFacts, prepared: &ShCollectionFinalized, names: &Vec<ShText>, roots: &Vec<i64>, maximum: i64) -> i64 {
+    let checked = &analyzed.checked;
+    let ast = &analyzed.front.parsed.ast;
+    if names.len() < 1 or names.len() > maximum { return 5008; };
+    let mut index = 0;
+    while index < names.len() { if names.get(index).text.len() != names.get(index).text.as_str().len() { return 5008; }; let binding = sh_cs_root(analyzed, names.get(index).text.as_str()); let signature = sh_s_resolve(checked, sh_binding_word(checked, binding, 3)); let returned = sh_s_argument(checked, signature, 0); let body = sh_ch_unwrap(ast, sh_s_child_kind(ast, sh_binding_word(checked, binding, 4), 40)); if binding < 0 or sh_cb_in(roots, binding) or sh_hir_function_body_state(ast, checked, binding) != 1 or sh_s_kind(checked, signature) != 11 or sh_s_data(checked, signature) != 0 or sh_s_flags(checked, signature) != 0 or sh_s_arity(checked, signature) != 1 or sh_o_role(origins, checked, returned) != 1 or sh_s_arity(checked, returned) != 1 or sh_l_has_parameter(checked, returned, 0) or sh_ast_word(ast, body, 0) != 53 or sh_ast_word(ast, body, 6) != 1 or sh_node_binding(checked, body) != sh_origin_at(&origins.canonical, 3) or not sh_hir_types_equal(checked, returned, sh_node_type(checked, body), 0) { return 5008; }; if not roots.push(binding) { return 5001; }; let code = sh_cs_drop_jobs(checked, ast, prepared, sh_o_element(checked, returned), roots, maximum); if code != 0 { return code; }; index = index + 1; };
+    0;
+}
+
+def sh_collection_constructor_source_object(entry: &str, provider_root: &str, manifest_pin: &str, artifact_pin: &str, collection_pin: &str, option_pin: &str, names: &Vec<ShText>, max_items: i64, maximum: i64, development: bool) -> Result<ShBinary, i64> {
+    if not development { return sh_coff_error(5410); };
+    if max_items < 1 or max_items > 100000 or maximum < 1 or maximum > 67108864 { return sh_coff_error(5001); };
+    let manifest = path_join_string(provider_root, "selfhost/sdk/collections_x64_abi1/manifest.json")?;
+    let library = path_join_string(provider_root, "tools/stdlib")?;
+    let prelude = path_join_string(provider_root, "selfhost/sdk/collections_x64_abi1/prelude.sg")?;
+    let collection = path_join_string(library.as_str(), "collections.sg")?;
+    let option = path_join_string(library.as_str(), "option.sg")?;
+    let colfile = file_snapshot_open(collection.as_str(), 1048576)?;
+    let optfile = file_snapshot_open(option.as_str(), 1048576)?;
+    let colsha = colfile.sha256()?;
+    let optsha = optfile.sha256()?;
+    if colsha.as_str() != collection_pin or optsha.as_str() != option_pin { return sh_coff_error(5951); };
+    let identity = colfile.identity()?;
+    let option_identity = optfile.identity()?;
+    let provider = sh_collection_provider_load(provider_root, manifest.as_str(), manifest_pin, artifact_pin, "x86_64-pc-windows-msvc", 1, development);
+    if provider.error != 0 { return sh_coff_error(provider.error); };
+    let graph = sh_cs_graph(entry, library.as_str(), &prelude, 16777216);
+    if graph.error != 0 { return sh_coff_error(graph.error); };
+    let analyzed = sh_modules_check(&graph, max_items, 1000);
+    if analyzed.error != 0 { return sh_coff_error(analyzed.error); };
+    let prepared = sh_collection_ownership_finalize(&analyzed.checked, &analyzed.front.parsed.ast, 100000, 1000000);
+    if prepared.error != 0 { return sh_coff_error(prepared.error); };
+    let mapping = sh_collection_provider_map(&provider, provider_root, &graph, &analyzed, manifest_pin, artifact_pin, identity.as_str(), collection_pin, "x86_64-pc-windows-msvc", 1, development);
+    if mapping.error != 0 { return sh_coff_error(mapping.error); };
+    let proto = "fn sengoo_raw_vec_iter_new(handle: i64) -> i64;";
+    let origins = sh_origins_analyze(&graph, &analyzed, identity.as_str(), collection_pin, proto, max_items);
+    if origins.error != 0 { return sh_coff_error(origins.error); };
+    let loans = sh_loans_analyze(&origins, &graph, &analyzed, identity.as_str(), collection_pin, proto, option_identity.as_str(), option_pin, max_items, 1);
+    if loans.error != 0 { return sh_coff_error(loans.error); };
+    let nll = sh_loan_liveness(&origins, &loans, &graph, &analyzed, identity.as_str(), collection_pin, proto, option_identity.as_str(), option_pin, 20000);
+    if nll.error != 0 { return sh_coff_error(nll.error); };
+    let handles = sh_collection_handles(&provider, &mapping, provider_root, manifest_pin, artifact_pin, &origins, &loans, &nll, &graph, &analyzed, identity.as_str(), collection_pin, proto, option_identity.as_str(), option_pin, max_items, development);
+    if handles.error != 0 { return sh_coff_error(handles.error); };
+    let roots = vec_new_i64();
+    let profile = sh_cs_profile(&analyzed, &origins, &prepared, names, &roots, max_items);
+    if profile != 0 { return sh_coff_error(profile); };
+    let scoped = sh_check_ownership_collection_functions(&provider, &mapping, provider_root, manifest_pin, artifact_pin, &origins, &loans, &nll, &handles, &graph, &analyzed, identity.as_str(), collection_pin, proto, option_identity.as_str(), option_pin, &roots, 1000, development);
+    if scoped.error != 0 { return sh_coff_error(scoped.error); };
+    let facts = sh_hir_origins_capture(&graph, &analyzed, identity.as_str(), collection_pin, proto, option_identity.as_str(), option_pin, max_items);
+    if facts.error != 0 { return sh_coff_error(facts.error); };
+    let hir = sh_hir_lift_modules(&graph, &analyzed, &scoped.ownership, &facts, identity.as_str(), collection_pin, proto, option_identity.as_str(), option_pin, max_items);
+    if hir.error != 0 { return sh_coff_error(hir.error); };
+    let validated = sh_hir_validate_modules(&hir, &graph, &analyzed, &scoped.ownership, identity.as_str(), collection_pin, proto, option_identity.as_str(), option_pin);
+    if validated != 0 { return sh_coff_error(validated); };
+    let ownership_valid = sh_collection_ownership_validate(&scoped, &provider, &mapping, provider_root, manifest_pin, artifact_pin, &origins, &loans, &nll, &handles, &graph, &analyzed, identity.as_str(), collection_pin, proto, option_identity.as_str(), option_pin, &roots, 1000, development);
+    if ownership_valid != 0 { return sh_coff_error(ownership_valid); };
+    let lowered = sh_l_collection_parts(&hir.source, &hir.ast, &hir.checked, &hir.ownership, max_items, true, sh_origin_at(&origins.canonical, 3), sh_ch_at(&mapping.rows, 0, 8, 2), &roots);
+    if lowered.error != 0 { return sh_coff_error(lowered.error); };
+    let mut original = sh_hir_origins_module_input(&graph, &analyzed, 4000000);
+    if original.error != 0 { return sh_coff_error(original.error); };
+    let original_owner = sh_hir_ownership_input(&scoped.ownership);
+    if original_owner.error != 0 { return sh_coff_error(original_owner.error); };
+    sh_ho_put_vector(&mut original, &original_owner.words, 4000000);
+    if original.error != 0 { return sh_coff_error(original.error); };
+    if not sh_o_equal(&original.words, &hir.origins.module_input) { return sh_coff_error(5508); };
+    let fresh = sh_collection_ownership_validate(&scoped, &provider, &mapping, provider_root, manifest_pin, artifact_pin, &origins, &loans, &nll, &handles, &graph, &analyzed, identity.as_str(), collection_pin, proto, option_identity.as_str(), option_pin, &roots, 1000, development);
+    if fresh != 0 { return sh_coff_error(fresh); };
+    sh_native_object(&lowered.mir, maximum, true);
+}

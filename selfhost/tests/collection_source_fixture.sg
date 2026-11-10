@@ -1,0 +1,71 @@
+import std::collections;
+
+extern "C" {
+    fn source_release(token: i64);
+    fn source_drop_observe();
+}
+
+struct SourceOwner {
+    token: i64,
+    value: i64,
+}
+
+impl Drop for SourceOwner {
+    def drop(&mut self) {
+        source_drop_observe();
+        if self.token != 0 { source_release(self.token); };
+        self.token = 0;
+        self.value = 0;
+    }
+}
+
+def source_i64() -> Vec<i64> {
+    vec_new();
+}
+
+def source_bool() -> Vec<bool> {
+    vec_new();
+}
+
+def source_owner() -> Vec<SourceOwner> {
+    vec_new();
+}
+
+def source_i64_second() -> Vec<i64> {
+    vec_new();
+}
+
+def source_manual() -> Vec<i64> {
+    Vec { handle: 0, marker: 0 };
+}
+
+def source_wrapper() -> Vec<i64> {
+    source_i64();
+}
+
+def source_parameter(value: i64) -> Vec<i64> {
+    vec_new();
+}
+
+def source_generic<T>() -> Vec<T> {
+    vec_new();
+}
+
+def source_other() -> i64 {
+    42;
+}
+
+def source_local() -> Vec<i64> {
+    let value: Vec<i64> = vec_new();
+    value;
+}
+
+def source_branch() -> Vec<i64> {
+    if true { vec_new(); } else { vec_new(); };
+}
+
+struct EmptySource;
+
+def source_empty() -> Vec<EmptySource> {
+    vec_new();
+}

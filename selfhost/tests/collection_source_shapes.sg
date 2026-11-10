@@ -1,0 +1,34 @@
+import std::collections;
+
+class SourceBase {
+    value: i64;
+}
+
+class SourceDerived: SourceBase {
+    extra: i64;
+}
+
+struct SourceClassContainer {
+    value: SourceDerived,
+}
+
+enum SourceEnum {
+    First
+    Second
+}
+
+def source_class() -> Vec<SourceDerived> {
+    vec_new();
+}
+
+def source_nested_class() -> Vec<SourceClassContainer> {
+    vec_new();
+}
+
+def source_array_class() -> Vec<[SourceDerived; 2]> {
+    vec_new();
+}
+
+def source_enum() -> Vec<SourceEnum> {
+    vec_new();
+}
