@@ -1,0 +1,46 @@
+// Unsafe development extraction preview, not resolver package admission.
+extern "C" {
+    unsafe fn sengoo_sg_package_extract(source: * const u8, length: i64, parent: i64, stage: * const u8,
+    stage_length: i64, target: * const u8, target_length: i64, cancel_after: i64) -> i64;
+    unsafe fn sengoo_ps_cli_count() -> i64;
+    unsafe fn sengoo_ps_cli_arg(index: i64) -> * const u8;
+    unsafe fn sengoo_ps_cli_length(index: i64) -> i64;
+    unsafe fn sengoo_ps_cli_open_input(index: i64) -> i64;
+    unsafe fn sengoo_ps_cli_input_bytes(input: i64) -> * const u8;
+    unsafe fn sengoo_ps_cli_input_size(input: i64) -> i64;
+    unsafe fn sengoo_ps_cli_close_input(input: i64);
+    unsafe fn sengoo_ps_cli_open_parent(index: i64) -> i64;
+    unsafe fn sengoo_ps_cli_close_parent(parent: i64);
+    unsafe fn sengoo_ps_cli_dispose();
+} // C ABI helper is required by the current compiler's unsafe-call surface.
+unsafe extern "C" fn sh_ps_cli() -> i64 {
+    if sengoo_ps_cli_count() != 4 {
+        sengoo_ps_cli_dispose();
+        return 64;
+    };
+    let input = sengoo_ps_cli_open_input(0);
+    if input == 0 {
+        sengoo_ps_cli_dispose();
+        return 66;
+    };
+    let parent = sengoo_ps_cli_open_parent(1);
+    if parent == 0 {
+        sengoo_ps_cli_close_input(input);
+        sengoo_ps_cli_dispose();
+        return 66;
+    };
+    let result = sengoo_sg_package_extract(sengoo_ps_cli_input_bytes(input), sengoo_ps_cli_input_size(input),
+    parent, sengoo_ps_cli_arg(2), sengoo_ps_cli_length(2), sengoo_ps_cli_arg(3), sengoo_ps_cli_length(3),
+    - 1);
+    sengoo_ps_cli_close_parent(parent);
+    sengoo_ps_cli_close_input(input);
+    sengoo_ps_cli_dispose();
+    if result == 0 {
+        0;
+    } else {
+        70 - result;
+    };
+}
+pub unsafe extern "C" fn main() -> i64 {
+    sh_ps_cli();
+}

@@ -1,0 +1,334 @@
+// Experimental byte-extraction transaction. Resolver manifest identity is a
+// separate admission step; this is not yet the public sgpm entry point.
+extern "C" {
+    unsafe fn sengoo_tar_read(value: * const u8, index: i64) -> u8;
+    unsafe fn sengoo_tar_output_read(value: * mut u8, index: i64) -> u8;
+    unsafe fn sengoo_ds_word_get(value: * mut u8, index: i64) -> i64;
+    unsafe fn sengoo_ds_word_put(value: * mut u8, index: i64, word: i64);
+    unsafe fn sengoo_sg_tar_stream_init(state: * mut u8, extent: i64) -> i64;
+    unsafe fn sengoo_sg_tar_stream_step(state: * mut u8, extent: i64, source: * const u8, length: i64,
+    finish: i64) -> i64;
+    unsafe fn sengoo_sg_tar_stream_query(state: * mut u8, extent: i64, field: i64) -> i64;
+    unsafe fn sengoo_sg_tar_stream_ack(state: * mut u8, extent: i64, result: i64) -> i64;
+    unsafe fn sengoo_sg_tar_stream_dispose(state: * mut u8, extent: i64) -> i64;
+    unsafe fn sengoo_sg_gzip_stream_init(state: * mut u8, extent: i64, mode: i64, input_limit: i64, output_limit: i64) -> i64;
+    unsafe fn sengoo_sg_gzip_stream_step(state: * mut u8, extent: i64, source: * const u8, length: i64,
+    output: * mut u8, capacity: i64, finish: i64) -> i64;
+    unsafe fn sengoo_sg_gzip_stream_query(state: * mut u8, extent: i64, field: i64) -> i64;
+    unsafe fn sengoo_sg_gzip_stream_dispose(state: * mut u8, extent: i64) -> i64;
+    unsafe fn sengoo_ds_storage_alloc(length: i64) -> * mut u8;
+    unsafe fn sengoo_ds_storage_present(value: * mut u8) -> i64;
+    unsafe fn sengoo_ds_storage_free(value: * mut u8);
+    unsafe fn sengoo_ps_mut_offset(value: * mut u8, offset: i64) -> * mut u8;
+    unsafe fn sengoo_ps_const_offset(value: * mut u8, offset: i64) -> * const u8;
+    unsafe fn sengoo_ps_input_offset(value: * const u8, offset: i64) -> * const u8;
+    unsafe fn sengoo_ps_component_equal(a: * const u8, n: i64, b: * const u8, m: i64) -> i64;
+    unsafe fn sengoo_ps_session_new(parent: i64, name: * const u8, length: i64) -> i64;
+    unsafe fn sengoo_ps_create_node(session: i64, parent: i64, name: * const u8, length: i64, kind: i64) -> i64;
+    unsafe fn sengoo_ps_write_node(session: i64, node: i64, source: * const u8, length: i64) -> i64;
+    unsafe fn sengoo_ps_flush_node(session: i64, node: i64) -> i64;
+    unsafe fn sengoo_ps_publish(session: i64, name: * const u8, length: i64) -> i64;
+    unsafe fn sengoo_ps_session_close(session: i64) -> i64;
+}
+unsafe extern "C" fn sh_ps_name(source: * const u8, length: i64) -> i64 {
+    if length < 1 or length > 64 {
+        return - 3;
+    };
+    let mut at = 0;
+    while at < length {
+        let b = sengoo_tar_read(source, at) as i64;
+        if not ((b >= 65 and b <= 90) or (b >= 97 and b <= 122) or (b >= 48 and b <= 57) or b == 45 or b == 95) {
+            return - 3;
+        };
+        at = at + 1;
+    };
+    if length == 3 or length == 4 {
+        let mut a = sengoo_tar_read(source, 0) as i64;
+        let mut b = sengoo_tar_read(source, 1) as i64;
+        let mut c = sengoo_tar_read(source, 2) as i64;
+        if a >= 97 and a <= 122 {
+            a = a - 32;
+        };
+        if b >= 97 and b <= 122 {
+            b = b - 32;
+        };
+        if c >= 97 and c <= 122 {
+            c = c - 32;
+        };
+        if length == 3 and ((a == 67 and b == 79 and c == 78) or (a == 80 and b == 82 and c == 78) or (a == 65 and b == 85 and c == 88) or (a == 78 and b == 85 and c == 76)) {
+            return - 3;
+        };
+        if length == 4 and ((a == 67 and b == 79 and c == 77) or (a == 76 and b == 80 and c == 84)) {
+            let d = sengoo_tar_read(source, 3) as i64;
+            if d >= 49 and d <= 57 {
+                return - 3;
+            };
+        };
+    };
+    0;
+} // A node record is (parent node, component offset in tar state, length, kind).
+// Node zero is the session root. Actual HANDLEs stay in the OS resource shim.
+unsafe extern "C" fn sh_ps_entry(session: i64, state: * mut u8, nodes: * mut u8, count: i64) -> i64 {
+    let start = sengoo_sg_tar_stream_query(state, 18438400, 7);
+    let length = sengoo_sg_tar_stream_query(state, 18438400, 8);
+    let kind = sengoo_sg_tar_stream_query(state, 18438400, 9);
+    if start < 1661184 or length < 1 or length > 65535 or start > 18438400 - length {
+        return - 10;
+    };
+    let mut parent = 0;
+    let mut begin = 0;
+    let mut total = count;
+    let mut current = 0;
+    while begin < length {
+        let mut end = begin;
+        while end < length and (sengoo_tar_output_read(state, start + end) as i64) != 47 {
+            end = end + 1;
+        };
+        let mut node_kind = 1;
+        if end == length {
+            node_kind = kind;
+        };
+        let mut found = - 1;
+        let mut id = 1;
+        // Real file names have already passed the tar namespace conflict test.
+        // Only directories can be reused (implicit parent, then explicit entry).
+        while node_kind == 1 and id < total {
+            if sengoo_ds_word_get(nodes, id * 4) == parent {
+                let off = sengoo_ds_word_get(nodes, id * 4 + 1);
+                let n = sengoo_ds_word_get(nodes, id * 4 + 2);
+                if sengoo_ps_component_equal(sengoo_ps_const_offset(state, off), n, sengoo_ps_const_offset(state,
+                start + begin), end - begin) == 1 {
+                    found = id;
+                };
+            };
+            id = id + 1;
+        };
+        if found >= 0 {
+            if node_kind == 0 or sengoo_ds_word_get(nodes, found * 4 + 3) != 1 {
+                return - 6;
+            };
+            current = found;
+        } else {
+            if total >= 32768 {
+                return - 7;
+            };
+            let made = sengoo_ps_create_node(session, parent, sengoo_ps_const_offset(state, start + begin),
+            end - begin, node_kind);
+            if made < 0 {
+                return made;
+            };
+            if made != total {
+                return - 10;
+            };
+            sengoo_ds_word_put(nodes, total * 4, parent);
+            sengoo_ds_word_put(nodes, total * 4 + 1, start + begin);
+            sengoo_ds_word_put(nodes, total * 4 + 2, end - begin);
+            sengoo_ds_word_put(nodes, total * 4 + 3, node_kind);
+            current = total;
+            total = total + 1;
+        };
+        parent = current;
+        begin = end + 1;
+    };
+    // The control prefix occupies record zero's unused words.
+    sengoo_ds_word_put(nodes, 0, total);
+    sengoo_ds_word_put(nodes, 1, current);
+    0;
+}
+unsafe extern "C" fn sh_ps_run(source: * const u8, length: i64, parent: i64, stage: * const u8, stage_length: i64,
+target: * const u8, target_length: i64, tar: * mut u8, gzip: * mut u8, output: * mut u8, nodes: * mut u8,
+cancel_after: i64) -> i64 {
+    let session = sengoo_ps_session_new(parent, stage, stage_length);
+    if session == 0 {
+        return - 8;
+    };
+    let mut result = 0;
+    sengoo_ds_word_put(nodes, 0, 1);
+    sengoo_ds_word_put(nodes, 1, 0);
+    let a = sengoo_sg_tar_stream_init(tar, 18438400);
+    let b = sengoo_sg_gzip_stream_init(gzip, 46080, 2, 67108864, 536870912);
+    if a < 0 or b < 0 {
+        result = - 10;
+    };
+    let mut consumed = 0;
+    let mut emitted = 0;
+    let mut done = false;
+    let mut steps = 0;
+    while result == 0 and not done {
+        if cancel_after >= 0 and steps >= cancel_after {
+            result = - 9;
+        } else {
+            let mut chunk = length - consumed;
+            if chunk > 113 {
+                chunk = 113;
+            };
+            let status = sengoo_sg_gzip_stream_step(gzip, 46080, sengoo_ps_input_offset(source, consumed),
+            chunk, output, 32768, if consumed + chunk == length {
+                1;
+            } else {
+                0;
+            });
+            let used = sengoo_sg_gzip_stream_query(gzip, 46080, 0);
+            let made = sengoo_sg_gzip_stream_query(gzip, 46080, 1);
+            if used < 0 or used > chunk or made < 0 or made > 32768 {
+                result = - 10;
+            } else {
+                consumed = consumed + used;
+                let mut at = 0;
+                let mut tar_done = false;
+                while result == 0 and not tar_done {
+                    let event = sengoo_sg_tar_stream_step(tar, 18438400, sengoo_ps_const_offset(output,
+                    at), made - at, if status == 2 {
+                        1;
+                    } else {
+                        0;
+                    });
+                    let eaten = sengoo_sg_tar_stream_query(tar, 18438400, 0);
+                    if eaten < 0 or eaten > made - at {
+                        result = - 10;
+                    } else {
+                        at = at + eaten;
+                        if event == 3 {
+                            let error = sh_ps_entry(session, tar, nodes, sengoo_ds_word_get(nodes, 0));
+                            if error < 0 {
+                                result = error;
+                            } else {
+                                let ack = sengoo_sg_tar_stream_ack(tar, 18438400, 0);
+                                if ack < 0 {
+                                    result = ack;
+                                };
+                            };
+                        } else if event == 4 {
+                            let offset = sengoo_sg_tar_stream_query(tar, 18438400, 11);
+                            let size = sengoo_sg_tar_stream_query(tar, 18438400, 12);
+                            let origin = at - eaten + offset;
+                            if origin < 0 or size < 0 or origin > made - size {
+                                result = - 10;
+                            } else {
+                                let error = sengoo_ps_write_node(session, sengoo_ds_word_get(nodes, 1),
+                                sengoo_ps_const_offset(output, origin), size);
+                                if error < 0 {
+                                    result = error;
+                                } else {
+                                    emitted = emitted + size;
+                                    let ack = sengoo_sg_tar_stream_ack(tar, 18438400, 0);
+                                    if ack < 0 {
+                                        result = ack;
+                                    };
+                                };
+                            };
+                        } else if event == 0 {
+                            if at != made {
+                                result = - 10;
+                            };
+                            tar_done = true;
+                        } else if event == 2 {
+                            if status != 2 or at != made {
+                                result = - 10;
+                            };
+                            tar_done = true;
+                            done = true;
+                        } else {
+                            result = event;
+                        };
+                    };
+                };
+                if result == 0 and status < 0 {
+                    result = status;
+                };
+                if result == 0 and status == 2 and not done {
+                    result = - 10;
+                };
+                if result == 0 and used == 0 and made == 0 and status != 2 {
+                    result = - 10;
+                };
+            };
+        };
+        steps = steps + 1;
+    };
+    if result == 0 {
+        if consumed != length or emitted != sengoo_sg_tar_stream_query(tar, 18438400, 2) {
+            result = - 10;
+        };
+        let mut node = 1;
+        while result == 0 and node < sengoo_ds_word_get(nodes, 0) {
+            let error = sengoo_ps_flush_node(session, node);
+            if error < 0 {
+                result = error;
+            };
+            node = node + 1;
+        };
+        if result == 0 {
+            result = sengoo_ps_publish(session, target, target_length);
+        };
+    };
+    let close = sengoo_ps_session_close(session);
+    if close < 0 {
+        result = - 11;
+    };
+    let dispose_tar = sengoo_sg_tar_stream_dispose(tar, 18438400);
+    let dispose_gzip = sengoo_sg_gzip_stream_dispose(gzip, 46080);
+    if result == 0 and (dispose_tar < 0 or dispose_gzip < 0) {
+        result = - 10;
+    };
+    result;
+}
+pub unsafe extern "C" fn sengoo_sg_package_extract(source: * const u8, length: i64, parent: i64, stage: * const u8,
+stage_length: i64, target: * const u8, target_length: i64, cancel_after: i64) -> i64 {
+    if length < 0 or length > 67108864 or stage_length < 1 or stage_length > 64 or target_length < 1 or target_length > 64 or parent == 0 or cancel_after < - 1 {
+        return - 3;
+    };
+    if sh_ps_name(stage, stage_length) < 0 or sh_ps_name(target, target_length) < 0 {
+        return - 3;
+    };
+    if stage_length == target_length {
+        let mut equal = true;
+        let mut index = 0;
+        while index < stage_length {
+            let mut left = sengoo_tar_read(stage, index) as i64;
+            let mut right = sengoo_tar_read(target, index) as i64;
+            if left >= 65 and left <= 90 {
+                left = left + 32;
+            };
+            if right >= 65 and right <= 90 {
+                right = right + 32;
+            };
+            if left != right {
+                equal = false;
+            };
+            index = index + 1;
+        };
+        if equal {
+            return - 3;
+        };
+    };
+    let tar = sengoo_ds_storage_alloc(18438400);
+    if sengoo_ds_storage_present(tar) == 0 {
+        return - 8;
+    };
+    let gzip = sengoo_ds_storage_alloc(46080);
+    if sengoo_ds_storage_present(gzip) == 0 {
+        sengoo_ds_storage_free(tar);
+        return - 8;
+    };
+    let output = sengoo_ds_storage_alloc(32768);
+    if sengoo_ds_storage_present(output) == 0 {
+        sengoo_ds_storage_free(gzip);
+        sengoo_ds_storage_free(tar);
+        return - 8;
+    };
+    let nodes = sengoo_ds_storage_alloc(1048576);
+    if sengoo_ds_storage_present(nodes) == 0 {
+        sengoo_ds_storage_free(output);
+        sengoo_ds_storage_free(gzip);
+        sengoo_ds_storage_free(tar);
+        return - 8;
+    };
+    let result = sh_ps_run(source, length, parent, stage, stage_length, target, target_length, tar, gzip,
+    output, nodes, cancel_after);
+    sengoo_ds_storage_free(nodes);
+    sengoo_ds_storage_free(output);
+    sengoo_ds_storage_free(gzip);
+    sengoo_ds_storage_free(tar);
+    result;
+}

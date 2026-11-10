@@ -84,3 +84,76 @@ development SDK dependency, not a final compiler-free SDK packaging proof.
 The provider's raw COFF timestamp is recorded; its normalized object changes
 only header bytes 4..7 to zero, with all code, unwind, data, symbols/auxiliary
 records and relocations unchanged. Raw object byte equality is not claimed.
+
+## Incremental scanner and extraction transaction (implementation owner: selfhost_core)
+
+The new incremental scanner reuses `tar.sg` numeric and path helpers without
+changing the qualified synchronous scanner. Its caller-owned workspace is
+18,438,400 bytes: 1,024 prefix/control bytes, 512 header bytes, 1,048,576
+extension bytes, two 65,536-byte pending-name buffers, 480,000 entry-record
+bytes and 16,777,216 namespace bytes. Initialization writes only the control
+prefix. Header, extension and namespace reads require their initialized
+prefixes. Reset invalidates the namespace; disposal invalidates the state and
+does not promise to erase file-name bytes. There is no heap or external handle
+inside this state. Copying a live state is unsupported. The unsafe caller must
+provide disjoint stable state/input extents and must not mutate a live state.
+
+`init/reset(state,18438400)`, `step(state,18438400,input,length,finish)`,
+`query(state,18438400,field)`, `ack(state,18438400,result)` and `dispose`
+use primitive C ABI parameters. Step returns 0 (need input), 2 (finished),
+3 (entry event), 4 (data event), or the scanner's negative error. Query fields
+0..6 expose per-call consumption, cumulative wire/content/entries, status,
+phase and workspace size; 7..13 expose current path offset/length, kind,
+declared size, data offset/length and entry ID; 14 is delivered file content.
+Events require an explicit acknowledgement before another step. Data points
+into the current caller input only until acknowledgement. Failed I/O (-8) or
+cancellation (-9) latches failure. Invalid API arguments return -3 before
+touching buffers; uninitialized state is -10. Finish is sticky. Two zero
+blocks and zero-only terminal padding are not publication: the scanner must
+also receive finish after the gzip framing core has validated every footer.
+
+The extraction pump feeds bounded compressed and decoded chunks through the
+existing gzip continuation and this scanner. The configured limits are 64 MiB
+compressed wire, 512 MiB tar wire, 256 MiB declared file content, 10,000 real
+entries, 1 MiB per extension and 16 MiB aggregate extension/name storage.
+These are separate budgets. Workspace size is not an RSS qualification.
+
+The filesystem adapter contains memory and Windows handle operations only.
+SG selects normalized path components, creates parents, writes data events,
+checks entry completion, drains gzip framing and requests publication. A
+session uses exclusive private-root creation and handle-relative child opens
+with reparse traversal disabled. It retains handles for every created object
+during extraction. SG requests file flushes and the adapter closes child
+handles before root publication. If rename fails, cleanup reopens only
+recorded components and requires their original volume/file IDs. Cleanup
+deletes only those objects in reverse order and never recursively enumerates
+an arbitrary caller path. Publication is a single same-parent,
+no-replace directory rename after complete gzip and tar validation. Existing
+targets are preserved. Disk error, cancellation, late CRC/member failure,
+reparse point or a target appearing before rename must leave no partial final
+tree. The parent directory is a caller-admitted trusted handle; this contract
+does not authorize following an untrusted textual parent path. A same-user OS
+adversary with write access to this admitted private parent is not a sandboxed
+principal. Zero sharing on a directory handle does not prevent creating a new
+child by pathname. Independent-process controls intentionally insert an unknown
+child/junction or replace a recorded file; cleanup preserves unknown/changed
+objects and returns -11 for a private residue. This is an explicit recoverable
+failure, never permission to recursively delete that residue. No final target
+is replaced by these controls. The 32,768 created-node handle bound includes
+implicit directories and is an additional development resource limit.
+
+The host API takes exactly one admitted parent HANDLE and two 1..64-byte ASCII
+components made of letters, digits, underscore and hyphen, excluding DOS names.
+It does not take two independent absolute destination paths. SG rejects equal
+stage/final components under ASCII case-insensitive comparison before creating
+the private root. All create and rename operations use the same parent handle;
+its actual volume/file ID is recorded before and after extraction. FILE_CREATE
+never reuses an existing object, including a pre-existing plain ASCII 8.3 alias.
+The preview rejects a leaf reparse parent. Intermediate aliases may reach the
+same admitted physical parent; the single handle/component contract still
+applies. Supporting arbitrary Unicode host basenames is outside this preview.
+
+This byte-extraction transaction is distinct from resolver admission. Full
+`Sengoo.toml` parsing, expected package identity, registry/checksum metadata and
+the public sgpm command remain separate explicit integration obligations.
+Neither a successful scanner nor manifest-file presence alone satisfies them.

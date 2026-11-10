@@ -42,3 +42,29 @@ validation, manifest identity checks and transactional staging/publication.
 - **WHEN** the source-only tar scanner passes while the existing gzip output bound remains 64 MiB
 - **THEN** the package integration tasks remain incomplete
 - **AND** the implementation does not claim replacement of the current sgpm resolver
+
+### Requirement: Incremental tar events and private publication
+
+The incremental implementation SHALL keep framing, metadata, path identity and
+budgets in SG and SHALL consume bounded chunks without retaining caller input
+pointers. An event SHALL be acknowledged before more input is consumed. The
+extraction transaction SHALL publish only after complete tar termination and
+successful gzip footer validation for every selected member.
+
+#### Scenario: Entry and payload split at every boundary
+- **WHEN** a GNU/PAX archive is delivered with headers, metadata and payload split across calls
+- **THEN** entry metadata and file bytes equal independently decoded source records
+- **AND** reads of unwritten workspace bytes and writes beyond its fixed extent are rejected by instrumentation
+
+#### Scenario: Error after private files were written
+- **WHEN** a late CRC, member, tar, budget, I/O or cancellation error occurs
+- **THEN** no final tree is published
+- **AND** cleanup removes only session-created objects while preserving an existing target
+
+#### Scenario: Filesystem alias or publication race
+- **WHEN** a reparse point is encountered or a final target appears before publication
+- **THEN** the transaction fails without following the reparse point or replacing that target
+
+#### Scenario: Resolver identity is not yet admitted
+- **WHEN** byte extraction passes but package manifest and expected identity have not been validated
+- **THEN** the public resolver replacement task remains incomplete
