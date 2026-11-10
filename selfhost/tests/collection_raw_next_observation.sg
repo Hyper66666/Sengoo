@@ -1,0 +1,322 @@
+import selfhost_semantic_collection_effect_ownership;
+
+import std::args;
+
+import std::assert;
+
+extern "C" {
+    fn sengoo_string_live_handle_count() -> i64;
+    fn sengoo_buffer_live_handle_count() -> i64;
+    fn sengoo_opaque_live_handle_count() -> i64;
+    fn sengoo_file_snapshot_live_handle_count() -> i64;
+    fn sengoo_file_snapshot_live_bytes() -> i64;
+}
+
+def sh_ht_arg(i: i64) -> Result<String, i64> {
+    let b = ffi_buffer_new(arg_len(i)?)?;
+    let n = arg_copy(i, b)?;
+    string_from_utf8(b, n);
+}
+
+def sh_ht_call(analyzed: &ShModuleChecked, owner: &str, target: &str) -> i64 {
+    let checked = &analyzed.checked;
+    let function = sh_o_unique(analyzed, analyzed.front.source, owner, 2);
+    let mut node = 0;
+    let mut result = -1;
+    while node < sh_ast_count(&analyzed.front.parsed.ast) { if sh_ast_word(&analyzed.front.parsed.ast, node, 0) == 53 and sh_ch_owner(checked, node) == function and sh_o_name(checked, sh_node_binding(checked, node), target) { if result >= 0 { return -1; }; result = node; }; node = node + 1; };
+    result;
+}
+
+def sh_ht_case(facts: &ShCollectionHandles, analyzed: &ShModuleChecked, function: &str, target: &str, status: i64, code: i64) {
+    let node = sh_ht_call(analyzed, function, target);
+    assert_true(node >= 0, "collection_handles.sg", 1);
+    let actual = sh_collection_handle_status(facts, node);
+    let owner = sh_ch_owner(&analyzed.checked, node);
+    let error = sh_collection_handle_function_error(facts, owner);
+    if actual != status or error != code { println(function); println(actual); println(status); println(error); println(code); };
+    assert_eq_i64(actual, status, "collection_handles.sg", 2);
+    assert_eq_i64(error, code, "collection_handles.sg", 3);
+    ();
+}
+
+def sh_ht_copy(values: &Vec<i64>) -> Vec<i64> {
+    let copy = vec_new_i64();
+    let mut i = 0;
+    while i < values.len() { copy.push(sh_origin_at(values, i)); i = i + 1; };
+    copy;
+}
+
+def sh_et_vec(out: &Vec<i64>, values: &Vec<i64>) {
+    out.push(values.handle);
+    out.push(values.marker);
+    out.push(values.len());
+    let mut at = 0;
+    while at < values.len() { out.push(sh_origin_at(values, at)); at = at + 1; };
+    ();
+}
+
+def sh_et_text(out: &Vec<i64>, text: &String) {
+    out.push(text.handle);
+    out.push(text.len());
+    let bytes = sh_lex_bytes(text);
+    assert_true(bytes.is_ok(), "collection_raw_next_observation.sg", 90);
+    let mut at = 0;
+    while at < text.len() { out.push(sh_lex_byte(&bytes.value, at)); at = at + 1; };
+    ();
+}
+
+def sh_et_input(graph: &ShModules, analyzed: &ShModuleChecked) -> Vec<i64> {
+    let out = vec_new_i64();
+    sh_et_vec(&out, &analyzed.checked.node_types);
+    sh_et_vec(&out, &analyzed.checked.call_types);
+    sh_et_vec(&out, &analyzed.checked.deferred_types);
+    sh_et_vec(&out, &analyzed.checked.builtin_calls);
+    sh_et_vec(&out, &analyzed.checked.resolution);
+    sh_et_vec(&out, &analyzed.checked.node_scopes);
+    sh_et_vec(&out, &analyzed.checked.bindings);
+    sh_et_vec(&out, &analyzed.checked.scopes);
+    sh_et_vec(&out, &analyzed.checked.substitutions);
+    sh_et_vec(&out, &analyzed.checked.generic_parameters);
+    sh_et_vec(&out, &analyzed.checked.constraints);
+    sh_et_vec(&out, &analyzed.checked.trait_types);
+    sh_et_vec(&out, &analyzed.checked.class_parents);
+    sh_et_vec(&out, &analyzed.checked.propagation);
+    sh_et_vec(&out, &analyzed.checked.loop_values);
+    out.push(analyzed.checked.async_depth);
+    out.push(analyzed.checked.unsafe_depth);
+    out.push(analyzed.checked.error);
+    out.push(analyzed.checked.start);
+    out.push(analyzed.checked.end);
+    out.push(analyzed.checked.diagnostic_limit);
+    out.push(analyzed.checked.current_scope);
+    out.push(analyzed.checked.current_owner);
+    out.push(analyzed.checked.current_return);
+    out.push(analyzed.checked.loop_depth);
+    out.push(analyzed.checked.depth);
+    out.push(analyzed.checked.unit_type);
+    out.push(analyzed.checked.bool_type);
+    out.push(analyzed.checked.integer_type);
+    out.push(analyzed.checked.float_type);
+    out.push(analyzed.checked.char_type);
+    out.push(analyzed.checked.str_type);
+    out.push(analyzed.checked.never_type);
+    out.push(analyzed.checked.error_type);
+    sh_et_vec(&out, &analyzed.checked.types.words);
+    sh_et_vec(&out, &analyzed.checked.types.arguments);
+    out.push(analyzed.checked.types.limit);
+    out.push(analyzed.checked.symbols.limit);
+    out.push(analyzed.checked.symbols.names.handle);
+    out.push(analyzed.checked.symbols.names.marker);
+    let mut at = 0;
+    while at < analyzed.checked.symbols.names.len() { sh_et_text(&out, &analyzed.checked.symbols.names.get(at).text); at = at + 1; };
+    out.push(analyzed.checked.diagnostics.handle);
+    out.push(analyzed.checked.diagnostics.marker);
+    out.push(analyzed.checked.diagnostics.len());
+    at = 0;
+    while at < analyzed.checked.diagnostics.len() { let d = analyzed.checked.diagnostics.get(at); out.push(d.code); out.push(d.severity); out.push(d.node); out.push(d.start); out.push(d.end); out.push(d.expected); out.push(d.actual); at = at + 1; };
+    sh_et_vec(&out, &analyzed.node_modules);
+    sh_et_vec(&out, &analyzed.binding_modules);
+    sh_et_vec(&out, &analyzed.scope_modules);
+    sh_et_vec(&out, &analyzed.module_scopes);
+    sh_et_vec(&out, &analyzed.module_bindings);
+    sh_et_vec(&out, &analyzed.exports);
+    sh_et_vec(&out, &analyzed.front.parsed.ast.words);
+    sh_et_vec(&out, &analyzed.front.parsed.ast.edges);
+    sh_et_vec(&out, &analyzed.front.expanded.mapping.words);
+    out.push(analyzed.error);
+    out.push(analyzed.source);
+    out.push(analyzed.start);
+    out.push(analyzed.end);
+    out.push(analyzed.front.error);
+    out.push(analyzed.front.source);
+    out.push(analyzed.front.start);
+    out.push(analyzed.front.end);
+    out.push(analyzed.front.parsed.error);
+    out.push(analyzed.front.parsed.start);
+    out.push(analyzed.front.parsed.end);
+    out.push(analyzed.front.parsed.ast.root);
+    out.push(analyzed.front.expanded.error);
+    out.push(analyzed.front.expanded.start);
+    out.push(analyzed.front.expanded.end);
+    sh_et_text(&out, &analyzed.front.expanded.text);
+    sh_et_text(&out, &graph.text);
+    sh_et_vec(&out, &graph.mapping);
+    out.push(graph.sources.texts.handle);
+    out.push(graph.sources.texts.marker);
+    out.push(graph.sources.limit);
+    out.push(graph.sources.max_bytes);
+    at = 0;
+    while at < graph.sources.texts.len() { sh_et_text(&out, &graph.sources.texts.get(at).text); at = at + 1; };
+    out;
+}
+
+def sh_ht_scope(provider_root: &String, manifest_sha: &String, artifact_sha: &String, program: &String, collection_pin: &String, option_pin: &String, poison: bool) -> Result<bool, i64> {
+    let manifest = path_join_string(provider_root.as_str(), "selfhost/sdk/collections_x64_abi1/manifest.json")?;
+    let stdlib = path_join_string(provider_root.as_str(), "tools/stdlib")?;
+    let prelude = path_join_string(provider_root.as_str(), "selfhost/sdk/collections_x64_abi1/prelude.sg")?;
+    let collection = path_join_string(provider_root.as_str(), "tools/stdlib/collections.sg")?;
+    let option = path_join_string(provider_root.as_str(), "tools/stdlib/option.sg")?;
+    let cs = file_snapshot_open(collection.as_str(), 1048576)?;
+    let identity = cs.identity()?;
+    let digest = cs.sha256()?;
+    let os = file_snapshot_open(option.as_str(), 1048576)?;
+    let option_identity = os.identity()?;
+    let option_digest = os.sha256()?;
+    assert_true(digest.as_str() == collection_pin.as_str() and option_digest.as_str() == option_pin.as_str(), "raw_observation", 20);
+    let provider = sh_collection_provider_load(provider_root.as_str(), manifest.as_str(), manifest_sha.as_str(), artifact_sha.as_str(), "x86_64-pc-windows-msvc", 1, true);
+    assert_eq_i64(provider.error, 0, "collection_handles.sg", 4);
+    let config = string_from_str("collection_runtime=")?;
+    config.push_str(prelude.as_str())?;
+    let graph = sh_modules_load(program.as_str(), stdlib.as_str(), &config, 64, 1048576);
+    assert_eq_i64(graph.error, 0, "collection_handles.sg", 5);
+    let analyzed = sh_modules_check(&graph, 100000, 1000);
+    if analyzed.error != 0 { println(analyzed.error); println(analyzed.start); };
+    assert_eq_i64(analyzed.error, 0, "collection_handles.sg", 6);
+    let prepared = sh_collection_ownership_finalize(&analyzed.checked, &analyzed.front.parsed.ast, 100000, 1000000);
+    assert_eq_i64(prepared.error, 0, "collection_raw_next_observation.sg", 19);
+    let idempotent = sh_collection_ownership_finalize(&analyzed.checked, &analyzed.front.parsed.ast, 100000, 1000000);
+    assert_eq_i64(idempotent.error, 0, "collection_raw_next_observation.sg", 20);
+    assert_eq_i64(idempotent.before_types, idempotent.after_types, "collection_raw_next_observation.sg", 21);
+    let frozen = sh_et_input(&graph, &analyzed);
+    let words = sh_ht_copy(&analyzed.checked.types.words);
+    let arguments = sh_ht_copy(&analyzed.checked.types.arguments);
+    let mapping = sh_collection_provider_map(&provider, provider_root.as_str(), &graph, &analyzed, manifest_sha.as_str(), artifact_sha.as_str(), identity.as_str(), digest.as_str(), "x86_64-pc-windows-msvc", 1, true);
+    assert_eq_i64(mapping.error, 0, "collection_handles.sg", 7);
+    let proto = "fn sengoo_raw_vec_iter_new(handle: i64) -> i64;";
+    let origins = sh_origins_analyze(&graph, &analyzed, identity.as_str(), digest.as_str(), proto, 100000);
+    assert_eq_i64(origins.error, 0, "collection_handles.sg", 8);
+    let loans = sh_loans_analyze(&origins, &graph, &analyzed, identity.as_str(), digest.as_str(), proto, option_identity.as_str(), option_digest.as_str(), 100000, 1);
+    assert_eq_i64(loans.error, 0, "collection_handles.sg", 9);
+    let nll = sh_loan_liveness(&origins, &loans, &graph, &analyzed, identity.as_str(), digest.as_str(), proto, option_identity.as_str(), option_digest.as_str(), 20000);
+    if nll.error != 0 { println(nll.error); };
+    assert_eq_i64(nll.error, 0, "collection_handles.sg", 10);
+    let mut facts = sh_collection_handles(&provider, &mapping, provider_root.as_str(), manifest_sha.as_str(), artifact_sha.as_str(), &origins, &loans, &nll, &graph, &analyzed, identity.as_str(), digest.as_str(), proto, option_identity.as_str(), option_digest.as_str(), 100000, true);
+    if facts.error != 0 { println("handles fatal"); println(facts.error); };
+    assert_eq_i64(facts.error, 0, "collection_handles.sg", 11);
+    assert_eq_i64(sh_collection_handles_validate(&facts, &provider, &mapping, provider_root.as_str(), manifest_sha.as_str(), artifact_sha.as_str(), &origins, &loans, &nll, &graph, &analyzed, identity.as_str(), digest.as_str(), proto, option_identity.as_str(), option_digest.as_str(), true), 0, "collection_handles.sg", 12);
+    let mut effects = sh_collection_effects(&provider, &mapping, provider_root.as_str(), manifest_sha.as_str(), artifact_sha.as_str(), &origins, &loans, &nll, &facts, &graph, &analyzed, identity.as_str(), digest.as_str(), proto, option_identity.as_str(), option_digest.as_str(), 20000, true);
+    assert_eq_i64(effects.error, 0, "collection_raw_next_observation.sg", 1);
+    assert_eq_i64(sh_collection_effects_validate(&effects, &provider, &mapping, provider_root.as_str(), manifest_sha.as_str(), artifact_sha.as_str(), &origins, &loans, &nll, &facts, &graph, &analyzed, identity.as_str(), digest.as_str(), proto, option_identity.as_str(), option_digest.as_str(), true), 0, "collection_raw_next_observation.sg", 2);
+    let requested = vec_new_i64();
+    requested.push(sh_o_unique(&analyzed, graph.root, "source_some_i64", 2));
+    requested.push(sh_o_unique(&analyzed, graph.root, "source_some_bool", 2));
+    requested.push(sh_o_unique(&analyzed, graph.root, "source_none_i64", 2));
+    requested.push(sh_o_unique(&analyzed, graph.root, "source_none_bool", 2));
+    requested.push(sh_o_unique(&analyzed, graph.root, "source_helper_i64", 2));
+    requested.push(sh_o_unique(&analyzed, graph.root, "source_helper_bool", 2));
+    requested.push(sh_o_unique(&analyzed, graph.root, "source_reuse_i64", 2));
+    let mut index = 0;
+    while index < requested.len() { assert_true(sh_origin_at(&requested, index) >= 0, "raw_observation", 1); index = index + 1; };
+    let scope = sh_check_ownership_collection_effect_functions(&provider, &mapping, provider_root.as_str(), manifest_sha.as_str(), artifact_sha.as_str(), &origins, &loans, &nll, &facts, &effects, &graph, &analyzed, identity.as_str(), digest.as_str(), proto, option_identity.as_str(), option_digest.as_str(), &requested, 1000, true);
+    if scope.error != 0 { println("scopeerror"); println(scope.error); let mut d = 0; while d < scope.ownership.diagnostics.len() { let diag = scope.ownership.diagnostics.get(d); println(diag.code); println(diag.node); let part = analyzed.front.expanded.text.get(diag.start, diag.end)?; println(part.as_str()); d = d + 1; }; };
+    assert_eq_i64(scope.error, 0, "raw_observation", 2);
+    let reuse = sh_o_unique(&analyzed, graph.root, "source_reuse_i64", 2);
+    let mut binding = 0;
+    let mut iterator = -1;
+    while binding < sh_binding_count(&analyzed.checked) { if sh_binding_word(&analyzed.checked, binding, 2) == 0 and sh_binding_word(&analyzed.checked, binding, 6) == reuse and sh_o_name(&analyzed.checked, binding, "iterator") { assert_eq_i64(iterator, -1, "raw_observation", 3); iterator = binding; }; binding = binding + 1; };
+    assert_true(iterator >= 0, "raw_observation", 4);
+    let mut drops = 0;
+    let mut action = 0;
+    while action < sh_ownership_action_count(&scope.ownership) { if sh_ownership_action(&scope.ownership, action, 1) == iterator { let kind = sh_ownership_action(&scope.ownership, action, 2); assert_true(kind != 2 and kind != 9 and kind != 10, "raw_observation", 5); if kind == 3 { drops = drops + 1; }; }; action = action + 1; };
+    assert_eq_i64(drops, 1, "raw_observation", 6);
+    let mut observations = 0;
+    let mut reuse_observations = 0;
+    let mut selected_op = -1;
+    let mut op = 0;
+    while op < effects.operations.len() / 16 { if sh_ce_at(&effects, op, 1) == 3 and sh_cb_in(&requested, sh_ce_at(&effects, op, 2)) { let call = sh_ce_at(&effects, op, 0); let arg = sh_ce_at(&effects, op, 7); let good = sh_collection_raw_next_observes(&effects, &loans, &analyzed.checked, &analyzed.front.parsed.ast, call, arg, 0); assert_true(good, "raw_observation", 7); assert_true(not sh_collection_raw_next_observes(&effects, &loans, &analyzed.checked, &analyzed.front.parsed.ast, call, arg, 1), "raw_observation", 8); if sh_ce_at(&effects, op, 2) == reuse { reuse_observations = reuse_observations + 1; selected_op = op; }; observations = observations + 1; }; op = op + 1; };
+    assert_eq_i64(reuse_observations, 2, "raw_observation", 9);
+    assert_true(observations >= 4 and selected_op >= 0, "raw_observation", 10);
+    let call = sh_ce_at(&effects, selected_op, 0);
+    let arg = sh_ce_at(&effects, selected_op, 7);
+    let mut poisons = 0;
+    if poison { let mut column = 0; while column < 16 { let kept = sh_ce_at(&effects, selected_op, column); effects.operations.set(selected_op * 16 + column, kept + 1); assert_true(not sh_collection_raw_next_observes(&effects, &loans, &analyzed.checked, &analyzed.front.parsed.ast, call, arg, 0), "raw_observation", 11); let denied = sh_check_ownership_collection_effect_functions(&provider, &mapping, provider_root.as_str(), manifest_sha.as_str(), artifact_sha.as_str(), &origins, &loans, &nll, &facts, &effects, &graph, &analyzed, identity.as_str(), digest.as_str(), proto, option_identity.as_str(), option_digest.as_str(), &requested, 1000, true); assert_eq_i64(denied.error, 6120, "raw_observation", 12); effects.operations.set(selected_op * 16 + column, kept); poisons = poisons + 1; column = column + 1; }; let row = sh_cb_words(&effects.operations); column = 0; while column < 16 { effects.operations.push(sh_origin_at(&row, selected_op * 16 + column)); column = column + 1; }; effects.call_events.push(sh_origin_at(&effects.call_events, selected_op)); assert_true(not sh_collection_raw_next_observes(&effects, &loans, &analyzed.checked, &analyzed.front.parsed.ast, call, arg, 0), "raw_observation", 13); column = 0; while column < 16 { effects.operations.pop(); column = column + 1; }; effects.call_events.pop(); poisons = poisons + 1; let event = sh_origin_at(&effects.call_events, selected_op); let kept = sh_origin_at(&effects.adjusted.valid_in, event); effects.adjusted.valid_in.set(event, 0); assert_true(not sh_collection_raw_next_observes(&effects, &loans, &analyzed.checked, &analyzed.front.parsed.ast, call, arg, 0), "raw_observation", 14); effects.adjusted.valid_in.set(event, kept); poisons = poisons + 1; let prior = sh_origin_at(&effects.handles.provider_rows, 18); effects.handles.provider_rows.set(18, -1); assert_true(not sh_collection_raw_next_observes(&effects, &loans, &analyzed.checked, &analyzed.front.parsed.ast, call, arg, 0), "raw_observation", 15); effects.handles.provider_rows.set(18, prior); poisons = poisons + 1; (); };
+    let denied_roots = vec_new_i64();
+    let denied_fn = sh_o_unique(&analyzed, graph.root, "negative_mutable", 2);
+    assert_true(denied_fn >= 0, "raw_observation", 16);
+    denied_roots.push(denied_fn);
+    let denied = sh_check_ownership_collection_effect_functions(&provider, &mapping, provider_root.as_str(), manifest_sha.as_str(), artifact_sha.as_str(), &origins, &loans, &nll, &facts, &effects, &graph, &analyzed, identity.as_str(), digest.as_str(), proto, option_identity.as_str(), option_digest.as_str(), &denied_roots, 1000, true);
+    assert_true(denied.error != 0, "raw_observation", 17);
+    if poison { println("negative_mutable"); println(denied.error); };
+    let denied_roots = vec_new_i64();
+    let denied_fn = sh_o_unique(&analyzed, graph.root, "negative_unguarded", 2);
+    assert_true(denied_fn >= 0, "raw_observation", 16);
+    denied_roots.push(denied_fn);
+    let denied = sh_check_ownership_collection_effect_functions(&provider, &mapping, provider_root.as_str(), manifest_sha.as_str(), artifact_sha.as_str(), &origins, &loans, &nll, &facts, &effects, &graph, &analyzed, identity.as_str(), digest.as_str(), proto, option_identity.as_str(), option_digest.as_str(), &denied_roots, 1000, true);
+    assert_true(denied.error != 0, "raw_observation", 17);
+    if poison { println("negative_unguarded"); println(denied.error); };
+    let denied_roots = vec_new_i64();
+    let denied_fn = sh_o_unique(&analyzed, graph.root, "negative_invalidated", 2);
+    assert_true(denied_fn >= 0, "raw_observation", 16);
+    denied_roots.push(denied_fn);
+    let denied = sh_check_ownership_collection_effect_functions(&provider, &mapping, provider_root.as_str(), manifest_sha.as_str(), artifact_sha.as_str(), &origins, &loans, &nll, &facts, &effects, &graph, &analyzed, identity.as_str(), digest.as_str(), proto, option_identity.as_str(), option_digest.as_str(), &denied_roots, 1000, true);
+    assert_true(denied.error != 0, "raw_observation", 17);
+    if poison { println("negative_invalidated"); println(denied.error); };
+    let denied_roots = vec_new_i64();
+    let denied_fn = sh_o_unique(&analyzed, graph.root, "negative_unknown", 2);
+    assert_true(denied_fn >= 0, "raw_observation", 16);
+    denied_roots.push(denied_fn);
+    let denied = sh_check_ownership_collection_effect_functions(&provider, &mapping, provider_root.as_str(), manifest_sha.as_str(), artifact_sha.as_str(), &origins, &loans, &nll, &facts, &effects, &graph, &analyzed, identity.as_str(), digest.as_str(), proto, option_identity.as_str(), option_digest.as_str(), &denied_roots, 1000, true);
+    assert_true(denied.error != 0, "raw_observation", 17);
+    if poison { println("negative_unknown"); println(denied.error); };
+    let denied_roots = vec_new_i64();
+    let denied_fn = sh_o_unique(&analyzed, graph.root, "negative_push_reuse", 2);
+    assert_true(denied_fn >= 0, "raw_observation", 16);
+    denied_roots.push(denied_fn);
+    let denied = sh_check_ownership_collection_effect_functions(&provider, &mapping, provider_root.as_str(), manifest_sha.as_str(), artifact_sha.as_str(), &origins, &loans, &nll, &facts, &effects, &graph, &analyzed, identity.as_str(), digest.as_str(), proto, option_identity.as_str(), option_digest.as_str(), &denied_roots, 1000, true);
+    assert_true(denied.error != 0, "raw_observation", 17);
+    if poison { println("negative_push_reuse"); println(denied.error); };
+    let denied_roots = vec_new_i64();
+    let denied_fn = sh_o_unique(&analyzed, graph.root, "negative_fake", 2);
+    assert_true(denied_fn >= 0, "raw_observation", 16);
+    denied_roots.push(denied_fn);
+    let denied = sh_check_ownership_collection_effect_functions(&provider, &mapping, provider_root.as_str(), manifest_sha.as_str(), artifact_sha.as_str(), &origins, &loans, &nll, &facts, &effects, &graph, &analyzed, identity.as_str(), digest.as_str(), proto, option_identity.as_str(), option_digest.as_str(), &denied_roots, 1000, true);
+    assert_true(denied.error != 0, "raw_observation", 17);
+    if poison { println("negative_fake"); println(denied.error); };
+    let denied_roots = vec_new_i64();
+    let denied_fn = sh_o_unique(&analyzed, graph.root, "negative_cross_t", 2);
+    assert_true(denied_fn >= 0, "raw_observation", 16);
+    denied_roots.push(denied_fn);
+    let denied = sh_check_ownership_collection_effect_functions(&provider, &mapping, provider_root.as_str(), manifest_sha.as_str(), artifact_sha.as_str(), &origins, &loans, &nll, &facts, &effects, &graph, &analyzed, identity.as_str(), digest.as_str(), proto, option_identity.as_str(), option_digest.as_str(), &denied_roots, 1000, true);
+    assert_true(denied.error != 0, "raw_observation", 17);
+    if poison { println("negative_cross_t"); println(denied.error); };
+    let denied_roots = vec_new_i64();
+    let denied_fn = sh_o_unique(&analyzed, graph.root, "negative_family", 2);
+    assert_true(denied_fn >= 0, "raw_observation", 16);
+    denied_roots.push(denied_fn);
+    let denied = sh_check_ownership_collection_effect_functions(&provider, &mapping, provider_root.as_str(), manifest_sha.as_str(), artifact_sha.as_str(), &origins, &loans, &nll, &facts, &effects, &graph, &analyzed, identity.as_str(), digest.as_str(), proto, option_identity.as_str(), option_digest.as_str(), &denied_roots, 1000, true);
+    assert_true(denied.error != 0, "raw_observation", 17);
+    if poison { println("negative_family"); println(denied.error); };
+    let denied_roots = vec_new_i64();
+    let denied_fn = sh_o_unique(&analyzed, graph.root, "negative_escape", 2);
+    assert_true(denied_fn >= 0, "raw_observation", 16);
+    denied_roots.push(denied_fn);
+    let denied = sh_check_ownership_collection_effect_functions(&provider, &mapping, provider_root.as_str(), manifest_sha.as_str(), artifact_sha.as_str(), &origins, &loans, &nll, &facts, &effects, &graph, &analyzed, identity.as_str(), digest.as_str(), proto, option_identity.as_str(), option_digest.as_str(), &denied_roots, 1000, true);
+    assert_true(denied.error != 0, "raw_observation", 17);
+    if poison { println("negative_escape"); println(denied.error); };
+    assert_eq_i64(sh_collection_effect_ownership_validate(&scope, &provider, &mapping, provider_root.as_str(), manifest_sha.as_str(), artifact_sha.as_str(), &origins, &loans, &nll, &facts, &effects, &graph, &analyzed, identity.as_str(), digest.as_str(), proto, option_identity.as_str(), option_digest.as_str(), &requested, 1000, true), 0, "raw_observation", 18);
+    let after = sh_et_input(&graph, &analyzed);
+    assert_true(sh_o_equal(&frozen, &after), "raw_observation", 19);
+    if poison { println("raw_observation_counts"); println(requested.len()); println(observations); println(reuse_observations); println(drops); println(poisons); };
+    result_ok_bool(true);
+}
+
+def main() -> i64 {
+    if args_len() == 1 { let flag = sh_ht_arg(0); if flag.is_ok() { if flag.value.as_str() == "--fail-equality" { assert_eq_i64(1, 2, "collection_raw_next_observation.sg", 98); (); }; if flag.value.as_str() == "--fail-truth" { assert_true(false, "collection_raw_next_observation.sg", 99); (); }; }; return 64; };
+    if args_len() != 6 { return 64; };
+    let root = sh_ht_arg(0);
+    let manifest = sh_ht_arg(1);
+    let object = sh_ht_arg(2);
+    let source = sh_ht_arg(3);
+    let collection_pin = sh_ht_arg(4);
+    let option_pin = sh_ht_arg(5);
+    if not root.is_ok() or not manifest.is_ok() or not object.is_ok() or not source.is_ok() or not collection_pin.is_ok() or not option_pin.is_ok() { return 65; };
+    let strings = sengoo_string_live_handle_count();
+    let buffers = sengoo_buffer_live_handle_count();
+    let opaque = sengoo_opaque_live_handle_count();
+    let files = sengoo_file_snapshot_live_handle_count();
+    let bytes = sengoo_file_snapshot_live_bytes();
+    let mut round = 0;
+    while round < 3 { let result = sh_ht_scope(&root.value, &manifest.value, &object.value, &source.value, &collection_pin.value, &option_pin.value, round == 0); if not result.is_ok() { println(result.error); return 65; }; assert_eq_i64(sengoo_string_live_handle_count(), strings, "collection_raw_next_observation.sg", 10); assert_eq_i64(sengoo_buffer_live_handle_count(), buffers, "collection_raw_next_observation.sg", 11); assert_eq_i64(sengoo_opaque_live_handle_count(), opaque, "collection_raw_next_observation.sg", 12); assert_eq_i64(sengoo_file_snapshot_live_handle_count(), files, "collection_raw_next_observation.sg", 13); assert_eq_i64(sengoo_file_snapshot_live_bytes(), bytes, "collection_raw_next_observation.sg", 14); round = round + 1; };
+    println("raw next observation: three first-call resource scopes passed");
+    42;
+}
