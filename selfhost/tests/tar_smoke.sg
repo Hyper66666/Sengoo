@@ -1,0 +1,45 @@
+extern "C" {
+    unsafe fn sengoo_sg_tar_scan(source: * const u8, length: i64, table: * mut u8, table_capacity: i64,
+    paths: * mut u8, path_capacity: i64) -> i64;
+    unsafe fn sengoo_tar_fixture_input(kind: i64) -> * const u8;
+    unsafe fn sengoo_tar_fixture_table() -> * mut u8;
+    unsafe fn sengoo_tar_fixture_paths() -> * mut u8;
+    fn sengoo_tar_fixture_table_byte(index: i64) -> u8;
+    fn sengoo_tar_fixture_path_byte(index: i64) -> u8;
+    fn sengoo_tar_fixture_expected_table(kind: i64, index: i64) -> u8;
+    fn sengoo_tar_fixture_expected_path(kind: i64, index: i64) -> u8;
+    fn sengoo_tar_fixture_length(kind: i64) -> i64;
+    fn sengoo_tar_fixture_result(kind: i64) -> i64;
+    fn sengoo_tar_fixture_table_length(kind: i64) -> i64;
+    fn sengoo_tar_fixture_path_length(kind: i64) -> i64;
+}
+pub unsafe extern "C" fn main() -> i64 {
+    let mut kind = 0;
+    while kind < 11 {
+        let result = sengoo_sg_tar_scan(sengoo_tar_fixture_input(kind), sengoo_tar_fixture_length(kind),
+        sengoo_tar_fixture_table(), 4096, sengoo_tar_fixture_paths(), 131072);
+        if result != sengoo_tar_fixture_result(kind) {
+            return 1;
+        };
+        if result >= 0 {
+            let mut index = 0;
+            while index < sengoo_tar_fixture_table_length(kind) {
+                if (sengoo_tar_fixture_table_byte(index) as i64) != (sengoo_tar_fixture_expected_table(kind,
+                index) as i64) {
+                    return 2;
+                };
+                index = index + 1;
+            };
+            index = 0;
+            while index < sengoo_tar_fixture_path_length(kind) {
+                if (sengoo_tar_fixture_path_byte(index) as i64) != (sengoo_tar_fixture_expected_path(kind,
+                index) as i64) {
+                    return 3;
+                };
+                index = index + 1;
+            };
+        };
+        kind = kind + 1;
+    };
+    42;
+}
