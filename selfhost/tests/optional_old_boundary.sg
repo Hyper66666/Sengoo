@@ -1,0 +1,31 @@
+import selfhost_mir_validate;
+
+import std::assert;
+
+def main() -> i64 {
+    let mir = sh_mir_new(100);
+    let empty = vec_new_i64();
+    let integer = sh_type_primitive(&mir.types, 2, 64, 1);
+    if not integer.is_ok() { return 65; };
+    let args = vec_new_i64();
+    args.push(integer.value);
+    let signature = sh_type_intern(&mir.types, 11, 0, 0, -1, &args);
+    if not signature.is_ok() { return 65; };
+    let name = string_from_str("old_optional_boundary");
+    if not name.is_ok() { return 65; };
+    let function = sh_mir_add_function(&mir, &name.value, signature.value, 0, -1, 0, 0);
+    if not function.is_ok() { return 65; };
+    let scope = sh_mir_add_scope(&mir, function.value, -1, 0);
+    if not scope.is_ok() { return 65; };
+    let block = sh_mir_add_block(&mir, function.value, scope.value, 0, -1, 0, 0);
+    if not block.is_ok() { return 65; };
+    let rejected = sh_mir_add_instruction(&mir, block.value, 27, integer.value, &empty, 0, 0, 0, -1, 0, 0);
+    assert_true(not rejected.is_ok(), "optional_old_boundary.sg", 1);
+    assert_eq_i64(rejected.error, 5002, "optional_old_boundary.sg", 2);
+    let value = sh_mir_add_instruction(&mir, block.value, 4, integer.value, &empty, 42, 0, 0, -1, 0, 0);
+    if not value.is_ok() { return 65; };
+    mir.instructions.set(value.value * 12 + 2, 27);
+    assert_eq_i64(sh_mir_inst_typecheck(&mir, value.value), 5003, "optional_old_boundary.sg", 3);
+    println("old opcode27: add_instruction=5002; inst_typecheck=5003");
+    0;
+}

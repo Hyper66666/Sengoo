@@ -1,0 +1,241 @@
+import selfhost_mir;
+
+import selfhost_lexer;
+
+def sh_optional_shape(mir: &ShMir, id: i64) -> i64 {
+    if id < 0 or id >= sh_mir_inst_count(mir) or sh_mir_inst(mir, id, 2) != 27 or sh_mir_inst(mir, id, 5) != 2 or sh_mir_inst(mir, id, 7) != 1 or sh_mir_inst(mir, id, 8) != 0 { return 5007; };
+    let ty = sh_mir_inst(mir, id, 3);
+    let first = sh_mir_inst_arg(mir, id, 0);
+    let handle = sh_mir_inst_arg(mir, id, 1);
+    let provider = sh_mir_inst(mir, id, 6);
+    if sh_mir_type_word(mir, ty, 0) != 12 or sh_mir_type_word(mir, ty, 1) != 0 or sh_mir_field_count(mir, ty, -1) != 2 or sh_mir_type_word(mir, sh_mir_field_type(mir, ty, -1, 0), 0) != 1 { return 5007; };
+    let reference = sh_mir_field_type(mir, ty, -1, 1);
+    if sh_mir_type_word(mir, reference, 0) != 6 or sh_mir_type_word(mir, reference, 2) != 0 or sh_mir_type_word(mir, reference, 5) != 1 { return 5007; };
+    if provider < 0 or provider >= sh_mir_fn_count(mir) or sh_mir_fn(mir, provider, 3) != 1 { return 5006; };
+    let signature = sh_mir_fn(mir, provider, 1);
+    let pointer = sh_mir_type_arg(mir, signature, 1);
+    let integer = sh_mir_type_arg(mir, signature, 0);
+    let byte = sh_mir_type_arg(mir, pointer, 0);
+    let name = sh_symbol_text(&mir.symbols, sh_mir_fn(mir, provider, 0));
+    if not name.is_ok() or name.value.as_str() != "sengoo_raw_vec_iter_next" or sh_mir_type_word(mir, signature, 0) != 11 or sh_mir_type_word(mir, signature, 1) != 1 or sh_mir_type_word(mir, signature, 2) != 0 or sh_mir_type_word(mir, signature, 5) != 2 or sh_mir_type_word(mir, pointer, 0) != 7 or sh_mir_type_word(mir, pointer, 2) != 1 or sh_mir_type_word(mir, pointer, 5) != 1 or sh_mir_type_word(mir, byte, 0) != 2 or sh_mir_type_word(mir, byte, 1) != 8 or sh_mir_type_word(mir, byte, 2) != 0 or sh_mir_type_word(mir, integer, 0) != 2 or sh_mir_type_word(mir, integer, 1) != 64 or sh_mir_type_word(mir, integer, 2) != 1 { return 5006; };
+    if first < 0 or first >= sh_mir_inst_count(mir) or handle < 0 or handle >= sh_mir_inst_count(mir) or sh_mir_inst(mir, first, 2) != 20 or sh_mir_inst(mir, first, 3) != pointer or sh_mir_inst(mir, first, 5) != 1 or sh_mir_inst(mir, first, 6) != provider or sh_mir_inst(mir, first, 7) != 1 or sh_mir_inst(mir, first, 8) != 0 or sh_mir_inst_arg(mir, first, 0) != handle or sh_mir_inst(mir, handle, 3) != integer { return 5007; };
+    0;
+}
+
+def sh_optional_direct_reaches(mir: &ShMir, entry: i64, target: i64, avoid: i64) -> bool {
+    let seen = vec_new_i64();
+    let queue = vec_new_i64();
+    let mut index = 0;
+    while index < sh_mir_block_count(mir) { if not seen.push(0) { return true; }; index = index + 1; };
+    if entry < 0 or target < 0 or entry >= seen.len() or target >= seen.len() { return true; };
+    if entry == avoid { return false; };
+    if not queue.push(entry) or not seen.set(entry, 1) { return true; };
+    index = 0;
+    while index < queue.len() { let block = queue.get(index).unwrap_or(-1); if block == target { return true; }; let term = sh_mir_block(mir, block, 4); let mut edge = 0; while edge < sh_mir_term(mir, term, 5) { let next = sh_mir_edge(mir, sh_mir_term(mir, term, 4) + edge, 1); if next != avoid and next >= 0 and next < seen.len() and seen.get(next).unwrap_or(-1) == 0 { if not seen.set(next, 1) or not queue.push(next) { return true; }; }; edge = edge + 1; }; index = index + 1; };
+    false;
+}
+
+def sh_optional_direct_active(mir: &ShMir, optional: i64, payload: i64) -> bool {
+    let function = sh_mir_inst(mir, payload, 0);
+    let use_block = sh_mir_inst(mir, payload, 1);
+    let entry = sh_mir_fn(mir, function, 2);
+    let mut id = 0;
+    while id < sh_mir_inst_count(mir) { if sh_mir_inst(mir, id, 0) == function and sh_mir_inst(mir, id, 2) == 18 and sh_mir_inst(mir, id, 5) == 1 and sh_mir_inst_arg(mir, id, 0) == optional and sh_mir_inst(mir, id, 6) == 0 and sh_mir_inst(mir, id, 7) == -1 { let block = sh_mir_inst(mir, id, 1); let term = sh_mir_block(mir, block, 4); if sh_mir_term(mir, term, 2) == 2 and sh_mir_term(mir, term, 3) == id and sh_mir_term(mir, term, 5) == 2 { let first = sh_mir_term(mir, term, 4); let left = sh_mir_edge(mir, first, 1); let right = sh_mir_edge(mir, first + 1, 1); if use_block != block and left != right and sh_mir_edge(mir, first, 4) == 1 and sh_mir_edge(mir, first + 1, 4) == 0 and sh_optional_direct_reaches(mir, left, use_block, -1) and not sh_optional_direct_reaches(mir, entry, use_block, block) and not sh_optional_direct_reaches(mir, right, use_block, block) { return true; }; }; }; id = id + 1; };
+    false;
+}
+
+def sh_optional_direct_uses(mir: &ShMir, optional: i64) -> i64 {
+    let mut id = 0;
+    while id < sh_mir_inst_count(mir) { let mut argument = 0; while argument < sh_mir_inst(mir, id, 5) { if sh_mir_inst_arg(mir, id, argument) == optional { if argument != 0 or sh_mir_inst(mir, id, 2) != 18 or sh_mir_inst(mir, id, 5) != 1 or sh_mir_inst(mir, id, 7) != -1 or sh_mir_inst(mir, id, 8) != 0 { return 5007; }; let field = sh_mir_inst(mir, id, 6); if field < 0 or field > 1 or field == 1 and not sh_optional_direct_active(mir, optional, id) { return 5007; }; }; argument = argument + 1; }; id = id + 1; };
+    id = 0;
+    while id < sh_mir_term_count(mir) { if sh_mir_term(mir, id, 3) == optional { return 5007; }; id = id + 1; };
+    id = 0;
+    while id < sh_mir_edge_count(mir) { let mut argument = 0; while argument < sh_mir_edge(mir, id, 3) { if sh_mir_operand(mir, sh_mir_edge(mir, id, 2), sh_mir_edge(mir, id, 3), argument) == optional { return 5007; }; argument = argument + 1; }; id = id + 1; };
+    0;
+}
+
+def sh_ol_escapes_edge(mir: &ShMir, value: i64) -> bool {
+    let mut row = 0;
+    while row < sh_mir_term_count(mir) { if sh_mir_term(mir, row, 3) == value { return true; }; row = row + 1; };
+    row = 0;
+    while row < sh_mir_edge_count(mir) { let mut argument = 0; while argument < sh_mir_edge(mir, row, 3) { if sh_mir_operand(mir, sh_mir_edge(mir, row, 2), sh_mir_edge(mir, row, 3), argument) == value { return true; }; argument = argument + 1; }; row = row + 1; };
+    false;
+}
+
+def sh_ol_address(mir: &ShMir, value: i64, local: i64) -> bool {
+    value >= 0 and value < sh_mir_inst_count(mir) and sh_mir_inst(mir, value, 2) == 13 and sh_mir_inst(mir, value, 6) == local and sh_mir_inst(mir, value, 0) == sh_mir_local(mir, local, 0);
+}
+
+def sh_ol_initial(mir: &ShMir, local: i64) -> i64 {
+    if local < 0 or local >= sh_mir_local_count(mir) { return -1; };
+    let mut initial = -1;
+    let mut address = 0;
+    while address < sh_mir_inst_count(mir) { if sh_ol_address(mir, address, local) { if sh_ol_escapes_edge(mir, address) { return -1; }; let mut use = 0; while use < sh_mir_inst_count(mir) { let mut argument = 0; while argument < sh_mir_inst(mir, use, 5) { if sh_mir_inst_arg(mir, use, argument) == address { let opcode = sh_mir_inst(mir, use, 2); if opcode == 15 and argument == 0 and sh_mir_inst(mir, use, 5) == 2 { let value = sh_mir_inst_arg(mir, use, 1); if initial >= 0 and initial != use or sh_mir_inst(mir, value, 2) != 27 or sh_mir_value_type_local(mir, value) != sh_mir_local(mir, local, 1) { return -1; }; initial = use; } else if opcode == 14 and argument == 0 and sh_mir_inst(mir, use, 5) == 1 { (); } else if opcode == 17 and argument == 0 and sh_mir_inst(mir, use, 5) == 1 and (sh_mir_inst(mir, use, 6) == 0 or sh_mir_inst(mir, use, 6) == 1) and sh_mir_inst(mir, use, 7) == -1 and sh_mir_inst(mir, use, 8) == 0 { if sh_ol_escapes_edge(mir, use) { return -1; }; let mut field_use = 0; while field_use < sh_mir_inst_count(mir) { let mut field_arg = 0; while field_arg < sh_mir_inst(mir, field_use, 5) { if sh_mir_inst_arg(mir, field_use, field_arg) == use and (sh_mir_inst(mir, field_use, 2) != 14 or field_arg != 0 or sh_mir_inst(mir, field_use, 5) != 1) { return -1; }; field_arg = field_arg + 1; }; field_use = field_use + 1; }; } else { return -1; }; }; argument = argument + 1; }; use = use + 1; }; }; address = address + 1; };
+    initial;
+}
+
+def sh_mir_value_type_local(mir: &ShMir, value: i64) -> i64 {
+    sh_mir_inst(mir, value, 3);
+}
+
+def sh_ol_initialized(mir: &ShMir, initial: i64, use: i64) -> bool {
+    if initial < 0 or use < 0 or sh_mir_inst(mir, initial, 0) != sh_mir_inst(mir, use, 0) { return false; };
+    let first = sh_mir_inst(mir, initial, 1);
+    let last = sh_mir_inst(mir, use, 1);
+    if first == last { return initial < use; };
+    let entry = sh_mir_fn(mir, sh_mir_inst(mir, use, 0), 2);
+    not sh_optional_direct_reaches(mir, entry, last, first);
+}
+
+def sh_ol_origin(mir: &ShMir, value: i64) -> i64 {
+    if sh_mir_inst(mir, value, 2) == 27 { return value; };
+    if sh_mir_inst(mir, value, 2) != 14 or sh_mir_inst(mir, value, 5) != 1 { return -1; };
+    let address = sh_mir_inst_arg(mir, value, 0);
+    if sh_mir_inst(mir, address, 2) != 13 { return -1; };
+    let initial = sh_ol_initial(mir, sh_mir_inst(mir, address, 6));
+    if not sh_ol_initialized(mir, initial, value) { return -1; };
+    sh_mir_inst_arg(mir, initial, 1);
+}
+
+def sh_ol_field(mir: &ShMir, loaded: i64, field: i64) -> i64 {
+    let opcode = sh_mir_inst(mir, loaded, 2);
+    if opcode == 18 and sh_mir_inst(mir, loaded, 5) == 1 and sh_mir_inst(mir, loaded, 6) == field and sh_mir_inst(mir, loaded, 7) == -1 { return sh_ol_origin(mir, sh_mir_inst_arg(mir, loaded, 0)); };
+    if opcode != 14 or sh_mir_inst(mir, loaded, 5) != 1 { return -1; };
+    let pointer = sh_mir_inst_arg(mir, loaded, 0);
+    if sh_mir_inst(mir, pointer, 2) != 17 or sh_mir_inst(mir, pointer, 5) != 1 or sh_mir_inst(mir, pointer, 6) != field or sh_mir_inst(mir, pointer, 7) != -1 or sh_mir_inst(mir, pointer, 8) != 0 { return -1; };
+    let address = sh_mir_inst_arg(mir, pointer, 0);
+    if sh_mir_inst(mir, address, 2) != 13 { return -1; };
+    let initial = sh_ol_initial(mir, sh_mir_inst(mir, address, 6));
+    if not sh_ol_initialized(mir, initial, loaded) { return -1; };
+    sh_mir_inst_arg(mir, initial, 1);
+}
+
+def sh_ol_active(mir: &ShMir, optional: i64, payload: i64) -> bool {
+    let function = sh_mir_inst(mir, payload, 0);
+    let use_block = sh_mir_inst(mir, payload, 1);
+    let entry = sh_mir_fn(mir, function, 2);
+    let mut tag = 0;
+    while tag < sh_mir_inst_count(mir) { if sh_mir_inst(mir, tag, 0) == function and sh_ol_field(mir, tag, 0) == optional { let block = sh_mir_inst(mir, tag, 1); let term = sh_mir_block(mir, block, 4); if sh_mir_term(mir, term, 2) == 2 and sh_mir_term(mir, term, 3) == tag and sh_mir_term(mir, term, 5) == 2 { let first = sh_mir_term(mir, term, 4); let left = sh_mir_edge(mir, first, 1); let right = sh_mir_edge(mir, first + 1, 1); if use_block != block and left != right and sh_mir_edge(mir, first, 4) == 1 and sh_mir_edge(mir, first + 1, 4) == 0 and sh_optional_direct_reaches(mir, left, use_block, -1) and not sh_optional_direct_reaches(mir, entry, use_block, block) and not sh_optional_direct_reaches(mir, right, use_block, block) { return true; }; }; }; tag = tag + 1; };
+    false;
+}
+
+def sh_optional_local_uses(mir: &ShMir, optional: i64) -> i64 {
+    let mut id = 0;
+    while id < sh_mir_inst_count(mir) { let mut argument = 0; while argument < sh_mir_inst(mir, id, 5) { if sh_ol_origin(mir, sh_mir_inst_arg(mir, id, argument)) == optional { let opcode = sh_mir_inst(mir, id, 2); if opcode == 15 and argument == 1 and sh_mir_inst(mir, id, 5) == 2 { let address = sh_mir_inst_arg(mir, id, 0); if sh_mir_inst(mir, address, 2) != 13 or sh_ol_initial(mir, sh_mir_inst(mir, address, 6)) != id { return 5007; }; } else if opcode == 18 and argument == 0 and sh_mir_inst(mir, id, 5) == 1 and sh_mir_inst(mir, id, 7) == -1 and sh_mir_inst(mir, id, 8) == 0 { let field = sh_mir_inst(mir, id, 6); if field < 0 or field > 1 or field == 1 and not sh_ol_active(mir, optional, id) { return 5007; }; } else { return 5007; }; }; argument = argument + 1; }; if sh_ol_field(mir, id, 1) == optional and not sh_ol_active(mir, optional, id) { return 5007; }; id = id + 1; };
+    id = 0;
+    while id < sh_mir_term_count(mir) { if sh_ol_origin(mir, sh_mir_term(mir, id, 3)) == optional { return 5007; }; id = id + 1; };
+    id = 0;
+    while id < sh_mir_edge_count(mir) { let mut argument = 0; while argument < sh_mir_edge(mir, id, 3) { if sh_ol_origin(mir, sh_mir_operand(mir, sh_mir_edge(mir, id, 2), sh_mir_edge(mir, id, 3), argument)) == optional { return 5007; }; argument = argument + 1; }; id = id + 1; };
+    0;
+}
+
+def sh_optional_payload_uses(mir: &ShMir, optional: i64) -> i64 {
+    let references = vec_new_i64();
+    let mut id = 0;
+    while id < sh_mir_inst_count(mir) { if sh_ol_field(mir, id, 1) == optional { if not references.push(id) { return 5001; }; }; id = id + 1; };
+    let mut at = 0;
+    while at < references.len() { let reference = sengoo_vec_get_or_default_i64(references.handle, at, -1); if sh_ol_escapes_edge(mir, reference) { return 5007; }; id = 0; while id < sh_mir_inst_count(mir) { let mut arg = 0; while arg < sh_mir_inst(mir, id, 5) { if sh_mir_inst_arg(mir, id, arg) == reference { let op = sh_mir_inst(mir, id, 2); let ty = sh_mir_inst(mir, id, 3); let kind = sh_mir_type_word(mir, ty, 0); if op == 14 and arg == 0 and sh_mir_inst(mir, id, 5) == 1 and kind >= 1 and kind <= 4 { (); } else if op == 17 and arg == 0 and sh_mir_inst(mir, id, 5) == 1 and kind == 6 and sh_mir_type_word(mir, ty, 2) == 0 and sh_mir_inst(mir, id, 7) == -1 and sh_mir_inst(mir, id, 8) == 0 { if not references.push(id) { return 5001; }; } else { return 5007; }; }; arg = arg + 1; }; id = id + 1; }; at = at + 1; if at > sh_mir_inst_count(mir) { return 5001; }; };
+    0;
+}
+
+def sh_optional_physical(mir: &ShMir, id: i64) -> i64 {
+    let shape = sh_optional_shape(mir, id);
+    if shape != 0 { return shape; };
+    let uses = sh_optional_local_uses(mir, id);
+    if uses != 0 { return uses; };
+    let carrier = sh_optional_carrier_shape(mir, id);
+    if carrier != 0 { return carrier; };
+    sh_optional_payload_uses(mir, id);
+}
+
+struct ShOptionalEmission {
+    value: i64,
+    raw_call: i64,
+    optional: i64,
+    block: i64,
+    error: i64,
+}
+
+def sh_optional_emit(mir: &ShMir, block: i64, provider: i64, handle: i64, option: i64, file: i64, start: i64, end: i64) -> ShOptionalEmission {
+    let mut out = ShOptionalEmission { value: -1, raw_call: -1, optional: -1, block: block, error: 0 };
+    if provider < 0 or provider >= sh_mir_fn_count(mir) or handle < 0 or handle >= sh_mir_inst_count(mir) { out.error = 5007; return out; };
+    let signature = sh_mir_fn(mir, provider, 1);
+    let pointer = sh_mir_type_arg(mir, signature, 1);
+    let args = vec_new_i64();
+    args.push(handle);
+    let called = sh_mir_add_instruction(mir, block, 20, pointer, &args, provider, 1, 0, file, start, end);
+    if not called.is_ok() { out.error = called.error; return out; };
+    out.raw_call = called.value;
+    args.clear();
+    args.push(called.value);
+    args.push(handle);
+    let wrapped = sh_mir_add_instruction(mir, block, 27, option, &args, provider, 1, 0, file, start, end);
+    if not wrapped.is_ok() { out.error = wrapped.error; return out; };
+    out.value = wrapped.value;
+    out.optional = wrapped.value;
+    out;
+}
+
+def sh_optional_scalar_emit(mir: &ShMir, block: i64, provider: i64, handle: i64, option: i64, fallback: i64, file: i64, start: i64, end: i64) -> ShOptionalEmission {
+    let mut out = sh_optional_emit(mir, block, provider, handle, option, file, start, end);
+    if out.error != 0 { return out; };
+    let signature = sh_mir_fn(mir, provider, 1);
+    let integer = sh_mir_type_arg(mir, signature, 0);
+    let reference = sh_mir_field_type(mir, option, -1, 1);
+    let element = sh_mir_type_arg(mir, reference, 0);
+    let boolean = sh_mir_field_type(mir, option, -1, 0);
+    if sh_mir_value_type(mir, fallback) != integer or not (sh_mir_type_word(mir, element, 0) == 1 or element == integer) { out.error = 5007; return out; };
+    let scope = sh_mir_block(mir, block, 1);
+    let function = sh_mir_block(mir, block, 0);
+    let yes = sh_mir_add_block(mir, function, scope, 0, file, start, end);
+    let no = sh_mir_add_block(mir, function, scope, 0, file, start, end);
+    let join = sh_mir_add_block(mir, function, scope, 0, file, start, end);
+    if not yes.is_ok() or not no.is_ok() or not join.is_ok() { out.error = 5001; return out; };
+    let args = vec_new_i64();
+    args.push(out.optional);
+    let tag = sh_mir_add_instruction(mir, block, 18, boolean, &args, 0, -1, 0, file, start, end);
+    if not tag.is_ok() { out.error = tag.error; return out; };
+    let branch = sh_mir_add_terminator(mir, block, 2, tag.value, file, start, end);
+    if not branch.is_ok() { out.error = branch.error; return out; };
+    let empty = vec_new_i64();
+    let left = sh_mir_add_edge(mir, branch.value, yes.value, &empty, 1, 0);
+    let right = sh_mir_add_edge(mir, branch.value, no.value, &empty, 0, 0);
+    if not left.is_ok() or not right.is_ok() { out.error = 5001; return out; };
+    let payload = sh_mir_add_instruction(mir, yes.value, 18, reference, &args, 1, -1, 0, file, start, end);
+    if not payload.is_ok() { out.error = payload.error; return out; };
+    args.clear();
+    args.push(payload.value);
+    let loaded = sh_mir_add_instruction(mir, yes.value, 14, element, &args, 0, 0, 0, file, start, end);
+    if not loaded.is_ok() { out.error = loaded.error; return out; };
+    let mut value = loaded.value;
+    if element != integer { args.clear(); args.push(value); let converted = sh_mir_add_instruction(mir, yes.value, 12, integer, &args, 0, 0, 0, file, start, end); if not converted.is_ok() { out.error = converted.error; return out; }; value = converted.value; };
+    let result = sh_mir_add_instruction(mir, join.value, 2, integer, &empty, 0, 0, 0, file, start, end);
+    if not result.is_ok() { out.error = result.error; return out; };
+    let leave_yes = sh_mir_add_terminator(mir, yes.value, 1, -1, file, start, end);
+    if not leave_yes.is_ok() { out.error = leave_yes.error; return out; };
+    args.clear();
+    args.push(value);
+    let first = sh_mir_add_edge(mir, leave_yes.value, join.value, &args, 0, 0);
+    if not first.is_ok() { out.error = first.error; return out; };
+    let leave_no = sh_mir_add_terminator(mir, no.value, 1, -1, file, start, end);
+    if not leave_no.is_ok() { out.error = leave_no.error; return out; };
+    args.clear();
+    args.push(fallback);
+    let second = sh_mir_add_edge(mir, leave_no.value, join.value, &args, 0, 0);
+    if not second.is_ok() { out.error = second.error; return out; };
+    out.value = result.value;
+    out.block = join.value;
+    out;
+}
+
+def sh_optional_carrier_shape(mir: &ShMir, optional: i64) -> i64 {
+    let optional_type = sh_mir_inst(mir, optional, 3);
+    let mut stores = 0;
+    let mut id = 0;
+    while id < sh_mir_local_count(mir) { if sh_mir_local(mir, id, 1) == optional_type and sh_ol_initial(mir, id) < 0 { return 5007; }; id = id + 1; };
+    id = 0;
+    while id < sh_mir_inst_count(mir) { if sh_mir_inst(mir, id, 3) == optional_type and sh_mir_inst(mir, id, 2) != 27 and sh_ol_origin(mir, id) < 0 { return 5007; }; id = id + 1; };
+    id = 0;
+    while id < sh_mir_inst_count(mir) { if sh_mir_inst(mir, id, 2) == 15 and sh_mir_inst(mir, id, 5) == 2 and sh_mir_inst_arg(mir, id, 1) == optional { stores = stores + 1; if stores > 1 { return 5007; }; }; if sh_mir_inst(mir, id, 2) == 17 and sh_mir_inst(mir, id, 5) == 1 and sh_mir_inst(mir, id, 6) == 1 { let address = sh_mir_inst_arg(mir, id, 0); if sh_mir_inst(mir, address, 2) == 13 { let initial = sh_ol_initial(mir, sh_mir_inst(mir, address, 6)); if initial >= 0 and sh_mir_inst_arg(mir, initial, 1) == optional and (not sh_ol_initialized(mir, initial, id) or not sh_ol_active(mir, optional, id)) { return 5007; }; }; }; id = id + 1; };
+    0;
+}

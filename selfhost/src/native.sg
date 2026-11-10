@@ -326,6 +326,7 @@ def sh_native_drop_type(native: &ShNative, mir: &ShMir, ty: i64, depth: i64) -> 
     let kind = sh_mir_type_word(mir, ty, 0);
     if kind == 16 or kind == 14 { return sh_i64_error(6502); };
     if kind != 12 and kind != 10 and kind != 8 { return sh_i64_ok(0); };
+    sh_native_size(native, mir, ty)?;
     let saved = native.drop_base + depth * 16 + 8;
     sh_x64_memory(&native.code, 1, 10, 5, -saved)?;
     let mut count = 0;
@@ -410,6 +411,7 @@ def sh_native_instruction(native: &ShNative, mir: &ShMir, id: i64) -> Result<i64
     if opcode == 3 or opcode == 4 or opcode == 6 or opcode == 7 { sh_x64_mov_imm(&native.code, 0, if opcode == 3 { 0; } else { aux; })?; return sh_native_finish(native, mir, id); };
     if opcode == 9 { let patch = sh_x64_rip_address(&native.code, 0)?; if not native.calls.push(patch) or not native.calls.push(aux) { return sh_i64_error(6503); }; return sh_native_finish(native, mir, id); };
     if opcode == 10 { sh_native_load(native, first, 0)?; if sh_mir_type_word(mir, ty, 0) == 3 { if aux != sh_kind("-") { return sh_i64_error(6502); }; sh_x64_mov_imm(&native.code, 10, if sh_native_width(mir, ty) == 4 { 2147483648; } else { -9223372036854775807 - 1; })?; sh_x64_binary(&native.code, 4, 0, 10)?; return sh_native_finish(native, mir, id); }; if aux == sh_kind("-") or aux == sh_kind("~") { sh_x64_unary(&native.code, if aux == sh_kind("-") { 1; } else { 0; }, 0)?; } else { sh_x64_mov_imm(&native.code, 10, 1)?; sh_x64_binary(&native.code, 4, 0, 10)?; }; return sh_native_finish(native, mir, id); };
+    if opcode == 27 { return sh_native_optional_direct(native, mir, id); };
     if opcode == 28 { sh_native_load(native, first, 0)?; return sh_native_finish(native, mir, id); };
     if opcode == 12 { return sh_native_cast(native, mir, id); };
     if opcode == 16 or opcode == 24 { return sh_native_aggregate(native, mir, id); };
@@ -555,9 +557,9 @@ def sh_native_debug_prepare(native: &ShNative, mir: &ShMir) -> Result<i64, i64> 
     sh_i64_ok(0);
 }
 
-def sh_native_emit_into(native: &mut ShNative, mir: &ShMir, object: &ShObject) -> Result<i64, i64> {
+def sh_native_emit_into_mode(native: &mut ShNative, mir: &ShMir, object: &ShObject, optional: bool) -> Result<i64, i64> {
     if object.sections.len() != 0 or object.data.len() != 0 or object.symbols.len() != 0 or object.relocations.len() != 0 or sh_binary_len(&native.code) != 0 or native.functions.len() != 0 { return sh_i64_error(6401); };
-    let checked = sh_mir_validate(mir);
+    let checked = if optional { sh_mir_validate_optional_physical(mir); } else { sh_mir_validate(mir); };
     if checked.error != 0 { return sh_i64_error(checked.error); };
     let metadata = sh_native_debug_prepare(native, mir);
     if not metadata.is_ok() { return sh_i64_error(metadata.error); };
@@ -604,4 +606,34 @@ def sh_native_new(mir: &ShMir, maximum: i64, checked: bool) -> ShNative {
 def sh_native_object(mir: &ShMir, maximum: i64, checked: bool) -> Result<ShBinary, i64> {
     let mut native = sh_native_new(mir, maximum, checked);
     sh_native_emit(&mut native, mir);
+}
+
+def sh_native_emit_into(native: &mut ShNative, mir: &ShMir, object: &ShObject) -> Result<i64, i64> {
+    sh_native_emit_into_mode(native, mir, object, false);
+}
+
+def sh_native_optional_physical_object(mir: &ShMir, maximum: i64, checked: bool) -> Result<ShBinary, i64> {
+    let mut native = sh_native_new(mir, maximum, checked);
+    let object = sh_object_new(maximum);
+    sh_native_emit_into_mode(&mut native, mir, &object, true)?;
+    sh_object_emit(&object);
+}
+
+def sh_native_optional_direct(native: &ShNative, mir: &ShMir, id: i64) -> Result<i64, i64> {
+    let ty = sh_mir_value_type(mir, id);
+    let size = sh_native_size(native, mir, ty)?;
+    let tag = sh_target_field_offset(&native.layout, mir, ty, -1, 0)?;
+    let payload = sh_target_field_offset(&native.layout, mir, ty, -1, 1)?;
+    if size != 16 or tag != 0 or payload != 8 { return sh_i64_error(6502); };
+    sh_native_address(native, id, 11)?;
+    sh_x64_mov_imm(&native.code, 0, 0)?;
+    sh_x64_memory(&native.code, 1, 0, 11, 0)?;
+    sh_x64_memory(&native.code, 1, 0, 11, 8)?;
+    sh_native_load(native, sh_mir_inst_arg(mir, id, 0), 0)?;
+    sh_x64_memory(&native.code, 1, 0, 11, 8)?;
+    sh_x64_mov_imm(&native.code, 10, 0)?;
+    sh_x64_binary(&native.code, 5, 0, 10)?;
+    sh_x64_set_condition(&native.code, 5, 0)?;
+    sh_x64_scalar_memory(&native.code, true, 0, 11, 0, 1, false)?;
+    sh_i64_ok(0);
 }

@@ -1,0 +1,88 @@
+import selfhost_native;
+
+import std::args;
+
+import std::file;
+
+def sh_cd_function(mir: &ShMir, name: &str, parameter: i64, unit: i64, abi: i64, foreign: bool) -> Result<i64, i64> {
+    let args = vec_new_i64();
+    args.push(parameter);
+    args.push(unit);
+    let signature = sh_type_intern(&mir.types, 11, abi, 0, -1, &args)?;
+    let text = string_from_str(name)?;
+    sh_mir_add_function(mir, &text, signature, if foreign { 1; } else { 0; }, -1, 0, 0);
+}
+
+def sh_cd_body(mir: &ShMir, function: i64) -> Result<i64, i64> {
+    let scope = sh_mir_add_scope(mir, function, -1, 0)?;
+    sh_mir_add_block(mir, function, scope, 0, -1, 0, 0);
+}
+
+def sh_cd_emit(mir: &ShMir, block: i64, opcode: i64, ty: i64, args: &Vec<i64>, aux: i64, extra: i64, flags: i64) -> Result<i64, i64> {
+    sh_mir_add_instruction(mir, block, opcode, ty, args, aux, extra, flags, -1, 0, 0);
+}
+
+def sh_cd_owner(mir: &ShMir, empty_body: bool) -> Result<bool, i64> {
+    let empty = vec_new_i64();
+    let args = vec_new_i64();
+    let unit = sh_type_primitive(&mir.types, 0, 0, 0)?;
+    let integer = sh_type_primitive(&mir.types, 2, 64, 1)?;
+    let byte = sh_type_primitive(&mir.types, 2, 8, 0)?;
+    args.push(byte);
+    let raw = sh_type_intern(&mir.types, 7, 0, 1, -1, &args)?;
+    let text = string_from_str(if empty_body { "CacheEmptyOwner"; } else { "CacheOnlyOwner"; })?;
+    let symbol = sh_intern(&mir.symbols, &text)?;
+    let owner = sh_type_intern(&mir.types, 12, 0, 0, symbol, &empty)?;
+    args.clear();
+    args.push(owner);
+    let receiver = sh_type_intern(&mir.types, 6, 0, 1, -1, &args)?;
+    let pointer = sh_type_intern(&mir.types, 7, 0, 1, -1, &args)?;
+    let release = sh_cd_function(mir, if empty_body { "cache_empty_release_unused"; } else { "cache_owner_release"; }, receiver, unit, 1, true)?;
+    let destructor = sh_cd_function(mir, if empty_body { "__cache_empty_drop"; } else { "__cache_typed_drop"; }, receiver, unit, 0, false)?;
+    let body = sh_cd_body(mir, destructor)?;
+    let input = sh_cd_emit(mir, body, 1, receiver, &empty, 0, 0, 0)?;
+    let returned = if empty_body { sh_cd_emit(mir, body, 3, unit, &empty, 0, 0, 0)?; } else { args.clear(); args.push(input); sh_cd_emit(mir, body, 20, unit, &args, release, 1, 0)?; };
+    sh_mir_add_terminator(mir, body, 3, returned, -1, 0, 0)?;
+    args.clear();
+    args.push(integer);
+    args.push(integer);
+    let offsets = vec_new_i64();
+    offsets.push(0);
+    offsets.push(8);
+    sh_mir_add_layout(mir, owner, -1, &args, &offsets, destructor, 16, 8)?;
+    mir.drop_glues.push(owner);
+    mir.drop_glues.push(1);
+    mir.drop_glues.push(destructor);
+    let callback = sh_cd_function(mir, if empty_body { "sg_drop_cache_empty"; } else { "sg_drop_cache_only"; }, raw, unit, 1, false)?;
+    let entry = sh_cd_body(mir, callback)?;
+    let erased = sh_cd_emit(mir, entry, 1, raw, &empty, 0, 0, 0)?;
+    args.clear();
+    args.push(erased);
+    let address = sh_cd_emit(mir, entry, 12, pointer, &args, 0, 0, 1)?;
+    args.clear();
+    args.push(address);
+    let dropped = sh_cd_emit(mir, entry, 21, unit, &args, -1, owner, 0)?;
+    sh_mir_add_terminator(mir, entry, 3, dropped, -1, 0, 0)?;
+    result_ok_bool(true);
+}
+
+def sh_cd_run() -> Result<bool, i64> {
+    let mir = sh_mir_new(200);
+    sh_cd_owner(&mir, false)?;
+    sh_cd_owner(&mir, true)?;
+    let valid = sh_mir_validate(&mir);
+    if valid.error != 0 { return result_err_bool(valid.error); };
+    let binary = sh_native_object(&mir, 65536, true)?;
+    let storage = ffi_buffer_new(arg_len(0)?)?;
+    let copied = arg_copy(0, storage)?;
+    let path = string_from_utf8(storage, copied)?;
+    let bytes = sh_binary_buffer(&binary)?;
+    file_write_str_raw(sengoo_stdlib_str_ptr(path.as_str()), bytes.ptr(), bytes.used_len())?;
+    result_ok_bool(true);
+}
+
+def main() -> i64 {
+    let result = sh_cd_run();
+    if not result.is_ok() { println(result.error); return 65; };
+    42;
+}

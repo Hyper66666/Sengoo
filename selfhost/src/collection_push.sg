@@ -1,0 +1,126 @@
+import selfhost_mir_validate;
+
+struct ShPushEmission {
+    value: i64,
+    block: i64,
+    call: i64,
+    local: i64,
+    consumed: i64,
+    error: i64,
+}
+
+def sh_push_provider_shape(mir: &ShMir, provider: i64) -> bool {
+    if provider < 0 or provider >= sh_mir_fn_count(mir) or sh_mir_fn(mir, provider, 3) != 1 { return false; };
+    let signature = sh_mir_fn(mir, provider, 1);
+    let integer = sh_mir_type_arg(mir, signature, 0);
+    let pointer = sh_mir_type_arg(mir, signature, 1);
+    let name = sh_symbol_text(&mir.symbols, sh_mir_fn(mir, provider, 0));
+    name.is_ok() and name.value.as_str() == "sengoo_raw_vec_push" and sh_mir_type_word(mir, signature, 0) == 11 and sh_mir_type_word(mir, signature, 1) == 1 and sh_mir_type_word(mir, signature, 2) == 0 and sh_mir_type_word(mir, signature, 5) == 3 and sh_mir_type_word(mir, integer, 0) == 2 and sh_mir_type_word(mir, integer, 1) == 64 and sh_mir_type_word(mir, integer, 2) == 1 and sh_mir_type_arg(mir, signature, 2) == integer and sh_mir_callback_byte_pointer(mir, pointer);
+}
+
+def sh_push_instruction(mir: &ShMir, block: i64, opcode: i64, ty: i64, args: &Vec<i64>, aux: i64, extra: i64, file: i64, start: i64, end: i64) -> Result<i64, i64> {
+    sh_mir_add_instruction(mir, block, opcode, ty, args, aux, extra, 0, file, start, end);
+}
+
+def sh_collection_push_emit(mir: &ShMir, block: i64, provider: i64, handle: i64, value: i64, file: i64, start: i64, end: i64) -> ShPushEmission {
+    let mut out = ShPushEmission { value: -1, block: block, call: -1, local: -1, consumed: 0, error: 0 };
+    if not sh_push_provider_shape(mir, provider) or block < 0 or block >= sh_mir_block_count(mir) or value < 0 or value >= sh_mir_inst_count(mir) { out.error = 5008; return out; };
+    let signature = sh_mir_fn(mir, provider, 1);
+    let integer = sh_mir_type_arg(mir, signature, 0);
+    let erased = sh_mir_type_arg(mir, signature, 1);
+    let element = sh_mir_value_type(mir, value);
+    if sh_mir_value_type(mir, handle) != integer or sh_mir_inst(mir, value, 0) != sh_mir_block(mir, block, 0) { out.error = 5007; return out; };
+    let built = sh_push_emit_inner(mir, block, provider, handle, value, element, integer, erased, file, start, end);
+    built;
+}
+
+def sh_push_emit_inner(mir: &ShMir, block: i64, provider: i64, handle: i64, value: i64, element: i64, integer: i64, erased: i64, file: i64, start: i64, end: i64) -> ShPushEmission {
+    let work = sh_push_build(mir, block, provider, handle, value, element, integer, erased, file, start, end);
+    if not work.is_ok() { return ShPushEmission { value: -1, block: block, call: -1, local: -1, consumed: 0, error: work.error }; };
+    ShPushEmission { value: sengoo_vec_get_or_default_i64(work.value.handle, 0, -1), block: sengoo_vec_get_or_default_i64(work.value.handle, 1, -1), call: sengoo_vec_get_or_default_i64(work.value.handle, 2, -1), local: sengoo_vec_get_or_default_i64(work.value.handle, 3, -1), consumed: 1, error: 0 };
+}
+
+def sh_push_build(mir: &ShMir, block: i64, provider: i64, handle: i64, value: i64, element: i64, integer: i64, erased: i64, file: i64, start: i64, end: i64) -> Result<Vec<i64>, i64> {
+    let function = sh_mir_block(mir, block, 0);
+    let scope = sh_mir_block(mir, block, 1);
+    let empty = vec_new_i64();
+    let args = vec_new_i64();
+    let unit = sh_type_primitive(&mir.types, 0, 0, 0)?;
+    let boolean = sh_type_primitive(&mir.types, 1, 0, 0)?;
+    let local = sh_mir_add_local(mir, function, element, -1, 0, 3, scope, -1, file, start, end)?;
+    args.push(element);
+    let pointer = sh_type_intern(&mir.types, 7, 0, 1, -1, &args)?;
+    let address = sh_push_instruction(mir, block, 13, pointer, &empty, local, 0, file, start, end)?;
+    args.clear();
+    args.push(address);
+    args.push(value);
+    sh_push_instruction(mir, block, 15, unit, &args, 0, 0, file, start, end)?;
+    sh_push_instruction(mir, block, 25, unit, &empty, local, 1, file, start, end)?;
+    args.clear();
+    args.push(address);
+    let erased_address = sh_mir_add_instruction(mir, block, 12, erased, &args, 0, 0, 1, file, start, end)?;
+    args.clear();
+    args.push(handle);
+    args.push(erased_address);
+    let call = sh_push_instruction(mir, block, 20, integer, &args, provider, 1, file, start, end)?;
+    let zero = sh_push_instruction(mir, block, 4, integer, &empty, 0, 0, file, start, end)?;
+    let oom = sh_push_instruction(mir, block, 4, integer, &empty, 14, 0, file, start, end)?;
+    let invalid = sh_push_instruction(mir, block, 4, integer, &empty, 2, 0, file, start, end)?;
+    let yes = sh_mir_add_block(mir, function, scope, 0, file, start, end)?;
+    let failed = sh_mir_add_block(mir, function, scope, 0, file, start, end)?;
+    let consumed = sh_mir_add_block(mir, function, scope, 0, file, start, end)?;
+    let remaining = sh_mir_add_block(mir, function, scope, 0, file, start, end)?;
+    let caller_drop = sh_mir_add_block(mir, function, scope, 0, file, start, end)?;
+    let violation = sh_mir_add_block(mir, function, scope, 0, file, start, end)?;
+    let join = sh_mir_add_block(mir, function, scope, 0, file, start, end)?;
+    args.clear();
+    args.push(call);
+    args.push(zero);
+    let success = sh_push_instruction(mir, block, 11, boolean, &args, sh_kind("=="), 0, file, start, end)?;
+    let branch = sh_mir_add_terminator(mir, block, 2, success, file, start, end)?;
+    sh_mir_add_edge(mir, branch, yes, &empty, 1, 0)?;
+    sh_mir_add_edge(mir, branch, failed, &empty, 0, 0)?;
+    let result = sh_push_instruction(mir, join, 2, boolean, &empty, 0, 0, file, start, end)?;
+    sh_push_instruction(mir, yes, 25, unit, &empty, local, 0, file, start, end)?;
+    let true_value = sh_push_instruction(mir, yes, 6, boolean, &empty, 1, 0, file, start, end)?;
+    let yes_term = sh_mir_add_terminator(mir, yes, 1, -1, file, start, end)?;
+    args.clear();
+    args.push(true_value);
+    sh_mir_add_edge(mir, yes_term, join, &args, 0, 0)?;
+    args.clear();
+    args.push(call);
+    args.push(oom);
+    let was_oom = sh_push_instruction(mir, failed, 11, boolean, &args, sh_kind("=="), 0, file, start, end)?;
+    let failed_term = sh_mir_add_terminator(mir, failed, 2, was_oom, file, start, end)?;
+    sh_mir_add_edge(mir, failed_term, consumed, &empty, 1, 0)?;
+    sh_mir_add_edge(mir, failed_term, remaining, &empty, 0, 0)?;
+    sh_push_instruction(mir, consumed, 25, unit, &empty, local, 0, file, start, end)?;
+    let false_value = sh_push_instruction(mir, consumed, 6, boolean, &empty, 0, 0, file, start, end)?;
+    let consumed_term = sh_mir_add_terminator(mir, consumed, 1, -1, file, start, end)?;
+    args.clear();
+    args.push(false_value);
+    sh_mir_add_edge(mir, consumed_term, join, &args, 0, 0)?;
+    args.clear();
+    args.push(call);
+    args.push(invalid);
+    let was_invalid = sh_push_instruction(mir, remaining, 11, boolean, &args, sh_kind("=="), 0, file, start, end)?;
+    let remaining_term = sh_mir_add_terminator(mir, remaining, 2, was_invalid, file, start, end)?;
+    sh_mir_add_edge(mir, remaining_term, caller_drop, &empty, 1, 0)?;
+    sh_mir_add_edge(mir, remaining_term, violation, &empty, 0, 0)?;
+    args.clear();
+    args.push(address);
+    sh_push_instruction(mir, caller_drop, 21, unit, &args, local, element, file, start, end)?;
+    sh_push_instruction(mir, caller_drop, 25, unit, &empty, local, 0, file, start, end)?;
+    let false_owned = sh_push_instruction(mir, caller_drop, 6, boolean, &empty, 0, 0, file, start, end)?;
+    let drop_term = sh_mir_add_terminator(mir, caller_drop, 1, -1, file, start, end)?;
+    args.clear();
+    args.push(false_owned);
+    sh_mir_add_edge(mir, drop_term, join, &args, 0, 0)?;
+    sh_mir_add_terminator(mir, violation, 4, -1, file, start, end)?;
+    let output = vec_new_i64();
+    output.push(result);
+    output.push(join);
+    output.push(call);
+    output.push(local);
+    result_ok_with(output, 0);
+}

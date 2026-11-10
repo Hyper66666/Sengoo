@@ -19,6 +19,20 @@ def sha(path):
     return hashlib.sha256(path.read_bytes()).hexdigest()
 
 
+def import_closure(entries):
+    found, pending = set(), list(entries)
+    while pending:
+        path = pending.pop()
+        if path in found:
+            continue
+        if not path.is_file():
+            raise ValueError("missing native import source: " + str(path))
+        found.add(path)
+        for name in re.findall(r"import\s+selfhost_([A-Za-z0-9_]+)\s*;", path.read_text("utf8")):
+            pending.append(ROOT / "selfhost/src" / (name + ".sg"))
+    return found
+
+
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     for name in ("seed", "clang", "formatter"):
@@ -31,15 +45,21 @@ def main():
     out.mkdir(parents=True, exist_ok=True)
     paths = {name: getattr(args, name).resolve() for name in ("seed", "clang", "formatter")}
     lock = json.loads((ROOT / "selfhost/bootstrap.lock").read_text())
-    names = ("core", "types", "lexer", "mir", "mir_validate", "layout", "abi", "call_abi", "binary", "coff", "object", "x64", "x64_scalar", "x64_memmove", "x64_sse", "float_literal", "unwind", "native")
+    baseline_names = ("core", "types", "lexer", "mir", "mir_validate", "layout", "abi", "call_abi", "binary", "coff", "object", "x64", "x64_scalar", "x64_memmove", "x64_sse", "float_literal", "unwind", "native")
+    actual = import_closure([ROOT / "selfhost/tests/native.sg", ROOT / "selfhost/tests/abi.sg",
+                             *(ROOT / "selfhost/src" / (name + ".sg") for name in baseline_names)])
+    names = sorted(path.stem for path in actual if path.parent == ROOT / "selfhost/src")
+    if not set(baseline_names).issubset(names):
+        raise ValueError("native import discovery dropped a guarded baseline source")
     inputs = [Path(__file__), ROOT / "selfhost/bootstrap.lock", ROOT / "selfhost/tests/native.sg", ROOT / "selfhost/tests/abi.sg", ROOT / "selfhost/tests/native_probe.c"]
-    inputs += [ROOT / "selfhost/src" / (name + ".sg") for name in names]
+    inputs += sorted(actual)
     inputs += sorted((ROOT / "tools/stdlib").rglob("*.sg"))
     inputs += [ROOT / "tools/stdlib/runtime.c", ROOT / "tools/stdlib/runtime_abi.h"]
     report = {"schema": 1, "result": "running", "stage": "scalar-mir-native-consumer",
               "revision": subprocess.check_output(["git", "rev-parse", "HEAD"], cwd=ROOT, text=True).strip(),
               "host": platform.platform(), "sources": {str(p.relative_to(ROOT)): sha(p) for p in inputs if p.is_file()},
               "tools": {}, "steps": [], "m4_complete": False,
+              "actual_native_import_modules": names,
               "limits": ["validated scalar/aggregate MIR with resolved root/structural Drop and readonly string literals; pending runtime glue, field cleanup across SG calls and async remain unsupported",
                          "stack-slot allocation; frames over 4096 bytes call __chkstk through a checked REL32 placeholder",
                          "fixed-stack unwind records; exception cleanup handlers and CodeView remain open",

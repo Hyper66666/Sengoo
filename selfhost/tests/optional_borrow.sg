@@ -1,0 +1,250 @@
+import selfhost_native;
+
+import std::args;
+
+import std::assert;
+
+import std::file;
+
+def sh_ob_fn(mir: &ShMir, name: &str, parameters: &Vec<i64>, result: i64, abi: i64, foreign: bool) -> Result<i64, i64> {
+    let args = vec_new_i64();
+    let mut i = 0;
+    while i < parameters.len() { args.push(sh_native_at(parameters, i)); i = i + 1; };
+    args.push(result);
+    let signature = sh_type_intern(&mir.types, 11, abi, 0, -1, &args)?;
+    let text = string_from_str(name)?;
+    sh_mir_add_function(mir, &text, signature, if foreign { 1; } else { 0; }, -1, 0, 0);
+}
+
+def sh_ob_body(mir: &ShMir, function: i64) -> Result<i64, i64> {
+    let scope = sh_mir_add_scope(mir, function, -1, 0)?;
+    sh_mir_add_block(mir, function, scope, 0, -1, 0, 0);
+}
+
+def sh_ob_inst(mir: &ShMir, block: i64, opcode: i64, ty: i64, args: &Vec<i64>, aux: i64, extra: i64, flags: i64) -> Result<i64, i64> {
+    sh_mir_add_instruction(mir, block, opcode, ty, args, aux, extra, flags, -1, 0, 0);
+}
+
+def sh_ob_fixture(mir: &ShMir, mode: i64, element_kind: i64) -> Result<bool, i64> {
+    let empty = vec_new_i64();
+    let args = vec_new_i64();
+    let integer = sh_type_primitive(&mir.types, 2, 64, 1)?;
+    let boolean = sh_type_primitive(&mir.types, 1, 0, 0)?;
+    let unit = sh_type_primitive(&mir.types, 0, 0, 0)?;
+    let byte = sh_type_primitive(&mir.types, 2, 8, 0)?;
+    args.push(byte);
+    let pointer = sh_type_intern(&mir.types, 7, 0, 1, -1, &args)?;
+    args.clear();
+    let mut element = integer;
+    if element_kind == 1 { element = boolean; };
+    if element_kind == 2 { let owner_name = string_from_str("BorrowedNonCopyOwner")?; let owner_symbol = sh_intern(&mir.symbols, &owner_name)?; element = sh_type_intern(&mir.types, 12, 0, 0, owner_symbol, &empty)?; args.clear(); args.push(element); let mutable = sh_type_intern(&mir.types, 6, 0, 1, -1, &args)?; args.clear(); args.push(mutable); let foreign = sh_ob_fn(mir, "optional_owner_release", &args, unit, 1, true)?; let destructor = sh_ob_fn(mir, "__sg_optional_owner_drop", &args, unit, 0, false)?; let body = sh_ob_body(mir, destructor)?; let address = sh_ob_inst(mir, body, 1, mutable, &empty, 0, 0, 0)?; args.clear(); args.push(address); let called = sh_ob_inst(mir, body, 20, unit, &args, foreign, 1, 0)?; sh_mir_add_terminator(mir, body, 3, called, -1, 0, 0)?; args.clear(); args.push(integer); args.push(integer); let fields = vec_new_i64(); fields.push(0); fields.push(8); sh_mir_add_layout(mir, element, -1, &args, &fields, destructor, 16, 8)?; mir.drop_glues.push(element); mir.drop_glues.push(1); mir.drop_glues.push(destructor); (); };
+    args.clear();
+    args.push(element);
+    let reference = sh_type_intern(&mir.types, 6, 0, 0, -1, &args)?;
+    let label = string_from_str(if element_kind == 0 { "OptionalI64"; } else if element_kind == 1 { "OptionalBool"; } else { "OptionalOwner"; })?;
+    let symbol = sh_intern(&mir.symbols, &label)?;
+    let optional = sh_type_intern(&mir.types, 12, 0, 0, symbol, &empty)?;
+    args.clear();
+    args.push(boolean);
+    args.push(reference);
+    let offsets = vec_new_i64();
+    offsets.push(0);
+    offsets.push(8);
+    sh_mir_add_layout(mir, optional, -1, &args, &offsets, -1, 16, 8)?;
+    args.clear();
+    args.push(integer);
+    let provider = if element_kind == 0 { sh_ob_fn(mir, "sengoo_raw_vec_iter_next", &args, pointer, 1, true)?; } else { 0; };
+    let function = sh_ob_fn(mir, if element_kind == 0 { "sg_optional_i64"; } else if element_kind == 1 { "sg_optional_bool"; } else { "sg_optional_owner"; }, &args, integer, 1, false)?;
+    let entry = sh_ob_body(mir, function)?;
+    let scope = sh_mir_block(mir, entry, 1);
+    let yes = sh_mir_add_block(mir, function, scope, 0, -1, 0, 0)?;
+    let no = sh_mir_add_block(mir, function, scope, 0, -1, 0, 0)?;
+    let handle = sh_ob_inst(mir, entry, 1, integer, &empty, 0, 0, 0)?;
+    let emission = sh_optional_emit(mir, entry, provider, handle, optional, -1, 0, 0);
+    if emission.error != 0 { return result_err_bool(emission.error); };
+    let returned = emission.raw_call;
+    let value = emission.optional;
+    let local = sh_mir_add_local(mir, function, optional, -1, 0, 1, scope, 0, -1, 0, 0)?;
+    args.clear();
+    args.push(optional);
+    let optional_pointer = sh_type_intern(&mir.types, 6, 0, 1, -1, &args)?;
+    let place = sh_ob_inst(mir, entry, 13, optional_pointer, &empty, local, 0, 0)?;
+    args.clear();
+    args.push(place);
+    args.push(value);
+    sh_ob_inst(mir, entry, 15, unit, &args, 0, 0, 0)?;
+    if mode == 5 { sh_ob_inst(mir, entry, 15, unit, &args, 0, 0, 0)?; (); };
+    args.clear();
+    args.push(boolean);
+    let bool_pointer = sh_type_intern(&mir.types, 6, 0, 0, -1, &args)?;
+    args.clear();
+    args.push(place);
+    let tag_pointer = sh_ob_inst(mir, entry, 17, bool_pointer, &args, 0, -1, 0)?;
+    args.clear();
+    args.push(tag_pointer);
+    let tag = sh_ob_inst(mir, entry, 14, boolean, &args, 0, 0, 0)?;
+    let mut branch_tag = tag;
+    if mode == 18 { let other = sh_optional_emit(mir, entry, provider, handle, optional, -1, 0, 0); if other.error != 0 { return result_err_bool(other.error); }; args.clear(); args.push(other.optional); branch_tag = sh_ob_inst(mir, entry, 18, boolean, &args, 0, -1, 0)?; };
+    let branch = sh_mir_add_terminator(mir, entry, 2, branch_tag, -1, 0, 0)?;
+    sh_mir_add_edge(mir, branch, yes, &empty, 1, 0)?;
+    sh_mir_add_edge(mir, branch, no, &empty, 0, 0)?;
+    args.clear();
+    args.push(reference);
+    let reference_pointer = sh_type_intern(&mir.types, 6, 0, 0, -1, &args)?;
+    args.clear();
+    args.push(place);
+    let payload_pointer = sh_ob_inst(mir, yes, 17, reference_pointer, &args, 1, -1, 0)?;
+    args.clear();
+    args.push(payload_pointer);
+    let payload = sh_ob_inst(mir, yes, 14, reference, &args, 0, 0, 0)?;
+    if mode == 17 { let saved = sh_mir_add_local(mir, function, reference, -1, 0, 1, scope, 0, -1, 0, 0)?; args.clear(); args.push(reference); let ref_pointer = sh_type_intern(&mir.types, 6, 0, 1, -1, &args)?; let place2 = sh_ob_inst(mir, yes, 13, ref_pointer, &empty, saved, 0, 0)?; args.clear(); args.push(place2); args.push(payload); sh_ob_inst(mir, yes, 15, unit, &args, 0, 0, 0)?; (); };
+    args.clear();
+    args.push(payload);
+    let mut loaded = -1;
+    if element_kind == 0 { loaded = sh_ob_inst(mir, yes, 14, integer, &args, 0, 0, 0)?; } else if element_kind == 1 { let byte = sh_ob_inst(mir, yes, 14, boolean, &args, 0, 0, 0)?; args.clear(); args.push(byte); loaded = sh_ob_inst(mir, yes, 12, integer, &args, 0, 0, 0)?; } else { args.clear(); args.push(integer); let pointer = sh_type_intern(&mir.types, 6, 0, 0, -1, &args)?; args.clear(); args.push(payload); let field = sh_ob_inst(mir, yes, 17, pointer, &args, 1, -1, 0)?; args.clear(); args.push(field); loaded = sh_ob_inst(mir, yes, 14, integer, &args, 0, 0, 0)?; };
+    sh_mir_add_terminator(mir, yes, 3, loaded, -1, 0, 0)?;
+    let absent = sh_ob_inst(mir, no, 4, integer, &empty, -1, 0, 0)?;
+    sh_mir_add_terminator(mir, no, 3, absent, -1, 0, 0)?;
+    if mode == 15 { mir.instructions.set(loaded * 12 + 2, 12); mir.instructions.set(loaded * 12 + 8, 1); (); };
+    if mode == 16 { args.clear(); args.push(reference); let external = sh_ob_fn(mir, "escape_reference", &args, integer, 1, true)?; mir.instructions.set(loaded * 12 + 2, 20); mir.instructions.set(loaded * 12 + 6, external); mir.instructions.set(loaded * 12 + 7, 1); (); };
+    if mode == 19 { let mut id = 0; while id < sh_mir_inst_count(mir) { if sh_mir_inst(mir, id, 2) == 15 and sh_mir_inst_arg(mir, id, 1) == value { mir.instructions.set(id * 12 + 2, 3); mir.instructions.set(id * 12 + 5, 0); (); }; id = id + 1; }; (); };
+    if mode == 6 { mir.terminators.set(sh_mir_block(mir, yes, 4) * 10 + 3, payload); mir.types.arguments.set(sh_mir_type_word(mir, sh_mir_fn(mir, function, 1), 4) + 1, reference); (); };
+    if mode == 7 { let term = sh_mir_block(mir, yes, 4); let arguments = vec_new_i64(); arguments.push(payload); let phi_block = sh_mir_add_block(mir, function, scope, 0, -1, 0, 0)?; let phi = sh_ob_inst(mir, phi_block, 2, reference, &empty, 0, 0, 0)?; mir.terminators.set(term * 10 + 2, 1); mir.terminators.set(term * 10 + 3, -1); sh_mir_add_edge(mir, term, phi_block, &arguments, 0, 0)?; args.clear(); args.push(phi); let read = sh_ob_inst(mir, phi_block, 14, integer, &args, 0, 0, 0)?; sh_mir_add_terminator(mir, phi_block, 3, read, -1, 0, 0)?; (); };
+    if mode == 8 { mir.instructions.set(payload * 12 + 1, entry); (); };
+    if mode == 9 { mir.instructions.set(value * 12 + 8, 1); (); };
+    if mode == 10 { mir.instructions.set(value * 12 + 6, -1); (); };
+    if mode == 11 { mir.instructions.set(returned * 12 + 7, 0); (); };
+    if mode == 12 { mir.types.words.set(reference * 6 + 2, 1); (); };
+    if mode == 13 { mir.types.words.set(sh_mir_fn(mir, provider, 1) * 6 + 1, 0); (); };
+    if mode == 14 { mir.instructions.set(returned * 12 + 6, function); (); };
+    if mode == 1 { mir.instructions.set(value * 12 + 7, 0); (); };
+    if mode == 2 { mir.operands.set(sh_mir_inst(mir, value, 4) + 1, returned); (); };
+    if mode == 3 { let false_edge = sh_mir_term(mir, branch, 4) + 1; mir.edges.set(false_edge * 6 + 1, yes); (); };
+    if mode == 4 { let term = sh_mir_block(mir, no, 4); mir.terminators.set(term * 10 + 2, 1); mir.terminators.set(term * 10 + 3, -1); sh_mir_add_edge(mir, term, yes, &empty, 0, 0)?; (); };
+    result_ok_bool(true);
+}
+
+def sh_ob_scalar(mir: &ShMir, boolean_element: bool) -> Result<bool, i64> {
+    let integer = sh_type_primitive(&mir.types, 2, 64, 1)?;
+    let boolean = sh_type_primitive(&mir.types, 1, 0, 0)?;
+    let empty = vec_new_i64();
+    let args = vec_new_i64();
+    args.push(if boolean_element { boolean; } else { integer; });
+    let reference = sh_type_intern(&mir.types, 6, 0, 0, -1, &args)?;
+    let label = string_from_str(if boolean_element { "OptionalBool"; } else { "OptionalI64"; })?;
+    let symbol = sh_intern(&mir.symbols, &label)?;
+    let optional = sh_type_intern(&mir.types, 12, 0, 0, symbol, &empty)?;
+    args.clear();
+    args.push(integer);
+    let function = sh_ob_fn(mir, if boolean_element { "sg_optional_scalar_bool"; } else { "sg_optional_scalar_i64"; }, &args, integer, 1, false)?;
+    let entry = sh_ob_body(mir, function)?;
+    let handle = sh_ob_inst(mir, entry, 1, integer, &empty, 0, 0, 0)?;
+    let fallback = sh_ob_inst(mir, entry, 4, integer, &empty, -1, 0, 0)?;
+    let emitted = sh_optional_scalar_emit(mir, entry, 0, handle, optional, fallback, -1, 0, 0);
+    if emitted.error != 0 { return result_err_bool(emitted.error); };
+    sh_mir_add_terminator(mir, emitted.block, 3, emitted.value, -1, 0, 0)?;
+    result_ok_bool(true);
+}
+
+def sh_op_words(output: &Vec<i64>, words: &Vec<i64>) -> Result<i64, i64> {
+    sh_op_push(output, words.handle)?;
+    sh_op_push(output, words.marker)?;
+    sh_op_push(output, words.len())?;
+    let mut index = 0;
+    while index < words.len() { sh_op_push(output, sengoo_vec_get_or_default_i64(words.handle, index, -1))?; index = index + 1; };
+    sh_i64_ok(0);
+}
+
+def sh_op_state(mir: &ShMir) -> Result<Vec<i64>, i64> {
+    let output = vec_new_i64();
+    sh_op_push(&output, mir.schema)?;
+    sh_op_push(&output, mir.target)?;
+    sh_op_push(&output, mir.runtime_abi)?;
+    sh_op_push(&output, mir.pointer_width)?;
+    sh_op_push(&output, mir.limit)?;
+    sh_op_push(&output, mir.types.limit)?;
+    sh_op_push(&output, mir.symbols.limit)?;
+    sh_op_push(&output, mir.symbols.names.handle)?;
+    sh_op_push(&output, mir.symbols.names.marker)?;
+    sh_op_words(&output, &mir.types.words)?;
+    sh_op_words(&output, &mir.types.arguments)?;
+    sh_op_words(&output, &mir.functions)?;
+    sh_op_words(&output, &mir.locals)?;
+    sh_op_words(&output, &mir.scopes)?;
+    sh_op_words(&output, &mir.blocks)?;
+    sh_op_words(&output, &mir.instructions)?;
+    sh_op_words(&output, &mir.operands)?;
+    sh_op_words(&output, &mir.parameters)?;
+    sh_op_words(&output, &mir.terminators)?;
+    sh_op_words(&output, &mir.edges)?;
+    sh_op_words(&output, &mir.layouts)?;
+    sh_op_words(&output, &mir.fields)?;
+    sh_op_words(&output, &mir.instances)?;
+    sh_op_words(&output, &mir.substitutions)?;
+    sh_op_words(&output, &mir.parents)?;
+    sh_op_words(&output, &mir.drop_glues)?;
+    sh_op_words(&output, &mir.sources)?;
+    sh_op_words(&output, &mir.spans)?;
+    sh_op_push(&output, sh_symbol_count(&mir.symbols))?;
+    let mut index = 0;
+    while index < sh_symbol_count(&mir.symbols) { sh_op_push(&output, mir.symbols.names.get(index).text.handle)?; let name = sh_symbol_text(&mir.symbols, index)?; let bytes = sh_lex_bytes(&name)?; sh_op_push(&output, name.len())?; let mut at = 0; while at < name.len() { sh_op_push(&output, sh_lex_byte(&bytes, at))?; at = at + 1; }; index = index + 1; };
+    Result { is_ok: true, value: output, error: 0 };
+}
+
+def sh_op_equal(before: &Vec<i64>, after: &Vec<i64>) {
+    assert_eq_i64(before.len(), after.len(), "optional_borrow.sg", 70);
+    let mut index = 0;
+    while index < before.len() { assert_eq_i64(sengoo_vec_get_or_default_i64(before.handle, index, -1), sengoo_vec_get_or_default_i64(after.handle, index, -2), "optional_borrow.sg", 71); index = index + 1; };
+    ();
+}
+
+extern "C" {
+    fn sengoo_string_live_handle_count() -> i64;
+    fn sengoo_buffer_live_handle_count() -> i64;
+    fn sengoo_opaque_live_handle_count() -> i64;
+}
+
+def sh_ob_scope(mode: i64, path: &str) -> Result<bool, i64> {
+    let mir = sh_mir_new(2000);
+    sh_ob_fixture(&mir, mode, 0)?;
+    sh_ob_fixture(&mir, 0, 1)?;
+    sh_ob_fixture(&mir, 0, 2)?;
+    sh_ob_scalar(&mir, false)?;
+    sh_ob_scalar(&mir, true)?;
+    let before = sh_op_state(&mir)?;
+    let ordinary = sh_mir_validate(&mir);
+    if mode == 0 { assert_eq_i64(ordinary.error, 5008, "optional_borrow.sg", 1); (); };
+    let physical = sh_mir_validate_optional_physical(&mir);
+    let after = sh_op_state(&mir)?;
+    sh_op_equal(&before, &after);
+    if mode > 0 { if physical.error == 0 { return result_err_bool(5000); }; println(physical.error); return result_ok_bool(true); };
+    assert_eq_i64(physical.error, 0, "optional_borrow.sg", 2);
+    let denied = sh_native_object(&mir, 65536, true);
+    assert_true(not denied.is_ok(), "optional_borrow.sg", 3);
+    assert_eq_i64(denied.error, 5008, "optional_borrow.sg", 4);
+    let emitted = sh_native_optional_physical_object(&mir, 65536, true)?;
+    let repeated = sh_native_optional_physical_object(&mir, 65536, true)?;
+    assert_eq_i64(sh_binary_len(&emitted), sh_binary_len(&repeated), "optional_borrow.sg", 5);
+    let mut at = 0;
+    while at < sh_binary_len(&emitted) { assert_eq_i64(sh_binary_get(&emitted, at)?, sh_binary_get(&repeated, at)?, "optional_borrow.sg", 6); at = at + 1; };
+    if path != "" { let bytes = sh_binary_buffer(&emitted)?; file_write_str_raw(sengoo_stdlib_str_ptr(path), bytes.ptr(), bytes.used_len())?; (); };
+    result_ok_bool(true);
+}
+
+def main() -> i64 {
+    if args_len() == 1 { let a = ffi_buffer_new(arg_len(0).unwrap_or(0)); if not a.is_ok() { return 65; }; let n = arg_copy(0, a.value); if not n.is_ok() { return 65; }; let text = string_from_utf8(a.value, n.value); if not text.is_ok() { return 65; }; if text.value.as_str() == "--fail-equality" { assert_eq_i64(1, 0, "optional_borrow.sg", 20); (); }; if text.value.as_str() == "--fail-truth" { assert_true(false, "optional_borrow.sg", 21); (); }; };
+    let mode = if args_len() > 1 { args_len() - 1; } else { 0; };
+    let mut path = string_new();
+    if args_len() == 1 { let storage = ffi_buffer_new(arg_len(0).unwrap_or(0)); if not storage.is_ok() { return 65; }; let count = arg_copy(0, storage.value); if not count.is_ok() { return 65; }; let copied = string_from_utf8(storage.value, count.value); if not copied.is_ok() { return 65; }; path = copied.value; };
+    let strings = sengoo_string_live_handle_count();
+    let buffers = sengoo_buffer_live_handle_count();
+    let opaque = sengoo_opaque_live_handle_count();
+    let mut round = 0;
+    while round < if mode > 0 { 5; } else { 100; } { let result = sh_ob_scope(mode, path.as_str()); if not result.is_ok() { println(result.error); return 65; }; assert_eq_i64(sengoo_string_live_handle_count(), strings, "optional_borrow.sg", 7); assert_eq_i64(sengoo_buffer_live_handle_count(), buffers, "optional_borrow.sg", 8); assert_eq_i64(sengoo_opaque_live_handle_count(), opaque, "optional_borrow.sg", 9); round = round + 1; };
+    42;
+}
+
+def sh_op_push(values: &Vec<i64>, value: i64) -> Result<i64, i64> {
+    if not values.push(value) { return sh_i64_error(5001); };
+    sh_i64_ok(0);
+}
