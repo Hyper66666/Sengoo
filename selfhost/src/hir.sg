@@ -98,9 +98,78 @@ def sh_hir_syntax_contains(ast: &ShAst, outer: i64, inner: i64, depth: i64) -> b
     false;
 }
 
+def sh_hir_type_equal_step(checked: &ShChecked, left: i64, right: i64, depth: i64, remaining: &mut i64) -> bool {
+    if *remaining <= 0 { return false; };
+    *remaining = *remaining - 1;
+    let a = sh_s_resolve(checked, left);
+    let b = sh_s_resolve(checked, right);
+    if a < 0 or b < 0 or a >= sh_type_count(&checked.types) or b >= sh_type_count(&checked.types) or depth >= 128 { return false; };
+    if a == b { return true; };
+    if sh_s_kind(checked, a) != sh_s_kind(checked, b) or sh_s_data(checked, a) != sh_s_data(checked, b) or sh_s_flags(checked, a) != sh_s_flags(checked, b) or sh_s_nominal(checked, a) != sh_s_nominal(checked, b) or sh_s_arity(checked, a) != sh_s_arity(checked, b) { return false; };
+    let mut index = 0;
+    while index < sh_s_arity(checked, a) { if not sh_hir_type_equal_step(checked, sh_s_argument(checked, a, index), sh_s_argument(checked, b, index), depth + 1, remaining) { return false; }; index = index + 1; };
+    true;
+}
+
+def sh_hir_types_equal(checked: &ShChecked, left: i64, right: i64, depth: i64) -> bool {
+    let mut remaining = 100000;
+    sh_hir_type_equal_step(checked, left, right, depth, &mut remaining);
+}
+
+def sh_hir_direct_child(ast: &ShAst, parent: i64, child: i64) -> bool {
+    if parent < 0 or child < 0 or parent >= sh_ast_count(ast) or child >= parent { return false; };
+    let mut index = 0;
+    let mut found = 0;
+    while index < sh_ast_word(ast, parent, 6) { if sh_ast_child(ast, parent, index) == child { found = found + 1; }; index = index + 1; };
+    found == 1;
+}
+
+def sh_hir_function_body_state(ast: &ShAst, checked: &ShChecked, function: i64) -> i64 {
+    let kind = sh_binding_word(checked, function, 2);
+    let declaration = sh_binding_word(checked, function, 4);
+    if kind != 2 and kind != 15 or declaration < 0 or declaration >= sh_ast_count(ast) or sh_node_binding(checked, declaration) != function { return -1; };
+    let syntax = sh_ast_word(ast, declaration, 0);
+    if kind == 2 and syntax != 20 or kind == 15 and syntax != 67 { return -1; };
+    let signature = sh_s_resolve(checked, sh_binding_word(checked, function, 3));
+    if sh_s_kind(checked, signature) != 11 or sh_s_arity(checked, signature) < 1 { return -1; };
+    let body = sh_s_child_kind(ast, declaration, 40);
+    if body < 0 { return 0; };
+    if not sh_hir_direct_child(ast, declaration, body) { return -1; };
+    let owner = sh_binding_word(checked, function, 6);
+    if sh_binding_word(checked, owner, 2) == 7 { let trait_declaration = sh_binding_word(checked, owner, 4); if kind != 2 or sh_ast_word(ast, trait_declaration, 0) != 27 or sh_node_binding(checked, trait_declaration) != owner or not sh_hir_direct_child(ast, trait_declaration, declaration) { return -1; }; return 2; };
+    let body_type = sh_node_type(checked, body);
+    if body_type < 0 or sh_s_kind(checked, sh_s_resolve(checked, body_type)) == 18 or sh_node_scope(checked, body) < 0 { return -1; };
+    1;
+}
+
+def sh_hir_deferred_error(code: i64) -> Result<Vec<i64>, i64> {
+    let missing: Vec<i64> = Vec { handle: 0, marker: 0 };
+    Result { is_ok: false, value: missing, error: code };
+}
+
+def sh_hir_deferred_body_map(hir: &ShHir) -> Result<Vec<i64>, i64> {
+    let count = sh_ast_count(&hir.ast);
+    let coverage = vec_new_i64();
+    let parents = vec_new_i64();
+    if count < 1 or count > hir.limit { return sh_hir_deferred_error(5501); };
+    let mut index = 0;
+    while index < count { if not (coverage.push(-1) and parents.push(0)) { return sh_hir_deferred_error(5501); }; index = index + 1; };
+    index = 0;
+    while index < count { let mut part = 0; while part < sh_ast_word(&hir.ast, index, 6) { let child = sh_ast_child(&hir.ast, index, part); if child < 0 or child >= index { return sh_hir_deferred_error(5502); }; if not parents.set(child, parents.get(child).unwrap_or(0) + 1) { return sh_hir_deferred_error(5501); }; part = part + 1; }; index = index + 1; };
+    let mut function = 0;
+    while function < sh_binding_count(&hir.checked) { if sh_binding_word(&hir.checked, function, 2) == 2 and sh_binding_word(&hir.checked, sh_binding_word(&hir.checked, function, 6), 2) == 7 { let declaration = sh_binding_word(&hir.checked, function, 4); let body = sh_s_child_kind(&hir.ast, declaration, 40); if body >= 0 { if sh_hir_function_body_state(&hir.ast, &hir.checked, function) != 2 or parents.get(declaration).unwrap_or(0) != 1 or coverage.get(body).unwrap_or(-1) >= 0 { return sh_hir_deferred_error(5504); }; if not coverage.set(body, function) { return sh_hir_deferred_error(5501); }; }; }; function = function + 1; };
+    index = count - 1;
+    while index >= 0 { let owner = coverage.get(index).unwrap_or(-1); if owner >= 0 { let mut child = 0; while child < sh_ast_word(&hir.ast, index, 6) { let next = sh_ast_child(&hir.ast, index, child); if next < 0 or next >= index { return sh_hir_deferred_error(5502); }; let prior = coverage.get(next).unwrap_or(-1); if prior >= 0 and prior != owner { return sh_hir_deferred_error(5504); }; if not coverage.set(next, owner) { return sh_hir_deferred_error(5501); }; child = child + 1; }; }; index = index - 1; };
+    index = 0;
+    while index < count { let owner = coverage.get(index).unwrap_or(-1); if owner >= 0 { if parents.get(index).unwrap_or(0) != 1 { return sh_hir_deferred_error(5504); }; if sh_node_type(&hir.checked, index) != -1 or sh_node_binding(&hir.checked, index) != -1 or sh_node_callable_type(&hir.checked, index) != -1 or sh_node_scope(&hir.checked, index) != -1 { return sh_hir_deferred_error(5503); }; }; let mut child = 0; while child < sh_ast_word(&hir.ast, index, 6) { let next = sh_ast_child(&hir.ast, index, child); let next_owner = coverage.get(next).unwrap_or(-1); if next_owner >= 0 and next_owner != owner { if sh_binding_word(&hir.checked, next_owner, 4) != index or sh_s_child_kind(&hir.ast, index, 40) != next { return sh_hir_deferred_error(5504); }; }; child = child + 1; }; index = index + 1; };
+    Result { is_ok: true, value: coverage, error: 0 };
+}
+
 def sh_hir_validate_calls(hir: &ShHir) -> i64 {
+    let deferred = sh_hir_deferred_body_map(hir);
+    if not deferred.is_ok() { return deferred.error; };
     let mut node = 0;
-    while node < sh_ast_count(&hir.ast) { if sh_ast_word(&hir.ast, node, 0) == 53 { let callee = sh_ast_child(&hir.ast, node, 0); let target = sh_node_binding(&hir.checked, node); let resolved = sh_node_binding(&hir.checked, callee); if target != resolved { return 5504; }; let category = sh_binding_word(&hir.checked, target, 2); if target >= 0 and category != 0 and category != 1 and category != 2 and category != 5 and category != 13 and category != 15 { return 5504; }; let signature = sh_s_resolve(&hir.checked, sh_node_type(&hir.checked, callee)); { if sh_s_kind(&hir.checked, signature) != 11 or sh_s_arity(&hir.checked, signature) < 1 { return 5503; }; let callable = sh_s_resolve(&hir.checked, sh_node_callable_type(&hir.checked, node)); if callable != signature { return 5503; }; let arity = sh_s_arity(&hir.checked, signature) - 1; if sh_s_resolve(&hir.checked, sh_s_argument(&hir.checked, signature, arity)) != sh_s_resolve(&hir.checked, sh_node_type(&hir.checked, node)) { return 5503; }; let receiver = if sh_ast_word(&hir.ast, callee, 0) == 55 { 1; } else { 0; }; let actuals = sh_ast_word(&hir.ast, node, 6) - 1 + receiver; let variadic = (sh_s_flags(&hir.checked, signature) & 1) != 0; if actuals < arity or not variadic and actuals != arity { return 5503; }; }; }; let node_kind = sh_ast_word(&hir.ast, node, 0); let callable = sh_node_callable_type(&hir.checked, node); if (node_kind == 50 or node_kind == 51) and callable < 0 and sh_binding_word(&hir.checked, sh_node_binding(&hir.checked, node), 2) == 2 { return 5503; }; if (node_kind == 50 or node_kind == 51) and callable >= 0 { let unary = node_kind == 50; let operation = sh_ast_word(&hir.ast, node, 4); let target = sh_node_binding(&hir.checked, node); let owner = sh_binding_word(&hir.checked, target, 6); let method = sh_symbol_text(&hir.checked.symbols, sh_binding_word(&hir.checked, target, 0)); let trait_name = sh_symbol_text(&hir.checked.symbols, if sh_binding_word(&hir.checked, owner, 2) == 7 { sh_binding_word(&hir.checked, owner, 0); } else { sh_s_impl_symbol(&hir.checked, owner); }); if sh_binding_word(&hir.checked, target, 2) != 2 or not method.is_ok() or not trait_name.is_ok() or not sh_s_text_equal(&method.value, sh_s_operator_method(operation, unary)) or not sh_s_text_equal(&trait_name.value, sh_s_operator_label(operation, unary)) { return 5504; }; let signature = sh_s_resolve(&hir.checked, callable); let count = sh_ast_word(&hir.ast, node, 6); if sh_s_kind(&hir.checked, signature) != 11 or sh_s_arity(&hir.checked, signature) != count + 1 or count != if unary { 1; } else { 2; } or sh_s_argument(&hir.checked, signature, count) != sh_s_resolve(&hir.checked, sh_node_type(&hir.checked, node)) { return 5503; }; let keys = vec_new_i64(); let values = vec_new_i64(); if not sh_s_pattern_keys(&hir.checked, sh_binding_word(&hir.checked, target, 3), signature, &keys, &values, 0) { return 5503; }; let mut operand = 0; while operand < count { let actual = sh_s_resolve(&hir.checked, sh_node_type(&hir.checked, sh_ast_child(&hir.ast, node, operand))); let required = sh_s_resolve(&hir.checked, sh_s_argument(&hir.checked, signature, operand)); if actual != required and not (sh_s_kind(&hir.checked, required) == 6 and sh_s_argument(&hir.checked, required, 0) == actual) { return 5503; }; operand = operand + 1; }; }; node = node + 1; };
+    while node < sh_ast_count(&hir.ast) { if sengoo_vec_get_or_default_i64(deferred.value.handle, node, -1) >= 0 { node = node + 1; continue; }; if sh_ast_word(&hir.ast, node, 0) == 53 { let callee = sh_ast_child(&hir.ast, node, 0); let target = sh_node_binding(&hir.checked, node); let resolved = sh_node_binding(&hir.checked, callee); if target != resolved { return 5504; }; let category = sh_binding_word(&hir.checked, target, 2); if target >= 0 and category != 0 and category != 1 and category != 2 and category != 5 and category != 13 and category != 15 { return 5504; }; let signature = sh_s_resolve(&hir.checked, sh_node_type(&hir.checked, callee)); { if sh_s_kind(&hir.checked, signature) != 11 or sh_s_arity(&hir.checked, signature) < 1 { return 5503; }; let callable = sh_s_resolve(&hir.checked, sh_node_callable_type(&hir.checked, node)); if not sh_hir_types_equal(&hir.checked, callable, signature, 0) { return 5503; }; let arity = sh_s_arity(&hir.checked, signature) - 1; if sh_s_resolve(&hir.checked, sh_s_argument(&hir.checked, signature, arity)) != sh_s_resolve(&hir.checked, sh_node_type(&hir.checked, node)) { return 5503; }; let receiver = if sh_ast_word(&hir.ast, callee, 0) == 55 { 1; } else { 0; }; let actuals = sh_ast_word(&hir.ast, node, 6) - 1 + receiver; let variadic = (sh_s_flags(&hir.checked, signature) & 1) != 0; if actuals < arity or not variadic and actuals != arity { return 5503; }; }; }; let node_kind = sh_ast_word(&hir.ast, node, 0); let callable = sh_node_callable_type(&hir.checked, node); if (node_kind == 50 or node_kind == 51) and callable < 0 and sh_binding_word(&hir.checked, sh_node_binding(&hir.checked, node), 2) == 2 { return 5503; }; if (node_kind == 50 or node_kind == 51) and callable >= 0 { let unary = node_kind == 50; let operation = sh_ast_word(&hir.ast, node, 4); let target = sh_node_binding(&hir.checked, node); let owner = sh_binding_word(&hir.checked, target, 6); let method = sh_symbol_text(&hir.checked.symbols, sh_binding_word(&hir.checked, target, 0)); let trait_name = sh_symbol_text(&hir.checked.symbols, if sh_binding_word(&hir.checked, owner, 2) == 7 { sh_binding_word(&hir.checked, owner, 0); } else { sh_s_impl_symbol(&hir.checked, owner); }); if sh_binding_word(&hir.checked, target, 2) != 2 or not method.is_ok() or not trait_name.is_ok() or not sh_s_text_equal(&method.value, sh_s_operator_method(operation, unary)) or not sh_s_text_equal(&trait_name.value, sh_s_operator_label(operation, unary)) { return 5504; }; let signature = sh_s_resolve(&hir.checked, callable); let count = sh_ast_word(&hir.ast, node, 6); if sh_s_kind(&hir.checked, signature) != 11 or sh_s_arity(&hir.checked, signature) != count + 1 or count != if unary { 1; } else { 2; } or sh_s_argument(&hir.checked, signature, count) != sh_s_resolve(&hir.checked, sh_node_type(&hir.checked, node)) { return 5503; }; let keys = vec_new_i64(); let values = vec_new_i64(); if not sh_s_pattern_keys(&hir.checked, sh_binding_word(&hir.checked, target, 3), signature, &keys, &values, 0) { return 5503; }; let mut operand = 0; while operand < count { let actual = sh_s_resolve(&hir.checked, sh_node_type(&hir.checked, sh_ast_child(&hir.ast, node, operand))); let required = sh_s_resolve(&hir.checked, sh_s_argument(&hir.checked, signature, operand)); if actual != required and not (sh_s_kind(&hir.checked, required) == 6 and sh_s_argument(&hir.checked, required, 0) == actual) { return 5503; }; operand = operand + 1; }; }; node = node + 1; };
     0;
 }
 
