@@ -234,3 +234,110 @@ snapshot; it does not rewrite the earlier evidence. Full manifest semantics,
 expected package identity, registry metadata and public sgpm integration remain
 unchecked tasks above. A successful byte-extraction preview alone is not a
 replacement package-manager qualification.
+
+## Canonical package admission checkpoint (owner: selfhost_core)
+
+- [x] Implement every RawManifest field and canonical target/registry/dependency validation in pure SG, with actual full-model comparison to tools/sgpm/src/manifest.rs.
+- [x] Preserve TOML quoted/dotted/inline/table-array/four-string syntax, actual struct-sequence acceptance, ignored-tail syntax and start-only BOM behavior in the measured canonical corpus.
+- [x] Validate exact SemVer/VersionReq u64 component and identifier rules, including the canonical comparator limit and independent mutation oracle.
+- [x] Implement fixed-state incremental SG SHA-256 using the existing linker constants/round mathematics; verify known vectors, cross-chunk splits and length-framed structural distinctions.
+- [x] Parse typed registry metadata and generate byte-exact serde_json::to_vec ordering/escaping without a C parser or foreign hash algorithm.
+- [x] Execute full root-manifest/expected-name/version/archive-digest/selected-entry/metadata admission before publication; write the three reserved markers from SG and compute the actual reference content framing over retained file handles.
+- [x] Reuse the single existing SG gzip/tar pump and handle cleanup for both legacy extraction and admitted import, preserving the old ABI's measured resources and failures.
+- [x] Exercise immutable compressed FileSnapshot locks, malformed/wrong identity/checksum/metadata, marker I/O denial, allocation failure, post-admission rename race and exact 256 MiB content with real SG hashing.
+- [x] Execute two fresh pure-SG-linked sgpm-preview import-archive and manifest-info images; expose all unported canonical operations as explicit unsupported results without Rust delegation.
+- [ ] Implement and qualify the existing public sgpm CLI contracts, dependency graph/lockfile/registry network/cache behavior and all remaining canonical build/project operations.
+- [ ] Complete the independent performance/RSS and final SDK packaging gates.
+
+### Exact admission evidence
+
+The expanded legacy ABI regression is
+`target/selfhost/package-stream-admission-regression-02/evidence.json`, SHA-256
+`403b2381371fd92fae8a36ce041bf9b91cb3c501f88fda47a39042635f3c0264`.
+It passes 155 actual commands at full revision
+`8ce3e0708a5fc8e62fd696ca4d0eb40414a31832` at both ends, with all consumed
+guards empty. The original 216 tar fixtures/343,062 schedules, 48 filesystem
+transactions, exact old four-allocation resources, host-identity controls,
+unwind and two-fresh byte checks remain present. Seven new SG algorithm objects
+and their actual UTF-8/memory/OS dependencies are linked; there is no undefined
+admission symbol hidden by a stub and no second gzip/tar pump. The earlier
+regression-01 report remains historical, SHA-256
+`1b5ca766d95ad7163d08349948bc8cd63099009da1e855e1859f6c49b7e3080d`;
+it predates the measured raw-invalid-UTF8 JSON ignored-field correction.
+
+The canonical independent oracle qualification is
+`target/selfhost/package-manifest-rust-formal-03/evidence.json`, SHA-256
+`e4321054f463f416677dc4246e0c94ed9da923fd65044c81184642712575f6d3`.
+Eighteen commands bind the actual tools/sgpm manifest module, exact registry
+metadata struct and exact package_content_checksum function, imports/wrappers,
+the repository Cargo.lock, actual rustc/cargo and runtime DLLs, all selected
+cached dependency source and crate archive bytes. Every package identity is
+matched by name/version/source/checksum; ambiguous names are not silently
+collapsed. All 1,840 source inputs and tool/config guards remain unchanged.
+The reference algorithms are independent oracles only, not SG providers.
+
+The admission gate is `target/selfhost/package-admission-formal-03/evidence.json`,
+SHA-256 `bdd72be19262d1a7fd2759ee7f3154307d15cd9f8c612ef6086e90d75c038013`.
+It passes 936 top-level commands plus 398 explicitly recorded nested oracle/
+subject commands (216 manifest, 116 metadata, 66 filesystem). Its actual start
+and end revision are both `8ce3e0708a5fc8e62fd696ca4d0eb40414a31832` on the
+recorded Windows host. The source/external/tool guards are empty: 3,315 source
+inputs, 2,207 external inputs and 88 tools are bound. Terminal audit separately
+enumerates all produced files, including published JSON and Sengoo.toml bytes;
+the original report is not rewritten to expand its artifact inventory.
+
+The canonical comparison includes 215 full field models: 154 constructed
+manifests, 43 tracked repository manifests and 18 literal cases extracted from
+the actual canonical Rust tests. Fifty-eight metadata cases compare both typed
+values and exact original struct serialization bytes. JSON unknown fields have
+the actual serde IgnoredAny behavior for discarded invalid UTF-8/surrogates;
+known strings and keys remain strictly validated and never acquire discarded
+bytes as an admitted value. There are 410 exact SemVer/VersionReq comparisons.
+TOML struct sequences and ignored extra elements were discovered by executing
+the reference and remain explicit compatibility behavior. Ignored values still
+need complete syntax, including dates, times, i64 bounds and float spelling.
+Decimal overflow is tested at `(2^1024 - 2^970) - 1`, the tie and +1, including
+the actual canonical negative-overflow behavior; no exponent guess authorizes
+a field. The SHA-256 probe checks 147 independent inputs, 8,645 splits and
+1,044,336 updates, including empty/abc/one-million-a and four distinct framed
+path/content decompositions. Invalid extent, initialized state, finished-state,
+zero disposal and deliberately wrong expected-digest controls all execute.
+
+Forty-six real admitted transactions compare published files and markers to
+independently extracted trees, actual serde_json struct bytes and the actual
+Rust content-checksum function. They cover wrong names/versions/digests,
+malformed/missing/ambiguous manifests, selected entry existence/type/relative
+containment, yanked policy, metadata errors, marker-write denial, three new
+admission allocation failures, post-admission target/replacement races, late
+CRC/member corruption plus identity disagreement, and cancellation after real
+writes. Root reserved marker names and their prefix conflicts are rejected
+before entry creation; nested files with the same basenames and ordinary
+dotfiles stay in the content digest. Parent directory casing and unequal UTF-8
+width aliases use the actually created component names. Marker name storage
+remains in tar state until failed-rename cleanup finishes; it never points into
+a freed parser buffer. The exact 256 MiB cumulative content transaction really
+decodes, writes, reads again and hashes its file data before publication. Its
+seven SG allocations total 29,084,168 bytes and all seven are released with
+zero live bytes and exact process-handle recovery. The separately measured
+5,922,816-byte working-set peak is an observation, not M8 qualification.
+
+The admitted deployment adds package_admission/manifest_toml/manifest_scalar/
+manifest_semver/manifest_schema/registry_metadata/sha256/utf8 SG objects to the
+single qualified extraction core, with the development OS/memory DLL and the
+pinned real stack-probe import. Two fresh new CLI objects, normalized C objects,
+DLL/import libraries and SG-linked PEs are byte-identical. No real unwind is
+removed; timestamp normalization changes only COFF bytes 4..7. New non-leaf OS
+entry ranges are actually registered and their loaded providers are bound.
+Readonly input mapping holds a real file handle that rejects both writing and
+deleting with sharing violation 32, and volume/file ID and handles stay stable.
+
+`sgpm-preview import-archive ARCHIVE PARENT PRIVATE FINAL NAME VERSION SHA256
+METADATA_JSON` executes full admission and publication. `sgpm-preview
+manifest-info MANIFEST` validates the full canonical schema and emits only
+`name<TAB>version<LF>`. Both product images run with empty PATH. Existing sgpm
+build/check/run/test/fmt/doc/tree/metadata/update/publish/new/init/cache/registry
+and unknown commands return explicit unsupported exit 69 in this preview. They
+are not renamed, simulated, delegated to Rust or counted as completed public
+sgpm behavior. Earlier syntax/model/fixture/source-runner failures remain
+unchanged historical reports, including a Python CRLF test-marker mistake
+corrected by comparing the real Rust LF bytes in a fresh run.

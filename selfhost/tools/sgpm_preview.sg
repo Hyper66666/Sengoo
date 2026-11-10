@@ -1,0 +1,137 @@
+// Explicit operation matrix: import-archive and manifest-info are implemented.
+// Existing sgpm build/check/resolve/network operations remain unsupported here.
+extern "C" {
+    unsafe fn sengoo_ps_cli_count() -> i64;
+    unsafe fn sengoo_ps_cli_arg(index: i64) -> * const u8;
+    unsafe fn sengoo_ps_cli_length(index: i64) -> i64;
+    unsafe fn sengoo_ps_cli_open_input(index: i64) -> i64;
+    unsafe fn sengoo_ps_cli_input_bytes(input: i64) -> * const u8;
+    unsafe fn sengoo_ps_cli_input_size(input: i64) -> i64;
+    unsafe fn sengoo_ps_cli_close_input(input: i64);
+    unsafe fn sengoo_ps_cli_open_parent(index: i64) -> i64;
+    unsafe fn sengoo_ps_cli_close_parent(parent: i64);
+    unsafe fn sengoo_ps_cli_dispose();
+    unsafe fn sengoo_pa_arguments_new(name: * const u8, n: i64, version: * const u8, v: i64, checksum: * const u8,
+    c: i64, metadata: * const u8, m: i64, allow: i64) -> * mut u8;
+    unsafe fn sengoo_pa_arguments_free(arguments: * mut u8);
+    unsafe fn sengoo_pa_cli_write(source: * const u8, length: i64, stderr: i64) -> i64;
+    unsafe fn sengoo_pa_cli_input_identity(input: i64, field: i64) -> i64;
+    unsafe fn sengoo_tar_read(source: * const u8, index: i64) -> u8;
+    unsafe fn sengoo_tar_output_read(state: * mut u8, index: i64) -> u8;
+    unsafe fn sengoo_tar_write(state: * mut u8, index: i64, value: u8);
+    unsafe fn sengoo_ds_word_get(state: * mut u8, index: i64) -> i64;
+    unsafe fn sengoo_ds_storage_alloc(length: i64) -> * mut u8;
+    unsafe fn sengoo_ds_storage_present(state: * mut u8) -> i64;
+    unsafe fn sengoo_ds_storage_free(state: * mut u8);
+    unsafe fn sengoo_ps_const_offset(state: * mut u8, index: i64) -> * const u8;
+    unsafe fn sengoo_sg_manifest_validate(source: * const u8, length: i64, state: * mut u8, extent: i64) -> i64;
+    unsafe fn sengoo_sg_package_import(source: * const u8, length: i64, parent: i64, stage: * const u8,
+    stage_size: i64, target: * const u8, target_size: i64, cancel: i64, arguments: * mut u8) -> i64;
+}
+unsafe extern "C" fn sh_pm_arg(index: i64, low: i64, high: i64, length: i64) -> bool {
+    if sengoo_ps_cli_length(index) != length {
+        return false;
+    };
+    let bytes = sengoo_ps_cli_arg(index);
+    let mut i = 0;
+    while i < length {
+        let expected = if i < 8 {
+            (low >> (i * 8)) & 255;
+        } else {
+            (high >> ((i - 8) * 8)) & 255;
+        };
+        if (sengoo_tar_read(bytes, i) as i64) != expected {
+            return false;
+        };
+        i = i + 1;
+    };
+    true;
+}
+unsafe extern "C" fn sh_pm_import() -> i64 {
+    if sengoo_ps_cli_count() != 9 {
+        return 64;
+    };
+    let archive = sengoo_ps_cli_open_input(1);
+    if archive == 0 {
+        return 66;
+    };
+    let metadata = sengoo_ps_cli_open_input(8);
+    if metadata == 0 {
+        sengoo_ps_cli_close_input(archive);
+        return 66;
+    };
+    let parent = sengoo_ps_cli_open_parent(2);
+    if parent == 0 {
+        sengoo_ps_cli_close_input(metadata);
+        sengoo_ps_cli_close_input(archive);
+        return 66;
+    };
+    let arguments = sengoo_pa_arguments_new(sengoo_ps_cli_arg(5), sengoo_ps_cli_length(5), sengoo_ps_cli_arg(6),
+    sengoo_ps_cli_length(6), sengoo_ps_cli_arg(7), sengoo_ps_cli_length(7), sengoo_ps_cli_input_bytes(metadata),
+    sengoo_ps_cli_input_size(metadata), 0);
+    let mut result = - 8;
+    if sengoo_ds_storage_present(arguments) == 1 {
+        result = sengoo_sg_package_import(sengoo_ps_cli_input_bytes(archive), sengoo_ps_cli_input_size(archive),
+        parent, sengoo_ps_cli_arg(3), sengoo_ps_cli_length(3), sengoo_ps_cli_arg(4), sengoo_ps_cli_length(4),
+        - 1, arguments);
+        sengoo_pa_arguments_free(arguments);
+    };
+    sengoo_ps_cli_close_parent(parent);
+    sengoo_ps_cli_close_input(metadata);
+    sengoo_ps_cli_close_input(archive);
+    if result == 0 {
+        0;
+    } else {
+        70 - result;
+    };
+}
+unsafe extern "C" fn sh_pm_manifest() -> i64 {
+    if sengoo_ps_cli_count() != 2 {
+        return 64;
+    };
+    let input = sengoo_ps_cli_open_input(1);
+    if input == 0 {
+        return 66;
+    };
+    let state = sengoo_ds_storage_alloc(8388608);
+    if sengoo_ds_storage_present(state) == 0 {
+        sengoo_ps_cli_close_input(input);
+        return 78;
+    };
+    let result = sengoo_sg_manifest_validate(sengoo_ps_cli_input_bytes(input), sengoo_ps_cli_input_size(input),
+    state, 8388608);
+    let mut status = 0;
+    if result < 0 {
+        status = 70 - result;
+    } else {
+        let name = sengoo_ds_word_get(state, 20);
+        let n = sengoo_ds_word_get(state, 21);
+        let version = sengoo_ds_word_get(state, 22);
+        let v = sengoo_ds_word_get(state, 23);
+        // Name and strict SemVer are already schema-admitted ASCII; this
+        // simple tab-separated identity does not claim full metadata output.
+        sengoo_tar_write(state, 400, 9u8);
+        sengoo_tar_write(state, 401, 10u8);
+        if sengoo_pa_cli_write(sengoo_ps_const_offset(state, name), n, 0) < 0 or sengoo_pa_cli_write(sengoo_ps_const_offset(state,
+        400), 1, 0) < 0 or sengoo_pa_cli_write(sengoo_ps_const_offset(state, version), v, 0) < 0 or sengoo_pa_cli_write(sengoo_ps_const_offset(state,
+        401), 1, 0) < 0 {
+            status = 78;
+        };
+    };
+    sengoo_ds_storage_free(state);
+    sengoo_ps_cli_close_input(input);
+    status;
+}
+pub unsafe extern "C" fn main() -> i64 {
+    let count = sengoo_ps_cli_count();
+    let mut result = 69;
+    if count >= 1 {
+        if sh_pm_arg(0, 7002381030475722089, 111559248995186, 14) {
+            result = sh_pm_import();
+        } else if sh_pm_arg(0, 8391162021251277165, 478459881773, 13) {
+            result = sh_pm_manifest();
+        };
+    };
+    sengoo_ps_cli_dispose();
+    result;
+}

@@ -1,0 +1,505 @@
+extern "C" {
+    unsafe fn sengoo_sg_manifest_toml_parse(source: * const u8, length: i64, state: * mut u8, extent: i64) -> i64;
+    unsafe fn sengoo_sg_semver_validate(text: * const u8, length: i64, mode: i64) -> i64;
+    unsafe fn sh_mt_word(state: * mut u8, node: i64, field: i64) -> i64;
+    unsafe fn sh_mt_set(state: * mut u8, node: i64, field: i64, value: i64);
+    unsafe fn sh_mt_put(state: * mut u8, byte: i64) -> i64;
+    unsafe fn sengoo_tar_output_read(state: * mut u8, index: i64) -> u8;
+    unsafe fn sengoo_tar_write(state: * mut u8, index: i64, value: u8);
+    unsafe fn sengoo_ds_word_get(state: * mut u8, index: i64) -> i64;
+    unsafe fn sengoo_ds_word_put(state: * mut u8, index: i64, value: i64);
+    unsafe fn sengoo_ps_const_offset(state: * mut u8, index: i64) -> * const u8;
+} // Exact little-endian literal bytes, not hashes or identifier authority.
+unsafe extern "C" fn sh_mm_key(state: * mut u8, node: i64, low: i64, high: i64, length: i64) -> bool {
+    if sh_mt_word(state, node, 3) != length {
+        return false;
+    };
+    let start = sh_mt_word(state, node, 2);
+    let mut i = 0;
+    while i < length {
+        let expected = if i < 8 {
+            (low >> (i * 8)) & 255;
+        } else {
+            (high >> ((i - 8) * 8)) & 255;
+        };
+        if (sengoo_tar_output_read(state, start + i) as i64) != expected {
+            return false;
+        };
+        i = i + 1;
+    };
+    true;
+} // root roles: schema1/package2/bin3/lib4/test5/registries6/dependencies7.
+unsafe extern "C" fn sh_mm_root_role(state: * mut u8, node: i64) -> i64 {
+    if sh_mm_key(state, node, 8299412212581033331, 418447190115, 13) {
+        1;
+    } else if sh_mm_key(state, node, 28542640758940016, 0, 7) {
+        2;
+    } else if sh_mm_key(state, node, 7235938, 0, 3) {
+        3;
+    } else if sh_mm_key(state, node, 6449516, 0, 3) {
+        4;
+    } else if sh_mm_key(state, node, 1953719668, 0, 4) {
+        5;
+    } else if sh_mm_key(state, node, 7598263560365892978, 29541, 10) {
+        6;
+    } else if sh_mm_key(state, node, 7954874742130894180, 1936025955, 12) {
+        7;
+    } else {
+        0;
+    };
+} // common field roles: name1/version2/authors3/description4/edition5/path6,
+// git7/rev8/registry9/package10/url11/token_env12.
+unsafe extern "C" fn sh_mm_role(state: * mut u8, node: i64) -> i64 {
+    if sh_mm_key(state, node, 1701667182, 0, 4) {
+        1;
+    } else if sh_mm_key(state, node, 31084746137298294, 0, 7) {
+        2;
+    } else if sh_mm_key(state, node, 32495445141124449, 0, 7) {
+        3;
+    } else if sh_mm_key(state, node, 8390322045806929252, 7237481, 11) {
+        4;
+    } else if sh_mm_key(state, node, 31084746153485413, 0, 7) {
+        5;
+    } else if sh_mm_key(state, node, 1752457584, 0, 4) {
+        6;
+    } else if sh_mm_key(state, node, 7629159, 0, 3) {
+        7;
+    } else if sh_mm_key(state, node, 7759218, 0, 3) {
+        8;
+    } else if sh_mm_key(state, node, 8751185064972739954, 0, 8) {
+        9;
+    } else if sh_mm_key(state, node, 28542640758940016, 0, 7) {
+        10;
+    } else if sh_mm_key(state, node, 7107189, 0, 3) {
+        11;
+    } else if sh_mm_key(state, node, 7954869244572430196, 118, 9) {
+        12;
+    } else {
+        0;
+    };
+}
+unsafe extern "C" fn sh_mm_fail(state: * mut u8, node: i64) -> i64 {
+    sengoo_ds_word_put(state, 5, - 21);
+    sengoo_ds_word_put(state, 6, sh_mt_word(state, node, 9));
+    - 21;
+} // Serde's derived struct visitors accept a sequence as well as a map. Preserve
+// this actual canonical spelling, assigning the exact declaration field order.
+pub unsafe extern "C" fn sh_mm_sequence(state: * mut u8, node: i64, structure: i64) -> i64 {
+    if sh_mt_word(state, node, 0) != 3 {
+        return 0;
+    };
+    let mut child = sh_mt_word(state, node, 6);
+    let mut index = 0;
+    let mut previous = - 1;
+    while child >= 0 {
+        let mut role = 0;
+        if structure == 2 {
+            if index < 5 {
+                role = index + 1;
+            };
+        } else if structure == 3 {
+            if index == 0 {
+                role = 1;
+            } else if index == 1 {
+                role = 6;
+            };
+        } else if structure == 4 or structure == 5 {
+            if index == 0 {
+                role = 6;
+            };
+        } else if structure == 6 {
+            if index == 0 {
+                role = 6;
+            } else if index == 1 {
+                role = 11;
+            } else if index == 2 {
+                role = 12;
+            };
+        } else if structure == 7 {
+            if index < 4 {
+                role = index + 13;
+            };
+        };
+        if role == 0 {
+            if sengoo_ds_word_get(state, 14) == 1 {
+                return sh_mm_fail(state, child);
+            };
+            if previous >= 0 {
+                sh_mt_set(state, previous, 7, - 1);
+            };
+            sh_mt_set(state, node, 0, 0);
+            return 0;
+        };
+        let mut low = 0;
+        let mut high = 0;
+        let mut length = 0;
+        if role == 1 {
+            low = 1701667182;
+            length = 4;
+        } else if role == 2 {
+            low = 31084746137298294;
+            length = 7;
+        } else if role == 3 {
+            low = 32495445141124449;
+            length = 7;
+        } else if role == 4 {
+            low = 8390322045806929252;
+            high = 7237481;
+            length = 11;
+        } else if role == 5 {
+            low = 31084746153485413;
+            length = 7;
+        } else if role == 6 {
+            low = 1752457584;
+            length = 4;
+        } else if role == 11 {
+            low = 7107189;
+            length = 3;
+        } else if role == 12 {
+            low = 7954869244572430196;
+            high = 118;
+            length = 9;
+        } else if role == 13 {
+            low = 7887337227475576931;
+            length = 8;
+        } else if role == 14 {
+            low = 110386756870521;
+            length = 6;
+        } else if role == 15 {
+            low = 7018141348476641657;
+            high = 7237491;
+            length = 11;
+        } else if role == 16 {
+            low = 8315178135798768998;
+            length = 8;
+        };
+        let begin = sengoo_ds_word_get(state, 4);
+        let mut i = 0;
+        while i < length {
+            let byte = if i < 8 {
+                (low >> (i * 8)) & 255;
+            } else {
+                (high >> ((i - 8) * 8)) & 255;
+            };
+            if sh_mt_put(state, byte) < 0 {
+                return - 22;
+            };
+            i = i + 1;
+        };
+        sh_mt_set(state, child, 2, begin);
+        sh_mt_set(state, child, 3, length);
+        previous = child;
+        child = sh_mt_word(state, child, 7);
+        index = index + 1;
+    };
+    sh_mt_set(state, node, 0, 0);
+    0;
+}
+unsafe extern "C" fn sh_mm_name(state: * mut u8, start: i64, length: i64, registry: i64) -> bool {
+    if length < 1 {
+        return false;
+    };
+    let mut i = 0;
+    while i < length {
+        let b = sengoo_tar_output_read(state, start + i) as i64;
+        let base = (b >= 97 and b <= 122) or (b >= 48 and b <= 57);
+        if not (base or b == 45 or b == 95 or (registry == 1 and b == 46)) {
+            return false;
+        };
+        if registry == 1 and (i == 0 or i == length - 1) and not base {
+            return false;
+        };
+        i = i + 1;
+    };
+    true;
+} // Rust str::trim Unicode White_Space, expressed in valid UTF-8 byte patterns.
+unsafe extern "C" fn sh_mm_space(state: * mut u8, start: i64, length: i64) -> i64 {
+    if length < 1 {
+        return 0;
+    };
+    let a = sengoo_tar_output_read(state, start) as i64;
+    if a == 32 or (a >= 9 and a <= 13) {
+        return 1;
+    };
+    if length >= 2 and a == 194 {
+        let b = sengoo_tar_output_read(state, start + 1) as i64;
+        if b == 133 or b == 160 {
+            return 2;
+        };
+    };
+    if length >= 3 {
+        let b = sengoo_tar_output_read(state, start + 1) as i64;
+        let c = sengoo_tar_output_read(state, start + 2) as i64;
+        if (a == 225 and b == 154 and c == 128) or (a == 226 and b == 128 and ((c >= 128 and c <= 138) or c == 168 or c == 169 or c == 175)) or (a == 226 and b == 129 and c == 159) or (a == 227 and b == 128 and c == 128) {
+            return 3;
+        };
+    };
+    0;
+}
+unsafe extern "C" fn sh_mm_trim(state: * mut u8, node: i64) -> i64 {
+    let mut start = sh_mt_word(state, node, 4);
+    let mut length = sh_mt_word(state, node, 5);
+    loop {
+        let width = sh_mm_space(state, start, length);
+        if width == 0 {
+            break;
+        };
+        start = start + width;
+        length = length - width;
+    };
+    while length > 0 {
+        let mut begin = start + length - 1;
+        while begin > start and (sengoo_tar_output_read(state, begin) as i64) >= 128 and (sengoo_tar_output_read(state,
+        begin) as i64) < 192 {
+            begin = begin - 1;
+        };
+        let width = sh_mm_space(state, begin, start + length - begin);
+        if width == 0 {
+            break;
+        };
+        length = length - width;
+    };
+    sengoo_ds_word_put(state, 18, start);
+    sengoo_ds_word_put(state, 19, length);
+    0;
+}
+unsafe extern "C" fn sh_mm_strings(state: * mut u8, node: i64) -> bool {
+    if sh_mt_word(state, node, 0) != 3 {
+        return false;
+    };
+    let mut child = sh_mt_word(state, node, 6);
+    while child >= 0 {
+        if sh_mt_word(state, child, 0) != 1 {
+            return false;
+        };
+        child = sh_mt_word(state, child, 7);
+    };
+    true;
+}
+unsafe extern "C" fn sh_mm_target(state: * mut u8, node: i64, role: i64) -> i64 {
+    if sh_mm_sequence(state, node, role) < 0 {
+        return - 21;
+    };
+    if sh_mt_word(state, node, 0) != 0 {
+        return sh_mm_fail(state, node);
+    };
+    let mut child = sh_mt_word(state, node, 6);
+    let mut path = false;
+    while child >= 0 {
+        let field = sh_mm_role(state, child);
+        if sh_mt_word(state, child, 0) != 1 or (field != 6 and not (role == 3 and field == 1)) {
+            return sh_mm_fail(state, child);
+        };
+        if field == 6 {
+            path = true;
+        } else if not sh_mm_name(state, sh_mt_word(state, child, 4), sh_mt_word(state, child, 5), 0) {
+            return sh_mm_fail(state, child);
+        };
+        child = sh_mt_word(state, child, 7);
+    };
+    if role == 5 and not path {
+        return sh_mm_fail(state, node);
+    };
+    0;
+}
+unsafe extern "C" fn sh_mm_registry(state: * mut u8, node: i64) -> i64 {
+    if sh_mm_sequence(state, node, 6) < 0 {
+        return - 21;
+    };
+    if sh_mt_word(state, node, 0) != 0 or not sh_mm_name(state, sh_mt_word(state, node, 2), sh_mt_word(state,
+    node, 3), 1) {
+        return sh_mm_fail(state, node);
+    };
+    let mut child = sh_mt_word(state, node, 6);
+    let mut path = false;
+    let mut url = false;
+    let mut token = false;
+    while child >= 0 {
+        let role = sh_mm_role(state, child);
+        if sh_mt_word(state, child, 0) != 1 or (role != 6 and role != 11 and role != 12) {
+            return sh_mm_fail(state, child);
+        };
+        sh_mm_trim(state, child);
+        let length = sengoo_ds_word_get(state, 19);
+        if role == 6 {
+            path = true;
+        } else if role == 11 {
+            url = length > 0;
+        } else {
+            if length == 0 {
+                return sh_mm_fail(state, child);
+            };
+            token = true;
+        };
+        child = sh_mt_word(state, child, 7);
+    };
+    if path == url or (token and not url) {
+        return sh_mm_fail(state, node);
+    };
+    0;
+}
+unsafe extern "C" fn sh_mm_dependency(state: * mut u8, node: i64) -> i64 {
+    if not sh_mm_name(state, sh_mt_word(state, node, 2), sh_mt_word(state, node, 3), 0) {
+        return sh_mm_fail(state, node);
+    };
+    if sh_mt_word(state, node, 0) == 1 {
+        sh_mm_trim(state, node);
+        if sengoo_sg_semver_validate(sengoo_ps_const_offset(state, sengoo_ds_word_get(state, 18)), sengoo_ds_word_get(state,
+        19), 1) != 1 {
+            return sh_mm_fail(state, node);
+        };
+        return 0;
+    };
+    if sh_mt_word(state, node, 0) != 0 {
+        return sh_mm_fail(state, node);
+    };
+    let mut child = sh_mt_word(state, node, 6);
+    let mut sources = 0;
+    let mut git = false;
+    let mut version = false;
+    let mut rev = false;
+    let mut registry = false;
+    while child >= 0 {
+        let role = sh_mm_role(state, child);
+        if sh_mt_word(state, child, 0) != 1 or (role != 6 and role != 7 and role != 8 and role != 2 and role != 9 and role != 10) {
+            return sh_mm_fail(state, child);
+        };
+        sh_mm_trim(state, child);
+        let start = sengoo_ds_word_get(state, 18);
+        let length = sengoo_ds_word_get(state, 19);
+        if length == 0 {
+            return sh_mm_fail(state, child);
+        };
+        if role == 6 or role == 7 or role == 2 {
+            sources = sources + 1;
+        };
+        if role == 7 {
+            git = true;
+        } else if role == 8 {
+            rev = true;
+        } else if role == 9 {
+            registry = true;
+            if not sh_mm_name(state, start, length, 1) {
+                return sh_mm_fail(state, child);
+            };
+        } else if role == 10 {
+            if not sh_mm_name(state, start, length, 0) {
+                return sh_mm_fail(state, child);
+            };
+        } else if role == 2 {
+            version = true;
+            if sengoo_sg_semver_validate(sengoo_ps_const_offset(state, start), length, 1) != 1 {
+                return sh_mm_fail(state, child);
+            };
+        };
+        child = sh_mt_word(state, child, 7);
+    };
+    if sources != 1 or (rev and not git) or (registry and not version) {
+        return sh_mm_fail(state, node);
+    };
+    0;
+}
+pub unsafe extern "C" fn sengoo_sg_manifest_validate(source: * const u8, length: i64, state: * mut u8,
+extent: i64) -> i64 {
+    let syntax = sengoo_sg_manifest_toml_parse(source, length, state, extent);
+    if syntax < 0 {
+        return syntax;
+    };
+    let mut root = sh_mt_word(state, 0, 6);
+    let mut package = - 1;
+    while root >= 0 {
+        let role = sh_mm_root_role(state, root);
+        if role == 0 {
+            return sh_mm_fail(state, root);
+        } else if role == 1 {
+            if sh_mt_word(state, root, 0) != 2 or sh_mt_word(state, root, 4) != 1 {
+                return sh_mm_fail(state, root);
+            };
+        } else if role == 2 {
+            package = root;
+        } else if role == 3 or role == 4 {
+            if sh_mm_target(state, root, role) < 0 {
+                return - 21;
+            };
+        } else if role == 5 {
+            if sh_mt_word(state, root, 0) != 3 {
+                return sh_mm_fail(state, root);
+            };
+            let mut item = sh_mt_word(state, root, 6);
+            while item >= 0 {
+                if sh_mm_target(state, item, 5) < 0 {
+                    return - 21;
+                };
+                item = sh_mt_word(state, item, 7);
+            };
+        } else {
+            if sh_mt_word(state, root, 0) != 0 {
+                return sh_mm_fail(state, root);
+            };
+            let mut item = sh_mt_word(state, root, 6);
+            while item >= 0 {
+                let result = if role == 6 {
+                    sh_mm_registry(state, item);
+                } else {
+                    sh_mm_dependency(state, item);
+                };
+                if result < 0 {
+                    return result;
+                };
+                item = sh_mt_word(state, item, 7);
+            };
+        };
+        root = sh_mt_word(state, root, 7);
+    };
+    if package < 0 {
+        return sh_mm_fail(state, 0);
+    };
+    if sh_mm_sequence(state, package, 2) < 0 or sh_mt_word(state, package, 0) != 0 {
+        return sh_mm_fail(state, package);
+    };
+    let mut child = sh_mt_word(state, package, 6);
+    let mut name = false;
+    let mut version = false;
+    while child >= 0 {
+        let role = sh_mm_role(state, child);
+        if role == 3 {
+            if not sh_mm_strings(state, child) {
+                return sh_mm_fail(state, child);
+            };
+        } else {
+            if sh_mt_word(state, child, 0) != 1 {
+                return sh_mm_fail(state, child);
+            };
+            let start = sh_mt_word(state, child, 4);
+            let n = sh_mt_word(state, child, 5);
+            if role == 1 {
+                if not sh_mm_name(state, start, n, 0) {
+                    return sh_mm_fail(state, child);
+                };
+                name = true;
+                sengoo_ds_word_put(state, 20, start);
+                sengoo_ds_word_put(state, 21, n);
+            } else if role == 2 {
+                if sengoo_sg_semver_validate(sengoo_ps_const_offset(state, start), n, 0) != 1 {
+                    return sh_mm_fail(state, child);
+                };
+                version = true;
+                sengoo_ds_word_put(state, 22, start);
+                sengoo_ds_word_put(state, 23, n);
+            } else if role == 5 {
+                if n != 4 or (sengoo_tar_output_read(state, start) as i64) != 50 or (sengoo_tar_output_read(state,
+                start + 1) as i64) != 48 or (sengoo_tar_output_read(state, start + 2) as i64) != 50 or (sengoo_tar_output_read(state,
+                start + 3) as i64) != 54 {
+                    return sh_mm_fail(state, child);
+                };
+            } else if role != 4 {
+                return sh_mm_fail(state, child);
+            };
+        };
+        child = sh_mt_word(state, child, 7);
+    };
+    if not name or not version {
+        return sh_mm_fail(state, package);
+    };
+    0;
+}

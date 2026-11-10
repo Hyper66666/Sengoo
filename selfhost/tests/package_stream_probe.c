@@ -99,6 +99,9 @@ static uint8_t *checked(const uint8_t *base,int64_t index,int bytes,int writing)
     exit(84);
 }
 uint8_t sengoo_tar_read(const uint8_t *base,int64_t index){return *checked(base,index,1,0);}
+#ifndef SENGOO_PACKAGE_IMPORT_TEST
+uint8_t sengoo_runtime_memory_read_u8(const uint8_t *base,int64_t index){return *checked(base,index,1,0);}
+#endif
 uint8_t sengoo_tar_output_read(uint8_t *base,int64_t index){return *checked(base,index,1,0);}
 void sengoo_tar_write(uint8_t *base,int64_t index,uint8_t value){*checked(base,index,1,1)=value;}
 void sengoo_tar_observe_os_compare(void){}
@@ -108,6 +111,7 @@ void sengoo_ds_state_write(uint8_t *base,int64_t index,uint8_t value){*checked(b
 void sengoo_ds_output_write(uint8_t *base,int64_t index,uint8_t value){*checked(base,index,1,1)=value;}
 int64_t sengoo_ds_word_get(uint8_t *base,int64_t index){int64_t value;memcpy(&value,checked(base,index,8,0),8);return value;}
 void sengoo_ds_word_put(uint8_t *base,int64_t index,int64_t value){memcpy(checked(base,index,8,1),&value,8);}
+void sengoo_pa_observe_read(uint8_t *target,int64_t count){for(int64_t i=0;i<count;i++)(void)checked(target,i,1,1);}
 uint8_t sengoo_deflate_input_read(const uint8_t *base,int64_t index){return *checked(base,index,1,0);}
 uint8_t sengoo_deflate_output_read(uint8_t *base,int64_t index){return *checked(base,index,1,0);}
 void sengoo_deflate_output_write(uint8_t *base,int64_t index,uint8_t value){*checked(base,index,1,1)=value;}

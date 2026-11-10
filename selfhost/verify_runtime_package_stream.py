@@ -85,6 +85,11 @@ def main():
             folder=args.gzip_stream_evidence.resolve().parent/gzip['fresh_rounds'][0]['round'];path=folder/(name+'.obj');pin=gzip['fresh_rounds'][0]['sha256'][name]
             if gzip['artifacts'].get(str(path))!=pin:raise ValueError('gzip core object not artifact-bound')
             frozen[name]=read(path,pin)
+        utf8_rows=[row for row in text['steps']if row['name']=='0-emit-utf8']
+        if len(utf8_rows)!=1 or utf8_rows[0]['exit_code']!=0:raise ValueError('UTF8 actual object producer differs')
+        utf8_source=Path(utf8_rows[0]['command'][2]).resolve();utf8_key=str(utf8_source.relative_to(args.text_evidence.resolve().parent));utf8_pin=text['artifacts'].get(utf8_key)
+        if not utf8_pin:raise ValueError('UTF8 object not artifact-bound')
+        frozen['utf8']=read(utf8_source,utf8_pin)
         # Independent Rust observations remain immutable historical execution.
         # Bind their complete source/compiler closure, executable and actual log.
         for name,pin in rust['sources'].items():read(name,pin)
@@ -108,10 +113,11 @@ def main():
         read(tar_corpus,tar['sources'][str(tar_corpus.relative_to(ROOT))]);read(tar_manifest,tar['sources'][str(tar_manifest.relative_to(ROOT))])
         if digest(read(obs['corpus']))!=digest(read(tar_corpus)):raise ValueError('Rust corpus differs from scanner corpus')
         snapshot=out/'inputs';snapshot.mkdir()
-        names=['runtime/tar_stream.sg','runtime/tar_stream_memory.c','runtime/package_stream.sg','runtime/package_stream_os.c','runtime/package_stream_cli.c','tools/package_stream.sg','tests/tar_stream_cases.py','tests/tar_stream_probe.c','tests/package_stream_cases.py','tests/package_stream_probe.c','tests/package_stream_unwind_probe.c']+['runtime/'+n for n in baseline]
+        additions=['package_admission','manifest_toml','manifest_scalar','manifest_semver','manifest_schema','registry_metadata','sha256']
+        names=['runtime/tar_stream.sg','runtime/tar_stream_memory.c','runtime/package_stream.sg','runtime/package_stream_os.c','runtime/package_stream_cli.c','runtime/package_admission_os.c','runtime/memory_read.c','tools/package_stream.sg','tests/tar_stream_cases.py','tests/tar_stream_probe.c','tests/package_stream_cases.py','tests/package_stream_probe.c','tests/package_stream_unwind_probe.c']+['runtime/'+n+'.sg'for n in additions]+['runtime/'+n for n in baseline]
         for name in names:
             saved=snapshot/('package_cli.sg'if name=='tools/package_stream.sg'else Path(name).name);saved.write_bytes(read(ROOT/'selfhost'/name));read(saved)
-        for name in ['tar_stream','package_stream','package_cli']:
+        for name in ['tar_stream','package_stream','package_cli',*additions]:
             run('format-'+name,[formatter,'--check',snapshot/(name+'.sg')],empty=True)
         for name in ['tar.sg','gzip.sg']:read(snapshot/name)
         run('generate-tar-events',[python,'-B','-X','utf8',snapshot/'tar_stream_cases.py','--corpus',tar_corpus,'--output',out/'tar-events'])
@@ -131,12 +137,13 @@ def main():
             report['artifacts'][str(target)]=sha(target);return target
         rounds=[];built_rounds=[]
         exports=set()
-        cstems=['package_stream_os','package_stream_cli','deflate_stream_memory','deflate_memory','deflate_storage','gzip_memory','gzip_stream_memory','tar_memory','tar_stream_memory']
+        cstems=['package_admission_os','package_stream_cli','deflate_stream_memory','deflate_memory','deflate_storage','gzip_memory','gzip_stream_memory','tar_memory','tar_stream_memory','memory_read']
         for stem in cstems:exports.update(re.findall(r'^\s*(?!static\b)[A-Za-z_][A-Za-z0-9_\s*]*\b(sengoo_[A-Za-z0-9_]+)\s*\([^;{}]*\)\s*\{',read(snapshot/(stem+'.c')).decode(),re.M))
+        exports.update(re.findall(r'^\s*(?!static\b)[A-Za-z_][A-Za-z0-9_\s*]*\b(sengoo_[A-Za-z0-9_]+)\s*\([^;{}]*\)\s*\{',read(snapshot/'package_stream_os.c').decode(),re.M))
         for number,label in enumerate(['first fresh 世界 &','second fresh 世界 &']):
             folder=out/label;folder.mkdir();built={}
             (folder/'tar.sg').write_bytes(read(snapshot/'tar.sg'));read(folder/'tar.sg')
-            for stem in ['tar_stream','package_stream','package_cli']:
+            for stem in ['tar_stream','package_stream','package_cli',*additions]:
                 source=folder/(stem+'.sg');source.write_bytes(read(snapshot/(stem+'.sg')));read(source);obj=folder/(stem+'.obj')
                 result=run(str(number)+'-emit-'+stem,[native,source,obj,'--wrap'])
                 if result.stderr or strict_json(result.stdout)!={'schema_version':1,'ok':True,'phase':'object'}:raise ValueError('actual SG object protocol differs')
@@ -154,7 +161,7 @@ def main():
             built['sdk-dll']=dll;built['sdk-import']=lib
             inspected=run(str(number)+'-sdk-unwind',[readobj,'--unwind','--coff-imports','--coff-exports',dll],cenv)
             if b'RuntimeFunction'not in inspected.stdout or b'NtCreateFile'in inspected.stdout:raise ValueError('SDK real unwind/import shape differs')
-            image=folder/'sg-package-extract-preview.exe';run(str(number)+'-sg-link',[linker,'link',image,'main',*[built[n]for n in ['package_cli','package_stream','tar_stream','gzip_stream','deflate_stream','deflate']],lib,stack],empty=True);built['image']=image
+            image=folder/'sg-package-extract-preview.exe';run(str(number)+'-sg-link',[linker,'link',image,'main',*[built[n]for n in ['package_cli','package_stream','tar_stream','gzip_stream','deflate_stream','deflate','utf8',*additions]],lib,stack],empty=True);built['image']=image
             hashes={name:sha(path)for name,path in built.items()}
             if rounds and rounds[0]['sha256']!=hashes:raise ValueError('two fresh SG/CSDK/DLL/importlib/PE bytes differ')
             rounds.append({'round':label,'sha256':hashes});built_rounds.append(built);report['artifacts'].update({str(path):sha(path)for path in built.values()})
@@ -206,9 +213,9 @@ def main():
         control=run('wrong-event-oracle-control',[out/'tar-probe.exe',wrong],expected=1)
         if control.stdout or b'fixture=0 reason=valid-terminal expected=4 actual=2'not in control.stderr:raise ValueError('wrong event oracle did not reach actual scanner')
         pprobe=compile_c('compile-package-probe',snapshot/'package_stream_probe.c',out/'package-probe.obj')
-        pos=compile_c('compile-package-os',snapshot/'package_stream_os.c',out/'package-os.obj',['-DSENGOO_PACKAGE_INSTRUMENTED'])
+        pos=compile_c('compile-package-os',snapshot/'package_admission_os.c',out/'package-os.obj',['-DSENGOO_PACKAGE_INSTRUMENTED'])
         pmem=[built_rounds[0][stem+'-sdk']for stem in ['gzip_memory','gzip_stream_memory','tar_stream_memory']]
-        core=[built_rounds[0][name]for name in ['package_stream','tar_stream','gzip_stream','deflate_stream','deflate']]
+        core=[built_rounds[0][name]for name in ['package_stream','tar_stream','gzip_stream','deflate_stream','deflate','utf8',*additions]]
         c_link(run,read,report,'link-package-probe',clang,[pprobe,pos,tmem,*pmem,*core,stack],out/'package-probe.exe',cenv)
         controls=run('package-api-controls',[out/'package-probe.exe','--api-controls']);value=strict_json(controls.stdout)
         expected={'schema':1,'controls':10,'bad_extent_zero_access':True,'same_stage_target_rejected':True,'dos_root_rejected':True,'allocations':0}

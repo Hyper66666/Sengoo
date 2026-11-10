@@ -1,0 +1,731 @@
+// Pre-publication package admission. Raw byte records are unsafe arguments,
+// never provider certificates; every identity/digest is checked in SG.
+extern "C" {
+    unsafe fn sengoo_pa_argument(arguments: * mut u8, index: i64) -> * const u8;
+    unsafe fn sengoo_pa_argument_length(arguments: * mut u8, index: i64) -> i64;
+    unsafe fn sengoo_pa_allow_yanked(arguments: * mut u8) -> i64;
+    unsafe fn sengoo_pa_file_size(session: i64, id: i64) -> i64;
+    unsafe fn sengoo_pa_file_identity(session: i64, id: i64) -> i64;
+    unsafe fn sengoo_pa_file_read(session: i64, id: i64, offset: i64, target: * mut u8, capacity: i64) -> i64;
+    unsafe fn sengoo_pa_open_attributes(session: i64, parent: i64, name: * const u8, length: i64) -> i64;
+    unsafe fn sengoo_pa_attributes_match(session: i64, id: i64, handle: i64) -> i64;
+    unsafe fn sengoo_pa_close_attributes(handle: i64);
+    unsafe fn sengoo_ps_component_equal(a: * const u8, n: i64, b: * const u8, m: i64) -> i64;
+    unsafe fn sengoo_ps_const_offset(state: * mut u8, offset: i64) -> * const u8;
+    unsafe fn sengoo_ps_mut_offset(state: * mut u8, offset: i64) -> * mut u8;
+    unsafe fn sengoo_ps_input_offset(source: * const u8, offset: i64) -> * const u8;
+    unsafe fn sengoo_tar_read(source: * const u8, index: i64) -> u8;
+    unsafe fn sengoo_tar_output_read(state: * mut u8, index: i64) -> u8;
+    unsafe fn sengoo_tar_write(state: * mut u8, index: i64, value: u8);
+    unsafe fn sengoo_ds_word_get(state: * mut u8, index: i64) -> i64;
+    unsafe fn sengoo_ds_word_put(state: * mut u8, index: i64, value: i64);
+    unsafe fn sengoo_sg_semver_validate(source: * const u8, length: i64, mode: i64) -> i64;
+    unsafe fn sengoo_sg_sha256_init(state: * mut u8, extent: i64) -> i64;
+    unsafe fn sengoo_sg_sha256_update(state: * mut u8, extent: i64, source: * const u8, length: i64) -> i64;
+    unsafe fn sengoo_sg_sha256_final(state: * mut u8, extent: i64, output: * mut u8, capacity: i64) -> i64;
+    unsafe fn sengoo_sg_manifest_validate(source: * const u8, length: i64, state: * mut u8, extent: i64) -> i64;
+    unsafe fn sh_mt_word(state: * mut u8, node: i64, field: i64) -> i64;
+    unsafe fn sh_mm_root_role(state: * mut u8, node: i64) -> i64;
+    unsafe fn sh_mm_role(state: * mut u8, node: i64) -> i64;
+    unsafe fn sh_tar_path(state: * mut u8, start: i64, length: i64) -> i64;
+    unsafe fn sengoo_sg_registry_metadata_parse(source: * const u8, length: i64, state: * mut u8, extent: i64) -> i64;
+    unsafe fn sengoo_sg_registry_metadata_encode(state: * mut u8, extent: i64, output: * mut u8, capacity: i64) -> i64;
+    unsafe fn sengoo_ps_create_node(session: i64, parent: i64, name: * const u8, length: i64, kind: i64) -> i64;
+    unsafe fn sengoo_ps_write_node(session: i64, node: i64, source: * const u8, length: i64) -> i64;
+    unsafe fn sengoo_ps_flush_node(session: i64, node: i64) -> i64;
+    unsafe fn sengoo_ds_storage_alloc(length: i64) -> * mut u8;
+    unsafe fn sengoo_ds_storage_present(state: * mut u8) -> i64;
+    unsafe fn sengoo_ds_storage_free(state: * mut u8);
+    unsafe fn sengoo_sg_sha256_dispose(state: * mut u8, extent: i64) -> i64;
+}
+unsafe extern "C" fn sh_pa_literal(target: * mut u8, at: i64, a: i64, b: i64, c: i64, d: i64, length: i64) {
+    let mut i = 0;
+    while i < length {
+        let word = if i < 8 {
+            a;
+        } else if i < 16 {
+            b;
+        } else if i < 24 {
+            c;
+        } else {
+            d;
+        };
+        sengoo_tar_write(target, at + i, ((word >> ((i % 8) * 8)) & 255) as u8);
+        i = i + 1;
+    };
+}
+pub unsafe extern "C" fn sh_pa_preflight(arguments: * mut u8) -> i64 {
+    let name_length = sengoo_pa_argument_length(arguments, 0);
+    let version_length = sengoo_pa_argument_length(arguments, 1);
+    let checksum_length = sengoo_pa_argument_length(arguments, 2);
+    let metadata_length = sengoo_pa_argument_length(arguments, 3);
+    let allow = sengoo_pa_allow_yanked(arguments);
+    if name_length < 1 or name_length > 65535 or version_length < 1 or version_length > 65535 or checksum_length != 64 or metadata_length < 1 or metadata_length > 1048576 or allow < 0 or allow > 1 {
+        return - 3;
+    };
+    let name = sengoo_pa_argument(arguments, 0);
+    let mut i = 0;
+    while i < name_length {
+        let b = sengoo_tar_read(name, i) as i64;
+        if not ((b >= 97 and b <= 122) or (b >= 48 and b <= 57) or b == 45 or b == 95) {
+            return - 24;
+        };
+        i = i + 1;
+    };
+    if sengoo_sg_semver_validate(sengoo_pa_argument(arguments, 1), version_length, 0) != 1 {
+        return - 24;
+    };
+    let checksum = sengoo_pa_argument(arguments, 2);
+    i = 0;
+    while i < 64 {
+        let b = sengoo_tar_read(checksum, i) as i64;
+        if not ((b >= 48 and b <= 57) or (b >= 97 and b <= 102)) {
+            return - 25;
+        };
+        i = i + 1;
+    };
+    0;
+}
+unsafe extern "C" fn sh_pa_hex(byte: i64) -> i64 {
+    if byte <= 57 {
+        byte - 48;
+    } else {
+        byte - 87;
+    };
+}
+pub unsafe extern "C" fn sh_pa_archive_checksum(source: * const u8, length: i64, arguments: * mut u8,
+hash: * mut u8, digest: * mut u8) -> i64 {
+    if length < 0 or length > 67108864 {
+        return - 3;
+    };
+    if sengoo_sg_sha256_init(hash, 1024) < 0 {
+        return - 25;
+    };
+    let mut at = 0;
+    while at < length {
+        let mut chunk = length - at;
+        if chunk > 32768 {
+            chunk = 32768;
+        };
+        if sengoo_sg_sha256_update(hash, 1024, sengoo_ps_input_offset(source, at), chunk) < 0 {
+            return - 25;
+        };
+        at = at + chunk;
+    };
+    if sengoo_sg_sha256_final(hash, 1024, digest, 32) < 0 {
+        return - 25;
+    };
+    let expected = sengoo_pa_argument(arguments, 2);
+    let mut i = 0;
+    while i < 32 {
+        let value = (sh_pa_hex(sengoo_tar_read(expected, i * 2) as i64) << 4) | sh_pa_hex(sengoo_tar_read(expected,
+        i * 2 + 1) as i64);
+        if (sengoo_tar_output_read(digest, i) as i64) != value {
+            return - 25;
+        };
+        i = i + 1;
+    };
+    0;
+}
+unsafe extern "C" fn sh_pa_node_find(session: i64, tar: * mut u8, nodes: * mut u8, parent: i64, name: * const u8,
+length: i64) -> i64 {
+    let count = sengoo_ds_word_get(nodes, 0);
+    if count < 1 or count > 32768 {
+        return - 26;
+    };
+    let mut i = 1;
+    while i < count {
+        if sengoo_ds_word_get(nodes, i * 4) == parent and sengoo_ps_component_equal(sengoo_ps_const_offset(tar,
+        sengoo_ds_word_get(nodes, i * 4 + 1)), sengoo_ds_word_get(nodes, i * 4 + 2), name, length) == 1 {
+            return i;
+        };
+        i = i + 1;
+    };
+    // Actual 8.3 spellings may differ from the archive's spelling. An OS
+    // attributes-only handle must identify a retained session-created node.
+    let attributes = sengoo_pa_open_attributes(session, parent, name, length);
+    if attributes == 0 {
+        return - 26;
+    };
+    let mut found = - 1;
+    i = 1;
+    while i < count {
+        if sengoo_ds_word_get(nodes, i * 4) == parent and sengoo_pa_attributes_match(session, i, attributes) == 1 {
+            found = i;
+        };
+        i = i + 1;
+    };
+    sengoo_pa_close_attributes(attributes);
+    if found < 0 {
+        - 26;
+    } else {
+        found;
+    };
+}
+pub unsafe extern "C" fn sh_pa_root_manifest(session: i64, tar: * mut u8, nodes: * mut u8) -> i64 {
+    sh_pa_literal(tar, 384, 8371751281595671891, 7105903, 0, 0, 11);
+    let found = sh_pa_node_find(session, tar, nodes, 0, sengoo_ps_const_offset(tar, 384), 11);
+    if found < 0 or sengoo_ds_word_get(nodes, found * 4 + 3) != 0 or sengoo_pa_file_identity(session,
+    found) != 1 {
+        return - 24;
+    };
+    found;
+}
+pub unsafe extern "C" fn sh_pa_reserved_path(tar: * mut u8, start: i64, length: i64) -> i64 {
+    if start < 1661184 or length < 1 or length > 65535 or start > 18438400 - length {
+        return - 26;
+    };
+    let mut component = 0;
+    while component < length and (sengoo_tar_output_read(tar, start + component) as i64) != 47 {
+        component = component + 1;
+    };
+    sh_pa_literal(tar, 512, 8241918741125231406, 7526410415579424867, 909455969, 0, 20);
+    sh_pa_literal(tar, 544, 8026308908964868910, 7526410479869457518, 909455969, 0, 20);
+    sh_pa_literal(tar, 576, 7309955093236249390, 7867077656573077863, 3342080360130376805, 1852797802,
+    28);
+    let name = sengoo_ps_const_offset(tar, start);
+    if sengoo_ps_component_equal(name, component, sengoo_ps_const_offset(tar, 512), 20) == 1 or sengoo_ps_component_equal(name,
+    component, sengoo_ps_const_offset(tar, 544), 20) == 1 or sengoo_ps_component_equal(name, component,
+    sengoo_ps_const_offset(tar, 576), 28) == 1 {
+        return - 4;
+    };
+    0;
+}
+pub unsafe extern "C" fn sh_pa_read_manifest(session: i64, node: i64, arguments: * mut u8, buffer: * mut u8,
+document: * mut u8) -> i64 {
+    let length = sengoo_pa_file_size(session, node);
+    if length < 0 or length > 1048576 {
+        return - 24;
+    };
+    let mut at = 0;
+    while at < length {
+        let mut chunk = length - at;
+        if chunk > 32768 {
+            chunk = 32768;
+        };
+        let read = sengoo_pa_file_read(session, node, at, sengoo_ps_mut_offset(buffer, at), chunk);
+        if read != chunk {
+            return - 8;
+        };
+        at = at + chunk;
+    };
+    if sengoo_pa_file_identity(session, node) != 1 or sengoo_pa_file_size(session, node) != length {
+        return - 8;
+    };
+    let parsed = sengoo_sg_manifest_validate(sengoo_ps_const_offset(buffer, 0), length, document, 8388608);
+    if parsed < 0 {
+        return parsed;
+    };
+    let mut role = 0;
+    while role < 2 {
+        let start = sengoo_ds_word_get(document, 20 + role * 2);
+        let size = sengoo_ds_word_get(document, 21 + role * 2);
+        let expected = sengoo_pa_argument(arguments, role);
+        if size != sengoo_pa_argument_length(arguments, role) {
+            return - 24;
+        };
+        let mut i = 0;
+        while i < size {
+            if sengoo_tar_output_read(document, start + i) != sengoo_tar_read(expected, i) {
+                return - 24;
+            };
+            i = i + 1;
+        };
+        role = role + 1;
+    };
+    0;
+}
+pub unsafe extern "C" fn sh_pa_target(session: i64, tar: * mut u8, nodes: * mut u8, source: * const u8,
+length: i64, scratch: * mut u8) -> i64 {
+    if length < 1 or length > 65535 {
+        return - 26;
+    };
+    let first = sengoo_tar_read(source, 0) as i64;
+    if first == 47 or first == 92 {
+        return - 26;
+    };
+    let mut read = 0;
+    let mut used = 0;
+    while read < length {
+        let begin = read;
+        while read < length and (sengoo_tar_read(source, read) as i64) != 47 and (sengoo_tar_read(source,
+        read) as i64) != 92 {
+            read = read + 1;
+        };
+        let size = read - begin;
+        if size == 0 or (size == 1 and (sengoo_tar_read(source, begin) as i64) == 46) {
+        } else if size == 2 and (sengoo_tar_read(source, begin) as i64) == 46 and (sengoo_tar_read(source,
+        begin + 1) as i64) == 46 {
+            if used == 0 {
+                return - 26;
+            };
+            while used > 0 and (sengoo_tar_output_read(scratch, used - 1) as i64) != 47 {
+                used = used - 1;
+            };
+            if used > 0 {
+                used = used - 1;
+            };
+        } else {
+            if used > 0 {
+                sengoo_tar_write(scratch, used, 47u8);
+                used = used + 1;
+            };
+            let mut i = 0;
+            while i < size {
+                sengoo_tar_write(scratch, used, sengoo_tar_read(source, begin + i));
+                used = used + 1;
+                i = i + 1;
+            };
+        };
+        read = read + 1;
+    };
+    let normalized = sh_tar_path(scratch, 0, used);
+    if normalized < 1 {
+        return - 26;
+    };
+    let mut parent = 0;
+    let mut begin = 0;
+    while begin < normalized {
+        let mut end = begin;
+        while end < normalized and (sengoo_tar_output_read(scratch, end) as i64) != 47 {
+            end = end + 1;
+        };
+        let node = sh_pa_node_find(session, tar, nodes, parent, sengoo_ps_const_offset(scratch, begin),
+        end - begin);
+        if node < 0 {
+            return node;
+        };
+        let directory = sengoo_ds_word_get(nodes, node * 4 + 3);
+        if end == normalized {
+            if directory != 0 or sengoo_pa_file_identity(session, node) != 1 {
+                return - 26;
+            };
+            return 0;
+        };
+        if directory != 1 {
+            return - 26;
+        };
+        parent = node;
+        begin = end + 1;
+    };
+    - 26;
+}
+pub unsafe extern "C" fn sh_pa_targets(session: i64, tar: * mut u8, nodes: * mut u8, document: * mut u8,
+scratch: * mut u8) -> i64 {
+    sh_pa_literal(tar, 400, 7955997338301067891, 6779694, 0, 0, 11);
+    sh_pa_literal(tar, 416, 3342349786834760307, 26483, 0, 0, 10);
+    let mut child = sh_mt_word(document, 0, 6);
+    let mut explicit = false;
+    while child >= 0 {
+        let role = sh_mm_root_role(document, child);
+        if role == 3 or role == 4 {
+            explicit = true;
+            let mut item = sh_mt_word(document, child, 6);
+            let mut path = - 1;
+            while item >= 0 {
+                if sh_mm_role(document, item) == 6 {
+                    path = item;
+                };
+                item = sh_mt_word(document, item, 7);
+            };
+            let result = if path >= 0 {
+                sh_pa_target(session, tar, nodes, sengoo_ps_const_offset(document, sh_mt_word(document,
+                path, 4)), sh_mt_word(document, path, 5), scratch);
+            } else if role == 3 {
+                sh_pa_target(session, tar, nodes, sengoo_ps_const_offset(tar, 400), 11, scratch);
+            } else {
+                sh_pa_target(session, tar, nodes, sengoo_ps_const_offset(tar, 416), 10, scratch);
+            };
+            if result < 0 {
+                return result;
+            };
+        };
+        child = sh_mt_word(document, child, 7);
+    };
+    if not explicit {
+        return sh_pa_target(session, tar, nodes, sengoo_ps_const_offset(tar, 400), 11, scratch);
+    };
+    0;
+}
+unsafe extern "C" fn sh_pa_metadata(arguments: * mut u8, document: * mut u8, buffer: * mut u8) -> i64 {
+    let parsed = sengoo_sg_registry_metadata_parse(sengoo_pa_argument(arguments, 3), sengoo_pa_argument_length(arguments,
+    3), document, 8388608);
+    if parsed < 0 {
+        return parsed;
+    };
+    let seen = sengoo_ds_word_get(document, 30);
+    let checksum = sengoo_ds_word_get(document, 31);
+    if (seen & 2) == 0 or sh_mt_word(document, checksum, 0) != 1 or sh_mt_word(document, checksum, 5) != 64 {
+        return - 25;
+    };
+    let start = sh_mt_word(document, checksum, 4);
+    let expected = sengoo_pa_argument(arguments, 2);
+    let mut i = 0;
+    while i < 64 {
+        if sengoo_tar_output_read(document, start + i) != sengoo_tar_read(expected, i) {
+            return - 25;
+        };
+        i = i + 1;
+    };
+    let yanked = sengoo_ds_word_get(document, 32);
+    if sh_mt_word(document, yanked, 4) == 1 and sengoo_pa_allow_yanked(arguments) == 0 {
+        return - 27;
+    };
+    sengoo_sg_registry_metadata_encode(document, 8388608, buffer, 1048704);
+}
+unsafe extern "C" fn sh_pa_marker(session: i64, tar: * mut u8, name: i64, length: i64, source: * const u8,
+size: i64) -> i64 {
+    let node = sengoo_ps_create_node(session, 0, sengoo_ps_const_offset(tar, name), length, 0);
+    if node < 0 {
+        return node;
+    };
+    let mut at = 0;
+    while at < size {
+        let mut chunk = size - at;
+        if chunk > 32768 {
+            chunk = 32768;
+        };
+        let written = sengoo_ps_write_node(session, node, sengoo_ps_input_offset(source, at), chunk);
+        if written < 0 {
+            return written;
+        };
+        at = at + chunk;
+    };
+    if sengoo_pa_file_identity(session, node) != 1 or sengoo_pa_file_size(session, node) != size {
+        return - 8;
+    };
+    if sengoo_ps_flush_node(session, node) < 0 {
+        return - 8;
+    };
+    node;
+}
+unsafe extern "C" fn sh_pa_entry_word(tar: * mut u8, entry: i64, field: i64) -> i64 {
+    if entry < 0 or entry >= 10000 or field < 0 or field > 5 {
+        return - 1;
+    };
+    sengoo_ds_word_get(tar, 147648 + entry * 6 + field);
+}
+unsafe extern "C" fn sh_pa_render(tar: * mut u8, nodes: * mut u8, packet: i64, buffer: * mut u8, base: i64) -> i64 {
+    if (packet >> 32) == 10000 {
+        let mut i = 0;
+        while i < 28 {
+            sengoo_tar_write(buffer, base + i, sengoo_tar_output_read(tar, 576 + i));
+            i = i + 1;
+        };
+        return 28;
+    };
+    let mut node = packet & 4294967295;
+    let count = sengoo_ds_word_get(nodes, 0);
+    let mut length = 0;
+    while node > 0 {
+        if node >= count {
+            return - 26;
+        };
+        let parent = sengoo_ds_word_get(nodes, node * 4);
+        let start = sengoo_ds_word_get(nodes, node * 4 + 1);
+        let size = sengoo_ds_word_get(nodes, node * 4 + 2);
+        if parent < 0 or parent >= node or size < 1 or size > 65535 or start < 1661184 or start > 18438400 - size {
+            return - 26;
+        };
+        length = length + size;
+        if parent > 0 {
+            length = length + 1;
+        };
+        if length > 65535 {
+            return - 22;
+        };
+        node = parent;
+    };
+    let mut at = base + length;
+    node = packet & 4294967295;
+    while node > 0 {
+        let parent = sengoo_ds_word_get(nodes, node * 4);
+        let start = sengoo_ds_word_get(nodes, node * 4 + 1);
+        let size = sengoo_ds_word_get(nodes, node * 4 + 2);
+        at = at - size;
+        let mut i = 0;
+        while i < size {
+            sengoo_tar_write(buffer, at + i, sengoo_tar_output_read(tar, start + i));
+            i = i + 1;
+        };
+        if parent > 0 {
+            at = at - 1;
+            sengoo_tar_write(buffer, at, 47u8);
+        };
+        node = parent;
+    };
+    if at != base or length < 1 {
+        - 26;
+    } else {
+        length;
+    };
+}
+unsafe extern "C" fn sh_pa_compare(tar: * mut u8, nodes: * mut u8, buffer: * mut u8, left: i64, right: i64) -> i64 {
+    let n = sh_pa_render(tar, nodes, left, buffer, 0);
+    let m = sh_pa_render(tar, nodes, right, buffer, 65536);
+    if n < 0 {
+        return n;
+    };
+    if m < 0 {
+        return m;
+    };
+    let mut i = 0;
+    while i < n and i < m {
+        let x = sengoo_tar_output_read(buffer, i) as i64;
+        let y = sengoo_tar_output_read(buffer, 65536 + i) as i64;
+        if x < y {
+            return - 1;
+        };
+        if x > y {
+            return 1;
+        };
+        i = i + 1;
+    };
+    if n < m {
+        - 1;
+    } else if n > m {
+        1;
+    } else {
+        0;
+    };
+}
+unsafe extern "C" fn sh_pa_down(tar: * mut u8, nodes: * mut u8, buffer: * mut u8, start: i64, end: i64) -> i64 {
+    let mut root = start;
+    while root * 2 + 1 < end {
+        let mut child = root * 2 + 1;
+        if child + 1 < end {
+            let compared = sh_pa_compare(tar, nodes, buffer, sengoo_ds_word_get(nodes, 131072 + child),
+            sengoo_ds_word_get(nodes, 131072 + child + 1));
+            if compared < - 1 {
+                return compared;
+            };
+            if compared < 0 {
+                child = child + 1;
+            };
+        };
+        let parent = sengoo_ds_word_get(nodes, 131072 + root);
+        let value = sengoo_ds_word_get(nodes, 131072 + child);
+        let compared = sh_pa_compare(tar, nodes, buffer, parent, value);
+        if compared < - 1 {
+            return compared;
+        };
+        if compared >= 0 {
+            break;
+        };
+        sengoo_ds_word_put(nodes, 131072 + root, value);
+        sengoo_ds_word_put(nodes, 131072 + child, parent);
+        root = child;
+    };
+    0;
+}
+unsafe extern "C" fn sh_pa_sort(tar: * mut u8, nodes: * mut u8, buffer: * mut u8, count: i64) -> i64 {
+    let mut start = count / 2;
+    while start > 0 {
+        start = start - 1;
+        let error = sh_pa_down(tar, nodes, buffer, start, count);
+        if error < 0 {
+            return error;
+        };
+    };
+    let mut end = count;
+    while end > 1 {
+        end = end - 1;
+        let first = sengoo_ds_word_get(nodes, 131072);
+        let last = sengoo_ds_word_get(nodes, 131072 + end);
+        sengoo_ds_word_put(nodes, 131072, last);
+        sengoo_ds_word_put(nodes, 131072 + end, first);
+        let error = sh_pa_down(tar, nodes, buffer, 0, end);
+        if error < 0 {
+            return error;
+        };
+    };
+    0;
+}
+unsafe extern "C" fn sh_pa_hash_length(hash: * mut u8, buffer: * mut u8, length: i64) -> i64 {
+    let mut i = 0;
+    while i < 8 {
+        sengoo_tar_write(buffer, i, ((length >> (i * 8)) & 255) as u8);
+        i = i + 1;
+    };
+    sengoo_sg_sha256_update(hash, 1024, sengoo_ps_const_offset(buffer, 0), 8);
+}
+unsafe extern "C" fn sh_pa_content_checksum(session: i64, tar: * mut u8, nodes: * mut u8, entries: i64,
+metadata_node: i64, metadata_size: i64, hash: * mut u8, buffer: * mut u8) -> i64 {
+    if entries < 0 or entries > 10000 {
+        return - 22;
+    };
+    let mut count = 0;
+    let mut i = 0;
+    while i < entries {
+        let packet = sengoo_ds_word_get(nodes, 131072 + i);
+        if (packet >> 32) != i or (packet & 4294967295) < 1 or (packet & 4294967295) >= 32768 {
+            return - 26;
+        };
+        if sh_pa_entry_word(tar, i, 5) == 0 {
+            sengoo_ds_word_put(nodes, 131072 + count, packet);
+            count = count + 1;
+        };
+        i = i + 1;
+    };
+    sengoo_ds_word_put(nodes, 131072 + count, (10000 << 32) | metadata_node);
+    count = count + 1;
+    let sorted = sh_pa_sort(tar, nodes, buffer, count);
+    if sorted < 0 {
+        return sorted;
+    };
+    if sengoo_sg_sha256_init(hash, 1024) < 0 {
+        return - 25;
+    };
+    i = 0;
+    while i < count {
+        let packet = sengoo_ds_word_get(nodes, 131072 + i);
+        let entry = packet >> 32;
+        let node = packet & 4294967295;
+        let name_length = sh_pa_render(tar, nodes, packet, buffer, 65536);
+        if name_length < 0 {
+            return name_length;
+        };
+        let size = if entry == 10000 {
+            metadata_size;
+        } else {
+            sh_pa_entry_word(tar, entry, 2);
+        };
+        if size < 0 or size > 268435456 or name_length < 1 or name_length > 65535 or sengoo_pa_file_identity(session,
+        node) != 1 or sengoo_pa_file_size(session, node) != size {
+            return - 26;
+        };
+        if sh_pa_hash_length(hash, buffer, name_length) < 0 or sengoo_sg_sha256_update(hash, 1024, sengoo_ps_const_offset(buffer,
+        65536), name_length) < 0 or sh_pa_hash_length(hash, buffer, size) < 0 {
+            return - 25;
+        };
+        let mut at = 0;
+        while at < size {
+            let mut chunk = size - at;
+            if chunk > 32768 {
+                chunk = 32768;
+            };
+            let read = sengoo_pa_file_read(session, node, at, buffer, chunk);
+            if read != chunk {
+                return - 8;
+            };
+            if sengoo_sg_sha256_update(hash, 1024, sengoo_ps_const_offset(buffer, 0), chunk) < 0 {
+                return - 25;
+            };
+            at = at + chunk;
+        };
+        if sengoo_pa_file_identity(session, node) != 1 or sengoo_pa_file_size(session, node) != size {
+            return - 8;
+        };
+        i = i + 1;
+    };
+    sengoo_sg_sha256_final(hash, 1024, buffer, 32);
+}
+unsafe extern "C" fn sh_pa_hex_char(value: i64) -> i64 {
+    if value < 10 {
+        48 + value;
+    } else {
+        87 + value;
+    };
+}
+unsafe extern "C" fn sh_pa_admit_inner(session: i64, tar: * mut u8, nodes: * mut u8, entries: i64, source: * const u8,
+length: i64, arguments: * mut u8, document: * mut u8, buffer: * mut u8, hash: * mut u8) -> i64 {
+    if entries < 0 or entries > 10000 {
+        return - 22;
+    };
+    let mut entry = 0;
+    while entry < entries {
+        let check = sh_pa_reserved_path(tar, 1661184 + sh_pa_entry_word(tar, entry, 3), sh_pa_entry_word(tar,
+        entry, 4));
+        if check < 0 {
+            return check;
+        };
+        entry = entry + 1;
+    };
+    let preflight = sh_pa_preflight(arguments);
+    if preflight < 0 {
+        return preflight;
+    };
+    let digest = sh_pa_archive_checksum(source, length, arguments, hash, buffer);
+    if digest < 0 {
+        return digest;
+    };
+    let manifest = sh_pa_root_manifest(session, tar, nodes);
+    if manifest < 0 {
+        return manifest;
+    };
+    let parsed = sh_pa_read_manifest(session, manifest, arguments, buffer, document);
+    if parsed < 0 {
+        return parsed;
+    };
+    let targets = sh_pa_targets(session, tar, nodes, document, buffer);
+    if targets < 0 {
+        return targets;
+    };
+    let metadata_size = sh_pa_metadata(arguments, document, buffer);
+    if metadata_size < 0 {
+        return metadata_size;
+    };
+    sh_pa_literal(tar, 512, 8241918741125231406, 7526410415579424867, 909455969, 0, 20);
+    sh_pa_literal(tar, 544, 8026308908964868910, 7526410479869457518, 909455969, 0, 20);
+    sh_pa_literal(tar, 576, 7309955093236249390, 7867077656573077863, 3342080360130376805, 1852797802,
+    28);
+    let metadata_node = sh_pa_marker(session, tar, 576, 28, sengoo_ps_const_offset(buffer, 0), metadata_size);
+    if metadata_node < 0 {
+        return metadata_node;
+    };
+    let content = sh_pa_content_checksum(session, tar, nodes, entries, metadata_node, metadata_size,
+    hash, buffer);
+    if content < 0 {
+        return content;
+    };
+    // Expand the raw digest backwards so the byte input is not overwritten.
+    let mut i = 32;
+    while i > 0 {
+        i = i - 1;
+        let b = sengoo_tar_output_read(buffer, i) as i64;
+        sengoo_tar_write(buffer, i * 2, sh_pa_hex_char(b >> 4) as u8);
+        sengoo_tar_write(buffer, i * 2 + 1, sh_pa_hex_char(b & 15) as u8);
+    };
+    sengoo_tar_write(buffer, 64, 10u8);
+    let content_node = sh_pa_marker(session, tar, 544, 20, sengoo_ps_const_offset(buffer, 0), 65);
+    if content_node < 0 {
+        return content_node;
+    };
+    let expected = sengoo_pa_argument(arguments, 2);
+    i = 0;
+    while i < 64 {
+        sengoo_tar_write(buffer, i, sengoo_tar_read(expected, i));
+        i = i + 1;
+    };
+    sengoo_tar_write(buffer, 64, 10u8);
+    let archive_node = sh_pa_marker(session, tar, 512, 20, sengoo_ps_const_offset(buffer, 0), 65);
+    if archive_node < 0 {
+        return archive_node;
+    };
+    0;
+}
+pub unsafe extern "C" fn sengoo_sg_package_admit(session: i64, tar: * mut u8, nodes: * mut u8, entries: i64,
+source: * const u8, length: i64, arguments: * mut u8) -> i64 {
+    let document = sengoo_ds_storage_alloc(8388608);
+    if sengoo_ds_storage_present(document) == 0 {
+        return - 8;
+    };
+    let buffer = sengoo_ds_storage_alloc(1048704);
+    if sengoo_ds_storage_present(buffer) == 0 {
+        sengoo_ds_storage_free(document);
+        return - 8;
+    };
+    let hash = sengoo_ds_storage_alloc(1024);
+    if sengoo_ds_storage_present(hash) == 0 {
+        sengoo_ds_storage_free(buffer);
+        sengoo_ds_storage_free(document);
+        return - 8;
+    };
+    let result = sh_pa_admit_inner(session, tar, nodes, entries, source, length, arguments, document,
+    buffer, hash);
+    sengoo_sg_sha256_dispose(hash, 1024);
+    sengoo_ds_storage_free(hash);
+    sengoo_ds_storage_free(buffer);
+    sengoo_ds_storage_free(document);
+    result;
+}

@@ -1,0 +1,690 @@
+// Canonical Sengoo.toml syntax tree. Values rejected by the canonical schema
+// never acquire a runtime meaning here. C supplies byte/word memory only.
+extern "C" {
+    unsafe fn sengoo_tar_read(source: * const u8, index: i64) -> u8;
+    unsafe fn sengoo_tar_output_read(state: * mut u8, index: i64) -> u8;
+    unsafe fn sengoo_tar_write(state: * mut u8, index: i64, value: u8);
+    unsafe fn sengoo_ds_word_get(state: * mut u8, index: i64) -> i64;
+    unsafe fn sengoo_ds_word_put(state: * mut u8, index: i64, value: i64);
+    unsafe fn sengoo_sg_utf8_validate(source: * const u8, length: i64) -> i64;
+    unsafe fn sh_ms_other(source: * const u8, begin: i64, end: i64) -> bool;
+} // 8 MiB: 4096 control/key-stack bytes; 32768 80-byte nodes; decoded pool.
+// Node: kind,parent,key begin/len,value begin/len,first child,next,flags,site.
+// kinds table0/string1/integer2/array3/other4; table flags explicit1/dotted2/sealed4.
+unsafe extern "C" fn sh_mt_fail(state: * mut u8, code: i64) -> i64 {
+    if sengoo_ds_word_get(state, 5) == 0 {
+        sengoo_ds_word_put(state, 5, code);
+        sengoo_ds_word_put(state, 6, sengoo_ds_word_get(state, 1));
+    };
+    code;
+}
+pub unsafe extern "C" fn sh_mt_word(state: * mut u8, node: i64, field: i64) -> i64 {
+    if node < 0 or node >= sengoo_ds_word_get(state, 3) or field < 0 or field > 9 {
+        return - 1;
+    };
+    sengoo_ds_word_get(state, 512 + node * 10 + field);
+}
+unsafe extern "C" fn sh_mt_set(state: * mut u8, node: i64, field: i64, value: i64) {
+    sengoo_ds_word_put(state, 512 + node * 10 + field, value);
+}
+unsafe extern "C" fn sh_mt_byte(source: * const u8, state: * mut u8, at: i64) -> i64 {
+    if at < 0 or at >= sengoo_ds_word_get(state, 2) {
+        return - 1;
+    };
+    sengoo_tar_read(source, at) as i64;
+}
+unsafe extern "C" fn sh_mt_put(state: * mut u8, byte: i64) -> i64 {
+    let at = sengoo_ds_word_get(state, 4);
+    if at < 2625536 or at >= 8388608 {
+        return sh_mt_fail(state, - 22);
+    };
+    sengoo_tar_write(state, at, byte as u8);
+    sengoo_ds_word_put(state, 4, at + 1);
+    0;
+}
+unsafe extern "C" fn sh_mt_scalar(state: * mut u8, value: i64) -> i64 {
+    if value < 0 or value > 1114111 or (value >= 55296 and value <= 57343) {
+        return sh_mt_fail(state, - 20);
+    };
+    if value < 128 {
+        return sh_mt_put(state, value);
+    };
+    if value < 2048 {
+        sh_mt_put(state, 192 | (value >> 6));
+        sh_mt_put(state, 128 | (value & 63));
+    } else if value < 65536 {
+        sh_mt_put(state, 224 | (value >> 12));
+        sh_mt_put(state, 128 | ((value >> 6) & 63));
+        sh_mt_put(state, 128 | (value & 63));
+    } else {
+        sh_mt_put(state, 240 | (value >> 18));
+        sh_mt_put(state, 128 | ((value >> 12) & 63));
+        sh_mt_put(state, 128 | ((value >> 6) & 63));
+        sh_mt_put(state, 128 | (value & 63));
+    };
+    sengoo_ds_word_get(state, 5);
+}
+unsafe extern "C" fn sh_mt_skip(source: * const u8, state: * mut u8, newlines: i64) -> i64 {
+    let mut at = sengoo_ds_word_get(state, 1);
+    let length = sengoo_ds_word_get(state, 2);
+    while at < length {
+        let b = sh_mt_byte(source, state, at);
+        if b == 32 or b == 9 {
+            at = at + 1;
+        } else if newlines == 1 and (b == 10 or b == 13) {
+            if b == 13 {
+                if sh_mt_byte(source, state, at + 1) != 10 {
+                    return sh_mt_fail(state, - 20);
+                };
+                at = at + 1;
+            };
+            at = at + 1;
+        } else if b == 35 {
+            while at < length and sh_mt_byte(source, state, at) != 10 and sh_mt_byte(source, state, at) != 13 {
+                let c = sh_mt_byte(source, state, at);
+                if (c < 32 and c != 9) or c == 127 {
+                    return sh_mt_fail(state, - 20);
+                };
+                at = at + 1;
+            };
+            if newlines == 0 {
+                break;
+            };
+        } else {
+            break;
+        };
+    };
+    sengoo_ds_word_put(state, 1, at);
+    0;
+}
+unsafe extern "C" fn sh_mt_string(source: * const u8, state: * mut u8, key: i64) -> i64 {
+    let mut at = sengoo_ds_word_get(state, 1);
+    let quote = sh_mt_byte(source, state, at);
+    let json = sengoo_ds_word_get(state, 14) == 1;
+    if quote != 34 and quote != 39 {
+        return sh_mt_fail(state, - 20);
+    };
+    if json and quote != 34 {
+        return sh_mt_fail(state, - 20);
+    };
+    let start = sengoo_ds_word_get(state, 4);
+    let mut triple = false;
+    if not json and key == 0 and sh_mt_byte(source, state, at + 1) == quote and sh_mt_byte(source, state,
+    at + 2) == quote {
+        triple = true;
+        at = at + 2;
+    };
+    at = at + 1;
+    if triple {
+        if sh_mt_byte(source, state, at) == 10 {
+            at = at + 1;
+        } else if sh_mt_byte(source, state, at) == 13 {
+            if sh_mt_byte(source, state, at + 1) != 10 {
+                return sh_mt_fail(state, - 20);
+            };
+            at = at + 2;
+        };
+    };
+    loop {
+        let b = sh_mt_byte(source, state, at);
+        if b < 0 {
+            return sh_mt_fail(state, - 20);
+        };
+        if b == quote {
+            if not triple {
+                at = at + 1;
+                break;
+            };
+            let mut count = 1;
+            while sh_mt_byte(source, state, at + count) == quote {
+                count = count + 1;
+            };
+            if count >= 3 {
+                if count > 5 {
+                    return sh_mt_fail(state, - 20);
+                };
+                let mut q = 3;
+                while q < count {
+                    sh_mt_put(state, quote);
+                    q = q + 1;
+                };
+                at = at + count;
+                break;
+            };
+        };
+        if b == 92 and quote == 34 {
+            at = at + 1;
+            let c = sh_mt_byte(source, state, at);
+            if triple and (c == 32 or c == 9 or c == 10 or c == 13) {
+                let mut saw = false;
+                while sh_mt_byte(source, state, at) == 32 or sh_mt_byte(source, state, at) == 9 {
+                    at = at + 1;
+                };
+                if sh_mt_byte(source, state, at) == 10 {
+                    at = at + 1;
+                    saw = true;
+                } else if sh_mt_byte(source, state, at) == 13 and sh_mt_byte(source, state, at + 1) == 10 {
+                    at = at + 2;
+                    saw = true;
+                };
+                if not saw {
+                    return sh_mt_fail(state, - 20);
+                };
+                while sh_mt_byte(source, state, at) == 32 or sh_mt_byte(source, state, at) == 9 or sh_mt_byte(source,
+                state, at) == 10 or sh_mt_byte(source, state, at) == 13 {
+                    if sh_mt_byte(source, state, at) == 13 {
+                        if sh_mt_byte(source, state, at + 1) != 10 {
+                            return sh_mt_fail(state, - 20);
+                        };
+                        at = at + 1;
+                    };
+                    at = at + 1;
+                };
+            } else if c == 117 or (c == 85 and not json) {
+                let mut width = 4;
+                if c == 85 {
+                    width = 8;
+                };
+                let mut value = 0;
+                let mut i = 0;
+                while i < width {
+                    at = at + 1;
+                    let digit = sh_mt_byte(source, state, at);
+                    let mut d = - 1;
+                    if digit >= 48 and digit <= 57 {
+                        d = digit - 48;
+                    } else if digit >= 65 and digit <= 70 {
+                        d = digit - 55;
+                    } else if digit >= 97 and digit <= 102 {
+                        d = digit - 87;
+                    };
+                    if d < 0 {
+                        return sh_mt_fail(state, - 20);
+                    };
+                    value = value * 16 + d;
+                    i = i + 1;
+                };
+                if json and sengoo_ds_word_get(state, 15) == 1 and value >= 55296 and value <= 57343 {
+                    value = 65533;
+                } else if json and value >= 55296 and value <= 56319 {
+                    if sh_mt_byte(source, state, at + 1) != 92 or sh_mt_byte(source, state, at + 2) != 117 {
+                        return sh_mt_fail(state, - 20);
+                    };
+                    at = at + 2;
+                    let mut low = 0;
+                    let mut j = 0;
+                    while j < 4 {
+                        at = at + 1;
+                        let digit = sh_mt_byte(source, state, at);
+                        let mut d = - 1;
+                        if digit >= 48 and digit <= 57 {
+                            d = digit - 48;
+                        } else if digit >= 65 and digit <= 70 {
+                            d = digit - 55;
+                        } else if digit >= 97 and digit <= 102 {
+                            d = digit - 87;
+                        };
+                        if d < 0 {
+                            return sh_mt_fail(state, - 20);
+                        };
+                        low = low * 16 + d;
+                        j = j + 1;
+                    };
+                    if low < 56320 or low > 57343 {
+                        return sh_mt_fail(state, - 20);
+                    };
+                    value = 65536 + (value - 55296) * 1024 + low - 56320;
+                };
+                if sh_mt_scalar(state, value) < 0 {
+                    return - 20;
+                };
+                at = at + 1;
+            } else {
+                let mut value = - 1;
+                if c == 98 {
+                    value = 8;
+                } else if c == 116 {
+                    value = 9;
+                } else if c == 110 {
+                    value = 10;
+                } else if c == 102 {
+                    value = 12;
+                } else if c == 114 {
+                    value = 13;
+                } else if c == 34 or c == 92 or (json and c == 47) {
+                    value = c;
+                };
+                if value < 0 {
+                    return sh_mt_fail(state, - 20);
+                };
+                sh_mt_put(state, value);
+                at = at + 1;
+            };
+        } else {
+            if (json and b < 32) or (not json and ((b < 32 and b != 9 and not (triple and (b == 10 or b == 13))) or b == 127)) {
+                return sh_mt_fail(state, - 20);
+            };
+            if b == 13 {
+                if not triple or sh_mt_byte(source, state, at + 1) != 10 {
+                    return sh_mt_fail(state, - 20);
+                };
+                at = at + 1;
+                sh_mt_put(state, 10);
+            } else {
+                sh_mt_put(state, b);
+            };
+            at = at + 1;
+        };
+        if sengoo_ds_word_get(state, 5) < 0 {
+            return sengoo_ds_word_get(state, 5);
+        };
+    };
+    sengoo_ds_word_put(state, 1, at);
+    sengoo_ds_word_put(state, 8, start);
+    sengoo_ds_word_put(state, 9, sengoo_ds_word_get(state, 4) - start);
+    0;
+}
+unsafe extern "C" fn sh_mt_key(source: * const u8, state: * mut u8) -> i64 {
+    let at = sengoo_ds_word_get(state, 1);
+    let b = sh_mt_byte(source, state, at);
+    if b == 34 or b == 39 {
+        return sh_mt_string(source, state, 1);
+    };
+    let start = sengoo_ds_word_get(state, 4);
+    let mut cursor = at;
+    loop {
+        let c = sh_mt_byte(source, state, cursor);
+        if not ((c >= 65 and c <= 90) or (c >= 97 and c <= 122) or (c >= 48 and c <= 57) or c == 45 or c == 95) {
+            break;
+        };
+        sh_mt_put(state, c);
+        cursor = cursor + 1;
+    };
+    if cursor == at {
+        return sh_mt_fail(state, - 20);
+    };
+    sengoo_ds_word_put(state, 1, cursor);
+    sengoo_ds_word_put(state, 8, start);
+    sengoo_ds_word_put(state, 9, cursor - at);
+    0;
+}
+pub unsafe extern "C" fn sh_mt_equal(state: * mut u8, a: i64, n: i64, b: i64, m: i64) -> i64 {
+    if n != m {
+        return 0;
+    };
+    let mut i = 0;
+    while i < n {
+        if sengoo_tar_output_read(state, a + i) != sengoo_tar_output_read(state, b + i) {
+            return 0;
+        };
+        i = i + 1;
+    };
+    1;
+}
+unsafe extern "C" fn sh_mt_find(state: * mut u8, parent: i64, key: i64, length: i64) -> i64 {
+    let mut node = sh_mt_word(state, parent, 6);
+    while node >= 0 {
+        if sh_mt_equal(state, key, length, sh_mt_word(state, node, 2), sh_mt_word(state, node, 3)) == 1 {
+            return node;
+        };
+        node = sh_mt_word(state, node, 7);
+    };
+    - 1;
+}
+unsafe extern "C" fn sh_mt_new(state: * mut u8, parent: i64, key: i64, length: i64, kind: i64) -> i64 {
+    let id = sengoo_ds_word_get(state, 3);
+    if id >= 32768 {
+        return sh_mt_fail(state, - 22);
+    };
+    sengoo_ds_word_put(state, 3, id + 1);
+    let mut field = 0;
+    while field < 10 {
+        sh_mt_set(state, id, field, 0);
+        field = field + 1;
+    };
+    sh_mt_set(state, id, 0, kind);
+    sh_mt_set(state, id, 1, parent);
+    sh_mt_set(state, id, 2, key);
+    sh_mt_set(state, id, 3, length);
+    sh_mt_set(state, id, 6, - 1);
+    sh_mt_set(state, id, 7, - 1);
+    sh_mt_set(state, id, 9, sengoo_ds_word_get(state, 1));
+    if parent >= 0 {
+        let first = sh_mt_word(state, parent, 6);
+        if sh_mt_word(state, parent, 0) == 3 {
+            if first < 0 {
+                sh_mt_set(state, parent, 6, id);
+            } else {
+                sh_mt_set(state, sh_mt_word(state, parent, 4), 7, id);
+            };
+            sh_mt_set(state, parent, 4, id);
+        } else {
+            sh_mt_set(state, id, 7, first);
+            sh_mt_set(state, parent, 6, id);
+        };
+    };
+    id;
+}
+unsafe extern "C" fn sh_mt_path(source: * const u8, state: * mut u8, parent: i64, header: i64) -> i64 {
+    let mut current = parent;
+    loop {
+        if sh_mt_skip(source, state, 0) < 0 or sh_mt_key(source, state) < 0 {
+            return - 20;
+        };
+        let key = sengoo_ds_word_get(state, 8);
+        let n = sengoo_ds_word_get(state, 9);
+        if sh_mt_skip(source, state, 0) < 0 {
+            return - 20;
+        };
+        let more = sh_mt_byte(source, state, sengoo_ds_word_get(state, 1)) == 46;
+        let mut node = sh_mt_find(state, current, key, n);
+        if node < 0 {
+            node = sh_mt_new(state, current, key, n, if more or header > 0 {
+                0;
+            } else {
+                4;
+            });
+            if node < 0 {
+                return node;
+            };
+        } else {
+            if sh_mt_word(state, node, 0) == 3 and (sh_mt_word(state, node, 8) & 8) != 0 {
+                if more {
+                    node = sh_mt_word(state, node, 4);
+                } else if header != 2 {
+                    return sh_mt_fail(state, - 20);
+                };
+            } else if not more and header == 0 {
+                return sh_mt_fail(state, - 20);
+            };
+        };
+        if more {
+            if sh_mt_word(state, node, 0) != 0 or (sh_mt_word(state, node, 8) & 4) != 0 {
+                return sh_mt_fail(state, - 20);
+            };
+            if header == 0 {
+                sh_mt_set(state, node, 8, sh_mt_word(state, node, 8) | 2);
+            };
+            sengoo_ds_word_put(state, 1, sengoo_ds_word_get(state, 1) + 1);
+            current = node;
+        } else {
+            if header == 1 {
+                if sh_mt_word(state, node, 0) != 0 or sh_mt_word(state, node, 8) != 0 {
+                    return sh_mt_fail(state, - 20);
+                };
+                sh_mt_set(state, node, 8, 1);
+            } else if header == 2 {
+                if sh_mt_word(state, node, 0) == 0 and sh_mt_word(state, node, 6) == - 1 and sh_mt_word(state,
+                node, 8) == 0 {
+                    sh_mt_set(state, node, 0, 3);
+                    sh_mt_set(state, node, 8, 8);
+                } else if sh_mt_word(state, node, 0) != 3 or sh_mt_word(state, node, 8) != 8 {
+                    return sh_mt_fail(state, - 20);
+                };
+                let item = sh_mt_new(state, node, 0, 0, 0);
+                if item < 0 {
+                    return item;
+                };
+                sh_mt_set(state, node, 4, item);
+                return item;
+            };
+            return node;
+        };
+    };
+}
+unsafe extern "C" fn sh_mt_value(source: * const u8, state: * mut u8, node: i64, depth: i64) -> i64 {
+    if depth > 64 {
+        return sh_mt_fail(state, - 22);
+    };
+    if sh_mt_skip(source, state, 0) < 0 {
+        return - 20;
+    };
+    let begin = sengoo_ds_word_get(state, 1);
+    let b = sh_mt_byte(source, state, begin);
+    if b == 34 or b == 39 {
+        if sh_mt_string(source, state, 0) < 0 {
+            return - 20;
+        };
+        sh_mt_set(state, node, 0, 1);
+        sh_mt_set(state, node, 4, sengoo_ds_word_get(state, 8));
+        sh_mt_set(state, node, 5, sengoo_ds_word_get(state, 9));
+        return 0;
+    };
+    if b == 91 {
+        sh_mt_set(state, node, 0, 3);
+        sengoo_ds_word_put(state, 1, begin + 1);
+        if sh_mt_skip(source, state, 1) < 0 {
+            return - 20;
+        };
+        while sh_mt_byte(source, state, sengoo_ds_word_get(state, 1)) != 93 {
+            let child = sh_mt_new(state, node, 0, 0, 4);
+            if child < 0 {
+                return child;
+            };
+            if sh_mt_value(source, state, child, depth + 1) < 0 or sh_mt_skip(source, state, 1) < 0 {
+                return - 20;
+            };
+            let c = sh_mt_byte(source, state, sengoo_ds_word_get(state, 1));
+            if c == 93 {
+                break;
+            };
+            if c != 44 {
+                return sh_mt_fail(state, - 20);
+            };
+            sengoo_ds_word_put(state, 1, sengoo_ds_word_get(state, 1) + 1);
+            if sh_mt_skip(source, state, 1) < 0 {
+                return - 20;
+            };
+        };
+        sengoo_ds_word_put(state, 1, sengoo_ds_word_get(state, 1) + 1);
+        return 0;
+    };
+    if b == 123 {
+        sh_mt_set(state, node, 0, 0);
+        sengoo_ds_word_put(state, 1, begin + 1);
+        if sh_mt_skip(source, state, 0) < 0 {
+            return - 20;
+        };
+        while sh_mt_byte(source, state, sengoo_ds_word_get(state, 1)) != 125 {
+            let child = sh_mt_path(source, state, node, 0);
+            if child < 0 {
+                return child;
+            };
+            if sh_mt_byte(source, state, sengoo_ds_word_get(state, 1)) != 61 {
+                return sh_mt_fail(state, - 20);
+            };
+            sengoo_ds_word_put(state, 1, sengoo_ds_word_get(state, 1) + 1);
+            if sh_mt_value(source, state, child, depth + 1) < 0 or sh_mt_skip(source, state, 0) < 0 {
+                return - 20;
+            };
+            let c = sh_mt_byte(source, state, sengoo_ds_word_get(state, 1));
+            if c == 125 {
+                break;
+            };
+            if c != 44 {
+                return sh_mt_fail(state, - 20);
+            };
+            sengoo_ds_word_put(state, 1, sengoo_ds_word_get(state, 1) + 1);
+            if sh_mt_skip(source, state, 0) < 0 {
+                return - 20;
+            };
+            if sh_mt_byte(source, state, sengoo_ds_word_get(state, 1)) == 125 {
+                return sh_mt_fail(state, - 20);
+            };
+        };
+        sh_mt_set(state, node, 8, 4);
+        sengoo_ds_word_put(state, 1, sengoo_ds_word_get(state, 1) + 1);
+        return 0;
+    };
+    // Only integer values can survive canonical schema validation. Retain
+    // other scalar spellings as non-string/non-integer, never as authority.
+    let mut at = begin;
+    while at < sengoo_ds_word_get(state, 2) {
+        let c = sh_mt_byte(source, state, at);
+        if c == 32 and at == begin + 10 and sh_mt_byte(source, state, begin + 4) == 45 and sh_mt_byte(source,
+        state, begin + 7) == 45 and sh_mt_byte(source, state, at + 3) == 58 {
+            at = at + 1;
+        } else {
+            if c == 32 or c == 9 or c == 10 or c == 13 or c == 35 or c == 44 or c == 93 or c == 125 {
+                break;
+            };
+            at = at + 1;
+        };
+    };
+    if at == begin {
+        return sh_mt_fail(state, - 20);
+    };
+    let mut p = begin;
+    let mut negative = false;
+    if sh_mt_byte(source, state, p) == 43 or sh_mt_byte(source, state, p) == 45 {
+        negative = sh_mt_byte(source, state, p) == 45;
+        p = p + 1;
+    };
+    let mut value = 0;
+    let mut valid = true;
+    let mut digits = 0;
+    let mut underscore = false;
+    let mut radix = 10;
+    let numeric_begin = p;
+    if p == begin and sh_mt_byte(source, state, p) == 48 {
+        let prefix = sh_mt_byte(source, state, p + 1);
+        if prefix == 120 {
+            radix = 16;
+            p = p + 2;
+        } else if prefix == 111 {
+            radix = 8;
+            p = p + 2;
+        } else if prefix == 98 {
+            radix = 2;
+            p = p + 2;
+        };
+    };
+    while p < at {
+        let c = sh_mt_byte(source, state, p);
+        let mut d = - 1;
+        if c >= 48 and c <= 57 {
+            d = c - 48;
+        } else if c >= 65 and c <= 70 {
+            d = c - 55;
+        } else if c >= 97 and c <= 102 {
+            d = c - 87;
+        };
+        if c == 95 {
+            if digits == 0 or underscore {
+                valid = false;
+            };
+            underscore = true;
+        } else {
+            if d < 0 or d >= radix {
+                valid = false;
+            } else if negative {
+                if value < ((- 9223372036854775807 - 1) + d) / radix {
+                    valid = false;
+                } else {
+                    value = value * radix - d;
+                };
+            } else if value > (9223372036854775807 - d) / radix {
+                valid = false;
+            } else {
+                value = value * radix + d;
+            };
+            digits = digits + 1;
+            underscore = false;
+        };
+        p = p + 1;
+    };
+    if digits == 0 or underscore or (radix == 10 and digits > 1 and sh_mt_byte(source, state, numeric_begin) == 48) {
+        valid = false;
+    };
+    if valid {
+        sh_mt_set(state, node, 0, 2);
+        sh_mt_set(state, node, 4, value);
+    } else {
+        if not sh_ms_other(source, begin, at) {
+            return sh_mt_fail(state, - 20);
+        };
+        sh_mt_set(state, node, 0, 4);
+    };
+    sengoo_ds_word_put(state, 1, at);
+    0;
+}
+pub unsafe extern "C" fn sengoo_sg_manifest_toml_parse(source: * const u8, length: i64, state: * mut u8,
+extent: i64) -> i64 {
+    if length < 0 or length > 1048576 or extent != 8388608 {
+        return - 3;
+    };
+    let mut i = 0;
+    while i < 128 {
+        sengoo_ds_word_put(state, i, 0);
+        i = i + 1;
+    };
+    sengoo_ds_word_put(state, 0, 1397576753);
+    sengoo_ds_word_put(state, 2, length);
+    sengoo_ds_word_put(state, 4, 2625536);
+    if sengoo_sg_utf8_validate(source, length) != 1 {
+        return sh_mt_fail(state, - 20);
+    };
+    if length >= 3 and (sengoo_tar_read(source, 0) as i64) == 239 and (sengoo_tar_read(source, 1) as i64) == 187 and (sengoo_tar_read(source,
+    2) as i64) == 191 {
+        sengoo_ds_word_put(state, 1, 3);
+    };
+    let root = sh_mt_new(state, - 1, 0, 0, 0);
+    sh_mt_set(state, root, 8, 1);
+    let mut current = 0;
+    while sengoo_ds_word_get(state, 1) < length {
+        if sh_mt_skip(source, state, 1) < 0 {
+            return - 20;
+        };
+        let at = sengoo_ds_word_get(state, 1);
+        if at == length {
+            break;
+        };
+        if sh_mt_byte(source, state, at) == 91 {
+            let mut header = 1;
+            let mut cursor = at + 1;
+            if sh_mt_byte(source, state, cursor) == 91 {
+                header = 2;
+                cursor = cursor + 1;
+            };
+            sengoo_ds_word_put(state, 1, cursor);
+            current = sh_mt_path(source, state, 0, header);
+            if current < 0 {
+                return current;
+            };
+            cursor = sengoo_ds_word_get(state, 1);
+            if sh_mt_byte(source, state, cursor) != 93 {
+                return sh_mt_fail(state, - 20);
+            };
+            cursor = cursor + 1;
+            if header == 2 {
+                if sh_mt_byte(source, state, cursor) != 93 {
+                    return sh_mt_fail(state, - 20);
+                };
+                cursor = cursor + 1;
+            };
+            sengoo_ds_word_put(state, 1, cursor);
+        } else {
+            let node = sh_mt_path(source, state, current, 0);
+            if node < 0 {
+                return node;
+            };
+            let cursor = sengoo_ds_word_get(state, 1);
+            if sh_mt_byte(source, state, cursor) != 61 {
+                return sh_mt_fail(state, - 20);
+            };
+            sengoo_ds_word_put(state, 1, cursor + 1);
+            if sh_mt_value(source, state, node, 0) < 0 {
+                return sengoo_ds_word_get(state, 5);
+            };
+        };
+        if sh_mt_skip(source, state, 0) < 0 {
+            return - 20;
+        };
+        let cursor = sengoo_ds_word_get(state, 1);
+        if cursor < length and sh_mt_byte(source, state, cursor) != 10 and sh_mt_byte(source, state,
+        cursor) != 13 {
+            return sh_mt_fail(state, - 20);
+        };
+    };
+    sengoo_ds_word_get(state, 5);
+}

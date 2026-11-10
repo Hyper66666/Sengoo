@@ -1,0 +1,360 @@
+// SHA-256 constants/rotate expressions reuse selfhost/src/link_hash.sg.
+// The linker remains unchanged; this byte API provides fixed-state streaming.
+extern "C" {
+    unsafe fn sengoo_tar_read(source: * const u8, index: i64) -> u8;
+    unsafe fn sengoo_tar_output_read(state: * mut u8, index: i64) -> u8;
+    unsafe fn sengoo_tar_write(state: * mut u8, index: i64, value: u8);
+    unsafe fn sengoo_ds_word_get(state: * mut u8, index: i64) -> i64;
+    unsafe fn sengoo_ds_word_put(state: * mut u8, index: i64, value: i64);
+}
+unsafe extern "C" fn sh_sha_k(index: i64) -> i64 {
+    if index == 0 {
+        return 1116352408;
+    };
+    if index == 1 {
+        return 1899447441;
+    };
+    if index == 2 {
+        return 3049323471;
+    };
+    if index == 3 {
+        return 3921009573;
+    };
+    if index == 4 {
+        return 961987163;
+    };
+    if index == 5 {
+        return 1508970993;
+    };
+    if index == 6 {
+        return 2453635748;
+    };
+    if index == 7 {
+        return 2870763221;
+    };
+    if index == 8 {
+        return 3624381080;
+    };
+    if index == 9 {
+        return 310598401;
+    };
+    if index == 10 {
+        return 607225278;
+    };
+    if index == 11 {
+        return 1426881987;
+    };
+    if index == 12 {
+        return 1925078388;
+    };
+    if index == 13 {
+        return 2162078206;
+    };
+    if index == 14 {
+        return 2614888103;
+    };
+    if index == 15 {
+        return 3248222580;
+    };
+    if index == 16 {
+        return 3835390401;
+    };
+    if index == 17 {
+        return 4022224774;
+    };
+    if index == 18 {
+        return 264347078;
+    };
+    if index == 19 {
+        return 604807628;
+    };
+    if index == 20 {
+        return 770255983;
+    };
+    if index == 21 {
+        return 1249150122;
+    };
+    if index == 22 {
+        return 1555081692;
+    };
+    if index == 23 {
+        return 1996064986;
+    };
+    if index == 24 {
+        return 2554220882;
+    };
+    if index == 25 {
+        return 2821834349;
+    };
+    if index == 26 {
+        return 2952996808;
+    };
+    if index == 27 {
+        return 3210313671;
+    };
+    if index == 28 {
+        return 3336571891;
+    };
+    if index == 29 {
+        return 3584528711;
+    };
+    if index == 30 {
+        return 113926993;
+    };
+    if index == 31 {
+        return 338241895;
+    };
+    if index == 32 {
+        return 666307205;
+    };
+    if index == 33 {
+        return 773529912;
+    };
+    if index == 34 {
+        return 1294757372;
+    };
+    if index == 35 {
+        return 1396182291;
+    };
+    if index == 36 {
+        return 1695183700;
+    };
+    if index == 37 {
+        return 1986661051;
+    };
+    if index == 38 {
+        return 2177026350;
+    };
+    if index == 39 {
+        return 2456956037;
+    };
+    if index == 40 {
+        return 2730485921;
+    };
+    if index == 41 {
+        return 2820302411;
+    };
+    if index == 42 {
+        return 3259730800;
+    };
+    if index == 43 {
+        return 3345764771;
+    };
+    if index == 44 {
+        return 3516065817;
+    };
+    if index == 45 {
+        return 3600352804;
+    };
+    if index == 46 {
+        return 4094571909;
+    };
+    if index == 47 {
+        return 275423344;
+    };
+    if index == 48 {
+        return 430227734;
+    };
+    if index == 49 {
+        return 506948616;
+    };
+    if index == 50 {
+        return 659060556;
+    };
+    if index == 51 {
+        return 883997877;
+    };
+    if index == 52 {
+        return 958139571;
+    };
+    if index == 53 {
+        return 1322822218;
+    };
+    if index == 54 {
+        return 1537002063;
+    };
+    if index == 55 {
+        return 1747873779;
+    };
+    if index == 56 {
+        return 1955562222;
+    };
+    if index == 57 {
+        return 2024104815;
+    };
+    if index == 58 {
+        return 2227730452;
+    };
+    if index == 59 {
+        return 2361852424;
+    };
+    if index == 60 {
+        return 2428436474;
+    };
+    if index == 61 {
+        return 2756734187;
+    };
+    if index == 62 {
+        return 3204031479;
+    };
+    if index == 63 {
+        return 3329325298;
+    };
+    0;
+}
+unsafe extern "C" fn sh_sha_rotr(value: i64, bits: i64) -> i64 {
+    ((value >> bits) | (value << (32 - bits))) & 4294967295;
+}
+unsafe extern "C" fn sh_sha_block(state: * mut u8) {
+    let mut i = 0;
+    while i < 16 {
+        let at = 640 + i * 4;
+        let word = ((sengoo_tar_output_read(state, at) as i64) << 24) | ((sengoo_tar_output_read(state,
+        at + 1) as i64) << 16) | ((sengoo_tar_output_read(state, at + 2) as i64) << 8) | (sengoo_tar_output_read(state,
+        at + 3) as i64);
+        sengoo_ds_word_put(state, 16 + i, word);
+        i = i + 1;
+    };
+    while i < 64 {
+        let x = sengoo_ds_word_get(state, 16 + i - 15);
+        let y = sengoo_ds_word_get(state, 16 + i - 2);
+        let s0 = sh_sha_rotr(x, 7) ^ sh_sha_rotr(x, 18) ^ (x >> 3);
+        let s1 = sh_sha_rotr(y, 17) ^ sh_sha_rotr(y, 19) ^ (y >> 10);
+        sengoo_ds_word_put(state, 16 + i, (sengoo_ds_word_get(state, 16 + i - 16) + s0 + sengoo_ds_word_get(state,
+        16 + i - 7) + s1) & 4294967295);
+        i = i + 1;
+    };
+    let mut a = sengoo_ds_word_get(state, 8);
+    let mut b = sengoo_ds_word_get(state, 9);
+    let mut c = sengoo_ds_word_get(state, 10);
+    let mut d = sengoo_ds_word_get(state, 11);
+    let mut e = sengoo_ds_word_get(state, 12);
+    let mut f = sengoo_ds_word_get(state, 13);
+    let mut g = sengoo_ds_word_get(state, 14);
+    let mut h = sengoo_ds_word_get(state, 15);
+    i = 0;
+    while i < 64 {
+        let s1 = sh_sha_rotr(e, 6) ^ sh_sha_rotr(e, 11) ^ sh_sha_rotr(e, 25);
+        let choice = (e & f) ^ ((e ^ 4294967295) & g);
+        let t1 = (h + s1 + choice + sh_sha_k(i) + sengoo_ds_word_get(state, 16 + i)) & 4294967295;
+        let s0 = sh_sha_rotr(a, 2) ^ sh_sha_rotr(a, 13) ^ sh_sha_rotr(a, 22);
+        let majority = (a & b) ^ (a & c) ^ (b & c);
+        let t2 = (s0 + majority) & 4294967295;
+        h = g;
+        g = f;
+        f = e;
+        e = (d + t1) & 4294967295;
+        d = c;
+        c = b;
+        b = a;
+        a = (t1 + t2) & 4294967295;
+        i = i + 1;
+    };
+    sengoo_ds_word_put(state, 8, (sengoo_ds_word_get(state, 8) + a) & 4294967295);
+    sengoo_ds_word_put(state, 9, (sengoo_ds_word_get(state, 9) + b) & 4294967295);
+    sengoo_ds_word_put(state, 10, (sengoo_ds_word_get(state, 10) + c) & 4294967295);
+    sengoo_ds_word_put(state, 11, (sengoo_ds_word_get(state, 11) + d) & 4294967295);
+    sengoo_ds_word_put(state, 12, (sengoo_ds_word_get(state, 12) + e) & 4294967295);
+    sengoo_ds_word_put(state, 13, (sengoo_ds_word_get(state, 13) + f) & 4294967295);
+    sengoo_ds_word_put(state, 14, (sengoo_ds_word_get(state, 14) + g) & 4294967295);
+    sengoo_ds_word_put(state, 15, (sengoo_ds_word_get(state, 15) + h) & 4294967295);
+}
+pub unsafe extern "C" fn sengoo_sg_sha256_init(state: * mut u8, extent: i64) -> i64 {
+    if extent != 1024 {
+        return - 3;
+    };
+    let mut i = 0;
+    while i < 128 {
+        sengoo_ds_word_put(state, i, 0);
+        i = i + 1;
+    };
+    sengoo_ds_word_put(state, 0, 1397246001);
+    sengoo_ds_word_put(state, 8, 1779033703);
+    sengoo_ds_word_put(state, 9, 3144134277);
+    sengoo_ds_word_put(state, 10, 1013904242);
+    sengoo_ds_word_put(state, 11, 2773480762);
+    sengoo_ds_word_put(state, 12, 1359893119);
+    sengoo_ds_word_put(state, 13, 2600822924);
+    sengoo_ds_word_put(state, 14, 528734635);
+    sengoo_ds_word_put(state, 15, 1541459225);
+    0;
+}
+pub unsafe extern "C" fn sengoo_sg_sha256_update(state: * mut u8, extent: i64, source: * const u8, length: i64) -> i64 {
+    if extent != 1024 or length < 0 or length > 67108864 {
+        return - 3;
+    };
+    if sengoo_ds_word_get(state, 0) != 1397246001 or sengoo_ds_word_get(state, 3) != 0 {
+        return - 4;
+    };
+    let total = sengoo_ds_word_get(state, 1);
+    let mut pending = sengoo_ds_word_get(state, 2);
+    if total < 0 or total > 1073741824 - length or pending < 0 or pending > 63 {
+        return - 4;
+    };
+    let mut at = 0;
+    while at < length {
+        sengoo_tar_write(state, 640 + pending, sengoo_tar_read(source, at));
+        pending = pending + 1;
+        at = at + 1;
+        if pending == 64 {
+            sh_sha_block(state);
+            pending = 0;
+        };
+    };
+    sengoo_ds_word_put(state, 1, total + length);
+    sengoo_ds_word_put(state, 2, pending);
+    0;
+}
+pub unsafe extern "C" fn sengoo_sg_sha256_final(state: * mut u8, extent: i64, output: * mut u8, capacity: i64) -> i64 {
+    if extent != 1024 or capacity < 32 or capacity > 67108864 {
+        return - 3;
+    };
+    if sengoo_ds_word_get(state, 0) != 1397246001 or sengoo_ds_word_get(state, 3) != 0 {
+        return - 4;
+    };
+    let total = sengoo_ds_word_get(state, 1);
+    let mut pending = sengoo_ds_word_get(state, 2);
+    if total < 0 or total > 1073741824 or pending < 0 or pending > 63 {
+        return - 4;
+    };
+    sengoo_tar_write(state, 640 + pending, 128u8);
+    pending = pending + 1;
+    if pending > 56 {
+        while pending < 64 {
+            sengoo_tar_write(state, 640 + pending, 0u8);
+            pending = pending + 1;
+        };
+        sh_sha_block(state);
+        pending = 0;
+    };
+    while pending < 56 {
+        sengoo_tar_write(state, 640 + pending, 0u8);
+        pending = pending + 1;
+    };
+    let bits = total * 8;
+    let mut i = 0;
+    while i < 8 {
+        sengoo_tar_write(state, 696 + i, ((bits >> ((7 - i) * 8)) & 255) as u8);
+        i = i + 1;
+    };
+    sh_sha_block(state);
+    i = 0;
+    while i < 32 {
+        let word = sengoo_ds_word_get(state, 8 + i / 4);
+        sengoo_tar_write(output, i, ((word >> ((3 - i % 4) * 8)) & 255) as u8);
+        i = i + 1;
+    };
+    sengoo_ds_word_put(state, 3, 1);
+    0;
+}
+pub unsafe extern "C" fn sengoo_sg_sha256_dispose(state: * mut u8, extent: i64) -> i64 {
+    if extent != 1024 {
+        return - 3;
+    };
+    let mut i = 0;
+    while i < 128 {
+        sengoo_ds_word_put(state, i, 0);
+        i = i + 1;
+    };
+    0;
+}

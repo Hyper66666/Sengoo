@@ -1,0 +1,390 @@
+// Exact decimal overflow threshold (tie rounds to +infinity):
+// 179769313486231580793728971405303415079934132710037826936173778980444968292764750946649017977587207096330286416692887910946555547851940402630657488671505820681908902000708383676273854845817711531764475730270069855571366959622842914819860834936475292719074168444365510704342711559699508093042880177904174497792
+extern "C" {
+    unsafe fn sengoo_tar_read(source: * const u8, index: i64) -> u8;
+}
+unsafe extern "C" fn sh_ms_limit(index: i64) -> i64 {
+    if index < 8 {
+        return (3545240236688226097 >> ((index - 0) * 8)) & 255;
+    };
+    if index < 16 {
+        return (3832901048620037171 >> ((index - 8) * 8)) & 255;
+    };
+    if index < 24 {
+        return (4049359708102275128 >> ((index - 16) * 8)) & 255;
+    };
+    if index < 32 {
+        return (3473178218783127353 >> ((index - 24) * 8)) & 255;
+    };
+    if index < 40 {
+        return (4123387614024774707 >> ((index - 32) * 8)) & 255;
+    };
+    if index < 48 {
+        return (3472617476426118195 >> ((index - 40) * 8)) & 255;
+    };
+    if index < 56 {
+        return (3691040958926238512 >> ((index - 48) * 8)) & 255;
+    };
+    if index < 64 {
+        return (4123106169079673142 >> ((index - 56) * 8)) & 255;
+    };
+    if index < 72 {
+        return (4050487811243257912 >> ((index - 64) * 8)) & 255;
+    };
+    if index < 80 {
+        return (3834591015188183346 >> ((index - 72) * 8)) & 255;
+    };
+    if index < 88 {
+        return (3474865994935318832 >> ((index - 80) * 8)) & 255;
+    };
+    if index < 96 {
+        return (3978988782047803185 >> ((index - 88) * 8)) & 255;
+    };
+    if index < 104 {
+        return (3689352138996527154 >> ((index - 96) * 8)) & 255;
+    };
+    if index < 112 {
+        return (3906363827108196912 >> ((index - 104) * 8)) & 255;
+    };
+    if index < 120 {
+        return (3472619697008554553 >> ((index - 112) * 8)) & 255;
+    };
+    if index < 128 {
+        return (3761971566380201017 >> ((index - 120) * 8)) & 255;
+    };
+    if index < 136 {
+        return (3760563109097715767 >> ((index - 128) * 8)) & 255;
+    };
+    if index < 144 {
+        return (3978145426497221168 >> ((index - 136) * 8)) & 255;
+    };
+    if index < 152 {
+        return (3473736800788822068 >> ((index - 144) * 8)) & 255;
+    };
+    if index < 160 {
+        return (4121136939408701493 >> ((index - 152) * 8)) & 255;
+    };
+    if index < 168 {
+        return (3472328304818206768 >> ((index - 160) * 8)) & 255;
+    };
+    if index < 176 {
+        return (3978423637298917431 >> ((index - 168) * 8)) & 255;
+    };
+    if index < 184 {
+        return (4049920480406614582 >> ((index - 176) * 8)) & 255;
+    };
+    if index < 192 {
+        return (3544675091905787188 >> ((index - 184) * 8)) & 255;
+    };
+    if index < 200 {
+        return (3977861778333840181 >> ((index - 192) * 8)) & 255;
+    };
+    if index < 208 {
+        return (3472336001399207733 >> ((index - 200) * 8)) & 255;
+    };
+    if index < 216 {
+        return (3546361734219970870 >> ((index - 208) * 8)) & 255;
+    };
+    if index < 224 {
+        return (3618142251394676275 >> ((index - 216) * 8)) & 255;
+    };
+    if index < 232 {
+        return (4049916086638098482 >> ((index - 224) * 8)) & 255;
+    };
+    if index < 240 {
+        return (3761411893503736113 >> ((index - 232) * 8)) & 255;
+    };
+    if index < 248 {
+        return (4121415120212865849 >> ((index - 240) * 8)) & 255;
+    };
+    if index < 256 {
+        return (3545519486904907570 >> ((index - 248) * 8)) & 255;
+    };
+    if index < 264 {
+        return (3834308432059709494 >> ((index - 256) * 8)) & 255;
+    };
+    if index < 272 {
+        return (3761407495473475893 >> ((index - 264) * 8)) & 255;
+    };
+    if index < 280 {
+        return (3907212654295463730 >> ((index - 272) * 8)) & 255;
+    };
+    if index < 288 {
+        return (3691034387491928377 >> ((index - 280) * 8)) & 255;
+    };
+    if index < 296 {
+        return (3977012963963974704 >> ((index - 288) * 8)) & 255;
+    };
+    if index < 304 {
+        return (3761692273229707575 >> ((index - 296) * 8)) & 255;
+    };
+    if index < 309 {
+        return (215708284729 >> ((index - 304) * 8)) & 255;
+    };
+    - 1;
+}
+unsafe extern "C" fn sh_ms_byte(source: * const u8, begin: i64, end: i64, at: i64) -> i64 {
+    if at < begin or at >= end {
+        return - 1;
+    };
+    sengoo_tar_read(source, at) as i64;
+}
+unsafe extern "C" fn sh_ms_decimal(source: * const u8, begin: i64, end: i64) -> i64 {
+    let mut at = begin;
+    let mut value = 0;
+    while at < end {
+        let b = sh_ms_byte(source, begin, end, at);
+        if b < 48 or b > 57 {
+            return - 1;
+        };
+        value = value * 10 + b - 48;
+        at = at + 1;
+    };
+    value;
+}
+unsafe extern "C" fn sh_ms_datetime(source: * const u8, begin: i64, end: i64) -> bool {
+    let mut at = begin;
+    let mut date = false;
+    if end - begin >= 10 and sh_ms_byte(source, begin, end, begin + 4) == 45 and sh_ms_byte(source, begin,
+    end, begin + 7) == 45 {
+        let year = sh_ms_decimal(source, begin, begin + 4);
+        let month = sh_ms_decimal(source, begin + 5, begin + 7);
+        let day = sh_ms_decimal(source, begin + 8, begin + 10);
+        if year < 0 or month < 1 or month > 12 {
+            return false;
+        };
+        let mut days = 31;
+        if month == 4 or month == 6 or month == 9 or month == 11 {
+            days = 30;
+        } else if month == 2 {
+            days = 28;
+            if year % 4 == 0 and (year % 100 != 0 or year % 400 == 0) {
+                days = 29;
+            };
+        };
+        if day < 1 or day > days {
+            return false;
+        };
+        date = true;
+        at = begin + 10;
+        if at == end {
+            return true;
+        };
+        let b = sh_ms_byte(source, begin, end, at);
+        if b != 84 and b != 116 and b != 32 {
+            return false;
+        };
+        at = at + 1;
+    };
+    if end - at < 8 or sh_ms_byte(source, begin, end, at + 2) != 58 or sh_ms_byte(source, begin, end,
+    at + 5) != 58 {
+        return false;
+    };
+    let hour = sh_ms_decimal(source, at, at + 2);
+    let minute = sh_ms_decimal(source, at + 3, at + 5);
+    let second = sh_ms_decimal(source, at + 6, at + 8);
+    if hour < 0 or hour > 23 or minute < 0 or minute > 59 or second < 0 or second > 60 {
+        return false;
+    };
+    at = at + 8;
+    if sh_ms_byte(source, begin, end, at) == 46 {
+        at = at + 1;
+        let start = at;
+        while sh_ms_byte(source, begin, end, at) >= 48 and sh_ms_byte(source, begin, end, at) <= 57 {
+            at = at + 1;
+        };
+        if at == start {
+            return false;
+        };
+    };
+    if at == end {
+        return true;
+    };
+    if not date {
+        return false;
+    };
+    let b = sh_ms_byte(source, begin, end, at);
+    if b == 90 or b == 122 {
+        return at + 1 == end;
+    };
+    if (b != 43 and b != 45) or end - at != 6 or sh_ms_byte(source, begin, end, at + 3) != 58 {
+        return false;
+    };
+    let hours = sh_ms_decimal(source, at + 1, at + 3);
+    let minutes = sh_ms_decimal(source, at + 4, at + 6);
+    hours >= 0 and hours <= 23 and minutes >= 0 and minutes <= 59;
+}
+pub unsafe extern "C" fn sh_ms_other(source: * const u8, begin: i64, end: i64) -> bool {
+    let length = end - begin;
+    let mut at = begin;
+    let mut negative = false;
+    if sh_ms_byte(source, begin, end, at) == 43 or sh_ms_byte(source, begin, end, at) == 45 {
+        negative = sh_ms_byte(source, begin, end, at) == 45;
+        at = at + 1;
+    };
+    if end - at == 3 {
+        let a = sh_ms_byte(source, begin, end, at);
+        let b = sh_ms_byte(source, begin, end, at + 1);
+        let c = sh_ms_byte(source, begin, end, at + 2);
+        if (a == 105 and b == 110 and c == 102) or (a == 110 and b == 97 and c == 110) {
+            return true;
+        };
+    };
+    if length == 4 and sh_ms_byte(source, begin, end, begin) == 116 and sh_ms_byte(source, begin, end,
+    begin + 1) == 114 and sh_ms_byte(source, begin, end, begin + 2) == 117 and sh_ms_byte(source, begin,
+    end, begin + 3) == 101 {
+        return true;
+    };
+    if length == 5 and sh_ms_byte(source, begin, end, begin) == 102 and sh_ms_byte(source, begin, end,
+    begin + 1) == 97 and sh_ms_byte(source, begin, end, begin + 2) == 108 and sh_ms_byte(source, begin,
+    end, begin + 3) == 115 and sh_ms_byte(source, begin, end, begin + 4) == 101 {
+        return true;
+    };
+    if sh_ms_datetime(source, begin, end) {
+        return true;
+    };
+    let mantissa_start = at;
+    let mut digits = 0;
+    let mut significant = 0;
+    let mut fractional = 0;
+    let mut nonzero = false;
+    let mut underscore = false;
+    while at < end {
+        let c = sh_ms_byte(source, begin, end, at);
+        if c == 95 {
+            if digits == 0 or underscore {
+                return false;
+            };
+            underscore = true;
+        } else if c >= 48 and c <= 57 {
+            if digits > 0 and sh_ms_byte(source, begin, end, mantissa_start) == 48 {
+                return false;
+            };
+            digits = digits + 1;
+            underscore = false;
+            if c != 48 {
+                nonzero = true;
+            };
+            if nonzero {
+                significant = significant + 1;
+            };
+        } else {
+            break;
+        };
+        at = at + 1;
+    };
+    if digits == 0 or underscore {
+        return false;
+    };
+    let mut floating = false;
+    if sh_ms_byte(source, begin, end, at) == 46 {
+        floating = true;
+        at = at + 1;
+        digits = 0;
+        while at < end {
+            let c = sh_ms_byte(source, begin, end, at);
+            if c == 95 {
+                if digits == 0 or underscore {
+                    return false;
+                };
+                underscore = true;
+            } else if c >= 48 and c <= 57 {
+                digits = digits + 1;
+                fractional = fractional + 1;
+                underscore = false;
+                if c != 48 {
+                    nonzero = true;
+                };
+                if nonzero {
+                    significant = significant + 1;
+                };
+            } else {
+                break;
+            };
+            at = at + 1;
+        };
+        if digits == 0 or underscore {
+            return false;
+        };
+    };
+    let mantissa_end = at;
+    let mut exponent = 0;
+    let mut exponent_negative = false;
+    if sh_ms_byte(source, begin, end, at) == 101 or sh_ms_byte(source, begin, end, at) == 69 {
+        floating = true;
+        at = at + 1;
+        let sign = sh_ms_byte(source, begin, end, at);
+        if sign == 43 or sign == 45 {
+            exponent_negative = sign == 45;
+            at = at + 1;
+        };
+        digits = 0;
+        while at < end {
+            let c = sh_ms_byte(source, begin, end, at);
+            if c == 95 {
+                if digits == 0 or underscore {
+                    return false;
+                };
+                underscore = true;
+            } else if c >= 48 and c <= 57 {
+                digits = digits + 1;
+                underscore = false;
+                if exponent < 2000000 {
+                    exponent = exponent * 10 + c - 48;
+                };
+            } else {
+                break;
+            };
+            at = at + 1;
+        };
+        if digits == 0 or underscore {
+            return false;
+        };
+    };
+    if at != end or not floating {
+        return false;
+    };
+    // This is the exact selected toml_edit positive-infinity rejection, not
+    // floating-point evaluation or a decimal-exponent approximation.
+    if negative or not nonzero {
+        return true;
+    };
+    if exponent_negative {
+        exponent = - exponent;
+    };
+    let order = significant + exponent - fractional;
+    if order < 309 {
+        return true;
+    };
+    if order > 309 {
+        return false;
+    };
+    let mut cursor = mantissa_start;
+    let mut started = false;
+    let mut index = 0;
+    while index < 309 {
+        let mut digit = 48;
+        while cursor < mantissa_end {
+            let c = sh_ms_byte(source, begin, end, cursor);
+            cursor = cursor + 1;
+            if c >= 48 and c <= 57 {
+                if c != 48 {
+                    started = true;
+                };
+                if started {
+                    digit = c;
+                    break;
+                };
+            };
+        };
+        let limit = sh_ms_limit(index);
+        if digit < limit {
+            return true;
+        };
+        if digit > limit {
+            return false;
+        };
+        index = index + 1;
+    };
+    false;
+}

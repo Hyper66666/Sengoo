@@ -1,6 +1,11 @@
 // Experimental byte-extraction transaction. Resolver manifest identity is a
 // separate admission step; this is not yet the public sgpm entry point.
 extern "C" {
+    unsafe fn sengoo_sg_package_admit(session: i64, tar: * mut u8, nodes: * mut u8, entries: i64, source: * const u8,
+    length: i64, arguments: * mut u8) -> i64;
+    unsafe fn sh_pa_preflight(arguments: * mut u8) -> i64;
+    unsafe fn sh_pa_reserved_path(tar: * mut u8, start: i64, length: i64) -> i64;
+    unsafe fn sengoo_pa_null() -> * mut u8;
     unsafe fn sengoo_tar_read(value: * const u8, index: i64) -> u8;
     unsafe fn sengoo_tar_output_read(value: * mut u8, index: i64) -> u8;
     unsafe fn sengoo_ds_word_get(value: * mut u8, index: i64) -> i64;
@@ -137,7 +142,7 @@ unsafe extern "C" fn sh_ps_entry(session: i64, state: * mut u8, nodes: * mut u8,
 }
 unsafe extern "C" fn sh_ps_run(source: * const u8, length: i64, parent: i64, stage: * const u8, stage_length: i64,
 target: * const u8, target_length: i64, tar: * mut u8, gzip: * mut u8, output: * mut u8, nodes: * mut u8,
-cancel_after: i64) -> i64 {
+cancel_after: i64, arguments: * mut u8, admitted: i64) -> i64 {
     let session = sengoo_ps_session_new(parent, stage, stage_length);
     if session == 0 {
         return - 8;
@@ -189,10 +194,28 @@ cancel_after: i64) -> i64 {
                     } else {
                         at = at + eaten;
                         if event == 3 {
-                            let error = sh_ps_entry(session, tar, nodes, sengoo_ds_word_get(nodes, 0));
+                            let mut reserved = 0;
+                            let entry_id = sengoo_sg_tar_stream_query(tar, 18438400, 13);
+                            if admitted == 1 {
+                                if entry_id < 0 or entry_id >= 10000 {
+                                    reserved = - 10;
+                                } else {
+                                    reserved = sh_pa_reserved_path(tar, sengoo_sg_tar_stream_query(tar,
+                                    18438400, 7), sengoo_sg_tar_stream_query(tar, 18438400, 8));
+                                };
+                            };
+                            let error = if reserved < 0 {
+                                reserved;
+                            } else {
+                                sh_ps_entry(session, tar, nodes, sengoo_ds_word_get(nodes, 0));
+                            };
                             if error < 0 {
                                 result = error;
                             } else {
+                                if admitted == 1 {
+                                    sengoo_ds_word_put(nodes, 131072 + entry_id, (entry_id << 32) | sengoo_ds_word_get(nodes,
+                                    1));
+                                };
                                 let ack = sengoo_sg_tar_stream_ack(tar, 18438400, 0);
                                 if ack < 0 {
                                     result = ack;
@@ -258,6 +281,10 @@ cancel_after: i64) -> i64 {
             };
             node = node + 1;
         };
+        if result == 0 and admitted == 1 {
+            result = sengoo_sg_package_admit(session, tar, nodes, sengoo_sg_tar_stream_query(tar, 18438400,
+            3), source, length, arguments);
+        };
         if result == 0 {
             result = sengoo_ps_publish(session, target, target_length);
         };
@@ -273,9 +300,9 @@ cancel_after: i64) -> i64 {
     };
     result;
 }
-pub unsafe extern "C" fn sengoo_sg_package_extract(source: * const u8, length: i64, parent: i64, stage: * const u8,
-stage_length: i64, target: * const u8, target_length: i64, cancel_after: i64) -> i64 {
-    if length < 0 or length > 67108864 or stage_length < 1 or stage_length > 64 or target_length < 1 or target_length > 64 or parent == 0 or cancel_after < - 1 {
+unsafe extern "C" fn sh_ps_extract(source: * const u8, length: i64, parent: i64, stage: * const u8, stage_length: i64,
+target: * const u8, target_length: i64, cancel_after: i64, arguments: * mut u8, admitted: i64) -> i64 {
+    if length < 0 or length > 67108864 or stage_length < 1 or stage_length > 64 or target_length < 1 or target_length > 64 or parent == 0 or cancel_after < - 1 or admitted < 0 or admitted > 1 {
         return - 3;
     };
     if sh_ps_name(stage, stage_length) < 0 or sh_ps_name(target, target_length) < 0 {
@@ -302,6 +329,12 @@ stage_length: i64, target: * const u8, target_length: i64, cancel_after: i64) ->
             return - 3;
         };
     };
+    if admitted == 1 {
+        let preflight = sh_pa_preflight(arguments);
+        if preflight < 0 {
+            return preflight;
+        };
+    };
     let tar = sengoo_ds_storage_alloc(18438400);
     if sengoo_ds_storage_present(tar) == 0 {
         return - 8;
@@ -317,7 +350,11 @@ stage_length: i64, target: * const u8, target_length: i64, cancel_after: i64) ->
         sengoo_ds_storage_free(tar);
         return - 8;
     };
-    let nodes = sengoo_ds_storage_alloc(1048576);
+    let nodes = sengoo_ds_storage_alloc(if admitted == 1 {
+        1128584;
+    } else {
+        1048576;
+    });
     if sengoo_ds_storage_present(nodes) == 0 {
         sengoo_ds_storage_free(output);
         sengoo_ds_storage_free(gzip);
@@ -325,10 +362,20 @@ stage_length: i64, target: * const u8, target_length: i64, cancel_after: i64) ->
         return - 8;
     };
     let result = sh_ps_run(source, length, parent, stage, stage_length, target, target_length, tar, gzip,
-    output, nodes, cancel_after);
+    output, nodes, cancel_after, arguments, admitted);
     sengoo_ds_storage_free(nodes);
     sengoo_ds_storage_free(output);
     sengoo_ds_storage_free(gzip);
     sengoo_ds_storage_free(tar);
     result;
+}
+pub unsafe extern "C" fn sengoo_sg_package_extract(source: * const u8, length: i64, parent: i64, stage: * const u8,
+stage_length: i64, target: * const u8, target_length: i64, cancel_after: i64) -> i64 {
+    sh_ps_extract(source, length, parent, stage, stage_length, target, target_length, cancel_after, sengoo_pa_null(),
+    0);
+}
+pub unsafe extern "C" fn sengoo_sg_package_import(source: * const u8, length: i64, parent: i64, stage: * const u8,
+stage_length: i64, target: * const u8, target_length: i64, cancel_after: i64, arguments: * mut u8) -> i64 {
+    sh_ps_extract(source, length, parent, stage, stage_length, target, target_length, cancel_after, arguments,
+    1);
 }

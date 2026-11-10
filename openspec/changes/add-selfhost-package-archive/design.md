@@ -157,3 +157,46 @@ This byte-extraction transaction is distinct from resolver admission. Full
 `Sengoo.toml` parsing, expected package identity, registry/checksum metadata and
 the public sgpm command remain separate explicit integration obligations.
 Neither a successful scanner nor manifest-file presence alone satisfies them.
+
+## Canonical manifest and publication admission increment
+
+The baseline is commit `2d3d2b87c34f6d13799a49faf7b83ee03d9178fa` and the
+immutable extraction report above. The new pure-SG manifest reader uses an
+8 MiB caller workspace: 4,096 control bytes, 32,768 append-only 80-byte nodes
+and a decoded-byte pool beginning at 2,625,536. Input is bounded to 1 MiB.
+Tables, dotted and quoted keys, four TOML string forms with Unicode escapes,
+arrays, inline tables, arrays of tables, duplicate/redefinition rules and
+canonical integer values are parsed in SG. A syntax tree is not an admitted
+manifest: no scalar tagged as another type may pass the canonical schema.
+All fields of the repository's actual `RawManifest`/`PackageMeta`/target/
+registry/dependency schema are validated, with exact SemVer/VersionReq lexical
+limits, source exclusivity and canonical names. The implementation is compared
+to the actual `tools/sgpm/src/manifest.rs` and pinned toml/semver crates, including
+the complete returned field model. A valid supported manifest syntax gap is
+a remaining implementation task, never a permanently narrowed profile.
+
+The eventual admitted transaction reads the unique root manifest from its
+retained session file handle, validates the full model and expected name and
+canonical version, and checks every selected target path against the staged
+file inventory and handle identity. Archive SHA-256 is over the immutable
+compressed input snapshot. Content SHA-256 uses the exact reference framing:
+sort normalized UTF-8 paths, then hash little-endian u64 path length, path
+bytes, little-endian u64 file length and bytes. The content checksum excludes
+the two checksum marker files but includes the normalized registry metadata
+marker, matching the reference. No checksum can be supplied by the archive
+itself: all three reserved marker names and conflicting prefixes are rejected.
+SG writes markers only after expected archive digest and identity admission.
+All marker I/O and target validation must finish before flush and rename.
+
+The existing linker has a pure-SG SHA-256 implementation over a bounded
+`ShBinary`. Its constants and round logic are the audited starting point for
+an incremental fixed-state byte API; its 16 MiB whole-buffer limit is not
+silently widened or used as a 256 MiB file arena. The previous linker source
+and qualification are unchanged. Known digests, every small split, random
+chunks and unambiguous path/length framing receive independent oracle checks.
+
+Registry metadata is a typed structure and checksum binding, not proof that
+remote index selection, network fetching, lockfiles or graph resolution are
+already implemented. Public SG package operations require an explicit support
+matrix and actual execution. Unsupported commands must fail without delegating
+to Rust or calling a manifest-only check a successful build/check/resolve.
