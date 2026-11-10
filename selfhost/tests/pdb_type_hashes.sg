@@ -1,0 +1,147 @@
+import selfhost_link_pdb;
+
+import std::args;
+
+import std::file;
+
+import std::assert;
+
+import std::io;
+
+extern "C" {
+    fn sengoo_string_live_handle_count() -> i64;
+    fn sengoo_buffer_live_handle_count() -> i64;
+    fn sengoo_opaque_live_handle_count() -> i64;
+    fn sengoo_file_snapshot_live_handle_count() -> i64;
+    fn sengoo_file_snapshot_live_bytes() -> i64;
+}
+
+def sh_pht_argument(index: i64) -> Result<String, i64> {
+    let b = ffi_buffer_new(arg_len(index).unwrap_or(0))?;
+    let n = arg_copy(index, b)?;
+    string_from_utf8(b, n);
+}
+
+def sh_pht_state(debug: &ShLinkDebug) -> Result<ShBinary, i64> {
+    let b = sh_binary_new(2097152);
+    sh_binary_unsigned(&b, debug.types.records.bytes.handle, 8)?;
+    sh_binary_unsigned(&b, debug.types.records.limit, 8)?;
+    sh_binary_unsigned(&b, debug.types.offsets.handle, 8)?;
+    sh_binary_unsigned(&b, debug.types.depths.handle, 8)?;
+    sh_binary_unsigned(&b, debug.types.offsets.len(), 8)?;
+    sh_binary_unsigned(&b, debug.types.depths.len(), 8)?;
+    sh_link_debug_append(&b, &debug.types.records)?;
+    let mut i = 0;
+    while i < debug.types.offsets.len() { sh_binary_unsigned(&b, sengoo_vec_get_or_default_i64(debug.types.offsets.handle, i, -1), 8)?; i = i + 1; };
+    i = 0;
+    while i < debug.types.depths.len() { sh_binary_unsigned(&b, sengoo_vec_get_or_default_i64(debug.types.depths.handle, i, -1), 8)?; i = i + 1; };
+    Result { is_ok: true, value: b, error: 0 };
+}
+
+def sh_pht_equal(a: &ShBinary, b: &ShBinary) -> bool {
+    if sh_binary_len(a) != sh_binary_len(b) { return false; };
+    let mut i = 0;
+    while i < sh_binary_len(a) { if sh_binary_get(a, i).unwrap_or(-1) != sh_binary_get(b, i).unwrap_or(-2) { return false; }; i = i + 1; };
+    true;
+}
+
+def sh_pht_rejected(debug: &ShLinkDebug, expected: i64) -> Result<i64, i64> {
+    let r = sh_link_pdb_type_hashes(debug);
+    if r.is_ok() or r.error != expected { return sh_i64_error(7392); };
+    sh_i64_ok(0);
+}
+
+def sh_pht_caps() -> Result<i64, i64> {
+    let count = sh_link_debug_new();
+    while count.types.offsets.len() <= 4096 { if not count.types.offsets.push(0) { return sh_i64_error(6001); }; };
+    sh_pht_rejected(&count, 7322)?;
+    let oversized = sh_link_debug_new();
+    let mut extent = sh_binary_len(&oversized.types.records);
+    while extent <= 1048576 { if not oversized.types.records.bytes.push(0) { return sh_i64_error(6001); }; extent = extent + 1; };
+    sh_pht_rejected(&oversized, 7322)?;
+    sh_i64_ok(0);
+}
+
+def sh_pht_scope(path: &String, write: bool) -> Result<i64, i64> {
+    sh_pht_caps()?;
+    let debug = sh_link_debug_new();
+    let field = string_from_str("value")?;
+    let fields = sh_link_cva_fields();
+    sh_link_cva_member(&fields, &debug.types, &field, 19, 0)?;
+    let f = sh_link_cva_finish(&debug.types, &fields)?;
+    let name = string_from_str("Small 世界")?;
+    let structure = sh_link_cva_aggregate(&debug.types, 5381, &name, f, 8)?;
+    let name_big = string_from_str("Large")?;
+    sh_link_cva_aggregate(&debug.types, 5381, &name_big, f, 70000)?;
+    let name_union = string_from_str("Union")?;
+    sh_link_cva_aggregate(&debug.types, 5382, &name_union, f, 8)?;
+    let enums = sh_link_cva_fields();
+    let one = string_from_str("one")?;
+    sh_link_cva_enumerator(&enums, &one, 1)?;
+    let two = string_from_str("two")?;
+    sh_link_cva_enumerator(&enums, &two, 70000)?;
+    let ef = sh_link_cva_finish(&debug.types, &enums)?;
+    let en = string_from_str("Enum")?;
+    sh_link_cva_enum(&debug.types, &en, ef)?;
+    let modified = sh_link_cv_modifier(&debug.types, structure)?;
+    sh_link_cv_pointer(&debug.types, modified, true)?;
+    sh_link_cv_pointer(&debug.types, structure, false)?;
+    let mut i = 0;
+    while i < 530 { sh_link_cva_array(&debug.types, 19, i * 8)?; i = i + 1; };
+    let before = sh_pht_state(&debug)?;
+    let hashes = sh_link_pdb_type_hashes(&debug)?;
+    let types = sh_link_pdb_debug_types(&debug)?;
+    sh_link_pdb_type_hash_header(&types, &debug, 11, &hashes)?;
+    assert_true(sh_binary_len(&debug.types.records) > 8192, "pdb_type_hashes.sg", 1);
+    assert_true(sh_binary_len(&hashes) > debug.types.offsets.len() * 4 + 8, "pdb_type_hashes.sg", 2);
+    let first = sengoo_vec_get_or_default_i64(debug.types.offsets.handle, 0, -1);
+    debug.types.offsets.set(0, 1);
+    sh_pht_rejected(&debug, 7321)?;
+    debug.types.offsets.set(0, first);
+    let length = sh_link_uint(&debug.types.records, 0, 2)?;
+    sh_binary_patch(&debug.types.records, 0, 1, 2)?;
+    sh_pht_rejected(&debug, 7321)?;
+    sh_binary_patch(&debug.types.records, 0, length, 2)?;
+    let kind = sh_link_uint(&debug.types.records, 2, 2)?;
+    sh_binary_patch(&debug.types.records, 2, 65535, 2)?;
+    sh_pht_rejected(&debug, 7323)?;
+    sh_binary_patch(&debug.types.records, 2, kind, 2)?;
+    let tag = sengoo_vec_get_or_default_i64(debug.types.offsets.handle, structure - 4096, -1);
+    sh_binary_patch(&debug.types.records, tag + 6, 128, 2)?;
+    sh_pht_rejected(&debug, 7323)?;
+    sh_binary_patch(&debug.types.records, tag + 6, 0, 2)?;
+    let depth = debug.types.depths.pop();
+    sh_pht_rejected(&debug, 7321)?;
+    debug.types.depths.push(depth.unwrap_or(-1));
+    sh_binary_byte(&debug.types.records, 0)?;
+    sh_pht_rejected(&debug, 7321)?;
+    debug.types.records.bytes.pop();
+    let after = sh_pht_state(&debug)?;
+    assert_true(sh_pht_equal(&before, &after), "pdb_type_hashes.sg", 3);
+    let original_header = sh_link_pdb_debug_types(&debug)?;
+    let hbefore = sh_link_sha256(&original_header)?;
+    let rejected = sh_link_pdb_type_hash_header(&original_header, &debug, 65535, &hashes);
+    assert_true(not rejected.is_ok() and rejected.error == 7321, "pdb_type_hashes.sg", 4);
+    let hafter = sh_link_sha256(&original_header)?;
+    assert_true(sh_pht_equal(&hbefore, &hafter), "pdb_type_hashes.sg", 5);
+    let empty = sh_binary_new(0);
+    let rejected_small = sh_link_pdb_type_hash_header(&original_header, &debug, 11, &empty);
+    assert_true(not rejected_small.is_ok() and rejected_small.error == 7321, "pdb_type_hashes.sg", 6);
+    if write { let msf = sh_link_msf_new(16777216); i = 0; while i < 12 { if i == 2 { sh_link_msf_add(&msf, &types)?; } else { if i == 11 { sh_link_msf_add(&msf, &hashes)?; } else { sh_link_msf_add(&msf, &empty)?; }; }; i = i + 1; }; let result = sh_link_msf_emit(&msf)?; let b = sh_binary_buffer(&result)?; file_write_str_raw(sengoo_stdlib_str_ptr(path.as_str()), b.ptr(), b.used_len())?; (); };
+    sh_i64_ok(0);
+}
+
+def sh_pht_run() -> Result<i64, i64> {
+    if args_len() != 1 { return sh_i64_ok(64); };
+    let path = sh_pht_argument(0)?;
+    let mut i = 0;
+    while i < 3 { let strings = sengoo_string_live_handle_count(); let buffers = sengoo_buffer_live_handle_count(); let opaque = sengoo_opaque_live_handle_count(); let snapshots = sengoo_file_snapshot_live_handle_count(); let bytes = sengoo_file_snapshot_live_bytes(); sh_pht_scope(&path, i == 0)?; assert_eq_i64(sengoo_string_live_handle_count(), strings, "pdb_type_hashes.sg", 8); assert_eq_i64(sengoo_buffer_live_handle_count(), buffers, "pdb_type_hashes.sg", 8); assert_eq_i64(sengoo_opaque_live_handle_count(), opaque, "pdb_type_hashes.sg", 8); assert_eq_i64(sengoo_file_snapshot_live_handle_count(), snapshots, "pdb_type_hashes.sg", 8); assert_eq_i64(sengoo_file_snapshot_live_bytes(), bytes, "pdb_type_hashes.sg", 8); i = i + 1; };
+    println("PDB TPI hashes: three first-call resource scopes passed");
+    sh_i64_ok(0);
+}
+
+def main() -> i64 {
+    let r = sh_pht_run();
+    if not r.is_ok() { println(r.error); return 65; };
+    r.value;
+}

@@ -16,6 +16,7 @@ import sys
 import time
 
 from link_debug_gate import ROOT, sha, u16, u32, msf_streams
+from pdb_type_hash_oracle import validate_tpi_hashes
 
 
 def closure():
@@ -34,8 +35,9 @@ def closure():
 
 def validate_pair(image, pdb, source):
     streams = msf_streams(pdb)
-    if len(streams) != 11:
+    if len(streams) != 12:
         raise AssertionError("PDB stream set differs")
+    validate_tpi_hashes(streams)
     rva = u32(image, 248)
     debug_raw = None
     for index in range(u16(image, 70)):

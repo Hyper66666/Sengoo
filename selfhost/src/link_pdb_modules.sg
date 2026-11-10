@@ -114,7 +114,7 @@ def sh_link_debug_modules_validate(program: &ShLinkDebugModules) -> Result<i64, 
 
 def sh_lpm_identity(program: &ShLinkDebugModules) -> Result<ShBinary, i64> {
     let input = sh_binary_new(256);
-    let domain = string_from_str("Sengoo-PDB-modules-v2")?;
+    let domain = string_from_str("Sengoo-PDB-modules-v2-tpi-hash-v1")?;
     sh_link_debug_text(&input, &domain)?;
     let state = sh_ldm_state_hash(program)?;
     sh_link_debug_append(&input, &state)?;
@@ -212,6 +212,8 @@ def sh_link_pdb_modules(program: &ShLinkDebugModules) -> Result<ShBinary, i64> {
     let empty = sh_binary_new(0);
     let info = sh_link_pdb_info(&program.catalog, &digest)?;
     let types = sh_link_pdb_debug_types(&program.catalog)?;
+    let type_hashes = sh_link_pdb_type_hashes(&program.catalog)?;
+    sh_link_pdb_type_hash_header(&types, &program.catalog, 10 + program.expected, &type_hashes)?;
     let ids = sh_link_pdb_types(false)?;
     let names = sh_link_pdb_names(&program.catalog)?;
     let dbi = sh_lpm_dbi(program, &image)?;
@@ -234,5 +236,6 @@ def sh_link_pdb_modules(program: &ShLinkDebugModules) -> Result<ShBinary, i64> {
     sh_link_msf_add(&streams, &program.symbols)?;
     sh_link_msf_add(&streams, &globals)?;
     sh_link_msf_add(&streams, &publics)?;
+    sh_link_msf_add(&streams, &type_hashes)?;
     sh_link_msf_emit(&streams);
 }

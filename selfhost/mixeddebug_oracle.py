@@ -1,3 +1,4 @@
+from pdb_type_hash_oracle import validate_tpi_hashes
 """Independent PDB byte oracle for mixed debug and explicitly nondebug modules."""
 import hashlib,struct
 from link_debug_gate import msf_streams,u16,u32
@@ -5,7 +6,7 @@ from link_units_oracle import cstring,require,patch_msf
 from verify_runtime_text import coff_image
 
 def inspect_mixed(pdb,sdk,source_paths):
- streams=msf_streams(pdb);require(len(streams)==13,'three module streams');dbi=streams[3];require((u16(dbi,12),u16(dbi,16),u16(dbi,20))==(11,12,10),'dynamic global/public/record indices');size,contributions,maps,files=struct.unpack_from('<4I',dbi,24);at=64;modules=[]
+ streams=msf_streams(pdb);require(len(streams)==14,'three modules plus TPI hash stream');validate_tpi_hashes(streams);dbi=streams[3];require((u16(dbi,12),u16(dbi,16),u16(dbi,20))==(11,12,10),'dynamic global/public/record indices');size,contributions,maps,files=struct.unpack_from('<4I',dbi,24);at=64;modules=[]
  while at<64+size:
   name,next_at=cstring(dbi,at+64,64+size);obj,next_at=cstring(dbi,next_at,64+size);require(name==obj==[b'sg-main.obj',b'sg-worker.obj',b'sdk-leaf.obj'][len(modules)],'actual declared module identity');modules.append({'stream':u16(dbi,at+34),'symbols':u32(dbi,at+36),'lines':u32(dbi,at+44),'files':u16(dbi,at+48),'owner':u16(dbi,at+20)});at=(next_at+3)&~3
  require(len(modules)==3 and [(x['stream'],x['files'],x['owner'])for x in modules]==[(6,2,0),(7,2,1),(8,0,2)],'three complete COFF modules / SDK filecount zero');plain=modules[2];require(plain['lines']==0,'no SDK line bytes');module=streams[8];require(len(module)==plain['symbols']+4 and u32(module,0)==4 and u32(module,len(module)-4)==0,'nondebug stream has only signature/symbols/end');at=4;kinds=[]

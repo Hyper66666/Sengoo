@@ -210,7 +210,7 @@ def sh_link_debug_identity(debug: &ShLinkDebug, image: &ShBinary, pdb_path: &Str
     let mut path_at = 0;
     while path_at < pdb_path.len() { if path_bytes.get_u8(path_at)? == 0 { return sh_coff_error(7301); }; path_at = path_at + 1; };
     let identity = sh_binary_new(16777216);
-    let domain = string_from_str("Sengoo-PDB-v1")?;
+    let domain = string_from_str("Sengoo-PDB-v1-tpi-hash-v1")?;
     sh_link_debug_text(&identity, &domain)?;
     sh_binary_unsigned(&identity, sh_binary_len(image), 8)?;
     sh_binary_unsigned(&identity, debug.names.names.len(), 8)?;

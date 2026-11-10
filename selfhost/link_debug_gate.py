@@ -1,6 +1,8 @@
 """Qualify SG-generated MSF/CodeView/PDB bytes with LLVM and live LLDB."""
 from __future__ import annotations
 
+from pdb_type_hash_oracle import validate_tpi_hashes
+
 import argparse
 import datetime as dt
 import hashlib
@@ -64,10 +66,11 @@ def msf_streams(raw):
 
 def validate_pair(image, pdb, source, pdb_path, expected_code_size=29, expected_lines=((0, 1), (4, 2), (13, 3), (19, 4), (24, 5))):
     streams = msf_streams(pdb)
-    if len(streams) != 11 or u32(streams[1], 0) != 20000404 or u32(streams[1], 8) != 1:
+    if len(streams) != 12 or u32(streams[1], 0) != 20000404 or u32(streams[1], 8) != 1:
         raise AssertionError("PDB stream identities differ")
     if u32(streams[3], 4) != 19990903 or u16(streams[3], 58) != 0x8664:
         raise AssertionError("DBI identity differs")
+    validate_tpi_hashes(streams)
     guid = streams[1][12:28]
     codeview_rva, debug_size = struct.unpack_from("<II", image, 248)
     sections = []

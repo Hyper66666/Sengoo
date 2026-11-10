@@ -1,5 +1,6 @@
 """Independent COFF and PDB module-space checks for bounded SG debug linking."""
 from __future__ import annotations
+from pdb_type_hash_oracle import validate_tpi_hashes
 import hashlib
 import struct
 from link_debug_gate import u16,u32,msf_streams
@@ -31,7 +32,7 @@ def inspect_units(main_obj,worker_obj,pdb,source_paths,object_paths):
             if name==b'helper':helpers.append((u32(raw,row+8),u16(raw,row+12),raw[row+16]))
         require(len(helpers)==1 and helpers[0][2]==3,'each object owns one static helper');coff_helpers.append(helpers[0])
     require(len(types[0])>2 and len(types[1])>2 and types[0][2]!=types[1][2],'local type 4098 must differ across object namespaces')
-    streams=msf_streams(pdb);require(len(streams)==12,'N+10 MSF streams');dbi=streams[3];require(u16(dbi,12)==10 and u16(dbi,16)==11 and u16(dbi,20)==9,'dynamic global/public/symbol stream indices')
+    streams=msf_streams(pdb);require(len(streams)==13,'N+11 MSF streams');validate_tpi_hashes(streams);dbi=streams[3];require(u16(dbi,12)==10 and u16(dbi,16)==11 and u16(dbi,20)==9,'dynamic global/public/symbol stream indices')
     require(u32(streams[2],12)-u32(streams[2],8)==len(type_records(streams[2],56)),'global TPI extent')
     module_size,contrib_size,map_size,file_size=struct.unpack_from('<4I',dbi,24);at=64;modules=[]
     while at<64+module_size:

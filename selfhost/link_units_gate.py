@@ -17,6 +17,7 @@ def coff_mutations(raw):
 
 parser=argparse.ArgumentParser(description="Qualify multiple independent SG COFF debug modules")
 for name in ["seed","clang","formatter","lldb-python-home","output"]:parser.add_argument("--"+name,required=True,type=Path)
+parser.add_argument('--native-evidence',type=Path,default=ROOT/'target/selfhost/m5-native-debug-multi-file-regression/evidence.json')
 args=parser.parse_args();root=ROOT;base=args.output.resolve();assert base.is_relative_to(root/'target');base.mkdir(parents=True,exist_ok=False)
 sha=lambda p:hashlib.sha256(p.read_bytes()).hexdigest()
 entry=root/'selfhost/tests/link_native_debug_units.sg';originals=closure(entry);originals.update(closure(root/'selfhost/tests/link_debug_units.sg'));originals.update({p:sha(p) for p in (root/'tools/stdlib').rglob('*') if p.is_file() and not any(x in {'target','build','__pycache__'} for x in p.relative_to(root/'tools/stdlib').parts)})
@@ -58,7 +59,7 @@ try:
 
  for path in [p for p in originals if p.suffix=='.sg' and (p.name in {'link_debug_units.sg','link_native_debug_units.sg'} or p.stem.startswith('link_'))]:run('format-'+path.stem,[tools['formatter'],'--check',snapshot/path.relative_to(root)])
  fast=base/'unit-model.exe';run('build-unit-model',[tools['seed'],'--runtime-mode','source-development','build',snapshot/'selfhost/tests/link_debug_units.sg','--force-rebuild','-O','0','-o',fast])
- prior=root/'target/selfhost/m5-native-debug-multi-file-regression/evidence.json';raw=prior.read_bytes();qualified=json.loads(raw);assert qualified['result']=='passed' and not qualified['changed_sources'] and not qualified['changed_tools'];inputs[str(prior)]=hashlib.sha256(raw).hexdigest()
+ prior=args.native_evidence.resolve();raw=prior.read_bytes();qualified=json.loads(raw);assert qualified['result']=='passed' and not qualified['changed_sources'] and not qualified['changed_tools'];inputs[str(prior)]=hashlib.sha256(raw).hexdigest()
  for name,digest in qualified['sources'].items():assert sha(root/name)==digest;inputs[str(root/name)]=digest
  report['qualifications']={'legacy_native_objects':{'report':str(prior),'sha256':hashlib.sha256(raw).hexdigest(),'sources':qualified['sources'],'artifacts':qualified['artifacts']}}
  fixtures=[('multiple-functions','link_native_debug_source.sg'),('multiple-returns','link_debug_ranges_source.sg'),('floating-parameters','link_native_debug_types_source.sg'),('mixed-scalar-parameters','link_native_debug_scalars_source.sg'),('readonly-reference','link_native_debug_refs_source.sg'),('mutable-reference','link_native_debug_mut_ref_source.sg'),('raw-void-pointer','link_native_debug_raw_ptr_source.sg'),('aggregate-locals','link_native_debug_aggregate_source.sg'),('tagged-enum-local','link_native_debug_enum_source.sg')]
@@ -77,7 +78,7 @@ try:
  'type-4098':{'common.sg':'pub def helper()->i64 {\n return 2;\n}\n','main.sg':'import common;\nextern "C" { fn worker()->i64; }\nstruct Local { input:i64, extra:i64 }\ndef main()->i64 {\n let state:Local=Local{input:38,extra:2};\n let input:i64=state.input+helper();\n let answer:i64=worker()+input-40;\n return answer;\n}\n','worker.sg':'import common;\nstruct Local { count:i64, step:i64 }\npub def worker()->i64 {\n let state:Local=Local{count:40,step:helper()};\n let answer:i64=state.count+state.step;\n return answer;\n}\n'}}
  inspections={};positive={}
  for variant,files in variants.items():
-  source=base/('sources 世界 & '+variant);source.mkdir();paths=[source/name for name in ['main.sg','common.sg','worker.sg']]
+  source=base/('sources 涓栫晫 & '+variant);source.mkdir();paths=[source/name for name in ['main.sg','common.sg','worker.sg']]
   for name,text in files.items():p=source/name;p.write_text(text,encoding='utf-8',newline='\n');inputs[str(p)]=sha(p)
   pinned=base/('fixed-'+variant+'.pdb');fresh=[]
   for round in ['fresh-a','fresh-b']:

@@ -211,6 +211,8 @@ def sh_link_pdb(debug: &ShLinkDebug, image: &ShBinary, path: &String) -> Result<
     let empty = sh_binary_new(0);
     let info = sh_link_pdb_info(debug, &digest)?;
     let types = sh_link_pdb_debug_types(debug)?;
+    let type_hashes = sh_link_pdb_type_hashes(debug)?;
+    sh_link_pdb_type_hash_header(&types, debug, 11, &type_hashes)?;
     let ids = sh_link_pdb_types(false)?;
     let names = sh_link_pdb_names(debug)?;
     let module = sh_binary_new(1048576);
@@ -240,6 +242,7 @@ def sh_link_pdb(debug: &ShLinkDebug, image: &ShBinary, path: &String) -> Result<
     sh_link_msf_add(&streams, &symbols)?;
     sh_link_msf_add(&streams, &globals)?;
     sh_link_msf_add(&streams, &publics)?;
+    sh_link_msf_add(&streams, &type_hashes)?;
     sh_link_msf_emit(&streams);
 }
 
@@ -300,4 +303,32 @@ def sh_link_pdb_debug_types(debug: &ShLinkDebug) -> Result<ShBinary, i64> {
     sh_binary_patch(&output, 28, 262143, 4)?;
     sh_link_debug_append(&output, &debug.types.records)?;
     Result { is_ok: true, value: output, error: 0 };
+}
+
+def sh_link_pdb_type_hashes(debug: &ShLinkDebug) -> Result<ShBinary, i64> {
+    let output = sh_binary_new(49152);
+    let count = debug.types.offsets.len();
+    if count > 4096 or sh_binary_len(&debug.types.records) > 1048576 { return sh_coff_error(7322); };
+    if debug.types.depths.len() != count { return sh_coff_error(7321); };
+    let mut index = 0;
+    let mut total = 0;
+    while index < count { let offset = sengoo_vec_get_or_default_i64(debug.types.offsets.handle, index, -1); if offset != total or offset > sh_binary_len(&debug.types.records) - 4 { return sh_coff_error(7321); }; let size = sh_link_uint(&debug.types.records, offset, 2)? + 2; if size < 4 or size % 4 != 0 or size > 65536 or size > sh_binary_len(&debug.types.records) - offset { return sh_coff_error(7321); }; let kind = sh_link_uint(&debug.types.records, offset + 2, 2)?; let mut hash = 0; if kind == 5381 or kind == 5382 or kind == 5383 { if size < if kind == 5381 { 24; } else { 20; } or sh_link_uint(&debug.types.records, offset + 6, 2)? != 0 { return sh_coff_error(7323); }; let name_at = if kind == 5383 { offset + 16; } else { let numeric = offset + if kind == 5381 { 20; } else { 12; }; sh_link_cva_number(&debug.types.records, numeric, offset + size)?; sh_link_cva_number_end(&debug.types.records, numeric); }; let name = sh_link_cva_text(&debug.types.records, name_at, offset + size, false)?; if sh_link_cva_padding(&debug.types.records, name_at + name.len() + 1, offset + size)? != offset + size { return sh_coff_error(7321); }; hash = sh_link_pdb_hash(&name)?; } else { if kind != 4609 and kind != 4104 and kind != 4097 and kind != 4098 and kind != 4611 and kind != 5379 { return sh_coff_error(7323); }; let mut at = 0; while at < size { hash = hash ^ sh_binary_get(&debug.types.records, offset + at)?; let mut bit = 0; while bit < 8 { hash = if (hash & 1) != 0 { (hash >> 1) ^ 3988292384; } else { hash >> 1; }; bit = bit + 1; }; at = at + 1; }; }; sh_binary_unsigned(&output, hash % 262143, 4)?; total = total + size; index = index + 1; };
+    if total != sh_binary_len(&debug.types.records) { return sh_coff_error(7321); };
+    index = 0;
+    total = 0;
+    while index < count { let offset = sengoo_vec_get_or_default_i64(debug.types.offsets.handle, index, -1); let size = sh_link_uint(&debug.types.records, offset, 2)? + 2; if index == 0 or (total + size) / 8192 > total / 8192 { sh_binary_unsigned(&output, 4096 + index, 4)?; sh_binary_unsigned(&output, total, 4)?; (); }; total = total + size; index = index + 1; };
+    Result { is_ok: true, value: output, error: 0 };
+}
+
+def sh_link_pdb_type_hash_header(types: &ShBinary, debug: &ShLinkDebug, stream: i64, hash: &ShBinary) -> Result<i64, i64> {
+    let bytes = debug.types.offsets.len() * 4;
+    if stream < 0 or stream > 65534 or sh_binary_len(types) < 56 or sh_link_uint(types, 4, 4)? != 56 or sh_binary_len(hash) < bytes or (sh_binary_len(hash) - bytes) % 8 != 0 { return sh_i64_error(7321); };
+    sh_binary_patch(types, 20, stream, 2)?;
+    sh_binary_patch(types, 32, 0, 4)?;
+    sh_binary_patch(types, 36, bytes, 4)?;
+    sh_binary_patch(types, 40, bytes, 4)?;
+    sh_binary_patch(types, 44, sh_binary_len(hash) - bytes, 4)?;
+    sh_binary_patch(types, 48, bytes, 4)?;
+    sh_binary_patch(types, 52, 0, 4)?;
+    sh_i64_ok(0);
 }

@@ -12,6 +12,7 @@ import subprocess
 import sys
 
 from link_debug_gate import ROOT, msf_streams, sha, u16, u32
+from pdb_type_hash_oracle import validate_tpi_hashes
 from link_multi_debug_gate import coff_fragments
 
 
@@ -42,7 +43,8 @@ def validate(streams, obj, paths, contents):
     _, at, length = fragments[0xF4][0]
     check_checksums(obj[at:at + length], expected_strings, paths, contents)
 
-    require(len(streams) == 11, "PDB stream count")
+    require(len(streams) == 12, "PDB stream count")
+    validate_tpi_hashes(streams)
     names = streams[5]
     require(u32(names, 0) == 0xEFFEEFFE and u32(names, 4) == 1, "PDB /names identity")
     size = u32(names, 8)
