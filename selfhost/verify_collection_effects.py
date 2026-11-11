@@ -2,6 +2,7 @@
 from __future__ import annotations
 import argparse, datetime, hashlib, json, os, platform, re, shutil, struct, subprocess, sys, tomllib
 from pathlib import Path
+from compiler_inputs import compiler_closure, module_map
 
 ROOT=Path(__file__).resolve().parents[1]
 def sha(path):return hashlib.sha256(Path(path).read_bytes()).hexdigest()
@@ -10,17 +11,14 @@ def rust_override(key):
     key=key.upper()
     return key.startswith(('RUSTC','RUSTDOC','RUSTUP_TOOLCHAIN','CARGO_BUILD_RUSTC','CARGO_BUILD_RUSTDOC','CARGO_PROFILE_')) or key in {'CARGO','RUSTFLAGS','RUSTDOCFLAGS','CARGO_ENCODED_RUSTFLAGS','CARGO_ENCODED_RUSTDOCFLAGS','CARGO_BUILD_RUSTFLAGS','CARGO_BUILD_RUSTDOCFLAGS','CARGO_BUILD_TARGET','CARGO_TARGET_DIR','CARGO_INCREMENTAL'} or key.startswith('CARGO_TARGET_') and key.endswith(('_RUSTFLAGS','_RUSTDOCFLAGS','_RUSTC'))
 def closure(entries):
-    result={};pending=list(entries)
-    while pending:
-        path=pending.pop()
-        if path in result:continue
-        result[path]=sha(path)
-        pending += [ROOT/'selfhost/src'/(n+'.sg') for n in re.findall(r'import\s+selfhost_([A-Za-z0-9_]+)\s*;',path.read_text('utf8'))]
-    return result
+    return compiler_closure(ROOT, entries)
 def main():
     parser=argparse.ArgumentParser(description=__doc__)
     for n in ['seed','clang','formatter','output']:parser.add_argument('--'+n,required=True,type=Path)
-    args=parser.parse_args();base=args.output.resolve();assert base.is_relative_to(ROOT/'target');base.mkdir(parents=True,exist_ok=False)
+    parser.add_argument('--provider-report',type=Path);parser.add_argument('--provider-pin')
+    args=parser.parse_args()
+    if (args.provider_report is None)!=(args.provider_pin is None):parser.error('--provider-report and --provider-pin must be supplied together')
+    base=args.output.resolve();assert base.is_relative_to(ROOT/'target');base.mkdir(parents=True,exist_ok=False)
     inputs={str(Path(__file__).resolve()):sha(__file__)}
     originals=closure([ROOT/'selfhost/tests/collection_effects.sg'])
     for directory in ['tools/stdlib','runtime']:
@@ -46,7 +44,7 @@ def main():
     assert tools['cargo'].parent==tools['rustc'].parent
     env.update(CARGO=str(tools['cargo']),RUSTC=str(tools['rustc']),CARGO_BUILD_RUSTC=str(tools['rustc']),RUSTUP_TOOLCHAIN=tools['rustc'].parent.parent.name,RUSTC_WRAPPER='',RUSTC_WORKSPACE_WRAPPER='',CARGO_BUILD_RUSTC_WRAPPER='',CARGO_BUILD_RUSTC_WORKSPACE_WRAPPER='')
     env['PATH']=str(tools['cargo'].parent)+os.pathsep+env['PATH']
-    env.update(SENGOO_STDLIB=str(snapshot/'tools/stdlib'),SENGOO_RUNTIME=str(snapshot/'tools/stdlib/runtime.c'),SENGOO_CLANG=str(tools['clang']),SENGOO_LINKER='lld',SENGOO_MODULE_MAP=';'.join('selfhost_'+p.stem+'='+str(snapshot/p.relative_to(ROOT))for p in originals if p.parent==ROOT/'selfhost/src'))
+    env.update(SENGOO_STDLIB=str(snapshot/'tools/stdlib'),SENGOO_RUNTIME=str(snapshot/'tools/stdlib/runtime.c'),SENGOO_CLANG=str(tools['clang']),SENGOO_LINKER='lld',SENGOO_MODULE_MAP=module_map(ROOT, originals, snapshot))
     pure={k:v for k,v in env.items()if not k.upper().startswith('SENGOO_')};pure['PATH']=''
     report={'schema':1,'stage':'fresh-collection-source-effects-and-ownership','result':'running','production_admitted':False,'m3_complete':False,'mir_schema':1,'host':platform.platform(),'source_revision':revision(),'started_at':datetime.datetime.now(datetime.timezone.utc).isoformat(),'sources':inputs,'qualified_checkout_sources':{str(p):h for p,h in originals.items()},'tools':{n:{'path':str(p),'sha256':sha(p)}for n,p in tools.items()},'steps':[],'limits':['schema1 source candidates remain unlowerable1; a faithful replay is not native Ref/constructor authority','read-only scope is the explicit six real root functions, not the full standard library/compiler closure','qualified historical C collection provider contract is pinned; existing C algorithms remain a development SDK dependency','physical MIR27 and push runtime execution is separately qualified by ed3aaa4; this gate tests source semantic admission/rejection and exact ownership','seed compiler uses recorded C/Rust development runtimes; requested lld selection does not independently qualify its complete nested SDK child-link closure','M3 core diagnostics, generic source jobs, Some source native emission, M6/M8/bootstrap cutover remain open'],'sdk_environment':{n:env.get(n)for n in ['INCLUDE','LIB','LIBPATH','VCToolsInstallDir','WindowsSdkDir','WindowsSDKVersion','VSINSTALLDIR','VCINSTALLDIR']}}
     configs={p/'.cargo'/n for p in [ROOT,*ROOT.parents,snapshot,*snapshot.parents]for n in ['config','config.toml']};configs.update(Path(os.environ.get('CARGO_HOME',str(Path.home()/'.cargo')))/n for n in ['config','config.toml']);report['cargo_config_candidates']={}
@@ -60,7 +58,7 @@ def main():
     try:
         # Revalidate the exact historical local qualification chain. It is not
         # substituted with freshly observed hashes of mutable current sources.
-        qualified=ROOT/'target/selfhost/m3-collection-provider-ast-checkpoint';qp=qualified/'evidence.json';qraw=qp.read_bytes();qdigest=hashlib.sha256(qraw).hexdigest();assert qdigest=='a63152e01208dff39e1d5cbcbd326187901808c8f76fa0d3075a08e0a9fa1cd3';q=json.loads(qraw);assert q['result']=='passed'
+        qp=args.provider_report.resolve()if args.provider_report is not None else ROOT/'target/selfhost/m3-collection-provider-ast-checkpoint/evidence.json';qualified=qp.parent;qraw=qp.read_bytes();qdigest=hashlib.sha256(qraw).hexdigest();expected_pin=args.provider_pin if args.provider_pin is not None else'a63152e01208dff39e1d5cbcbd326187901808c8f76fa0d3075a08e0a9fa1cd3';assert qdigest==expected_pin;q=json.loads(qraw);assert q['schema']==1 and q['stage']=='collections-namespace-two-provider-mapping'and q['result']=='passed'
         inputs[str(qp)]=qdigest
         immutable_values=set(q['sources'].values());transformed=[]
         for name,digest in q['qualified_checkout_sources'].items():
@@ -70,9 +68,13 @@ def main():
         report['historical_provider_origin_bindings']={'originals':q['qualified_checkout_sources'],'consumed_immutable_sources':q['sources'],'transformed_originals':transformed}
         for name,digest in q['sources'].items():assert sha(name)==digest;inputs[name]=digest
         for name,item in q['tools'].items():assert sha(item['path'])==item['sha256'];inputs[item['path']]=item['sha256']
-        assert not any(q.get(k)for k in ['changed_sources','changed_tools','checkout_changes','changed_configs','changed_artifacts'])
+        assert all(q[k]==[]for k in ['changed_sources','changed_tools','checkout_changes','changed_configs','changed_artifacts'])
         for relative,digest in q['artifacts'].items():p=qualified/relative;assert sha(p)==digest;inputs[str(p)]=digest
-        report['qualified_provider']={'report':str(qp),'report_sha256':qdigest,'pinned_historical_qualification':True,'manifest_sha256':q['provider_manifest_sha256'],'object_sha256':q['provider_object_sha256'],'sources':q['sources'],'tools':q['tools'],'artifacts':q['artifacts']}
+        for step in q['steps']:
+            assert step['exit_code']==step.get('expected_exit_code',0)
+            for stream in ['stdout','stderr']:
+                receipt=qualified/(step['name']+'.'+stream+'.log');assert sha(receipt)==step[stream+'_sha256'];inputs[str(receipt)]=sha(receipt)
+        report['qualified_provider']={'report':str(qp),'report_sha256':qdigest,'pinned_historical_qualification':args.provider_report is None,'manifest_sha256':q['provider_manifest_sha256'],'object_sha256':q['provider_object_sha256'],'sources':q['sources'],'tools':q['tools'],'artifacts':q['artifacts']}
         for n in ['cargo','rustc']:run(n+'-version',[tools[n],'-vV'if n=='rustc'else'-V'])
         # Cargo's actual compiler selection is verified, not inferred from a shim/sysroot.
         probe=base/'cargo-probe';probe.mkdir();(probe/'src').mkdir();(probe/'Cargo.toml').write_text('[package]\nname="effects_rustc_probe"\nversion="0.0.0"\nedition="2021"\n[workspace]\n',encoding='utf8');(probe/'src/lib.rs').write_text('pub fn value()->i64{42}\n',encoding='utf8');(probe/'build.rs').write_text('fn main(){println!("cargo:warning=effects_rustc={}",std::env::var("RUSTC").unwrap());}\n',encoding='utf8')

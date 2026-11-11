@@ -143,6 +143,26 @@ hosts continue to require their own evidence.
 
 ## Native development preview
 
+The compiler module graph now uses an SG-owned retained-source arena in
+`compiler_support/`, independent of the public 32-owner `FileSnapshot` API.
+The compiler arena permits up to 1,024 unique sources with explicit byte/path
+budgets and reuses duplicate physical identities at capacity. A narrow Windows
+adapter retains file and ancestor handles; SG owns complete reads, UTF-8,
+SHA-256, deduplication and resource admission. Source-authority consumers reread
+the same retained handle and compare bytes, identity, paths and digest before
+accepting a witness. This does not complete compiler self-build or the native SDK.
+
+`verify_compiler_source_snapshots.py` qualifies capacity, real module loading,
+source-witness mutation, injected read/metadata failures, first-call resource
+recovery and the actual compiler self-input frontier. It builds an independent
+OS probe from the exact captured adapter sources. Ordinary compiler, HIR and
+collection-flow regressions remain separate integration requirements; current
+evidence is recorded by `add-selfhost-compiler-source-snapshots`.
+`audit_compiler_source_snapshots.py` checks the five named reports together,
+rehashes their actual input closures and records legacy unhashed command logs
+only as audit-time observations. A running or failed dependency cannot pass
+this integration audit.
+
 `source_codegen_gate.py` builds `tools/native.sg` and runs 49 exact source
 programs. Forty-six execute with exit status 42 and identical stdout/stderr
 through both the SG native and frozen qualified Rust/LLVM paths. The remaining

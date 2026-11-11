@@ -1,0 +1,147 @@
+import selfhost_hir_origins;
+
+import std::assert;
+
+import std::args;
+
+extern "C" {
+    fn sengoo_string_live_handle_count() -> i64;
+    fn sengoo_buffer_live_handle_count() -> i64;
+    fn sengoo_opaque_live_handle_count() -> i64;
+    fn sengoo_file_snapshot_live_handle_count() -> i64;
+    fn sengoo_file_snapshot_live_bytes() -> i64;
+    fn sengoo_compiler_snapshot_test_handle_count() -> i64;
+}
+
+def arg_text(i: i64) -> Result<String, i64> {
+    let n = arg_len(i)?;
+    let b = ffi_buffer_new(n)?;
+    let c = arg_copy(i, b)?;
+    string_from_utf8(b, c);
+}
+
+def invalid_copy(length: i64, capacity: i64, initialized: i64) -> Result<i64, i64> {
+    let state = ffi_buffer_new(1024)?;
+    assert_eq_i64(sengoo_compiler_snapshot_init(state.ptr(), 1024), 0, "copy-bounds", 1);
+    let bytes = ffi_buffer_new(capacity)?;
+    let literal = "copy";
+    assert_eq_i64(sengoo_ffi_buffer_copy_in(bytes.handle, sengoo_stdlib_str_ptr(literal), initialized), 0, "copy-bounds", 2);
+    let before = ffi_buffer_new(80)?;
+    let path = string_new();
+    let pinned = string_new();
+    let identity = string_new();
+    let digest = string_new();
+    let arena = sh_compiler_snapshot_arena(1, 1024, 32768);
+    assert_true(arena.snapshots.push(ShCompilerSnapshot { guard: ShCompilerSourceGuard { state: state }, bytes: bytes, before: before, path: path, pinned_path: pinned, identity: identity, digest: digest, length: length }), "copy-bounds", 3);
+    let output = ffi_buffer_new(32)?;
+    assert_true(output.copy_in("keep"), "copy-bounds", 4);
+    let rejected = sh_compiler_snapshot_copy_handle(&arena, 0, output.handle);
+    assert_true(not rejected.is_ok(), "copy-bounds", 5);
+    assert_eq_i64(output.used_len(), 4, "copy-bounds", 6);
+    let kept = string_from_utf8(output, 4)?;
+    assert_true(kept.as_str() == "keep", "copy-bounds", 7);
+    sh_i64_ok(42);
+}
+
+def probe() -> Result<i64, i64> {
+    invalid_copy(-1, 4, 4)?;
+    invalid_copy(8, 4, 4)?;
+    invalid_copy(4, 4, 2)?;
+    let entry = arg_text(0)?;
+    let library = arg_text(1)?;
+    let empty = string_new();
+    let graph = sh_modules_load(entry.as_str(), library.as_str(), &empty, 8, 1048576);
+    assert_eq_i64(graph.error, 0, "poison", 1);
+    let analyzed = sh_modules_check(&graph, 10000, 1000);
+    assert_eq_i64(analyzed.error, 0, "poison", 2);
+    assert_true(sh_ho_physical_valid(&graph), "poison", 3);
+    let identity = graph.units.get(0).identity.clone()?;
+    let digest = sh_compiler_snapshot_string(&graph.snapshots, 0, 0)?;
+    assert_eq_i64(sh_o_pin(&graph, &analyzed, identity.as_str(), digest.as_str()), 0, "poison", 4);
+    let invalid = sh_compiler_snapshot_matches(&graph.snapshots, -1);
+    assert_true(not invalid.is_ok() and invalid.error == 3, "poison", 12);
+    let invalid_high = sh_compiler_snapshot_matches(&graph.snapshots, graph.snapshots.snapshots.len());
+    assert_true(not invalid_high.is_ok() and invalid_high.error == 3, "poison", 13);
+    let original = graph.sources.texts.get(0).text.clone()?;
+    assert_true(original.as_str() == "def main()->i64{42}\n", "fixture", 1);
+    let normal_copy = ffi_buffer_new(original.len())?;
+    assert_eq_i64(sh_compiler_snapshot_copy_handle(&graph.snapshots, 0, normal_copy.handle)?, original.len(), "copy", 1);
+    let normal_text = string_from_utf8(normal_copy, original.len())?;
+    assert_true(normal_text.as_str() == original.as_str(), "copy", 2);
+    let short_copy = ffi_buffer_new(original.len())?;
+    assert_true(short_copy.copy_in("keep"), "copy", 3);
+    assert_eq_i64(sengoo_ffi_buffer_copy_in(graph.snapshots.snapshots.get(0).bytes.handle, sengoo_stdlib_str_ptr(original.as_str()), original.len() - 1), 0, "copy", 4);
+    assert_true(not sh_compiler_snapshot_copy_handle(&graph.snapshots, 0, short_copy.handle).is_ok(), "copy", 5);
+    assert_eq_i64(short_copy.used_len(), 4, "copy", 6);
+    assert_true(string_from_utf8(short_copy, 4)?.as_str() == "keep", "copy", 7);
+    assert_true(not sh_compiler_snapshot_matches(&graph.snapshots, 0)?, "copy", 8);
+    assert_eq_i64(sengoo_ffi_buffer_copy_in(graph.snapshots.snapshots.get(0).bytes.handle, sengoo_stdlib_str_ptr(original.as_str()), original.len()), 0, "copy", 9);
+    assert_true(sh_compiler_snapshot_matches(&graph.snapshots, 0)?, "copy", 10);
+    let actual_identity = graph.snapshots.snapshots.get(0).identity.clone()?;
+    let actual_path = graph.snapshots.snapshots.get(0).path.clone()?;
+    let actual_pinned = graph.snapshots.snapshots.get(0).pinned_path.clone()?;
+    graph.snapshots.snapshots.get(0).digest.clear();
+    graph.snapshots.snapshots.get(0).digest.push_str("poison")?;
+    assert_true(not sh_compiler_snapshot_matches(&graph.snapshots, 0)?, "poison", 14);
+    graph.snapshots.snapshots.get(0).digest.clear();
+    graph.snapshots.snapshots.get(0).digest.push_str(digest.as_str())?;
+    graph.snapshots.snapshots.get(0).identity.clear();
+    graph.snapshots.snapshots.get(0).identity.push_str("poison")?;
+    assert_true(not sh_compiler_snapshot_matches(&graph.snapshots, 0)?, "poison", 15);
+    graph.snapshots.snapshots.get(0).identity.clear();
+    graph.snapshots.snapshots.get(0).identity.push_str(actual_identity.as_str())?;
+    graph.snapshots.snapshots.get(0).path.clear();
+    graph.snapshots.snapshots.get(0).path.push_str("poison")?;
+    assert_true(not sh_compiler_snapshot_matches(&graph.snapshots, 0)?, "poison", 16);
+    graph.snapshots.snapshots.get(0).path.clear();
+    graph.snapshots.snapshots.get(0).path.push_str(actual_path.as_str())?;
+    graph.snapshots.snapshots.get(0).pinned_path.clear();
+    graph.snapshots.snapshots.get(0).pinned_path.push_str("poison")?;
+    assert_true(not sh_compiler_snapshot_matches(&graph.snapshots, 0)?, "poison", 17);
+    graph.snapshots.snapshots.get(0).pinned_path.clear();
+    graph.snapshots.snapshots.get(0).pinned_path.push_str(actual_pinned.as_str())?;
+    let metadata = sengoo_ffi_buffer_ptr(graph.snapshots.snapshots.get(0).before.handle);
+    let volume = sh_css_word(&graph.snapshots.snapshots.get(0).before, 0);
+    sengoo_ds_word_put(sengoo_compiler_snapshot_bytes_ptr(metadata), 0, volume + 1);
+    assert_true(not sh_compiler_snapshot_matches(&graph.snapshots, 0)?, "poison", 18);
+    sengoo_ds_word_put(sengoo_compiler_snapshot_bytes_ptr(metadata), 0, volume);
+    assert_true(sh_compiler_snapshot_matches(&graph.snapshots, 0)?, "poison", 19);
+    let poison = string_from_str("def main()->i64{43}\n")?;
+    assert_eq_i64(poison.len(), graph.snapshots.snapshots.get(0).length, "poison", 5);
+    assert_eq_i64(sengoo_ffi_buffer_copy_in(graph.snapshots.snapshots.get(0).bytes.handle, sengoo_stdlib_str_ptr(poison.as_str()), poison.len()), 0, "poison", 6);
+    assert_true(graph.sources.texts.get(0).text.clear(), "poison", 7);
+    graph.sources.texts.get(0).text.push_str(poison.as_str())?;
+    assert_true(graph.text.clear(), "poison", 8);
+    graph.text.push_str(poison.as_str())?;
+    graph.text.push_str("\n\n")?;
+    assert_true(not sh_ho_physical_valid(&graph), "poison", 9);
+    assert_eq_i64(sh_o_pin(&graph, &analyzed, identity.as_str(), digest.as_str()), -1, "poison", 10);
+    assert_true(sh_compiler_snapshot_string(&graph.snapshots, 0, 0)?.as_str() == digest.as_str(), "poison", 11);
+    graph.snapshots.snapshots.get(0).digest.clear();
+    graph.snapshots.snapshots.get(0).digest.push_str("1771cef60c5239f5fb0e4be5b5c3ab216ece5738284b2bed9161b615546cdce4")?;
+    assert_true(not sh_compiler_snapshot_matches(&graph.snapshots, 0)?, "poison", 20);
+    assert_true(not sh_ho_physical_valid(&graph), "poison", 21);
+    sengoo_ffi_buffer_copy_in(graph.snapshots.snapshots.get(0).bytes.handle, sengoo_stdlib_str_ptr(original.as_str()), original.len());
+    graph.sources.texts.get(0).text.clear();
+    graph.sources.texts.get(0).text.push_str(original.as_str())?;
+    graph.text.clear();
+    graph.text.push_str(original.as_str())?;
+    graph.text.push_str("\n\n")?;
+    graph.snapshots.snapshots.get(0).digest.clear();
+    graph.snapshots.snapshots.get(0).digest.push_str(digest.as_str())?;
+    assert_true(sh_ho_physical_valid(&graph), "poison", 22);
+    assert_eq_i64(sh_o_pin(&graph, &analyzed, identity.as_str(), digest.as_str()), 0, "poison", 23);
+    sh_i64_ok(42);
+}
+
+def main() -> i64 {
+    let strings = sengoo_string_live_handle_count();
+    let buffers = sengoo_buffer_live_handle_count();
+    let opaque = sengoo_opaque_live_handle_count();
+    let files = sengoo_file_snapshot_live_handle_count();
+    let bytes = sengoo_file_snapshot_live_bytes();
+    let handles = sengoo_compiler_snapshot_test_handle_count();
+    let mut i = 0;
+    while i < 3 { { let value = probe(); if not value.is_ok() { println(value.error); return 65; }; }; assert_eq_i64(sengoo_string_live_handle_count(), strings, "scope", 1); assert_eq_i64(sengoo_buffer_live_handle_count(), buffers, "scope", 2); assert_eq_i64(sengoo_opaque_live_handle_count(), opaque, "scope", 3); assert_eq_i64(sengoo_file_snapshot_live_handle_count(), files, "scope", 4); assert_eq_i64(sengoo_file_snapshot_live_bytes(), bytes, "scope", 5); assert_eq_i64(sengoo_compiler_snapshot_test_handle_count(), handles, "scope", 6); i = i + 1; };
+    42;
+}

@@ -14,6 +14,7 @@ import sys
 import tomllib
 
 from verify_collection_provider import ROOT, sha, closure, headers
+from compiler_inputs import module_map
 
 
 def revision():
@@ -32,7 +33,7 @@ def main():
     parent_path = args.provider_report.resolve()
     assert sha(parent_path) == args.provider_pin
     parent = json.loads(parent_path.read_text('utf8'))
-    assert parent['stage'] == 'collections-namespace-two-provider-mapping' and parent['result'] == 'passed'
+    assert parent['schema'] == 1 and parent['stage'] == 'collections-namespace-two-provider-mapping' and parent['result'] == 'passed'
     for name in ['changed_sources', 'checkout_changes', 'changed_tools', 'changed_configs', 'changed_artifacts']:
         assert parent[name] == []
     sources = {str(parent_path): args.provider_pin, str(Path(__file__).resolve()): sha(__file__),
@@ -89,7 +90,7 @@ def main():
         assert sha(tools[name]) == lock[name + '_sha256']
     env.update(CARGO=str(tools['cargo']), RUSTC=str(tools['rustc']), CARGO_BUILD_RUSTC=str(tools['rustc']), RUSTUP_TOOLCHAIN=tools['rustc'].parent.parent.name, RUSTC_WRAPPER='', RUSTC_WORKSPACE_WRAPPER='', CARGO_BUILD_RUSTC_WRAPPER='', CARGO_BUILD_RUSTC_WORKSPACE_WRAPPER='')
     env['PATH'] = str(tools['cargo'].parent) + os.pathsep + env['PATH']
-    env.update(SENGOO_STDLIB=str(captured / 'tools/stdlib'), SENGOO_RUNTIME=str(captured / 'tools/stdlib/runtime.c'), SENGOO_CLANG=str(tools['clang']), SENGOO_MODULE_MAP=';'.join('selfhost_' + path.stem + '=' + str(captured / path.relative_to(ROOT)) for path in originals if path.parent == ROOT / 'selfhost/src'))
+    env.update(SENGOO_STDLIB=str(captured / 'tools/stdlib'), SENGOO_RUNTIME=str(captured / 'tools/stdlib/runtime.c'), SENGOO_CLANG=str(tools['clang']), SENGOO_MODULE_MAP=module_map(ROOT, originals, captured))
     pure = {key: value for key, value in env.items() if not key.upper().startswith('SENGOO_')}
     pure['PATH'] = ''
     configs = {folder / '.cargo' / name for folder in [ROOT, *ROOT.parents, captured, *captured.parents] for name in ['config', 'config.toml']}

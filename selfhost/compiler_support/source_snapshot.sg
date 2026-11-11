@@ -1,0 +1,314 @@
+import std::collections;
+
+import std::string;
+
+import std::ffi;
+
+import selfhost_compiler_snapshot_sha;
+
+import selfhost_compiler_snapshot_utf8;
+
+extern "C" {
+    fn sengoo_compiler_snapshot_init(state: i64, extent: i64) -> i64;
+    fn sengoo_compiler_snapshot_open(state: i64, extent: i64, path: i64, length: i64) -> i64;
+    fn sengoo_compiler_snapshot_close(state: i64, extent: i64) -> i64;
+    fn sengoo_compiler_snapshot_seek(state: i64, extent: i64, offset: i64) -> i64;
+    fn sengoo_compiler_snapshot_read(state: i64, extent: i64, output: i64, capacity: i64) -> i64;
+    fn sengoo_compiler_snapshot_metadata(state: i64, extent: i64, output: i64, capacity: i64) -> i64;
+    fn sengoo_compiler_snapshot_path(state: i64, extent: i64, kind: i64, output: i64, capacity: i64) -> i64;
+    fn sengoo_compiler_snapshot_full_path(path: i64, length: i64, output: i64, capacity: i64) -> i64;
+    fn sengoo_compiler_snapshot_drive_type(root: i64, length: i64) -> i64;
+    unsafe fn sengoo_compiler_snapshot_bytes_ptr(value: i64) -> *mut u8;
+    unsafe fn sengoo_compiler_snapshot_const_bytes_ptr(value: i64) -> *const u8;
+    unsafe fn sengoo_runtime_memory_read_u8(source: *const u8, index: i64) -> u8;
+    unsafe fn sengoo_ds_word_get(source: *mut u8, index: i64) -> i64;
+}
+
+struct ShCompilerSourceGuard {
+    state: Buffer,
+}
+
+impl !Send for ShCompilerSourceGuard {
+}
+
+impl !Sync for ShCompilerSourceGuard {
+}
+
+impl Drop for ShCompilerSourceGuard {
+    def drop(&mut self) {
+        sengoo_compiler_snapshot_close(sengoo_ffi_buffer_ptr(self.state.handle), 1024);
+    }
+}
+
+struct ShCompilerSnapshot {
+    guard: ShCompilerSourceGuard,
+    bytes: Buffer,
+    before: Buffer,
+    path: String,
+    pinned_path: String,
+    identity: String,
+    digest: String,
+    length: i64,
+}
+
+struct ShCompilerSnapshotArena {
+    snapshots: Vec<ShCompilerSnapshot>,
+    max_modules: i64,
+    max_bytes: i64,
+    max_path_bytes: i64,
+    bytes: i64,
+    path_bytes: i64,
+    error: i64,
+}
+
+def sh_css_ok(value: i64) -> Result<i64, i64> {
+    Result { is_ok: true, value: value, error: 0 };
+}
+
+def sh_css_error(error: i64) -> Result<i64, i64> {
+    Result { is_ok: false, value: 0, error: error };
+}
+
+def sh_css_status(value: i64) -> Result<i64, i64> {
+    if value < 0 { sh_css_error(0 - value); } else { sh_css_ok(value); };
+}
+
+def sh_css_byte(pointer: i64, index: i64) -> i64 {
+    sengoo_runtime_memory_read_u8(sengoo_compiler_snapshot_const_bytes_ptr(pointer), index) as i64;
+}
+
+def sh_css_word(buffer: &Buffer, index: i64) -> i64 {
+    sengoo_ds_word_get(sengoo_compiler_snapshot_bytes_ptr(sengoo_ffi_buffer_ptr(buffer.handle)), index);
+}
+
+def sh_css_text(pointer: i64, length: i64) -> Result<String, i64> {
+    if length < 0 or length > 16777216 { return string_result_err(13); };
+    if sengoo_sg_utf8_validate(sengoo_compiler_snapshot_const_bytes_ptr(pointer), length) != 1 { return string_result_err(20); };
+    let bytes = ffi_buffer_from_bytes_raw(pointer, length)?;
+    string_from_utf8(bytes, length);
+}
+
+def sh_css_upper(byte: i64) -> i64 {
+    if byte >= 97 and byte <= 122 { byte - 32; } else { byte; };
+}
+
+def sh_css_reserved(pointer: i64, begin: i64, end: i64) -> bool {
+    let mut stop = begin;
+    while stop < end and sh_css_byte(pointer, stop) != 46 { stop = stop + 1; };
+    let count = stop - begin;
+    if count < 3 or count > 4 { return false; };
+    let a = sh_css_upper(sh_css_byte(pointer, begin));
+    let b = sh_css_upper(sh_css_byte(pointer, begin + 1));
+    let c = sh_css_upper(sh_css_byte(pointer, begin + 2));
+    if count == 3 { return a == 67 and b == 79 and c == 78 or a == 80 and b == 82 and c == 78 or a == 65 and b == 85 and c == 88 or a == 78 and b == 85 and c == 76; };
+    let digit = sh_css_byte(pointer, begin + 3);
+    digit >= 49 and digit <= 57 and (a == 67 and b == 79 and c == 77 or a == 76 and b == 80 and c == 84);
+}
+
+def sh_css_input_path(path: &str) -> i64 {
+    let length = path.len();
+    if length < 1 or length >= 32768 { return 2; };
+    let pointer = sengoo_stdlib_str_ptr(path);
+    if sengoo_sg_utf8_validate(sengoo_compiler_snapshot_const_bytes_ptr(pointer), length) != 1 { return 20; };
+    let mut index = 0;
+    while index < length { let byte = sh_css_byte(pointer, index); if byte == 0 or byte == 58 and index != 1 { return 2; }; index = index + 1; };
+    if length >= 2 { let first = sh_css_byte(pointer, 0); let second = sh_css_byte(pointer, 1); if (first == 92 or first == 47) and (second == 92 or second == 47) { return 2; }; if second == 58 and (length < 3 or not (sh_css_byte(pointer, 2) == 92 or sh_css_byte(pointer, 2) == 47)) { return 2; }; };
+    0;
+}
+
+def sh_css_normal_path(path: &str) -> i64 {
+    let pointer = sengoo_stdlib_str_ptr(path);
+    let length = path.len();
+    if length < 4 or length >= 32768 or sh_css_byte(pointer, 1) != 58 or sh_css_byte(pointer, 2) != 92 or sh_css_byte(pointer, length - 1) == 92 { return 2; };
+    let mut begin = 3;
+    let mut index = 3;
+    while index <= length { let byte = if index == length { 0; } else { sh_css_byte(pointer, index); }; if index < length and (byte < 32 or byte == 58) { return 2; }; if index == length or byte == 92 { if index == begin or sh_css_byte(pointer, index - 1) == 46 or sh_css_byte(pointer, index - 1) == 32 or sh_css_reserved(pointer, begin, index) { return 2; }; begin = index + 1; }; index = index + 1; };
+    let drive = sengoo_compiler_snapshot_drive_type(pointer, 3);
+    if drive < 0 { return 0 - drive; };
+    if drive != 3 { return 8; };
+    0;
+}
+
+def sh_css_hex(output: &String, value: i64, digits: i64) -> Result<i64, i64> {
+    let alphabet = string_from_str("0123456789abcdef")?;
+    let mut index = digits - 1;
+    while index >= 0 { let nibble = (value >> (index * 4)) & 15; let part = alphabet.get(nibble, nibble + 1)?; output.push_str(part.as_str())?; index = index - 1; };
+    sh_css_ok(0);
+}
+
+def sh_css_identity(metadata: &Buffer) -> Result<String, i64> {
+    let result = string_new();
+    sh_css_hex(&result, sh_css_word(metadata, 0), 8)?;
+    result.push_str(":")?;
+    sh_css_hex(&result, sh_css_word(metadata, 1), 8)?;
+    sh_css_hex(&result, sh_css_word(metadata, 2), 8)?;
+    result.push_str(":")?;
+    sh_css_hex(&result, sh_css_word(metadata, 6), 8)?;
+    sh_css_hex(&result, sh_css_word(metadata, 7), 8)?;
+    string_result_ok(result);
+}
+
+def sh_css_same(before: &Buffer, after: &Buffer) -> bool {
+    let mut index = 0;
+    while index < 10 { if sh_css_word(before, index) != sh_css_word(after, index) { return false; }; index = index + 1; };
+    true;
+}
+
+def sh_compiler_snapshot_arena(max_modules: i64, max_bytes: i64, max_path_bytes: i64) -> ShCompilerSnapshotArena {
+    let snapshots: Vec<ShCompilerSnapshot> = vec_new();
+    let error = if max_modules < 1 or max_modules > 1024 or max_bytes < 0 or max_bytes > 67108864 or max_path_bytes < 0 or max_path_bytes > 8388608 { 2; } else { 0; };
+    ShCompilerSnapshotArena { snapshots: snapshots, max_modules: max_modules, max_bytes: max_bytes, max_path_bytes: max_path_bytes, bytes: 0, path_bytes: 0, error: error };
+}
+
+def sh_compiler_snapshot_open(arena: &mut ShCompilerSnapshotArena, path: &String) -> Result<i64, i64> {
+    if arena.error != 0 { return sh_css_error(arena.error); };
+    if path.len() != path.as_str().len() { return sh_css_error(2); };
+    let input = sh_css_input_path(path.as_str());
+    if input != 0 { return sh_css_error(input); };
+    let normalized = ffi_buffer_new(32768)?;
+    let normalized_length = sh_css_status(sengoo_compiler_snapshot_full_path(sengoo_stdlib_str_ptr(path.as_str()), path.len(), normalized.ptr(), 32768))?;
+    let normal = sh_css_text(normalized.ptr(), normalized_length)?;
+    let policy = sh_css_normal_path(normal.as_str());
+    if policy != 0 { return sh_css_error(policy); };
+    let state = ffi_buffer_new(1024)?;
+    sh_css_status(sengoo_compiler_snapshot_init(state.ptr(), 1024))?;
+    let guard = ShCompilerSourceGuard { state: state };
+    let address = sengoo_ffi_buffer_ptr(guard.state.handle);
+    sh_css_status(sengoo_compiler_snapshot_open(address, 1024, sengoo_stdlib_str_ptr(normal.as_str()), normal.len()))?;
+    let before = ffi_buffer_new(80)?;
+    sh_css_status(sengoo_compiler_snapshot_metadata(address, 1024, before.ptr(), 80))?;
+    let identity = sh_css_identity(&before)?;
+    let mut index = 0;
+    while index < arena.snapshots.len() { if arena.snapshots.get(index).identity.as_str() == identity.as_str() { if not sh_css_same(&arena.snapshots.get(index).before, &before) { return sh_css_error(9); }; let after = ffi_buffer_new(80)?; sh_css_status(sengoo_compiler_snapshot_metadata(sengoo_ffi_buffer_ptr(arena.snapshots.get(index).guard.state.handle), 1024, after.ptr(), 80))?; if not sh_css_same(&before, &after) { return sh_css_error(9); }; return sh_css_ok(index); }; index = index + 1; };
+    if arena.snapshots.len() >= arena.max_modules { return sh_css_error(13); };
+    if sh_css_word(&before, 3) != 0 { return sh_css_error(13); };
+    let length = sh_css_word(&before, 4);
+    if length < 0 or length > arena.max_bytes - arena.bytes { return sh_css_error(13); };
+    let display_length = sh_css_status(sengoo_compiler_snapshot_path(address, 1024, 0, normalized.ptr(), 32768))?;
+    let display = sh_css_text(normalized.ptr(), display_length)?;
+    let pinned_length = sh_css_status(sengoo_compiler_snapshot_path(address, 1024, 1, normalized.ptr(), 32768))?;
+    let pinned = sh_css_text(normalized.ptr(), pinned_length)?;
+    let paths = display_length + pinned_length;
+    if paths > arena.max_path_bytes - arena.path_bytes { return sh_css_error(13); };
+    let bytes = ffi_buffer_new(length)?;
+    let chunk = ffi_buffer_new(65536)?;
+    let hash = ffi_buffer_new(1024)?;
+    let hash_pointer = sengoo_compiler_snapshot_bytes_ptr(hash.ptr());
+    sh_css_status(sengoo_sg_sha256_init(hash_pointer, 1024))?;
+    let mut offset = 0;
+    while offset < length { let remaining = length - offset; let wanted = if remaining < 65536 { remaining; } else { 65536; }; let got = sh_css_status(sengoo_compiler_snapshot_read(address, 1024, chunk.ptr(), wanted))?; if got <= 0 or got > wanted { return sh_css_error(9); }; sh_css_status(sengoo_sg_sha256_update(hash_pointer, 1024, sengoo_compiler_snapshot_const_bytes_ptr(chunk.ptr()), got))?; let copied = sh_css_status(sengoo_ffi_buffer_append(bytes.handle, chunk.ptr(), got))?; if copied != got { return sh_css_error(9); }; offset = offset + got; };
+    let eof = sh_css_status(sengoo_compiler_snapshot_read(address, 1024, chunk.ptr(), 1))?;
+    if eof != 0 { return sh_css_error(9); };
+    let after = ffi_buffer_new(80)?;
+    sh_css_status(sengoo_compiler_snapshot_metadata(address, 1024, after.ptr(), 80))?;
+    if not sh_css_same(&before, &after) { return sh_css_error(9); };
+    if sengoo_sg_utf8_validate(sengoo_compiler_snapshot_const_bytes_ptr(bytes.ptr()), length) != 1 { return sh_css_error(20); };
+    let digest_bytes = ffi_buffer_new(32)?;
+    sh_css_status(sengoo_sg_sha256_final(hash_pointer, 1024, sengoo_compiler_snapshot_bytes_ptr(digest_bytes.ptr()), 32))?;
+    sh_css_status(sengoo_sg_sha256_dispose(hash_pointer, 1024))?;
+    let digest = string_new();
+    index = 0;
+    while index < 32 { sh_css_hex(&digest, sh_css_byte(digest_bytes.ptr(), index), 2)?; index = index + 1; };
+    let snapshot = ShCompilerSnapshot { guard: guard, bytes: bytes, before: before, path: display, pinned_path: pinned, identity: identity, digest: digest, length: length };
+    let id = arena.snapshots.len();
+    if not arena.snapshots.push(snapshot) { return sh_css_error(14); };
+    arena.bytes = arena.bytes + length;
+    arena.path_bytes = arena.path_bytes + paths;
+    sh_css_ok(id);
+}
+
+def sh_compiler_snapshots_unchanged(arena: &ShCompilerSnapshotArena) -> bool {
+    let mut index = 0;
+    while index < arena.snapshots.len() {
+        let current = sh_compiler_snapshot_matches(arena, index);
+        if not current.is_ok() or not current.value { return false; };
+        index = index + 1;
+    };
+    true;
+}
+
+def sh_compiler_snapshot_length(arena: &ShCompilerSnapshotArena, id: i64) -> Result<i64, i64> {
+    if id < 0 or id >= arena.snapshots.len() { return sh_css_error(3); };
+    sh_css_ok(arena.snapshots.get(id).length);
+}
+
+def sh_compiler_snapshot_string(arena: &ShCompilerSnapshotArena, id: i64, field: i64) -> Result<String, i64> {
+    if id < 0 or id >= arena.snapshots.len() { return string_result_err(3); };
+    if field == 0 { return arena.snapshots.get(id).digest.clone(); };
+    if field == 1 { return arena.snapshots.get(id).identity.clone(); };
+    if field == 2 { return arena.snapshots.get(id).path.clone(); };
+    if field == 3 { return arena.snapshots.get(id).pinned_path.clone(); };
+    string_result_err(2);
+}
+
+def sh_compiler_snapshot_copy(arena: &ShCompilerSnapshotArena, id: i64, output: &mut Buffer) -> Result<i64, i64> {
+    sh_compiler_snapshot_copy_handle(arena, id, output.handle);
+}
+
+def sh_compiler_snapshot_copy_handle(arena: &ShCompilerSnapshotArena, id: i64, output: i64) -> Result<i64, i64> {
+    if id < 0 or id >= arena.snapshots.len() { return sh_css_error(3); };
+    let length = arena.snapshots.get(id).length;
+    if length < 0 or length > arena.max_bytes or sengoo_ffi_buffer_capacity(arena.snapshots.get(id).bytes.handle) < length or sengoo_ffi_buffer_used_len(arena.snapshots.get(id).bytes.handle) != length { return sh_css_error(2); };
+    let capacity = sengoo_ffi_buffer_capacity(output);
+    if capacity < 0 { return sh_css_error(3); };
+    if length > capacity { return sh_css_error(4); };
+    sh_css_status(sengoo_ffi_buffer_copy_in(output, sengoo_ffi_buffer_ptr(arena.snapshots.get(id).bytes.handle), length))?;
+    sh_css_ok(length);
+}
+
+def sh_css_match(value: bool) -> Result<bool, i64> {
+    Result { is_ok: true, value: value, error: 0 };
+}
+
+def sh_compiler_snapshot_matches(arena: &ShCompilerSnapshotArena, id: i64) -> Result<bool, i64> {
+    if id < 0 or id >= arena.snapshots.len() { return Result { is_ok: false, value: false, error: 3 }; };
+    if arena.error != 0 or arena.max_modules < 1 or arena.max_modules > 1024 or arena.snapshots.len() > arena.max_modules or arena.max_bytes < 0 or arena.max_bytes > 67108864 { return sh_css_match(false); };
+    let snapshot = arena.snapshots.get(id);
+    let length = snapshot.length;
+    if length < 0 or length > arena.max_bytes or sengoo_ffi_buffer_capacity(snapshot.guard.state.handle) < 1024 or sengoo_ffi_buffer_capacity(snapshot.before.handle) < 80 or sengoo_ffi_buffer_capacity(snapshot.bytes.handle) < length or sengoo_ffi_buffer_used_len(snapshot.bytes.handle) != length { return sh_css_match(false); };
+    let address = sengoo_ffi_buffer_ptr(snapshot.guard.state.handle);
+    let actual = ffi_buffer_new(80)?;
+    sh_css_status(sengoo_compiler_snapshot_metadata(address, 1024, actual.ptr(), 80))?;
+    if not sh_css_same(&snapshot.before, &actual) or sh_css_word(&actual, 3) != 0 or sh_css_word(&actual, 4) != length { return sh_css_match(false); };
+    let identity = sh_css_identity(&actual)?;
+    if sengoo_string_eq(identity.handle, snapshot.identity.handle) == 0 { return sh_css_match(false); };
+    let path_bytes = ffi_buffer_new(32768)?;
+    let display_length = sh_css_status(sengoo_compiler_snapshot_path(address, 1024, 0, path_bytes.ptr(), 32768))?;
+    let display = sh_css_text(path_bytes.ptr(), display_length)?;
+    if sengoo_string_eq(display.handle, snapshot.path.handle) == 0 { return sh_css_match(false); };
+    let pinned_length = sh_css_status(sengoo_compiler_snapshot_path(address, 1024, 1, path_bytes.ptr(), 32768))?;
+    let pinned = sh_css_text(path_bytes.ptr(), pinned_length)?;
+    if sengoo_string_eq(pinned.handle, snapshot.pinned_path.handle) == 0 { return sh_css_match(false); };
+    sh_css_status(sengoo_compiler_snapshot_seek(address, 1024, 0))?;
+    let chunk = ffi_buffer_new(65536)?;
+    let hash = ffi_buffer_new(1024)?;
+    let hash_pointer = sengoo_compiler_snapshot_bytes_ptr(hash.ptr());
+    sh_css_status(sengoo_sg_sha256_init(hash_pointer, 1024))?;
+    let stored = sengoo_ffi_buffer_ptr(snapshot.bytes.handle);
+    let mut offset = 0;
+    while offset < length {
+        let remaining = length - offset;
+        let wanted = if remaining < 65536 { remaining; } else { 65536; };
+        let got = sh_css_status(sengoo_compiler_snapshot_read(address, 1024, chunk.ptr(), wanted))?;
+        if got <= 0 or got > wanted { return sh_css_match(false); };
+        let mut index = 0;
+        while index < got {
+            if sh_css_byte(chunk.ptr(), index) != sh_css_byte(stored, offset + index) { return sh_css_match(false); };
+            index = index + 1;
+        };
+        sh_css_status(sengoo_sg_sha256_update(hash_pointer, 1024, sengoo_compiler_snapshot_const_bytes_ptr(chunk.ptr()), got))?;
+        offset = offset + got;
+    };
+    let eof = sh_css_status(sengoo_compiler_snapshot_read(address, 1024, chunk.ptr(), 1))?;
+    if eof != 0 { return sh_css_match(false); };
+    let after = ffi_buffer_new(80)?;
+    sh_css_status(sengoo_compiler_snapshot_metadata(address, 1024, after.ptr(), 80))?;
+    if not sh_css_same(&actual, &after) { return sh_css_match(false); };
+    let digest_bytes = ffi_buffer_new(32)?;
+    sh_css_status(sengoo_sg_sha256_final(hash_pointer, 1024, sengoo_compiler_snapshot_bytes_ptr(digest_bytes.ptr()), 32))?;
+    sh_css_status(sengoo_sg_sha256_dispose(hash_pointer, 1024))?;
+    let digest = string_new();
+    let mut index = 0;
+    while index < 32 { sh_css_hex(&digest, sh_css_byte(digest_bytes.ptr(), index), 2)?; index = index + 1; };
+    sh_css_match(sengoo_string_eq(digest.handle, snapshot.digest.handle) != 0);
+}

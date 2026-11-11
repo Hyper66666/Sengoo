@@ -51,3 +51,13 @@ The six-export local qualification is recorded in
 (SHA256 `a63152e01208dff39e1d5cbcbd326187901808c8f76fa0d3075a08e0a9fa1cd3`).
 It passes nineteen commands, actual C runtime execution and five SG first-call
 resource scopes. The broader compiler integration tasks remain open.
+
+The experimental source-effect contract pins that qualification's complete
+collection object hash. Clang 19 on this host writes a wall-clock COFF timestamp,
+so another source-identical build can fail that contract. Any development
+timestamp normalization must preserve the raw compiler output, take the target
+timestamp from an independently pinned qualified object, compare every other
+byte, and produce a separate object with the exact qualified full hash. Code,
+data, symbols, relocations and other headers may not differ. The current run
+still executes and qualifies the selected normalized object; normalization is
+recorded as a build transformation, not byte-identical raw compiler output.

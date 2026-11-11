@@ -11,6 +11,8 @@ import re
 import subprocess
 import time
 
+from compiler_inputs import compiler_closure, module_map
+
 ROOT = Path(__file__).resolve().parents[1]
 CASES = {
     "constant": "def main()->i64{42}",
@@ -78,19 +80,7 @@ def sha(path):
 
 
 def native_modules():
-    pending = [ROOT / "selfhost/tools/native.sg"]
-    seen = set()
-    while pending:
-        source = pending.pop()
-        if source in seen:
-            continue
-        seen.add(source)
-        for name in re.findall(r"(?m)^\s*import\s+selfhost_([A-Za-z0-9_]+)\s*;", source.read_text(encoding="utf-8")):
-            path = ROOT / "selfhost/src" / (name + ".sg")
-            if not path.is_file():
-                raise ValueError(f"missing declared native compiler module: {name}")
-            pending.append(path)
-    return sorted(seen - {ROOT / "selfhost/tools/native.sg"})
+    return sorted(compiler_closure(ROOT, [ROOT / "selfhost/tools/native.sg"]))
 
 
 def main():
@@ -146,8 +136,7 @@ def main():
         if name.upper().startswith(("SENGOO_", "SGPLATFORM_", "SDL2_")):
             env.pop(name)
     env.update(SENGOO_STDLIB=str(snapshot / "tools/stdlib"), SENGOO_RUNTIME=str(snapshot / "tools/stdlib/runtime.c"),
-               SENGOO_CLANG=str(paths["clang"]), SENGOO_MODULE_MAP=";".join(
-                   "selfhost_" + path.stem + "=" + str(path) for path in modules))
+               SENGOO_CLANG=str(paths["clang"]), SENGOO_MODULE_MAP=module_map(snapshot, modules))
     env["PATH"] = str(paths["clang"].parent) + os.pathsep + env.get("PATH", "")
 
     def run(name, command, code=0):

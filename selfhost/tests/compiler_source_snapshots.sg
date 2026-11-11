@@ -1,0 +1,125 @@
+import selfhost_compiler_source_snapshot;
+
+import std::assert;
+
+import std::args;
+
+import std::file_snapshot;
+
+extern "C" {
+    fn sengoo_string_live_handle_count() -> i64;
+    fn sengoo_buffer_live_handle_count() -> i64;
+    fn sengoo_opaque_live_handle_count() -> i64;
+    fn sengoo_compiler_snapshot_test_handle_count() -> i64;
+}
+
+def sh_csst_path(root: &String, number: i64) -> Result<String, i64> {
+    let path = root.clone()?;
+    path.push_str("/file-")?;
+    path.push_i64(number)?;
+    path.push_str(".sg")?;
+    string_result_ok(path);
+}
+
+def sh_csst_scope(root: &String) -> Result<i64, i64> {
+    let mut arena = sh_compiler_snapshot_arena(33, 4096, 32768);
+    let mut index = 0;
+    while index < 33 { let path = sh_csst_path(root, index)?; let id = sh_compiler_snapshot_open(&mut arena, &path)?; assert_eq_i64(id, index, "compiler-source-snapshots", 1); assert_eq_i64(arena.snapshots.get(id).length, 15, "compiler-source-snapshots", 2); let public = file_snapshot_open(path.as_str(), 15)?; let identity = public.identity()?; let digest = public.sha256()?; assert_true(identity.as_str() == arena.snapshots.get(id).identity.as_str(), "compiler-source-snapshots", 3); assert_true(digest.as_str() == arena.snapshots.get(id).digest.as_str(), "compiler-source-snapshots", 4); index = index + 1; };
+    let first = sh_csst_path(root, 0)?;
+    let duplicate = sh_compiler_snapshot_open(&mut arena, &first)?;
+    assert_eq_i64(duplicate, 0, "compiler-source-snapshots", 5);
+    let extra = sh_csst_path(root, 33)?;
+    let rejected = sh_compiler_snapshot_open(&mut arena, &extra);
+    assert_eq_i64(rejected.error, 13, "compiler-source-snapshots", 6);
+    assert_eq_i64(arena.snapshots.len(), 33, "compiler-source-snapshots", 7);
+    assert_eq_i64(arena.bytes, 495, "compiler-source-snapshots", 8);
+    assert_true(sh_compiler_snapshots_unchanged(&arena), "compiler-source-snapshots", 9);
+    let insufficient = ffi_buffer_from_bytes("keep")?;
+    let no_copy = sh_compiler_snapshot_copy_handle(&arena, 0, insufficient.handle);
+    assert_eq_i64(no_copy.error, 4, "compiler-source-snapshots", 27);
+    let kept = string_from_utf8(insufficient, 4)?;
+    assert_true(kept.as_str() == "keep", "compiler-source-snapshots", 28);
+    let mut copied_buffer = ffi_buffer_new(15)?;
+    assert_eq_i64(sh_compiler_snapshot_copy(&arena, 0, &mut copied_buffer)?, 15, "compiler-source-snapshots", 29);
+    let alias = root.clone()?;
+    alias.push_str("/alias.sg")?;
+    let aliased = sh_compiler_snapshot_open(&mut arena, &alias)?;
+    assert_eq_i64(aliased, 0, "compiler-source-snapshots", 10);
+    let mut tiny = sh_compiler_snapshot_arena(33, 14, 32768);
+    let oversized = sh_compiler_snapshot_open(&mut tiny, &first);
+    assert_eq_i64(oversized.error, 13, "compiler-source-snapshots", 11);
+    assert_eq_i64(tiny.snapshots.len(), 0, "compiler-source-snapshots", 12);
+    assert_eq_i64(tiny.bytes, 0, "compiler-source-snapshots", 13);
+    let mut paths = sh_compiler_snapshot_arena(33, 4096, 0);
+    let no_path_space = sh_compiler_snapshot_open(&mut paths, &first);
+    assert_eq_i64(no_path_space.error, 13, "compiler-source-snapshots", 14);
+    assert_eq_i64(paths.snapshots.len(), 0, "compiler-source-snapshots", 15);
+    let invalid = root.clone()?;
+    invalid.push_str("/invalid.sg")?;
+    let mut utf = sh_compiler_snapshot_arena(2, 4096, 32768);
+    let bad_utf = sh_compiler_snapshot_open(&mut utf, &invalid);
+    assert_eq_i64(bad_utf.error, 20, "compiler-source-snapshots", 16);
+    assert_eq_i64(utf.snapshots.len(), 0, "compiler-source-snapshots", 17);
+    let nulbytes = ffi_buffer_from_bytes_raw(sengoo_stdlib_str_ptr(first.as_str()), first.len())?;
+    let nulinput = ffi_buffer_new(first.len() + 2)?;
+    nulinput.append_copy(&nulbytes, 0, first.len())?;
+    nulinput.push_u8(0)?;
+    nulinput.push_u8(120)?;
+    let nulname = string_from_utf8(nulinput, first.len() + 2)?;
+    let nul = sh_compiler_snapshot_open(&mut utf, &nulname);
+    assert_eq_i64(nul.error, 2, "compiler-source-snapshots", 18);
+    let payload_path = root.clone()?;
+    payload_path.push_str("/payload-nul.sg")?;
+    let payload = sh_compiler_snapshot_open(&mut utf, &payload_path)?;
+    assert_eq_i64(sh_compiler_snapshot_length(&utf, payload)?, 3, "compiler-source-snapshots", 30);
+    let public = file_snapshot_open(payload_path.as_str(), 3)?;
+    let public_digest = public.sha256()?;
+    let own_digest = sh_compiler_snapshot_string(&utf, payload, 0)?;
+    assert_true(public_digest.as_str() == own_digest.as_str(), "compiler-source-snapshots", 31);
+    sh_css_ok(42);
+}
+
+def sh_csst_capacity(root: &String) -> Result<i64, i64> {
+    let mut arena = sh_compiler_snapshot_arena(1024, 65536, 8388608);
+    let mut index = 0;
+    while index < 1024 { let path = sh_csst_path(root, index)?; assert_eq_i64(sh_compiler_snapshot_open(&mut arena, &path)?, index, "compiler-source-snapshots", 32); index = index + 1; };
+    let first = sh_csst_path(root, 0)?;
+    assert_eq_i64(sh_compiler_snapshot_open(&mut arena, &first)?, 0, "compiler-source-snapshots", 33);
+    let alias = root.clone()?;
+    alias.push_str("/alias.sg")?;
+    assert_eq_i64(sh_compiler_snapshot_open(&mut arena, &alias)?, 0, "compiler-source-snapshots", 34);
+    let extra = sh_csst_path(root, 1024)?;
+    let rejected = sh_compiler_snapshot_open(&mut arena, &extra);
+    assert_eq_i64(rejected.error, 13, "compiler-source-snapshots", 35);
+    assert_eq_i64(arena.snapshots.len(), 1024, "compiler-source-snapshots", 36);
+    assert_eq_i64(arena.bytes, 15360, "compiler-source-snapshots", 37);
+    assert_true(sh_compiler_snapshots_unchanged(&arena), "compiler-source-snapshots", 38);
+    sh_css_ok(42);
+}
+
+def main() -> i64 {
+    let count = arg_len(0);
+    if not count.is_ok() { return 64; };
+    let argument = ffi_buffer_new(count.value);
+    if not argument.is_ok() { return 64; };
+    let copied = arg_copy(0, argument.value);
+    if not copied.is_ok() { return 64; };
+    let root = string_from_utf8(argument.value, copied.value);
+    if not root.is_ok() { return 64; };
+    let strings = sengoo_string_live_handle_count();
+    let buffers = sengoo_buffer_live_handle_count();
+    let opaque = sengoo_opaque_live_handle_count();
+    let snapshots = sengoo_file_snapshot_live_handle_count();
+    let bytes = sengoo_file_snapshot_live_bytes();
+    let handles = sengoo_compiler_snapshot_test_handle_count();
+    let mut round = 0;
+    while round < 3 { { let result = sh_csst_scope(&root.value); if not result.is_ok() { println(result.error); return 65; }; }; assert_eq_i64(sengoo_string_live_handle_count(), strings, "compiler-source-snapshots", 21); assert_eq_i64(sengoo_buffer_live_handle_count(), buffers, "compiler-source-snapshots", 22); assert_eq_i64(sengoo_opaque_live_handle_count(), opaque, "compiler-source-snapshots", 23); assert_eq_i64(sengoo_file_snapshot_live_handle_count(), snapshots, "compiler-source-snapshots", 24); assert_eq_i64(sengoo_file_snapshot_live_bytes(), bytes, "compiler-source-snapshots", 25); assert_eq_i64(sengoo_compiler_snapshot_test_handle_count(), handles, "compiler-source-snapshots", 26); round = round + 1; };
+    { let result = sh_csst_capacity(&root.value); if not result.is_ok() { println(result.error); return 65; }; };
+    assert_eq_i64(sengoo_string_live_handle_count(), strings, "compiler-source-snapshots", 41);
+    assert_eq_i64(sengoo_buffer_live_handle_count(), buffers, "compiler-source-snapshots", 42);
+    assert_eq_i64(sengoo_opaque_live_handle_count(), opaque, "compiler-source-snapshots", 43);
+    assert_eq_i64(sengoo_file_snapshot_live_handle_count(), snapshots, "compiler-source-snapshots", 44);
+    assert_eq_i64(sengoo_file_snapshot_live_bytes(), bytes, "compiler-source-snapshots", 45);
+    assert_eq_i64(sengoo_compiler_snapshot_test_handle_count(), handles, "compiler-source-snapshots", 46);
+    42;
+}

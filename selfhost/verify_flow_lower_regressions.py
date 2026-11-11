@@ -5,6 +5,7 @@ Legacy direct clang linking remains a behavior regression, not final SDK qualifi
 from __future__ import annotations
 import argparse,concurrent.futures,datetime,hashlib,json,os,platform,re,subprocess,sys,tomllib
 from pathlib import Path
+from compiler_inputs import compiler_closure
 ROOT=Path(__file__).resolve().parents[1]
 def sha(p):return hashlib.sha256(Path(p).read_bytes()).hexdigest()
 def revision():return subprocess.check_output(['git','rev-parse','HEAD'],cwd=ROOT,text=True).strip()
@@ -36,12 +37,7 @@ def main():
  try:
   lock=json.loads((ROOT/'selfhost/bootstrap.lock').read_bytes());reference=json.loads((ROOT/'selfhost/reference-baseline.lock').read_bytes());clang=Path('C:/Users/admin/AppData/Local/SengooToolchain/clang+llvm-19.1.7-x86_64-pc-windows-msvc/bin/clang.exe');seed=ROOT/'target/agent-conditional-compiler/bin/sgc.exe';ref=ROOT/'target/selfhost/seed-reference/release/sgc.exe';fmt=ROOT/'target/agent-formatter/debug/sgfmt.exe';rustbin=Path(os.environ.get('RUSTUP_HOME',str(Path.home()/'.rustup')))/'toolchains'/(lock['rust_toolchain']+'-x86_64-pc-windows-msvc')/'bin'
   for n,p,h in [('seed',seed,lock['seed']['sha256']),('clang',clang,lock['clang']['sha256']),('reference',ref,reference['tools']['sgc']['sha256']),('formatter',fmt,lock['formatter']['sha256']),('cargo',rustbin/'cargo.exe',lock['cargo_sha256']),('rustc',rustbin/'rustc.exe',lock['rustc_sha256']),('python',Path(sys.executable),sha(sys.executable))]:bind(p,h);tools[n]={'path':str(p),'sha256':h}
-  entries=[ROOT/n for n in ['selfhost/tests/borrow.sg','selfhost/tests/mir.sg','selfhost/tests/handle_disarm_hir.sg','selfhost/tools/native.sg']];seen=set();pending=entries[:]
-  while pending:
-   p=pending.pop()
-   if p in seen:continue
-   assert p.is_file(),p;seen.add(p)
-   for name in re.findall(r'import\s+selfhost_([A-Za-z0-9_]+)\s*;',p.read_text('utf8')):pending.append(ROOT/'selfhost/src'/(name+'.sg'))
+  entries=[ROOT/n for n in ['selfhost/tests/borrow.sg','selfhost/tests/mir.sg','selfhost/tests/handle_disarm_hir.sg','selfhost/tools/native.sg']];seen=set(compiler_closure(ROOT,entries))
   paths=seen|{Path(__file__).resolve()}|{ROOT/n for n in ['selfhost/verify_mir.py','selfhost/verify_projection.py','selfhost/verify_handle_disarm.py','selfhost/source_codegen_gate.py','selfhost/bootstrap.lock','selfhost/reference-baseline.lock','selfhost/REFERENCE_GAPS.md','selfhost/tests/handle_disarm.sg','selfhost/tests/handle_disarm_probe.c','selfhost/tests/projection_probe.c','selfhost/tests/native_source_probe.c','Cargo.toml','Cargo.lock','rust-toolchain.toml']}
   for directory in ['tools/stdlib','runtime']:paths.update(p for p in(ROOT/directory).rglob('*')if p.is_file()and not any(x in {'build','target','__pycache__'}for x in p.relative_to(ROOT/directory).parts))
   paths.update(p for p in(ROOT/'openspec/changes/add-selfhost-handle-disarm').rglob('*.md')if p.name!='tasks.md')
@@ -59,8 +55,10 @@ def main():
   probe=base/'cargo-probe';(probe/'src').mkdir(parents=True);(probe/'Cargo.toml').write_text('[package]\nname="flow_lower_rustc_probe"\nversion="0.0.0"\nedition="2021"\n[workspace]\n',encoding='utf8');(probe/'src/lib.rs').write_text('pub fn answer()->i64{42}\n',encoding='utf8');(probe/'build.rs').write_text('fn main(){println!("cargo:warning=flow_lower_rustc={}",std::env::var("RUSTC").unwrap());}\n',encoding='utf8');observed=step('cargo-actual-compiler',[rustbin/'cargo.exe','build','--offline','--verbose','--manifest-path',probe/'Cargo.toml','--target-dir',probe/'target'],env);text=(observed.stdout+observed.stderr).decode('utf8');assert 'flow_lower_rustc='+str(rustbin/'rustc.exe')in text and sum(line.lstrip().startswith('Running ')and str(rustbin/'rustc.exe').casefold()in line.casefold()for line in text.splitlines())>=2
   for p in [probe/'Cargo.toml',probe/'Cargo.lock',probe/'build.rs',probe/'src/lib.rs']:bind(p)
   headers={}
-  for name in ['projection_probe','handle_disarm_probe','native_source_probe']:
-   source=ROOT/'selfhost/tests'/(name+'.c');before=base/(name+'-before.d');after=base/(name+'-after.d');step(name+'-headers',[clang,'-M','-MT','optional_dependency','-MF',before,source],env);captured={str(p):sha(p)for p in dependencies(before)}
+  c_sources=[ROOT/'selfhost/tests'/(name+'.c')for name in ['projection_probe','handle_disarm_probe','native_source_probe']]
+  c_sources += sorted(p for p in seen if p.parent==ROOT/'selfhost/compiler_support/native' and p.suffix=='.c')
+  for source in c_sources:
+   name=source.stem;before=base/(name+'-before.d');after=base/(name+'-after.d');step(name+'-headers',[clang,'-M','-MT','optional_dependency','-MF',before,source],env);captured={str(p):sha(p)for p in dependencies(before)}
    for p,h in captured.items():bind(p,h)
    obj=base/(name+'.obj');step(name+'-header-compile-check',[clang,'-MD','-MT','optional_dependency','-MF',after,'-c',source,'-o',obj],env);assert captured=={str(p):sha(p)for p in dependencies(after)};artifacts[obj.name]=sha(obj);headers[name]=captured
   report['c_header_closures']=headers

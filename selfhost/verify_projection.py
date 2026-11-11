@@ -16,6 +16,8 @@ import subprocess
 import sys
 import time
 
+from compiler_inputs import compiler_closure, module_map
+
 ROOT = Path(__file__).resolve().parents[1]
 COMMON = ('extern "C"{fn sg_acquire()->i64;fn sg_release(value:i64);'
           'fn sg_live()->i64;fn sg_created()->i64;fn sg_frees()->i64;'
@@ -52,21 +54,10 @@ def revision() -> str:
 
 
 def source_inputs() -> tuple[dict[str, str], list[Path]]:
-    pending = [ROOT/'selfhost/tools/native.sg']
     paths = {Path(__file__).resolve(), ROOT/'selfhost/tests/projection_probe.c',
              ROOT/'selfhost/bootstrap.lock', ROOT/'selfhost/reference-baseline.lock',
              ROOT/'Cargo.toml', ROOT/'Cargo.lock', ROOT/'rust-toolchain.toml'}
-    closure: set[Path] = set()
-    while pending:
-        path = pending.pop()
-        if path in closure:
-            continue
-        closure.add(path)
-        for name in re.findall(r'^\s*import\s+selfhost_([a-z0-9_]+)\s*;', path.read_text(encoding='utf-8'), re.M):
-            source = ROOT/'selfhost/src'/(name+'.sg')
-            if not source.is_file():
-                raise RuntimeError('missing native compiler import: '+name)
-            pending.append(source)
+    closure = set(compiler_closure(ROOT, [ROOT/'selfhost/tools/native.sg']))
     paths.update(closure)
     for directory in ('tools/stdlib', 'runtime'):
         for path in (ROOT/directory).rglob('*'):
@@ -122,7 +113,7 @@ def main() -> int:
             if name.upper().startswith(('SENGOO_', 'SGPLATFORM_', 'SDL2_')):
                 env.pop(name)
         env.update(SENGOO_STDLIB=str(ROOT/'tools/stdlib'), SENGOO_RUNTIME=str(ROOT/'tools/stdlib/runtime.c'),
-                   SENGOO_CLANG=str(args.clang.resolve()), SENGOO_MODULE_MAP=';'.join('selfhost_'+p.stem+'='+str(p) for p in modules))
+                   SENGOO_CLANG=str(args.clang.resolve()), SENGOO_MODULE_MAP=module_map(ROOT, modules))
         env['PATH'] = str(args.clang.resolve().parent)+os.pathsep+env.get('PATH', '')
 
         def run(name: str, command: list, expected: int = 0) -> subprocess.CompletedProcess:

@@ -2,6 +2,7 @@
 from __future__ import annotations
 import argparse, datetime, hashlib, json, os, platform, re, shutil, struct, subprocess, sys, tomllib
 from pathlib import Path
+from compiler_inputs import compiler_closure, module_map
 
 ROOT=Path(__file__).resolve().parents[1]
 def sha(path):return hashlib.sha256(Path(path).read_bytes()).hexdigest()
@@ -10,13 +11,7 @@ def rust_override(key):
     key=key.upper()
     return key.startswith(('RUSTC','RUSTDOC','RUSTUP_TOOLCHAIN','CARGO_BUILD_RUSTC','CARGO_BUILD_RUSTDOC','CARGO_PROFILE_')) or key in {'CARGO','RUSTFLAGS','RUSTDOCFLAGS','CARGO_ENCODED_RUSTFLAGS','CARGO_ENCODED_RUSTDOCFLAGS','CARGO_BUILD_RUSTFLAGS','CARGO_BUILD_RUSTDOCFLAGS','CARGO_BUILD_TARGET','CARGO_TARGET_DIR','CARGO_INCREMENTAL'} or key.startswith('CARGO_TARGET_') and key.endswith(('_RUSTFLAGS','_RUSTDOCFLAGS','_RUSTC'))
 def closure(entries):
-    result={};pending=list(entries)
-    while pending:
-        path=pending.pop()
-        if path in result:continue
-        result[path]=sha(path)
-        pending += [ROOT/'selfhost/src'/(n+'.sg') for n in re.findall(r'import\s+selfhost_([A-Za-z0-9_]+)\s*;',path.read_text('utf8'))]
-    return result
+    return compiler_closure(ROOT, entries)
 def dependencies(path):
     raw=path.read_text('utf8').replace('\\\n',' ');assert raw.startswith('hir_origin_dependency:')
     payload=raw.split(':',1)[1];words=[];word=[];at=0
@@ -61,7 +56,7 @@ def main():
     assert tools['cargo'].parent==tools['rustc'].parent
     env.update(CARGO=str(tools['cargo']),RUSTC=str(tools['rustc']),CARGO_BUILD_RUSTC=str(tools['rustc']),RUSTUP_TOOLCHAIN=tools['rustc'].parent.parent.name,RUSTC_WRAPPER='',RUSTC_WORKSPACE_WRAPPER='',CARGO_BUILD_RUSTC_WRAPPER='',CARGO_BUILD_RUSTC_WORKSPACE_WRAPPER='')
     env['PATH']=str(tools['cargo'].parent)+os.pathsep+env['PATH']
-    env.update(SENGOO_STDLIB=str(snapshot/'tools/stdlib'),SENGOO_RUNTIME=str(snapshot/'tools/stdlib/runtime.c'),SENGOO_CLANG=str(tools['clang']),SENGOO_MODULE_MAP=';'.join('selfhost_'+p.stem+'='+str(snapshot/p.relative_to(ROOT))for p in originals if p.parent==ROOT/'selfhost/src'))
+    env.update(SENGOO_STDLIB=str(snapshot/'tools/stdlib'),SENGOO_RUNTIME=str(snapshot/'tools/stdlib/runtime.c'),SENGOO_CLANG=str(tools['clang']),SENGOO_MODULE_MAP=module_map(ROOT, originals, snapshot))
     pure={k:v for k,v in env.items()if not k.upper().startswith('SENGOO_')};pure['PATH']=''
     report={'schema':1,'stage':'hir6-owning-origin-loan-candidates','result':'running','production_admitted':False,'m3_complete':False,'hir_schema':6,'host':platform.platform(),'source_revision':revision(),'started_at':datetime.datetime.now(datetime.timezone.utc).isoformat(),'sources':inputs,'qualified_checkout_sources':{str(p):h for p,h in originals.items()},'tools':{n:{'path':str(p),'sha256':sha(p)}for n,p in tools.items()},'steps':[],'limits':['candidate validation proves faithful source analysis only; source diagnostics never authorize lowering','candidate unlowerable1 retained; all module/present payloads rejected5008 by ordinary lower; no provider/callback/constructor/Ref authority','mini source modules are independent pinned constructed fixtures, not official selected SDK provider or current std ownership qualification','wire/arena cap4000000i64 words; large duplicated input tables recorded, no compiler closure capacity or M8/RSS claim','development compiler uses recorded C/Rust runtime; nested legacy source/native behavior gates do not qualify complete MSVC child-linker/SDK bootstrap provenance'],'sdk_environment':{n:env.get(n)for n in ['INCLUDE','LIB','LIBPATH','VCToolsInstallDir','WindowsSdkDir','WindowsSDKVersion','VSINSTALLDIR','VCINSTALLDIR']}}
     configs={p/'.cargo'/n for p in [ROOT,*ROOT.parents,snapshot,*snapshot.parents]for n in ['config','config.toml']};configs.update(Path(os.environ.get('CARGO_HOME',str(Path.home()/'.cargo')))/n for n in ['config','config.toml']);report['cargo_config_candidates']={}

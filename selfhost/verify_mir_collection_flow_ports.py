@@ -2,6 +2,7 @@
 from __future__ import annotations
 import argparse, datetime, hashlib, json, os, platform, re, shutil, struct, subprocess, sys, tomllib
 from pathlib import Path
+from compiler_inputs import compiler_closure, module_map
 
 ROOT=Path(__file__).resolve().parents[1]
 def sha(path):return hashlib.sha256(Path(path).read_bytes()).hexdigest()
@@ -10,25 +11,9 @@ def rust_override(key):
     key=key.upper()
     return key.startswith(('RUSTC','RUSTDOC','RUSTUP_TOOLCHAIN','CARGO_BUILD_RUSTC','CARGO_BUILD_RUSTDOC','CARGO_PROFILE_')) or key in {'CARGO','RUSTFLAGS','RUSTDOCFLAGS','CARGO_ENCODED_RUSTFLAGS','CARGO_ENCODED_RUSTDOCFLAGS','CARGO_BUILD_RUSTFLAGS','CARGO_BUILD_RUSTDOCFLAGS','CARGO_BUILD_TARGET','CARGO_TARGET_DIR','CARGO_INCREMENTAL'} or key.startswith('CARGO_TARGET_') and key.endswith(('_RUSTFLAGS','_RUSTDOCFLAGS','_RUSTC'))
 def closure(entries):
-    result={};pending=list(entries)
-    while pending:
-        path=pending.pop()
-        if path in result:continue
-        result[path]=sha(path)
-        pending += [ROOT/'selfhost/src'/(n+'.sg') for n in re.findall(r'import\s+selfhost_([A-Za-z0-9_]+)\s*;',path.read_text('utf8'))]
-    return result
-flow_maps={}
+    return compiler_closure(ROOT, entries)
 def flow_closure(entry):
-    aliases={}
-    result={};pending=[entry]
-    while pending:
-        path=pending.pop()
-        if path in result:continue
-        result[path]=sha(path)
-        for name in re.findall(r'import\s+(selfhost_[A-Za-z0-9_]+)\s*;',path.read_text('utf8')):
-            target=aliases.get(name,ROOT/'selfhost/src'/(name[len('selfhost_'):]+'.sg'))
-            assert target.is_file(),(name,target);flow_maps[name]=target;pending.append(target)
-    return result
+    return compiler_closure(ROOT, [entry])
 
 def main():
     parser=argparse.ArgumentParser(description=__doc__)
@@ -60,7 +45,7 @@ def main():
     assert tools['cargo'].parent==tools['rustc'].parent
     env.update(CARGO=str(tools['cargo']),RUSTC=str(tools['rustc']),CARGO_BUILD_RUSTC=str(tools['rustc']),RUSTUP_TOOLCHAIN=tools['rustc'].parent.parent.name,RUSTC_WRAPPER='',RUSTC_WORKSPACE_WRAPPER='',CARGO_BUILD_RUSTC_WRAPPER='',CARGO_BUILD_RUSTC_WORKSPACE_WRAPPER='')
     env['PATH']=str(tools['cargo'].parent)+os.pathsep+env['PATH']
-    env.update(SENGOO_STDLIB=str(snapshot/'tools/stdlib'),SENGOO_RUNTIME=str(snapshot/'tools/stdlib/runtime.c'),SENGOO_CLANG=str(tools['clang']),SENGOO_LINKER='lld',SENGOO_MODULE_MAP=';'.join(n+'='+str(snapshot/p.relative_to(ROOT))for n,p in flow_maps.items()))
+    env.update(SENGOO_STDLIB=str(snapshot/'tools/stdlib'),SENGOO_RUNTIME=str(snapshot/'tools/stdlib/runtime.c'),SENGOO_CLANG=str(tools['clang']),SENGOO_LINKER='lld',SENGOO_MODULE_MAP=module_map(ROOT, originals, snapshot))
     pure={k:v for k,v in env.items()if not k.upper().startswith('SENGOO_')};pure['PATH']=''
     report={'schema':1,'stage':'bounded-internal-collection-flow-ports','result':'running','production_admitted':False,'m3_complete':False,'mir_schema':1,'host':platform.platform(),'source_revision':revision(),'started_at':datetime.datetime.now(datetime.timezone.utc).isoformat(),'sources':inputs,'qualified_checkout_sources':{str(p):h for p,h in originals.items()},'tools':{n:{'path':str(p),'sha256':sha(p)}for n,p in tools.items()},'steps':[],'limits':['only bounded internal source lowering configuration and first-resource rejection behavior; no source Ref/provider permission','actual checked/ownership input and type/symbol state remain unchanged; invalid contexts reject before copying flow vectors or emitting MIR','ordinary public lower/native still reject candidate optional borrowing; complete fresh source authority and generic/source SDK integration are separate gates','development seed uses recorded C/Rust runtimes; no complete final linker/SDK or M6/M8/selfbuild qualification'],'sdk_environment':{n:env.get(n)for n in ['INCLUDE','LIB','LIBPATH','VCToolsInstallDir','WindowsSdkDir','WindowsSDKVersion','VSINSTALLDIR','VCINSTALLDIR']}}
     configs={p/'.cargo'/n for p in [ROOT,*ROOT.parents,snapshot,*snapshot.parents]for n in ['config','config.toml']};configs.update(Path(os.environ.get('CARGO_HOME',str(Path.home()/'.cargo')))/n for n in ['config','config.toml']);report['cargo_config_candidates']={}

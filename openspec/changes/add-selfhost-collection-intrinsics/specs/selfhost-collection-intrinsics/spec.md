@@ -24,6 +24,17 @@ prototypes and actual program bindings independently of saved candidate data.
 - **WHEN** the mapping records layout, backing, iterator, release or element-transfer preconditions
 - **THEN** those masks SHALL describe obligations for subsequent compiler checks and SHALL NOT stand in for satisfied origin, loan or ownership facts
 
+#### Scenario: Rebuilding an already qualified COFF provider
+- **WHEN** a fresh build differs from a pinned qualified AMD64 COFF provider only
+  in its four-byte header timestamp
+- **THEN** an explicitly recorded development build transformation MAY produce a
+  separate object with the qualified timestamp, retaining the raw compiler output
+- **AND** all bytes outside that header field SHALL be identical to the pinned
+  qualified object, and the complete transformed object SHALL have that exact hash
+- **AND** a difference in any other byte SHALL reject this transformation
+- **AND** current provider mapping, execution and resource checks SHALL consume
+  the transformed object, without broadening compiler artifact admission.
+
 ### Requirement: Constructors SHALL produce real concrete storage contracts
 
 Canonical construction SHALL derive target layout and generated move/drop

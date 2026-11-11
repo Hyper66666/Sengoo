@@ -11,9 +11,12 @@ from pathlib import Path
 import platform
 import re
 import shutil
+import struct
 import subprocess
 import sys
 import tomllib
+
+from compiler_inputs import compiler_closure, module_map
 
 ROOT = Path(__file__).resolve().parents[1]
 
@@ -27,15 +30,7 @@ def revision():
 
 
 def closure(entry):
-    found, pending = {}, [entry]
-    while pending:
-        path = pending.pop()
-        if path in found:
-            continue
-        found[path] = sha(path)
-        pending.extend(ROOT / 'selfhost/src' / (name + '.sg') for name in
-                       re.findall(r'import\s+selfhost_(\w+)\s*;', path.read_text('utf8')))
-    return found
+    return compiler_closure(ROOT, [entry])
 
 
 def headers(path):
@@ -60,11 +55,34 @@ def headers(path):
     return result
 
 
+def coff_timestamp_candidate(raw, qualified):
+    """Only restore the timestamp of an otherwise identical qualified COFF."""
+    assert len(raw) == len(qualified) and len(raw) >= 20, 'COFF size changed'
+    assert raw[:4] == qualified[:4] and raw[8:] == qualified[8:], 'non-timestamp COFF bytes changed'
+    machine, sections, _, symbols, symbol_count, optional, _ = struct.unpack_from('<HHIIIHH', raw)
+    assert machine == 0x8664 and sections > 0 and optional == 0, 'unexpected COFF kind'
+    assert 20 + sections * 40 <= len(raw), 'truncated COFF section table'
+    assert symbol_count > 0 and symbols >= 20 + sections * 40 and symbols + symbol_count * 18 + 4 <= len(raw), 'invalid COFF symbol table'
+    string_table = symbols + symbol_count * 18
+    string_bytes = struct.unpack_from('<I', raw, string_table)[0]
+    assert string_bytes >= 4 and string_table + string_bytes <= len(raw), 'invalid COFF strings'
+    for index in range(sections):
+        fields = struct.unpack_from('<8sIIIIIIHHI', raw, 20 + index * 40)
+        size, offset, relocations, count = fields[3], fields[4], fields[5], fields[7]
+        assert not offset or offset + size <= len(raw), 'invalid COFF section bytes'
+        assert not count or relocations and relocations + count * 10 <= len(raw), 'invalid COFF relocations'
+    return raw[:4] + qualified[4:8] + raw[8:]
+
+
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     for name in ['seed', 'clang', 'formatter', 'output']:
         parser.add_argument('--' + name, type=Path, required=True)
+    parser.add_argument('--coff-timestamp-parent', type=Path, help='Opt-in reviewed timestamp-only conversion against the pinned original provider report')
+    parser.add_argument('--coff-timestamp-parent-pin')
     args = parser.parse_args()
+    if (args.coff_timestamp_parent is None) != (args.coff_timestamp_parent_pin is None):
+        parser.error('--coff-timestamp-parent and --coff-timestamp-parent-pin must be provided together')
     base = args.output.resolve()
     assert base.is_relative_to(ROOT / 'target')
     base.mkdir(parents=True, exist_ok=False)
@@ -108,7 +126,7 @@ def main():
     assert tools['cargo'].parent == tools['rustc'].parent
     env.update(CARGO=str(tools['cargo']), RUSTC=str(tools['rustc']), CARGO_BUILD_RUSTC=str(tools['rustc']), RUSTUP_TOOLCHAIN=tools['rustc'].parent.parent.name, RUSTC_WRAPPER='', RUSTC_WORKSPACE_WRAPPER='', CARGO_BUILD_RUSTC_WRAPPER='', CARGO_BUILD_RUSTC_WORKSPACE_WRAPPER='')
     env['PATH'] = str(tools['cargo'].parent) + os.pathsep + env['PATH']
-    env.update(SENGOO_STDLIB=str(captured / 'tools/stdlib'), SENGOO_RUNTIME=str(captured / 'tools/stdlib/runtime.c'), SENGOO_CLANG=str(tools['clang']), SENGOO_MODULE_MAP=';'.join('selfhost_' + path.stem + '=' + str(captured / path.relative_to(ROOT)) for path in original if path.parent == ROOT / 'selfhost/src'))
+    env.update(SENGOO_STDLIB=str(captured / 'tools/stdlib'), SENGOO_RUNTIME=str(captured / 'tools/stdlib/runtime.c'), SENGOO_CLANG=str(tools['clang']), SENGOO_MODULE_MAP=module_map(ROOT, original, captured))
     pure = {key: value for key, value in env.items() if not key.upper().startswith('SENGOO_')}
     pure['PATH'] = ''
     configs = {folder / '.cargo' / name for folder in [ROOT, *ROOT.parents] for name in ['config', 'config.toml']}
@@ -157,9 +175,69 @@ def main():
             run(name + '-headers', [tools['clang'], *flags, '-M', '-MT', 'provider_dependency', '-MF', dep_before, source])
             selected_headers = headers(dep_before); inputs.update(selected_headers)
             obj = artifact_dir / (name + '.obj')
-            run(name + '-compile', [tools['clang'], *flags, '-MD', '-MT', 'provider_dependency', '-MF', dep_after, '-c', source, '-o', obj])
+            raw_obj = artifact_dir / (name + '.raw.obj') if name == 'runtime_collections' and args.coff_timestamp_parent is not None else obj
+            run(name + '-compile', [tools['clang'], *flags, '-MD', '-MT', 'provider_dependency', '-MF', dep_after, '-c', source, '-o', raw_obj])
             assert selected_headers == headers(dep_after)
             report['c_header_closures'][name] = selected_headers
+            if name == 'runtime_collections' and args.coff_timestamp_parent is not None:
+                # Rebuilding COFF sets a wall-clock timestamp even when
+                # SOURCE_DATE_EPOCH is set. Preserve the raw object and admit
+                # only an explicit four-byte metadata conversion against the
+                # already qualified provider. All execution below uses the
+                # normalized object and the existing strict object digest.
+                parent_path = args.coff_timestamp_parent.resolve()
+                parent_pin = 'a63152e01208dff39e1d5cbcbd326187901808c8f76fa0d3075a08e0a9fa1cd3'
+                object_pin = '6186b302533aa26588534a0062ccbaa488b58df8561c692a8c0257c65193575a'
+                assert args.coff_timestamp_parent_pin == parent_pin and sha(parent_path) == parent_pin
+                parent = json.loads(parent_path.read_bytes())
+                assert parent['result'] == 'passed' and parent['provider_object_sha256'] == object_pin
+                assert all(not parent[k] for k in ['changed_sources', 'checkout_changes', 'changed_tools', 'changed_configs', 'changed_artifacts'])
+                qualified = parent_path.parent / 'implementation/target/provider/runtime_collections.obj'
+                assert sha(qualified) == object_pin and parent['artifacts'][str(qualified.relative_to(parent_path.parent))] == object_pin
+                assert parent['tools']['clang']['sha256'] == report['tools']['clang']['sha256']
+                inputs[str(parent_path)] = parent_pin; inputs[str(qualified)] = object_pin
+                old_root = parent_path.parent / 'implementation'
+                old_headers = {}
+                for filename, digest in parent['c_header_closures'][name].items():
+                    path = Path(filename); assert sha(path) == digest; inputs[str(path)] = digest
+                    key = str(path.relative_to(old_root)) if path.is_relative_to(old_root) else str(path.resolve())
+                    old_headers[key] = digest
+                current_headers = {str(Path(filename).relative_to(captured)) if Path(filename).is_relative_to(captured) else str(Path(filename).resolve()): digest for filename, digest in selected_headers.items()}
+                assert current_headers == old_headers, 'provider compilation closure changed'
+                raw = raw_obj.read_bytes(); accepted = qualified.read_bytes()
+                normalized = coff_timestamp_candidate(raw, accepted)
+                assert hashlib.sha256(normalized).hexdigest() == object_pin
+                # Every non-timestamp byte is a negative control, including
+                # headers, section contents, relocations, symbols and strings.
+                rejected = 0
+                for offset in range(len(raw)):
+                    if 4 <= offset < 8:
+                        continue
+                    mutation = bytearray(raw); mutation[offset] ^= 1
+                    try:
+                        coff_timestamp_candidate(bytes(mutation), accepted)
+                    except AssertionError:
+                        rejected += 1
+                    else:
+                        raise AssertionError('non-timestamp mutation admitted at ' + str(offset))
+                assert rejected == len(raw) - 4
+                length_rejections = 0
+                for mutation in [raw[:-1], raw + b'\0']:
+                    try:
+                        coff_timestamp_candidate(mutation, accepted)
+                    except AssertionError:
+                        length_rejections += 1
+                    else:
+                        raise AssertionError('changed COFF length admitted')
+                assert length_rejections == 2
+                obj.write_bytes(normalized)
+                report['artifacts'][str(raw_obj.relative_to(base))] = sha(raw_obj)
+                report['coff_timestamp_normalization'] = dict(parent_report=str(parent_path), parent_sha256=parent_pin,
+                    qualified_object=str(qualified), qualified_sha256=object_pin, raw_object=str(raw_obj), raw_sha256=sha(raw_obj),
+                    normalized_object=str(obj), normalized_sha256=sha(obj), raw_timestamp=struct.unpack_from('<I', raw, 4)[0],
+                    qualified_timestamp=struct.unpack_from('<I', accepted, 4)[0], allowed_offsets=[4, 5, 6, 7],
+                    identical_outside_timestamp=True, non_timestamp_single_byte_rejections=rejected, length_rejections=length_rejections,
+                    equal_compile_header_closures=True, scope='Reviewed COFF timestamp conversion only; raw build retained; no raw byte-reproducibility claim')
             objects.append(obj); report['artifacts'][str(obj.relative_to(base))] = sha(obj)
         generator = captured / 'selfhost/sdk/update_collections_inventory.py'
         run('provider-inventory', [tools['python'], '-B', '-X', 'utf8', generator, '--root', captured, '--artifact', objects[-1]])

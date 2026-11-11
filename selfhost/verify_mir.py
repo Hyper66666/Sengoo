@@ -17,19 +17,12 @@ import subprocess
 import sys
 import time
 
+from compiler_inputs import compiler_closure, module_map
+
 ROOT = Path(__file__).resolve().parents[1]
 def frontend_modules():
-    pending = [ROOT / "selfhost/tests/borrow.sg", ROOT / "selfhost/tests/mir.sg"]
-    seen = set()
-    while pending:
-        path = pending.pop()
-        if path in seen:
-            continue
-        if not path.is_file():
-            raise RuntimeError("missing frontend import source: " + str(path))
-        seen.add(path)
-        pending += [ROOT / "selfhost/src" / (name + ".sg") for name in re.findall(r"^\s*import\s+selfhost_([a-z0-9_]+)\s*;", path.read_text(encoding="utf-8"), re.MULTILINE)]
-    return sorted(path.stem for path in seen if path.parent == ROOT / "selfhost/src")
+    inputs = compiler_closure(ROOT, [ROOT / "selfhost/tests/borrow.sg", ROOT / "selfhost/tests/mir.sg"])
+    return [entry.split("=", 1)[0] for entry in module_map(ROOT, inputs).split(";") if entry]
 SEED_SHA = "9b1055c5a5cb7f09c016228a44f7427b7519b6a92e69cad5993004831c3aa1e5"
 CLANG_SHA = "56ef1abd0df11a3b1b77822193e927c6345078c24511567ae10b3afd803d03a3"
 
@@ -47,18 +40,7 @@ def inputs() -> dict[str, str]:
              ROOT / "rust-toolchain.toml", ROOT / "selfhost/tests/borrow.sg", ROOT / "selfhost/tests/mir.sg"}
     # Discover every real import of both unchanged legacy programs. New HIR
     # codec dependencies must be guarded rather than dropped from a fixed list.
-    pending = [ROOT / "selfhost/tests/borrow.sg", ROOT / "selfhost/tests/mir.sg"]
-    visited = set()
-    while pending:
-        path = pending.pop()
-        if path in visited:
-            continue
-        if not path.is_file():
-            raise RuntimeError("missing frontend import source: " + str(path))
-        visited.add(path)
-        paths.add(path)
-        for dependency in re.findall(r"^\s*import\s+selfhost_([a-z0-9_]+)\s*;", path.read_text(encoding="utf-8"), re.MULTILINE):
-            pending.append(ROOT / "selfhost/src" / (dependency + ".sg"))
+    paths.update(compiler_closure(ROOT, [ROOT / "selfhost/tests/borrow.sg", ROOT / "selfhost/tests/mir.sg"]))
     for directory in ("tools/stdlib", "runtime"):
         for path in (ROOT / directory).rglob("*"):
             if path.is_file() and not any(part in {"target", "build", "__pycache__"} for part in path.relative_to(ROOT / directory).parts):
@@ -105,7 +87,7 @@ def main() -> int:
         report["actual_frontend_import_modules"] = frontend_modules()
         env = os.environ.copy()
         env.update(SENGOO_STDLIB=str(ROOT / "tools/stdlib"), SENGOO_RUNTIME=str(ROOT / "tools/stdlib/runtime.c"), SENGOO_CLANG=str(args.clang.resolve()),
-                   SENGOO_MODULE_MAP=";".join("selfhost_" + name + "=" + str(ROOT / "selfhost/src" / (name + ".sg")) for name in frontend_modules()))
+                   SENGOO_MODULE_MAP=module_map(ROOT, [ROOT / name for name in before]))
         env["PATH"] = str(args.clang.resolve().parent) + os.pathsep + env.get("PATH", "")
         jobs = [
             ("borrow-build", [str(args.seed.resolve()), "--runtime-mode", "source-development", "build", "selfhost/tests/borrow.sg", "--force-rebuild", "-O", "0", "-o", str(output / "borrow-tests.exe")], None),

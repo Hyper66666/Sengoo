@@ -15,6 +15,7 @@ import time
 import tomllib
 
 from verify_collection_provider import ROOT, closure, headers, sha
+from compiler_inputs import module_map
 
 
 def revision():
@@ -34,7 +35,11 @@ def main():
     parser.add_argument('--regression-parent', type=Path)
     parser.add_argument('--regression-parent-pin')
     parser.add_argument('--profile', choices=['constructor', 'flow'], default='constructor')
+    parser.add_argument('--provider-report', type=Path)
+    parser.add_argument('--provider-pin')
     args = parser.parse_args()
+    if (args.provider_report is None) != (args.provider_pin is None):
+        parser.error('--provider-report and --provider-pin must be supplied together')
     base = args.output.resolve()
     assert base.is_relative_to(ROOT / 'target')
     base.mkdir(parents=True, exist_ok=False)
@@ -61,10 +66,11 @@ def main():
                                   'Actual source/provider/loan/effect/ownership proofs and strict optional physical MIR; owning HIR6',
                                   'Saved MIR is not accepted; full owned new-authority wire and final runtime/self-build remain open'],
                           ordinary_regressions_separately_required=True)
-        parent_path = ROOT / 'target/selfhost/m3-collection-provider-ast-checkpoint/evidence.json'
-        assert sha(parent_path) == 'a63152e01208dff39e1d5cbcbd326187901808c8f76fa0d3075a08e0a9fa1cd3'
+        parent_path = args.provider_report.resolve() if args.provider_report is not None else ROOT / 'target/selfhost/m3-collection-provider-ast-checkpoint/evidence.json'
+        parent_pin = args.provider_pin if args.provider_pin is not None else 'a63152e01208dff39e1d5cbcbd326187901808c8f76fa0d3075a08e0a9fa1cd3'
+        assert sha(parent_path) == parent_pin
         parent = json.loads(parent_path.read_bytes())
-        assert parent['result'] == 'passed'
+        assert parent['schema'] == 1 and parent['stage'] == 'collections-namespace-two-provider-mapping' and parent['result'] == 'passed'
         assert all(parent[k] == [] for k in ['changed_sources', 'checkout_changes', 'changed_tools', 'changed_configs', 'changed_artifacts'])
         sources[str(parent_path)] = sha(parent_path)
         for path, digest in parent['sources'].items():
@@ -145,7 +151,7 @@ def main():
         env.update(CARGO=tools['cargo']['path'], RUSTC=tools['rustc']['path'], CARGO_BUILD_RUSTC=tools['rustc']['path'],
                    RUSTUP_TOOLCHAIN=Path(tools['rustc']['path']).parent.parent.name, RUSTC_WRAPPER='', RUSTC_WORKSPACE_WRAPPER='', CARGO_BUILD_RUSTC_WRAPPER='', CARGO_BUILD_RUSTC_WORKSPACE_WRAPPER='',
                    SENGOO_STDLIB=str(captured / 'tools/stdlib'), SENGOO_RUNTIME=str(captured / 'tools/stdlib/runtime.c'), SENGOO_CLANG=str(args.clang.resolve()),
-                   SENGOO_MODULE_MAP=';'.join('selfhost_' + p.stem + '=' + str(captured / p.relative_to(ROOT)) for p in imported if p.parent == ROOT / 'selfhost/src'))
+                   SENGOO_MODULE_MAP=module_map(ROOT, imported, captured))
         env['PATH'] = str(Path(tools['cargo']['path']).parent) + os.pathsep + env['PATH']
         pure = {k: v for k, v in env.items() if not k.upper().startswith('SENGOO_')}
         pure['PATH'] = ''

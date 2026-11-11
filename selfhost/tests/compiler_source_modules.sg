@@ -1,0 +1,70 @@
+import selfhost_semantic_modules;
+
+import std::assert;
+
+import std::args;
+
+extern "C" {
+    fn sengoo_string_live_handle_count() -> i64;
+    fn sengoo_buffer_live_handle_count() -> i64;
+    fn sengoo_opaque_live_handle_count() -> i64;
+    fn sengoo_file_snapshot_live_handle_count() -> i64;
+    fn sengoo_file_snapshot_live_bytes() -> i64;
+    fn sengoo_compiler_snapshot_test_handle_count() -> i64;
+}
+
+def sh_cssm_file(root: &String, name: &str) -> Result<String, i64> {
+    let path = root.clone()?;
+    path.push_str("/")?;
+    path.push_str(name)?;
+    string_result_ok(path);
+}
+
+def sh_cssm_scope(root: &String) -> Result<i64, i64> {
+    let entry = sh_cssm_file(root, "root.sg")?;
+    let library = sh_cssm_file(root, "stdlib")?;
+    let empty = string_new();
+    let graph = sh_modules_load(entry.as_str(), library.as_str(), &empty, 1000000, 1073741824);
+    assert_eq_i64(graph.error, 0, "compiler-source-modules", 1);
+    assert_eq_i64(graph.units.len(), 34, "compiler-source-modules", 2);
+    assert_eq_i64(graph.sources.limit, 1000000, "compiler-source-modules", 3);
+    assert_eq_i64(graph.maximum, 1073741824, "compiler-source-modules", 4);
+    assert_eq_i64(graph.snapshots.max_modules, 1024, "compiler-source-modules", 5);
+    assert_eq_i64(graph.snapshots.max_bytes, 67108864, "compiler-source-modules", 6);
+    assert_eq_i64(graph.snapshots.snapshots.len(), 34, "compiler-source-modules", 7);
+    assert_true(sh_modules_unchanged(&graph), "compiler-source-modules", 8);
+    let limited = sh_modules_load(entry.as_str(), library.as_str(), &empty, 33, 16777216);
+    assert_eq_i64(limited.error, 5204, "compiler-source-modules", 9);
+    let duplicate_path = sh_cssm_file(root, "duplicate.sg")?;
+    let duplicate = sh_modules_load(duplicate_path.as_str(), library.as_str(), &empty, 34, 16777216);
+    assert_eq_i64(duplicate.error, 0, "compiler-source-modules", 10);
+    assert_eq_i64(duplicate.units.len(), 34, "compiler-source-modules", 11);
+    assert_true(sh_modules_unchanged(&duplicate), "compiler-source-modules", 12);
+    let invalid_path = sh_cssm_file(root, "invalid.sg")?;
+    let invalid = sh_modules_load(invalid_path.as_str(), library.as_str(), &empty, 4, 16777216);
+    assert_eq_i64(invalid.error, 5207, "compiler-source-modules", 13);
+    let missing_path = sh_cssm_file(root, "missing.sg")?;
+    let missing = sh_modules_load(missing_path.as_str(), library.as_str(), &empty, 4, 16777216);
+    assert_eq_i64(missing.error, 5205, "compiler-source-modules", 14);
+    sh_i64_ok(42);
+}
+
+def main() -> i64 {
+    let length = arg_len(0);
+    if not length.is_ok() { return 64; };
+    let bytes = ffi_buffer_new(length.value);
+    if not bytes.is_ok() { return 64; };
+    let copied = arg_copy(0, bytes.value);
+    if not copied.is_ok() { return 64; };
+    let root = string_from_utf8(bytes.value, copied.value);
+    if not root.is_ok() { return 64; };
+    let strings = sengoo_string_live_handle_count();
+    let buffers = sengoo_buffer_live_handle_count();
+    let opaque = sengoo_opaque_live_handle_count();
+    let snapshots = sengoo_file_snapshot_live_handle_count();
+    let snapshot_bytes = sengoo_file_snapshot_live_bytes();
+    let handles = sengoo_compiler_snapshot_test_handle_count();
+    let mut round = 0;
+    while round < 3 { { let result = sh_cssm_scope(&root.value); if not result.is_ok() { println(result.error); return 65; }; }; assert_eq_i64(sengoo_string_live_handle_count(), strings, "compiler-source-modules", 15); assert_eq_i64(sengoo_buffer_live_handle_count(), buffers, "compiler-source-modules", 16); assert_eq_i64(sengoo_opaque_live_handle_count(), opaque, "compiler-source-modules", 17); assert_eq_i64(sengoo_file_snapshot_live_handle_count(), snapshots, "compiler-source-modules", 18); assert_eq_i64(sengoo_file_snapshot_live_bytes(), snapshot_bytes, "compiler-source-modules", 19); assert_eq_i64(sengoo_compiler_snapshot_test_handle_count(), handles, "compiler-source-modules", 20); round = round + 1; };
+    42;
+}

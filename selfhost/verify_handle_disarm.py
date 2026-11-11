@@ -13,6 +13,8 @@ import sys
 import time
 import tomllib
 
+from compiler_inputs import compiler_closure, module_map
+
 ROOT = Path(__file__).resolve().parents[1]
 ENTRIES = ["selfhost/tests/handle_disarm_hir.sg", "selfhost/tools/native.sg", "selfhost/tools/semantic.sg"]
 
@@ -34,6 +36,7 @@ def dependency_inputs():
     paths.update(path for path in (ROOT/"openspec/changes/add-selfhost-handle-disarm").rglob("*.md") if path.name != "tasks.md")
     for name in ("selfhost/src/borrow.sg","selfhost/src/hir.sg","selfhost/src/mir_lower.sg","selfhost/tests/borrow.sg","selfhost/tests/mir.sg","selfhost/tests/handle_disarm_hir.sg","selfhost/tests/handle_disarm.sg","selfhost/tests/handle_disarm_probe.c"):
         paths.add(ROOT/name)
+    paths.update(compiler_closure(ROOT, [ROOT / name for name in ENTRIES]))
     return {str(path):sha(path)for path in sorted(paths)}
 
 def main():
@@ -61,15 +64,11 @@ def main():
         report["tools"]=tools
         before=dependency_inputs();report["inputs_before"]=before
         snapshot=out/"implementation";snapshot.mkdir(exist_ok=True)
-        pending=[ROOT/name for name in ENTRIES];seen=set();modules={}
-        while pending:
-            path=pending.pop()
-            if path in seen:continue
-            seen.add(path);data=path.read_bytes();origins[str(path)]=hashlib.sha256(data).hexdigest()
+        modules=compiler_closure(ROOT,[ROOT/name for name in ENTRIES])
+        for path, expected_hash in modules.items():
+            data=path.read_bytes();origins[str(path)]=hashlib.sha256(data).hexdigest()
+            if origins[str(path)] != expected_hash:raise RuntimeError("compiler input changed during capture")
             dest=snapshot/path.relative_to(ROOT);dest.parent.mkdir(parents=True,exist_ok=True);dest.write_bytes(data);snapshots[str(dest)]=sha(dest)
-            if path.parent==ROOT/"selfhost/src":modules[path.stem]=dest
-            for name in re.findall(r"^\s*import\s+selfhost_([a-z0-9_]+)\s*;",data.decode("utf-8"),re.M):
-                pending.append(ROOT/"selfhost/src"/(name+".sg"))
         for name in ("tools/stdlib","selfhost/tests/handle_disarm.sg","selfhost/tests/handle_disarm_probe.c"):
             source=ROOT/name
             paths=source.rglob("*")if source.is_dir()else [source]
@@ -79,7 +78,7 @@ def main():
         if any(sha(path)!=digest for path,digest in origins.items()):raise RuntimeError("mixed source snapshot")
         report["producer_origins"]=origins;report["producer_snapshots"]=snapshots
         env={key:value for key,value in os.environ.items()if not key.upper().startswith(("SENGOO_","SGPLATFORM_","SDL2_"))and not rust_override(key)}
-        env.update(SENGOO_STDLIB=str(snapshot/"tools/stdlib"),SENGOO_RUNTIME=str(snapshot/"tools/stdlib/runtime.c"),SENGOO_CLANG=str(args.clang.resolve()),SENGOO_MODULE_MAP=";".join("selfhost_"+name+"="+str(path)for name,path in modules.items()),RUSTC=str(rustbin/"rustc.exe"),CARGO_BUILD_RUSTC=str(rustbin/"rustc.exe"),CARGO=str(rustbin/"cargo.exe"),RUSTUP_TOOLCHAIN=rustbin.parent.name,RUSTC_WRAPPER="",RUSTC_WORKSPACE_WRAPPER="",CARGO_BUILD_RUSTC_WRAPPER="",CARGO_BUILD_RUSTC_WORKSPACE_WRAPPER="")
+        env.update(SENGOO_STDLIB=str(snapshot/"tools/stdlib"),SENGOO_RUNTIME=str(snapshot/"tools/stdlib/runtime.c"),SENGOO_CLANG=str(args.clang.resolve()),SENGOO_MODULE_MAP=module_map(ROOT,modules,snapshot),RUSTC=str(rustbin/"rustc.exe"),CARGO_BUILD_RUSTC=str(rustbin/"rustc.exe"),CARGO=str(rustbin/"cargo.exe"),RUSTUP_TOOLCHAIN=rustbin.parent.name,RUSTC_WRAPPER="",RUSTC_WORKSPACE_WRAPPER="",CARGO_BUILD_RUSTC_WRAPPER="",CARGO_BUILD_RUSTC_WORKSPACE_WRAPPER="")
         env["PATH"]=str(rustbin)+os.pathsep+str(args.clang.resolve().parent)+os.pathsep+env.get("PATH","")
         cargo_home=Path(env.get("CARGO_HOME",str(Path.home()/".cargo")))
         candidates={parent/".cargo"/name for parent in(ROOT,*ROOT.parents)for name in("config","config.toml")}

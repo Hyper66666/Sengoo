@@ -1,3 +1,5 @@
+import selfhost_compiler_source_snapshot;
+
 import selfhost_frontend;
 
 import selfhost_semantic;
@@ -9,7 +11,7 @@ import std::file;
 import std::env;
 
 struct ShModuleUnit {
-    snapshot: FileSnapshot,
+    snapshot: i64,
     path: String,
     identity: String,
     source: i64,
@@ -24,6 +26,7 @@ struct ShModuleConfig {
 }
 
 struct ShModules {
+    snapshots: ShCompilerSnapshotArena,
     sources: ShSources,
     units: Vec<ShModuleUnit>,
     states: Vec<i64>,
@@ -101,12 +104,12 @@ def sh_module_config_path(config: &ShModuleConfig, name: &String) -> Result<Stri
 }
 
 def sh_module_load(graph: &mut ShModules, path: &String, standard: i64, site: ShSpan) -> i64 {
-    let opened = file_snapshot_open(path.as_str(), graph.maximum);
-    if not opened.is_ok() { let code = if opened.error == STATUS_OVERFLOW() or opened.error == STATUS_BUFFER_TOO_SMALL() or opened.error == STATUS_OUT_OF_MEMORY() { 5204; } else { 5205; }; sh_module_fail(graph, code, site.source, site.start, site.end); return -1; };
+    let opened = sh_compiler_snapshot_open(&mut graph.snapshots, path);
+    if not opened.is_ok() { let code = if opened.error == STATUS_OVERFLOW() or opened.error == STATUS_BUFFER_TOO_SMALL() or opened.error == STATUS_OUT_OF_MEMORY() { 5204; } else if opened.error == STATUS_INVALID_UTF8() { 5207; } else { 5205; }; sh_module_fail(graph, code, site.source, site.start, site.end); return -1; };
     let snapshot = opened.value;
-    let identity = snapshot.identity();
-    let absolute = snapshot.path();
-    let length = snapshot.len();
+    let identity = sh_compiler_snapshot_string(&graph.snapshots, snapshot, 1);
+    let absolute = sh_compiler_snapshot_string(&graph.snapshots, snapshot, 2);
+    let length = sh_compiler_snapshot_length(&graph.snapshots, snapshot);
     if not identity.is_ok() or not absolute.is_ok() or not length.is_ok() { sh_module_fail(graph, 5205, site.source, site.start, site.end); return -1; };
     let mut index = 0;
     while index < graph.units.len() { if sengoo_string_eq(graph.units.get(index).identity.handle, identity.value.handle) != 0 { return index; }; index = index + 1; };
@@ -114,7 +117,7 @@ def sh_module_load(graph: &mut ShModules, path: &String, standard: i64, site: Sh
     let allocated = ffi_buffer_new(length.value);
     if not allocated.is_ok() { sh_module_fail(graph, 5204, site.source, site.start, site.end); return -1; };
     let mut buffer = allocated.value;
-    let copied = snapshot.copy_bytes(&mut buffer);
+    let copied = sh_compiler_snapshot_copy(&graph.snapshots, snapshot, &mut buffer);
     if not copied.is_ok() or copied.value != length.value { sh_module_fail(graph, 5205, site.source, site.start, site.end); return -1; };
     let decoded = string_from_utf8(buffer, copied.value);
     if not decoded.is_ok() { sh_module_fail(graph, 5207, site.source, site.start, site.end); return -1; };
@@ -272,7 +275,7 @@ def sh_modules_load(entry: &str, stdlib: &str, module_map: &String, max_modules:
     let root_path = string_from_str(entry);
     let library = string_from_str(stdlib);
     let library_ok = library.is_ok();
-    let mut graph = ShModules { sources: sh_sources_new(max_modules, max_bytes), units: units, states: vec_new_i64(), edges: vec_new_i64(), order: vec_new_i64(), local_order: vec_new_i64(), requested: sh_symbols_new(max_modules), requests: vec_new_i64(), standard_ids: vec_new_i64(), config: config, features: sh_symbols_new(0), text: string_new(), mapping: vec_new_i64(), stdlib: library.value, root: -1, bytes: 0, maximum: max_bytes, error: 0, source: -1, start: 0, end: 0 };
+    let mut graph = ShModules { snapshots: sh_compiler_snapshot_arena(if max_modules > 1024 { 1024; } else { max_modules; }, if max_bytes > 67108864 { 67108864; } else { max_bytes; }, 8388608), sources: sh_sources_new(max_modules, max_bytes), units: units, states: vec_new_i64(), edges: vec_new_i64(), order: vec_new_i64(), local_order: vec_new_i64(), requested: sh_symbols_new(max_modules), requests: vec_new_i64(), standard_ids: vec_new_i64(), config: config, features: sh_symbols_new(0), text: string_new(), mapping: vec_new_i64(), stdlib: library.value, root: -1, bytes: 0, maximum: max_bytes, error: 0, source: -1, start: 0, end: 0 };
     if max_modules < 1 or max_modules > 1000000 or max_bytes < 0 or not root_path.is_ok() or not library_ok { sh_module_fail(&mut graph, 5204, -1, 0, 0); return graph; };
     if graph.config.error != 0 { let code = graph.config.error; sh_module_fail(&mut graph, code, -1, 0, 0); return graph; };
     let root = sh_module_load(&mut graph, &root_path.value, 0, ShSpan { source: -1, start: 0, end: 0 });
@@ -297,7 +300,7 @@ def sh_modules_load(entry: &str, stdlib: &str, module_map: &String, max_modules:
 
 def sh_modules_unchanged(graph: &ShModules) -> bool {
     let mut index = 0;
-    while index < graph.units.len() { let current = graph.units.get(index).snapshot.still_matches(); if not current.is_ok() or not current.value { return false; }; index = index + 1; };
+    while index < graph.units.len() { let current = sh_compiler_snapshot_matches(&graph.snapshots, graph.units.get(index).snapshot); if not current.is_ok() or not current.value { return false; }; index = index + 1; };
     true;
 }
 
