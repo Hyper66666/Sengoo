@@ -40,6 +40,11 @@ explicit external-toolchain procedures outside the no-external-tools gate.
 | Stage0 Windows synchronous Unicode process-launch correction | `fix-windows-process-utf8-launch` |
 | SG lexer/parser/macro/attribute pipeline and formatter integration | `add-selfhost-syntax` |
 | SG semantic analysis, borrowing/Drop, HIR/MIR and reference comparison | `add-selfhost-semantics` |
+| Compiler-owned retained source arena and physical witness revalidation | `add-selfhost-compiler-source-snapshots` |
+| Selected AsyncFile factory source authority and HIR schema-seven facts | `add-selfhost-async-file-factory-contract` |
+| Restricted synchronous AsyncFile buffer observation | `fix-selfhost-async-file-buffer-observer` |
+| Checked signed-i64/shared-str print builtin lowering | `add-selfhost-print-intrinsics` |
+| Conditional named-field cleanup paths and native field state | `add-selfhost-conditional-field-cleanup` |
 | Canonical iterator producer origins and conditional source obligations | `add-selfhost-iterator-origins` |
 | Selected collection providers, concrete constructors and checked optional-borrow compiler integration | `add-selfhost-collection-intrinsics` |
 | Windows x64 code generator, target ABI and optimization | `add-selfhost-native-backend` |
@@ -68,9 +73,10 @@ links to child requirements rather than duplicating their behavior.
 | M7: full toolchain | All four tools and SG runtime build from SG; all documented Windows supported behavior and protocol ports pass |
 | M8: default cutover | Full-toolchain fixed point, clean installation, compatibility, performance, two consecutive candidates and rollback proof |
 
-M0's checkpoint publication is already performed. The measurement freeze and
-other M0 exits remain open until their named checks are recorded. M1 does not
-claim M2-M8, a minimal platform SDK, or a self-hosted compiler.
+M0, M1 and M2 have passed the named local gates recorded in the program task
+ledger. Their evidence does not close M3-M8, qualify a final platform SDK, or
+establish a compiler fixed point. Individual later child checkpoints likewise
+close only their explicitly verified obligations.
 
 ## Final self-build proof
 

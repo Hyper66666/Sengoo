@@ -1,3 +1,5 @@
+import selfhost_factory_path;
+
 import selfhost_compiler_source_snapshot;
 
 import selfhost_frontend;
@@ -353,7 +355,8 @@ def sh_module_export(checked: &ShModuleChecked, module: i64, symbol: i64, type_n
 
 def sh_modules_check(graph: &ShModules, max_nodes: i64, max_diagnostics: i64) -> ShModuleChecked {
     let front = sh_frontend(&graph.text, graph.root, &graph.features, graph.maximum, max_nodes);
-    let checked = sh_check(&front.expanded.text, &front.parsed.ast, max_diagnostics);
+    let factory = sh_module_factory_source(graph, &front);
+    let checked = sh_check_factory(&front.expanded.text, &front.parsed.ast, max_diagnostics, &factory);
     let mut output = ShModuleChecked { front: front, checked: checked, node_modules: vec_new_i64(), binding_modules: vec_new_i64(), scope_modules: vec_new_i64(), module_scopes: vec_new_i64(), module_bindings: vec_new_i64(), exports: vec_new_i64(), error: graph.error, source: graph.source, start: graph.start, end: graph.end };
     if output.error != 0 { return output; };
     if output.front.error != 0 { let site = sh_modules_span(graph, output.front.start, output.front.end); output.error = output.front.error; output.source = site.source; output.start = site.start; output.end = site.end; return output; };
@@ -372,4 +375,118 @@ def sh_modules_check(graph: &ShModules, max_nodes: i64, max_diagnostics: i64) ->
     while module < sh_module_count(graph) { let spelling = string_from_str("@module:"); if not spelling.is_ok() { output.error = 5204; return output; }; sh_module_append(&spelling.value, &graph.units.get(module).identity); let symbol = sh_intern(&output.checked.symbols, &spelling.value).unwrap_or(-1); let module_binding = sh_s_binding(&output.checked, symbol, 0, 12, output.checked.unit_type, -1, 4096, -1, -1); let module_scope = sh_s_scope(&output.checked, 0, module_binding, 4); sh_s_binding_set(&output.checked, module_binding, 7, module_scope); output.module_bindings.push(module_binding); output.module_scopes.push(module_scope); output.binding_modules.push(module); output.scope_modules.push(module); module = module + 1; };
     if output.checked.error != 0 { let site = sh_module_expanded_span(graph, &output.front, output.checked.start, output.checked.end); output.error = output.checked.error; output.source = site.source; output.start = site.start; output.end = site.end; };
     output;
+}
+
+def sh_module_factory_source(graph: &ShModules, front: &ShFrontend) -> ShFactorySource {
+    let mut out = sh_factory_source_empty();
+    if graph.error != 0 or front.error != 0 or not sh_modules_unchanged(graph) { out.schema = -1; return out; };
+    let file = string_from_str("file");
+    if not file.is_ok() { out.schema = -1; return out; };
+    let symbol = sh_module_symbol(&graph.requested, &file.value);
+    let module = graph.standard_ids.get(symbol).unwrap_or(-1);
+    if module < 0 { return out; };
+    if module >= graph.units.len() or module >= graph.sources.texts.len() or graph.units.get(module).source != module or graph.units.get(module).standard != 1 { out.schema = -1; return out; };
+    if not sh_factory_selected_request(graph, module, "file", 0) { out.schema = -1; return out; };
+    let snapshot = graph.units.get(module).snapshot;
+    let matches = sh_compiler_snapshot_matches(&graph.snapshots, snapshot);
+    let digest = sh_compiler_snapshot_string(&graph.snapshots, snapshot, 0);
+    let identity = sh_compiler_snapshot_string(&graph.snapshots, snapshot, 1);
+    let path = sh_compiler_snapshot_string(&graph.snapshots, snapshot, 2);
+    let length = sh_compiler_snapshot_length(&graph.snapshots, snapshot);
+    if not matches.is_ok() or not matches.value or not digest.is_ok() or not identity.is_ok() or not path.is_ok() or not length.is_ok() or length.value < 1 or length.value > 65536 or identity.value.as_str() != graph.units.get(module).identity.as_str() or path.value.as_str() != graph.units.get(module).path.as_str() { out.schema = -1; return out; };
+    if digest.value.as_str() != sh_factory_profile_digest(1) { return out; };
+    let allocated = ffi_buffer_new(length.value);
+    if not allocated.is_ok() { out.schema = -1; return out; };
+    let mut bytes = allocated.value;
+    let copied = sh_compiler_snapshot_copy(&graph.snapshots, snapshot, &mut bytes);
+    if not copied.is_ok() or copied.value != length.value { out.schema = -1; return out; };
+    let source = string_from_utf8(bytes, copied.value);
+    if not source.is_ok() or source.value.as_str() != graph.sources.texts.get(module).text.as_str() { out.schema = -1; return out; };
+    let mut origin = -1;
+    let mut i = 0;
+    while i < graph.mapping.len() { if graph.mapping.get(i + 2).unwrap_or(-1) == module { if origin >= 0 or graph.mapping.get(i + 3).unwrap_or(-1) != 0 or graph.mapping.get(i + 4).unwrap_or(-1) != length.value or graph.mapping.get(i + 1).unwrap_or(-1) - graph.mapping.get(i).unwrap_or(-1) != length.value { out.schema = -1; return out; }; origin = graph.mapping.get(i).unwrap_or(-1); }; i = i + 5; };
+    if origin < 0 { out.schema = -1; return out; };
+    let joined = graph.text.get(origin, origin + length.value);
+    if not joined.is_ok() or joined.value.as_str() != source.value.as_str() { out.schema = -1; return out; };
+    let mut expanded = -1;
+    i = 0;
+    while i < front.expanded.mapping.words.len() { let low = front.expanded.mapping.words.get(i).unwrap_or(-1); let high = front.expanded.mapping.words.get(i + 1).unwrap_or(-1); let start = front.expanded.mapping.words.get(i + 2).unwrap_or(-1); let end = front.expanded.mapping.words.get(i + 3).unwrap_or(-1); let mode = front.expanded.mapping.words.get(i + 4).unwrap_or(-1); if mode == 0 and start <= origin and end >= origin + length.value and high - low == end - start { if expanded >= 0 { out.schema = -1; return out; }; expanded = low + origin - start; }; i = i + 5; };
+    if expanded < 0 { out.schema = -1; return out; };
+    out.profile = 1;
+    out.module = module;
+    out.expanded_start = expanded;
+    out.identity = identity.value;
+    out.digest = digest.value;
+    out.source = source.value;
+    let anchor = sh_factory_source_anchor(&out);
+    if not anchor.is_ok() { out.schema = -1; return out; };
+    out.anchor = anchor.value;
+    if not sh_factory_source_valid(&out, &front.expanded.text) { out.schema = -1; };
+    out;
+}
+
+def sh_factory_selected_path(graph: &ShModules, module: i64, name: &str) -> bool {
+    if module < 0 or module >= graph.units.len() or graph.units.get(module).source != module { return false; };
+    let filename = string_from_str(name);
+    if not filename.is_ok() or not filename.value.push_str(".sg").is_ok() { return false; };
+    let requested = path_join_string(graph.stdlib.as_str(), filename.value.as_str());
+    if not requested.is_ok() or sh_css_input_path(requested.value.as_str()) != 0 { return false; };
+    let allocated = ffi_buffer_new(32768);
+    if not allocated.is_ok() { return false; };
+    let status = sengoo_compiler_snapshot_full_path(sengoo_stdlib_str_ptr(requested.value.as_str()), requested.value.len(), allocated.value.ptr(), 32768);
+    if status <= 0 or status >= 32768 { return false; };
+    let normal = sh_css_text(allocated.value.ptr(), status);
+    let actual = sh_compiler_snapshot_string(&graph.snapshots, graph.units.get(module).snapshot, 2);
+    if not normal.is_ok() or not actual.is_ok() or sh_css_normal_path(normal.value.as_str()) != 0 { return false; };
+    if normal.value.as_str() == actual.value.as_str() { return true; };
+    let snapshot = graph.units.get(module).snapshot;
+    if snapshot < 0 or snapshot >= graph.snapshots.snapshots.len() { return false; };
+    let guard = sengoo_ffi_buffer_ptr(graph.snapshots.snapshots.get(snapshot).guard.state.handle);
+    if sengoo_compiler_snapshot_case_insensitive(guard, 1024) != 1 { return false; };
+    sengoo_factory_path_equal(sengoo_stdlib_str_ptr(normal.value.as_str()), normal.value.len(), sengoo_stdlib_str_ptr(actual.value.as_str()), actual.value.len()) == 1;
+}
+
+def sh_factory_request_source(graph: &ShModules, importer: i64) -> Result<String, i64> {
+    if importer < 0 or importer >= graph.units.len() or importer >= graph.sources.texts.len() or graph.units.get(importer).source != importer { return string_result_err(5509); };
+    let snapshot = graph.units.get(importer).snapshot;
+    let matches = sh_compiler_snapshot_matches(&graph.snapshots, snapshot);
+    let length = sh_compiler_snapshot_length(&graph.snapshots, snapshot);
+    let identity = sh_compiler_snapshot_string(&graph.snapshots, snapshot, 1);
+    let path = sh_compiler_snapshot_string(&graph.snapshots, snapshot, 2);
+    if not matches.is_ok() or not matches.value or not length.is_ok() or length.value < 0 or length.value > graph.maximum { return string_result_err(5509); };
+    if not identity.is_ok() or not path.is_ok() or identity.value.as_str() != graph.units.get(importer).identity.as_str() or path.value.as_str() != graph.units.get(importer).path.as_str() { return string_result_err(5509); };
+    let mut bytes = ffi_buffer_new(length.value)?;
+    let copied = sh_compiler_snapshot_copy(&graph.snapshots, snapshot, &mut bytes)?;
+    if copied != length.value { return string_result_err(5509); };
+    let text = string_from_utf8(bytes, copied)?;
+    if text.as_str() != graph.sources.texts.get(importer).text.as_str() { return string_result_err(5509); };
+    if graph.mapping.len() % 5 != 0 { return string_result_err(5509); };
+    let mut row = 0;
+    let mut found = false;
+    while row < graph.mapping.len() { if graph.mapping.get(row + 2).unwrap_or(-1) == importer { let low = graph.mapping.get(row).unwrap_or(-1); let high = graph.mapping.get(row + 1).unwrap_or(-1); if found or graph.mapping.get(row + 3).unwrap_or(-1) != 0 or graph.mapping.get(row + 4).unwrap_or(-1) != length.value or high - low != length.value { return string_result_err(5509); }; let joined = graph.text.get(low, high)?; let pointer = sengoo_stdlib_str_ptr(text.as_str()); let bom = text.len() >= 3 and sh_css_byte(pointer, 0) == 239 and sh_css_byte(pointer, 1) == 187 and sh_css_byte(pointer, 2) == 191; if bom { let prefix = joined.get(0, 3)?; let tail = joined.get(3, joined.len())?; let original = text.get(3, text.len())?; if prefix.as_str() != "   " or tail.as_str() != original.as_str() { return string_result_err(5509); }; } else if joined.as_str() != text.as_str() { return string_result_err(5509); }; found = true; }; row = row + 5; };
+    if not found { return string_result_err(5509); };
+    string_result_ok(text);
+}
+
+def sh_factory_import_request(graph: &ShModules, importer: i64, start: i64, end: i64, wanted: &str) -> bool {
+    if start < 0 or end <= start { return false; };
+    let raw = sh_factory_request_source(graph, importer);
+    if not raw.is_ok() { return false; };
+    let front = sh_module_import_front(&raw.value, importer, &graph.features, graph.maximum);
+    if front.error != 0 { return false; };
+    let ast = &front.parsed.ast;
+    let mut index = 0;
+    while index < sh_ast_word(ast, ast.root, 6) { let node = sh_ast_child(ast, ast.root, index); if sh_ast_word(ast, node, 0) == 30 { let site = sh_exp_map(&front.expanded.mapping, sh_ast_word(ast, node, 2), sh_ast_word(ast, node, 3)); if site.start == start and site.end == end { let path = sh_s_child_kind(ast, node, 12); let first = sh_s_name(&front.expanded.text, ast, sh_ast_child(ast, path, 0)); if first.is_ok() and first.value.as_str() == "std" { if sh_ast_word(ast, path, 6) > 1 { let name = sh_s_name(&front.expanded.text, ast, sh_ast_child(ast, path, 1)); if name.is_ok() and name.value.as_str() == wanted { return true; }; } else { let mut child = 0; while child < sh_ast_word(ast, node, 6) { let item = sh_ast_child(ast, node, child); if sh_ast_word(ast, item, 0) == 10 { let name = sh_s_name(&front.expanded.text, ast, item); if name.is_ok() and name.value.as_str() == wanted { return true; }; }; child = child + 1; }; }; }; }; }; index = index + 1; };
+    false;
+}
+
+def sh_factory_selected_request(graph: &ShModules, module: i64, name: &str, depth: i64) -> bool {
+    if depth > 1 or not sh_factory_selected_path(graph, module, name) or graph.requests.len() % 4 != 0 { return false; };
+    let spelling = string_from_str(name);
+    if not spelling.is_ok() { return false; };
+    let symbol = sh_module_symbol(&graph.requested, &spelling.value);
+    if symbol < 0 or graph.standard_ids.get(symbol).unwrap_or(-1) != module { return false; };
+    let mut row = 0;
+    while row < graph.requests.len() { if graph.requests.get(row).unwrap_or(-1) == symbol { let importer = graph.requests.get(row + 1).unwrap_or(-1); let start = graph.requests.get(row + 2).unwrap_or(-1); let end = graph.requests.get(row + 3).unwrap_or(-1); if sh_factory_import_request(graph, importer, start, end, name) { return true; }; if name == "file" and start == 0 and end == 0 and sh_factory_selected_request(graph, importer, "stream", depth + 1) { return true; }; }; row = row + 4; };
+    false;
 }

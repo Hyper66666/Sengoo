@@ -1,0 +1,83 @@
+import selfhost_compiler_source_snapshot;
+
+struct ShFactorySource {
+    schema: i64,
+    profile: i64,
+    module: i64,
+    expanded_start: i64,
+    identity: String,
+    digest: String,
+    source: String,
+    anchor: String,
+    records: Vec<i64>,
+}
+
+def sh_factory_source_empty() -> ShFactorySource {
+    ShFactorySource { schema: 1, profile: 0, module: -1, expanded_start: -1, identity: string_new(), digest: string_new(), source: string_new(), anchor: string_new(), records: vec_new_i64() };
+}
+
+def sh_factory_profile_digest(profile: i64) -> &str {
+    if profile == 1 { "4f06beb2c04856a97dc4d06abeea7deb783c7f6cd50375c7d6a8d2b533c1876f"; } else { ""; };
+}
+
+def sh_factory_source_hash(text: &String) -> Result<String, i64> {
+    let state = ffi_buffer_new(1024)?;
+    let output = ffi_buffer_new(32)?;
+    let pointer = sengoo_compiler_snapshot_bytes_ptr(state.ptr());
+    sh_css_status(sengoo_sg_sha256_init(pointer, 1024))?;
+    sh_css_status(sengoo_sg_sha256_update(pointer, 1024, sengoo_compiler_snapshot_const_bytes_ptr(sengoo_stdlib_str_ptr(text.as_str())), text.len()))?;
+    sh_css_status(sengoo_sg_sha256_final(pointer, 1024, sengoo_compiler_snapshot_bytes_ptr(output.ptr()), 32))?;
+    sh_css_status(sengoo_sg_sha256_dispose(pointer, 1024))?;
+    let digest = string_new();
+    let mut index = 0;
+    while index < 32 { sh_css_hex(&digest, sh_css_byte(output.ptr(), index), 2)?; index = index + 1; };
+    string_result_ok(digest);
+}
+
+def sh_factory_source_anchor(source: &ShFactorySource) -> Result<String, i64> {
+    let text = string_from_str("SG-FACTORY-SOURCE-1\n")?;
+    text.push_i64(source.profile)?;
+    text.push_str("\n")?;
+    text.push_i64(source.module)?;
+    text.push_str("\n")?;
+    text.push_i64(source.expanded_start)?;
+    text.push_str("\n")?;
+    text.push_i64(source.identity.len())?;
+    text.push_str("\n")?;
+    text.push_str(source.identity.as_str())?;
+    text.push_str("\n")?;
+    text.push_str(source.digest.as_str())?;
+    sh_factory_source_hash(&text);
+}
+
+def sh_factory_source_valid(source: &ShFactorySource, expanded: &String) -> bool {
+    if source.schema != 1 { return false; };
+    if source.profile == 0 { return source.module == -1 and source.expanded_start == -1 and source.identity.len() == 0 and source.digest.len() == 0 and source.source.len() == 0 and source.anchor.len() == 0 and source.records.len() == 0; };
+    if source.profile != 1 or source.module < 0 or source.module >= 1024 or source.expanded_start < 0 or source.expanded_start > expanded.len() or source.source.len() < 1 or source.source.len() > 65536 or source.source.len() > expanded.len() - source.expanded_start or source.identity.len() < 1 or source.identity.len() > 4096 or source.digest.as_str() != sh_factory_profile_digest(source.profile) or source.anchor.len() != 64 or source.records.len() > 24 { return false; };
+    let actual = expanded.get(source.expanded_start, source.expanded_start + source.source.len());
+    if not actual.is_ok() or actual.value.as_str() != source.source.as_str() { return false; };
+    let digest = sh_factory_source_hash(&source.source);
+    if not digest.is_ok() or digest.value.as_str() != source.digest.as_str() { return false; };
+    let anchor = sh_factory_source_anchor(source);
+    anchor.is_ok() and anchor.value.as_str() == source.anchor.as_str();
+}
+
+def sh_factory_source_clone(source: &ShFactorySource) -> ShFactorySource {
+    let mut out = sh_factory_source_empty();
+    let identity = source.identity.clone();
+    let digest = source.digest.clone();
+    let text = source.source.clone();
+    let anchor = source.anchor.clone();
+    if not identity.is_ok() or not digest.is_ok() or not text.is_ok() or not anchor.is_ok() { out.schema = -1; return out; };
+    out.schema = source.schema;
+    out.profile = source.profile;
+    out.module = source.module;
+    out.expanded_start = source.expanded_start;
+    out.identity = identity.value;
+    out.digest = digest.value;
+    out.source = text.value;
+    out.anchor = anchor.value;
+    let mut index = 0;
+    while index < source.records.len() { if index >= 24 or not out.records.push(source.records.get(index).unwrap_or(-1)) { out.schema = -1; return out; }; index = index + 1; };
+    out;
+}

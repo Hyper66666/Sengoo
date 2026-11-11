@@ -1,0 +1,4 @@
+[package]
+name = "async-file-factory-tests"
+version = "0.0.1"
+edition = "2026"

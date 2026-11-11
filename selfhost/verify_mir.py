@@ -59,7 +59,7 @@ def main() -> int:
     tools = {args.seed.resolve(): SEED_SHA, args.clang.resolve(): CLANG_SHA}
     report: dict = {
         "schema": 1, "stage": "m3-hir-mir-ownership-contracts", "result": "running",
-        "m3_complete": False, "hir_schema": 6, "mir_schema": 1, "runtime_abi": 1,
+        "m3_complete": False, "hir_schema": 7, "mir_schema": 1, "runtime_abi": 1,
         "target": "x86_64-pc-windows-msvc", "optimization": 0,
         "started_at": dt.datetime.now(dt.timezone.utc).isoformat(),
         "host": {"system": platform.system(), "release": platform.release(), "machine": platform.machine(), "python": platform.python_version(), "python_executable_sha256": sha(Path(sys.executable))},

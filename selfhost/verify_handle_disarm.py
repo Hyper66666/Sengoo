@@ -48,7 +48,7 @@ def main():
     args=parser.parse_args();out=args.output.resolve()
     if not out.is_relative_to(ROOT/"target"):raise ValueError("outputs must remain within target/")
     out.mkdir(parents=True,exist_ok=True)
-    report={"schema":1,"stage":"canonical-handle-disarm-hir6","result":"running","m3_complete":False,"hir_schema":6,"mir_schema":1,"started_at":dt.datetime.now(dt.timezone.utc).isoformat(),"host":{"platform":platform.platform(),"python":platform.python_version(),"python_executable_sha256":sha(sys.executable)},"steps":[],"scope":"production source snapshots; canonical disarm only; no root resurrection, raw pointer or SDK widening"}
+    report={"schema":1,"stage":"canonical-handle-disarm-hir7","result":"running","m3_complete":False,"hir_schema":7,"mir_schema":1,"started_at":dt.datetime.now(dt.timezone.utc).isoformat(),"host":{"platform":platform.platform(),"python":platform.python_version(),"python_executable_sha256":sha(sys.executable)},"steps":[],"scope":"production source snapshots; canonical disarm only; no root resurrection, raw pointer or SDK widening"}
     before={};origins={};snapshots={};tools={};configs={}
     def save():(out/"evidence.json").write_text(json.dumps(report,indent=2)+"\n",encoding="utf-8")
     save()

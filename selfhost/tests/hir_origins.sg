@@ -31,7 +31,7 @@ def h6_ordinary() -> Result<bool, i64> {
     let ownership = sh_check_ownership(&text, &parsed.ast, &checked, 100);
     let hir = sh_hir_lift(&text, &parsed.ast, &checked, 1000);
     assert_eq_i64(hir.error, 0, "hir_origins.sg", 3);
-    assert_eq_i64(hir.schema, 6, "hir_origins.sg", 4);
+    assert_eq_i64(hir.schema, 7, "hir_origins.sg", 4);
     assert_eq_i64(hir.checked.types.limit, checked.types.limit, "hir_origins.sg", 5);
     assert_eq_i64(hir.checked.symbols.limit, checked.symbols.limit, "hir_origins.sg", 6);
     assert_true(sh_hir_ownership_equal(&hir.ownership, &ownership), "hir_origins.sg", 7);
@@ -45,10 +45,10 @@ def h6_ordinary() -> Result<bool, i64> {
     h6_words(&hir.ownership.contracts, &restored.ownership.contracts);
     let again = sh_hir_encode(&restored, 1000000);
     assert_true(sh_o_equal(&image.words, &again.words), "hir_origins.sg", 12);
-    image.words.set(1, 5);
+    image.words.set(1, 6);
     let old = sh_hir_decode(&image.words, 1000000);
     assert_eq_i64(old.error, 5502, "hir_origins.sg", 13);
-    image.words.set(1, 6);
+    image.words.set(1, 7);
     let lowered = sh_lower_hir(&restored, 1000);
     assert_eq_i64(lowered.error, 0, "hir_origins.sg", 14);
     h6_exact(&hir);
@@ -570,10 +570,10 @@ def h6_real() -> Result<bool, i64> {
     trailing.push(0);
     let bad = sh_hir_decode(&trailing, 4000000);
     assert_true(bad.error != 0, "hir_origins.sg", 69);
-    wire.words.set(1, 5);
+    wire.words.set(1, 6);
     let old = sh_hir_decode(&wire.words, 4000000);
     assert_eq_i64(old.error, 5502, "hir_origins.sg", 70);
-    wire.words.set(1, 6);
+    wire.words.set(1, 7);
     let short = sh_hir_encode(&hir, 10);
     assert_eq_i64(short.error, 5501, "hir_origins.sg", 71);
     let raw = sh_hir_origins_encode(&facts, 4000000);
@@ -601,6 +601,6 @@ def main() -> i64 {
     let mut i = 0;
     let scopes = if args_len() > 0 { let mode = h6_arg(6); if mode.is_ok() and mode.value.as_str() == "stdlib" { 1; } else { 3; }; } else { 10; };
     while i < scopes { { let result = if args_len() > 0 { h6_real(); } else { h6_ordinary(); }; if args_len() == 0 { let shadow = h6_shadow(); if not shadow.is_ok() { println(shadow.error); return 65; }; }; if not result.is_ok() { println(result.error); return 65; }; }; assert_eq_i64(sengoo_string_live_handle_count(), strings, "hir_origins.sg", 75); assert_eq_i64(sengoo_buffer_live_handle_count(), buffers, "hir_origins.sg", 76); assert_eq_i64(sengoo_opaque_live_handle_count(), opaque, "hir_origins.sg", 77); assert_eq_i64(sengoo_file_snapshot_live_handle_count(), files, "hir_origins.sg", 78); assert_eq_i64(sengoo_file_snapshot_live_bytes(), bytes, "hir_origins.sg", 79); i = i + 1; };
-    println("HIR6 exact first-call resources passed");
+    println("HIR7 exact first-call resources passed");
     0;
 }

@@ -78,7 +78,7 @@ def main() -> int:
         raise ValueError('gate outputs must remain inside target/')
     output.mkdir(parents=True, exist_ok=True)
     report = {'schema': 1, 'stage': 'contextual-projection-and-runtime-pointer', 'result': 'running',
-              'm3_complete': False, 'hir_schema': 6, 'runtime_abi': 1, 'optimization': 0,
+              'm3_complete': False, 'hir_schema': 7, 'runtime_abi': 1, 'optimization': 0,
               'started_at': dt.datetime.now(dt.timezone.utc).isoformat(),
               'host': {'system': platform.system(), 'release': platform.release(), 'machine': platform.machine(),
                        'python': platform.python_version(), 'python_executable_sha256': sha(Path(sys.executable))},

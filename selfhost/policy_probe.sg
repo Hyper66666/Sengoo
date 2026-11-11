@@ -1,0 +1,88 @@
+import selfhost_semantic_modules;
+import std::assert;
+extern "C" {
+    fn sengoo_policy_test_arm(address:i64, extent:i64, mode:i64, index:i64)->i64;
+    fn sengoo_policy_test_observe(kind:i64)->i64;
+    fn sengoo_policy_test_disarm();
+    fn sengoo_policy_test_handles()->i64;
+    fn sengoo_string_live_handle_count()->i64;
+    fn sengoo_buffer_live_handle_count()->i64;
+    fn sengoo_opaque_live_handle_count()->i64;
+    fn sengoo_file_snapshot_live_handle_count()->i64;
+    fn sengoo_file_snapshot_live_bytes()->i64;
+}
+
+def shape(graph:&ShModules,module:i64,front:&ShFrontend,expected:bool,guard:i64,mode:i64,index:i64,count:i64) {
+    assert_eq_i64(sengoo_policy_test_arm(guard,1024,mode,index),count,"arm",1);
+    assert_true(sh_factory_selected_path(graph,module,"file")==expected,"selected-path",1);
+    assert_eq_i64(sengoo_policy_test_observe(1),0,"no-open",1);
+    assert_eq_i64(sengoo_policy_test_observe(2),0,"only-retained",1);
+    assert_eq_i64(sengoo_policy_test_arm(guard,1024,mode,index),count,"arm",2);
+    assert_true(sh_factory_selected_request(graph,module,"file",0)==expected,"selected-request",1);
+    assert_eq_i64(sengoo_policy_test_observe(1),0,"no-open",2);
+    assert_eq_i64(sengoo_policy_test_observe(2),0,"only-retained",2);
+    assert_eq_i64(sengoo_policy_test_arm(guard,1024,mode,index),count,"arm",3);
+    let fact=sh_module_factory_source(graph,front);
+    assert_eq_i64(fact.profile,if expected {1;} else {0;},"profile",1);
+    assert_eq_i64(fact.schema,if expected {1;} else {-1;},"schema",1);
+    assert_eq_i64(sengoo_policy_test_observe(1),0,"no-open",3);
+    assert_eq_i64(sengoo_policy_test_observe(2),0,"only-retained",3);
+    ();
+}
+
+def scope()->i64 {
+    let empty=string_new();
+    let mut graph=sh_modules_load("@ENTRY@","@LIBRARY@",&empty,128,16777216);
+    assert_eq_i64(graph.error,0,"load",1);
+    let file=string_from_str("file").value;
+    let symbol=sh_module_symbol(&graph.requested,&file);
+    let module=graph.standard_ids.get(symbol).unwrap_or(-1);
+    assert_true(module>=0,"file-module",1);
+    let snapshot=graph.units.get(module).snapshot;
+    let guard=sengoo_ffi_buffer_ptr(graph.snapshots.snapshots.get(snapshot).guard.state.handle);
+    let count=sengoo_policy_test_arm(guard,1024,1,-1);
+    assert_true(count>0,"ancestor-count",1);
+    let front=sh_frontend(&graph.text,graph.root,&graph.features,graph.maximum,100000);
+    assert_eq_i64(front.error,0,"frontend",1);
+    let mut mode=1;
+    while mode<=4 {
+        shape(&graph,module,&front,true,guard,mode,count-1,count);
+        assert_eq_i64(sengoo_policy_test_observe(0),0,"exact-needs-no-case-policy",1);
+        mode=mode+1;
+    };
+    graph.stdlib=string_from_str("@CASE_LIBRARY@").value;
+    mode=1;
+    while mode<=4 {
+        shape(&graph,module,&front,mode==1,guard,mode,count-1,count);
+        assert_eq_i64(sengoo_policy_test_observe(0),count,"case-checks-all-ancestors",1);
+        mode=mode+1;
+    };
+    // A positive case-policy response cannot turn a different basename into file.
+    sengoo_policy_test_arm(guard,1024,1,-1);
+    assert_true(not sh_factory_selected_path(&graph,module,"stream"),"different-file",1);
+    sengoo_policy_test_disarm();
+    42;
+}
+
+def main()->i64 {
+    let strings=sengoo_string_live_handle_count();
+    let buffers=sengoo_buffer_live_handle_count();
+    let opaque=sengoo_opaque_live_handle_count();
+    let files=sengoo_file_snapshot_live_handle_count();
+    let bytes=sengoo_file_snapshot_live_bytes();
+    let handles=sengoo_policy_test_handles();
+    let mut i=0;
+    while i<3 {
+        assert_eq_i64(scope(),42,"scope",1);
+        assert_eq_i64(sengoo_string_live_handle_count(),strings,"resources",1);
+        assert_eq_i64(sengoo_buffer_live_handle_count(),buffers,"resources",2);
+        assert_eq_i64(sengoo_opaque_live_handle_count(),opaque,"resources",3);
+        assert_eq_i64(sengoo_file_snapshot_live_handle_count(),files,"resources",4);
+        assert_eq_i64(sengoo_file_snapshot_live_bytes(),bytes,"resources",5);
+        assert_eq_i64(sengoo_policy_test_handles(),handles,"resources",6);
+        println(i);
+        println("exact/case-policy source controls restored six resources");
+        i=i+1;
+    };
+    42;
+}

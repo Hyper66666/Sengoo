@@ -53,7 +53,7 @@ def main():
     args=parser.parse_args();out=args.output.resolve()
     if not out.is_relative_to(ROOT/"target"):raise ValueError("outputs must remain within target/")
     out.mkdir(parents=True,exist_ok=True)
-    report={"schema":1,"stage":"primitive-scalar-borrow-escape","result":"running","m3_complete":False,"hir_schema":6,"mir_schema":1,"started_at":dt.datetime.now(dt.timezone.utc).isoformat(),"host":{"platform":platform.platform(),"python":platform.python_version(),"python_executable_sha256":sha(sys.executable)},"steps":[],"scope":"immutable source snapshots; primitive path reads only; no raw pointer, owner Copy or provider permission"}
+    report={"schema":1,"stage":"primitive-scalar-borrow-escape","result":"running","m3_complete":False,"hir_schema":7,"mir_schema":1,"started_at":dt.datetime.now(dt.timezone.utc).isoformat(),"host":{"platform":platform.platform(),"python":platform.python_version(),"python_executable_sha256":sha(sys.executable)},"steps":[],"scope":"immutable source snapshots; primitive path reads only; no raw pointer, owner Copy or provider permission"}
     before={};origins={};snapshots={};tools={};configs={}
     def save():(out/"evidence.json").write_text(json.dumps(report,indent=2)+"\n",encoding="utf-8")
     save()

@@ -18,6 +18,7 @@ extern "C" {
     fn sengoo_compiler_snapshot_path(state: i64, extent: i64, kind: i64, output: i64, capacity: i64) -> i64;
     fn sengoo_compiler_snapshot_full_path(path: i64, length: i64, output: i64, capacity: i64) -> i64;
     fn sengoo_compiler_snapshot_drive_type(root: i64, length: i64) -> i64;
+    fn sengoo_compiler_snapshot_case_insensitive(state: i64, extent: i64) -> i64;
     unsafe fn sengoo_compiler_snapshot_bytes_ptr(value: i64) -> *mut u8;
     unsafe fn sengoo_compiler_snapshot_const_bytes_ptr(value: i64) -> *const u8;
     unsafe fn sengoo_runtime_memory_read_u8(source: *const u8, index: i64) -> u8;
@@ -219,11 +220,7 @@ def sh_compiler_snapshot_open(arena: &mut ShCompilerSnapshotArena, path: &String
 
 def sh_compiler_snapshots_unchanged(arena: &ShCompilerSnapshotArena) -> bool {
     let mut index = 0;
-    while index < arena.snapshots.len() {
-        let current = sh_compiler_snapshot_matches(arena, index);
-        if not current.is_ok() or not current.value { return false; };
-        index = index + 1;
-    };
+    while index < arena.snapshots.len() { let current = sh_compiler_snapshot_matches(arena, index); if not current.is_ok() or not current.value { return false; }; index = index + 1; };
     true;
 }
 
@@ -286,19 +283,7 @@ def sh_compiler_snapshot_matches(arena: &ShCompilerSnapshotArena, id: i64) -> Re
     sh_css_status(sengoo_sg_sha256_init(hash_pointer, 1024))?;
     let stored = sengoo_ffi_buffer_ptr(snapshot.bytes.handle);
     let mut offset = 0;
-    while offset < length {
-        let remaining = length - offset;
-        let wanted = if remaining < 65536 { remaining; } else { 65536; };
-        let got = sh_css_status(sengoo_compiler_snapshot_read(address, 1024, chunk.ptr(), wanted))?;
-        if got <= 0 or got > wanted { return sh_css_match(false); };
-        let mut index = 0;
-        while index < got {
-            if sh_css_byte(chunk.ptr(), index) != sh_css_byte(stored, offset + index) { return sh_css_match(false); };
-            index = index + 1;
-        };
-        sh_css_status(sengoo_sg_sha256_update(hash_pointer, 1024, sengoo_compiler_snapshot_const_bytes_ptr(chunk.ptr()), got))?;
-        offset = offset + got;
-    };
+    while offset < length { let remaining = length - offset; let wanted = if remaining < 65536 { remaining; } else { 65536; }; let got = sh_css_status(sengoo_compiler_snapshot_read(address, 1024, chunk.ptr(), wanted))?; if got <= 0 or got > wanted { return sh_css_match(false); }; let mut index = 0; while index < got { if sh_css_byte(chunk.ptr(), index) != sh_css_byte(stored, offset + index) { return sh_css_match(false); }; index = index + 1; }; sh_css_status(sengoo_sg_sha256_update(hash_pointer, 1024, sengoo_compiler_snapshot_const_bytes_ptr(chunk.ptr()), got))?; offset = offset + got; };
     let eof = sh_css_status(sengoo_compiler_snapshot_read(address, 1024, chunk.ptr(), 1))?;
     if eof != 0 { return sh_css_match(false); };
     let after = ffi_buffer_new(80)?;

@@ -568,7 +568,7 @@ def sh_b_contract_parameter(checked: &ShChecked, function: i64, ordinal: i64) ->
 
 def sh_b_contract_observes_mode(result: &ShOwnership, checked: &ShChecked, ast: &ShAst, call: i64, ordinal: i64, projected: bool) -> bool {
     let function = sh_node_binding(checked, call);
-    if sh_b_native_contract(checked, function, ordinal) or projected and sh_b_native_projects(checked, function, ordinal) { return true; };
+    if sh_b_async_file_read_contract(checked, ast, function, ordinal) or sh_b_native_contract(checked, function, ordinal) or projected and sh_b_native_projects(checked, function, ordinal) { return true; };
     let target = sh_ast_child(ast, call, 0);
     let ty = sh_s_resolve(checked, sh_node_type(checked, target));
     if sh_s_kind(checked, ty) != 11 { return false; };
@@ -683,4 +683,15 @@ def sh_check_ownership(text: &String, ast: &ShAst, checked: &ShChecked, max_diag
 
 def sh_ownership(text: &String, ast: &ShAst, checked: &ShChecked, max_diagnostics: i64) -> ShOwnership {
     sh_check_ownership(text, ast, checked, max_diagnostics);
+}
+
+def sh_b_async_file_read_contract(checked: &ShChecked, ast: &ShAst, function: i64, position: i64) -> bool {
+    if position != 1 or sh_binding_word(checked, function, 2) != 2 or sh_binding_word(checked, function, 5) != 8 or sh_s_child_kind(ast, sh_binding_word(checked, function, 4), 40) >= 0 { return false; };
+    let name = sh_symbol_text(&checked.symbols, sh_binding_word(checked, function, 0));
+    if not name.is_ok() or name.value.as_str() != "sengoo_async_file_read_into" { return false; };
+    let signature = sh_s_resolve(checked, sh_binding_word(checked, function, 3));
+    if sh_s_kind(checked, signature) != 11 or sh_s_data(checked, signature) != 1 or sh_s_flags(checked, signature) != 0 or sh_s_arity(checked, signature) != 4 { return false; };
+    let mut i = 0;
+    while i < 4 { if not sh_s_intrinsic_i64(checked, sh_s_argument(checked, signature, i)) { return false; }; i = i + 1; };
+    true;
 }

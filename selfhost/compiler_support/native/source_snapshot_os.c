@@ -195,3 +195,16 @@ int64_t sengoo_compiler_snapshot_seek(int64_t address,int64_t extent,int64_t off
     if(!SetFilePointerEx(state->file,position,NULL,FILE_BEGIN))return ss_error(GetLastError());
     return 0;
 }
+
+/* Read only the directory handles retained by this source guard. Unknown case
+ * policy is not evidence for accepting an alternate path spelling. */
+int64_t sengoo_compiler_snapshot_case_insensitive(int64_t address,int64_t extent) {
+    CompilerSnapshotState *state=ss_active(address,extent);
+    if(!state||!state->file||!state->count)return -3;
+    for(uint64_t index=0;index<state->count;++index){
+        FILE_CASE_SENSITIVE_INFO info={0};
+        if(!GetFileInformationByHandleEx(state->directories[index],FileCaseSensitiveInfo,&info,sizeof(info)))return ss_error(GetLastError());
+        if(info.Flags!=0)return 0;
+    }
+    return 1;
+}

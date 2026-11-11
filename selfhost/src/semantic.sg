@@ -1284,7 +1284,9 @@ def sh_s_check_function(checked: &mut ShChecked, text: &String, ast: &ShAst, bin
     checked.current_owner = binding;
     checked.current_return = result;
     sh_s_contracts(checked, text, ast, binding, result);
-    let escape = sh_s_escape_kind(checked, result, 0);
+    let factory = sh_s_factory_proof(checked, text, ast, binding);
+    let authorized = factory.len() == 24;
+    let escape = if authorized { 0; } else { sh_s_escape_kind(checked, result, 0); };
     if escape != 0 { sh_s_diagnose(checked, ast, declaration, escape, 1, -1, result); };
     checked.async_depth = if (flags & 4) != 0 { 1; } else { 0; };
     checked.unsafe_depth = if (flags & 2) != 0 { 1; } else { 0; };
@@ -1293,7 +1295,8 @@ def sh_s_check_function(checked: &mut ShChecked, text: &String, ast: &ShAst, bin
     let mut child_at = 0;
     while child_at < sh_ast_word(ast, declaration, 6) { let child = sh_ast_child(ast, declaration, child_at); let kind = sh_ast_word(ast, child, 0); if kind >= 70 and kind <= 76 { has_return_type = true; }; child_at = child_at + 1; };
     let effect_tail = owner_kind == 14 and not has_return_type and sh_s_kind(checked, result) == 0;
-    let actual = sh_s_block(checked, text, ast, body, if effect_tail { -2; } else { result; });
+    let actual_raw = sh_s_block(checked, text, ast, body, if authorized { checked.integer_type; } else if effect_tail { -2; } else { result; });
+    let actual = if authorized and sh_s_intrinsic_i64(checked, actual_raw) { sh_s_set_type(checked, body, result); checked.factory.records = factory; result; } else { actual_raw; };
     let function_name = sh_s_symbol_text(checked, sh_binding_word(checked, binding, 0));
     let implicit_main = function_name.is_ok() and sh_s_text_equal(&function_name.value, "main") and sh_binding_word(checked, binding, 6) < 0 and sh_s_kind(checked, actual) == 0 and sh_s_kind(checked, result) == 2;
     if not implicit_main and not effect_tail { sh_s_expect(checked, ast, body, result, actual); (); };
@@ -1306,7 +1309,14 @@ def sh_s_check_function(checked: &mut ShChecked, text: &String, ast: &ShAst, bin
 }
 
 def sh_check(text: &String, ast: &ShAst, max_diagnostics: i64) -> ShChecked {
+    let absent = sh_factory_source_empty();
+    sh_check_factory(text, ast, max_diagnostics, &absent);
+}
+
+def sh_check_factory(text: &String, ast: &ShAst, max_diagnostics: i64, factory: &ShFactorySource) -> ShChecked {
     let mut checked = sh_s_new(ast, max_diagnostics);
+    if not sh_factory_source_valid(factory, text) or factory.records.len() != 0 { checked.error = 5124; return checked; };
+    checked.factory = sh_factory_source_clone(factory);
     if checked.error != 0 { return checked; };
     if ast.root < 0 or sh_ast_word(ast, ast.root, 0) != 1 { checked.error = 5117; return checked; };
     sh_s_builtins(&checked);
@@ -1557,4 +1567,216 @@ def sh_builtin_call_valid(checked: &ShChecked, text: &String, ast: &ShAst, index
     let declaration = sh_binding_word(checked, runtime, 4);
     if not runtime_name.is_ok() or not sh_s_text_equal(&runtime_name.value, "sengoo_string_as_str_ptr") or sh_binding_word(checked, runtime, 2) != 2 or (sh_binding_word(checked, runtime, 5) & 8) == 0 or declaration < 0 or sh_s_child_kind(ast, declaration, 40) >= 0 { return false; };
     sh_binding_word(checked, runtime, 3) == runtime_fn and sh_s_kind(checked, runtime_fn) == 11 and sh_s_data(checked, runtime_fn) == 1 and sh_s_flags(checked, runtime_fn) == 0 and sh_s_arity(checked, runtime_fn) == 2 and sh_s_intrinsic_i64(checked, sh_s_argument(checked, runtime_fn, 0)) and sh_s_intrinsic_i64(checked, sh_s_argument(checked, runtime_fn, 1));
+}
+
+def sh_s_factory_named(checked: &ShChecked, binding: i64, name: &str) -> bool {
+    let label = sh_s_symbol_text(checked, sh_binding_word(checked, binding, 0));
+    label.is_ok() and label.value.as_str() == name;
+}
+
+def sh_s_factory_site(source: &ShFactorySource, ast: &ShAst, node: i64) -> bool {
+    let start = sh_ast_word(ast, node, 2);
+    let end = sh_ast_word(ast, node, 3);
+    node >= 0 and start >= source.expanded_start and end > start and end <= source.expanded_start + source.source.len();
+}
+
+def sh_s_factory_parameter(checked: &ShChecked, owner: i64, ordinal: i64) -> i64 {
+    let mut found = -1;
+    let mut i = 0;
+    while i < sh_binding_count(checked) { if sh_binding_word(checked, i, 2) == 1 and sh_binding_word(checked, i, 6) == owner and sh_binding_word(checked, i, 7) == ordinal { if found >= 0 { return -1; }; found = i; }; i = i + 1; };
+    found;
+}
+
+def sh_s_factory_fields(checked: &ShChecked, ast: &ShAst, owner: i64, outcome: bool) -> i64 {
+    if sh_binding_word(checked, owner, 2) != 3 or not sh_s_factory_site(&checked.factory, ast, sh_binding_word(checked, owner, 4)) { return -1; };
+    let nominal = sh_binding_word(checked, owner, 3);
+    if sh_s_kind(checked, nominal) != 12 or sh_s_arity(checked, nominal) != 0 { return -1; };
+    let mut count = 0;
+    let mut first = -1;
+    let mut i = 0;
+    while i < sh_binding_count(checked) { if sh_binding_word(checked, i, 2) == 6 and sh_binding_word(checked, i, 6) == owner { let ordinal = sh_binding_word(checked, i, 7); let ty = sh_binding_word(checked, i, 3); if ordinal != count { return -1; }; if count == 0 { first = i; }; if outcome { if count > 2 or count < 2 and sh_s_kind(checked, ty) != 1 or count == 2 and not sh_s_intrinsic_i64(checked, ty) { return -1; }; let name = if count == 0 { "is_ok"; } else if count == 1 { "value"; } else { "error"; }; if not sh_s_factory_named(checked, i, name) { return -1; }; } else { if count != 0 or not sh_s_factory_named(checked, i, "handle") or not sh_s_intrinsic_i64(checked, ty) { return -1; }; }; count = count + 1; }; i = i + 1; };
+    if count != if outcome { 3; } else { 1; } { return -1; };
+    first;
+}
+
+def sh_s_factory_proof(checked: &ShChecked, text: &String, ast: &ShAst, binding: i64) -> Vec<i64> {
+    let result = vec_new_i64();
+    if checked.factory.profile != 1 or sh_binding_word(checked, binding, 2) != 2 or not sh_s_factory_named(checked, binding, "wait_readable") or not sh_factory_source_valid(&checked.factory, text) { return result; };
+    let declaration = sh_binding_word(checked, binding, 4);
+    let owner = sh_binding_word(checked, binding, 6);
+    if not sh_s_factory_site(&checked.factory, ast, declaration) or sh_binding_word(checked, binding, 5) != 0 or sh_binding_word(checked, owner, 2) != 14 { return result; };
+    let mut i = 0;
+    while i < checked.trait_types.len() { if checked.trait_types.get(i).unwrap_or(-1) == owner { return result; }; i = i + 2; };
+    i = 0;
+    while i < checked.generic_parameters.len() { let generic_owner = checked.generic_parameters.get(i).unwrap_or(-1); if generic_owner == binding or generic_owner == owner { return result; }; i = i + 3; };
+    let language = sh_binding_word(checked, binding, 3);
+    if sh_s_kind(checked, language) != 11 or sh_s_data(checked, language) != 0 or sh_s_flags(checked, language) != 0 or sh_s_arity(checked, language) != 3 { return result; };
+    let receiver = sh_s_argument(checked, language, 0);
+    let future = sh_s_argument(checked, language, 2);
+    if sh_s_kind(checked, receiver) != 6 or sh_s_flags(checked, receiver) != 0 or sh_s_arity(checked, receiver) != 1 or not sh_s_intrinsic_i64(checked, sh_s_argument(checked, language, 1)) or sh_s_kind(checked, future) != 16 or sh_s_arity(checked, future) != 1 { return result; };
+    let receiver_owner = sh_adt_binding(checked, sh_s_argument(checked, receiver, 0));
+    let output_owner = sh_adt_binding(checked, sh_s_argument(checked, future, 0));
+    if sh_binding_word(checked, owner, 6) != receiver_owner or not sh_s_factory_named(checked, receiver_owner, "AsyncFile") or not sh_s_factory_named(checked, output_owner, "FileReadinessOutcome") { return result; };
+    let field = sh_s_factory_fields(checked, ast, receiver_owner, false);
+    if field < 0 or sh_s_factory_fields(checked, ast, output_owner, true) < 0 { return result; };
+    let self_param = sh_s_factory_parameter(checked, binding, 0);
+    let timeout_param = sh_s_factory_parameter(checked, binding, 1);
+    if self_param < 0 or timeout_param < 0 or sh_binding_word(checked, self_param, 3) != receiver or not sh_s_intrinsic_i64(checked, sh_binding_word(checked, timeout_param, 3)) { return result; };
+    let body = sh_s_child_kind(ast, declaration, 40);
+    if body < 0 or sh_ast_word(ast, body, 6) != 1 { return result; };
+    let statement = sh_ast_child(ast, body, 0);
+    if sh_ast_word(ast, statement, 0) != 43 or sh_ast_word(ast, statement, 6) != 1 { return result; };
+    let call = sh_ast_child(ast, statement, 0);
+    if sh_ast_word(ast, call, 0) != 53 or sh_ast_word(ast, call, 6) != 3 { return result; };
+    let callee = sh_ast_child(ast, call, 0);
+    let handle = sh_ast_child(ast, call, 1);
+    let timeout = sh_ast_child(ast, call, 2);
+    if not sh_s_factory_path(ast, callee) or sh_ast_word(ast, handle, 0) != 55 or sh_ast_word(ast, handle, 6) != 2 or not sh_s_factory_path(ast, timeout) { return result; };
+    let receiver_node = sh_ast_child(ast, handle, 0);
+    let field_node = sh_ast_child(ast, handle, 1);
+    if not sh_s_factory_path(ast, receiver_node) or sh_ast_word(ast, field_node, 0) != 10 { return result; };
+    let scope = sh_binding_word(checked, binding, 7);
+    if sh_s_lookup(checked, sh_s_factory_symbol(checked, text, ast, receiver_node), scope, false) != self_param or sh_s_lookup(checked, sh_s_factory_symbol(checked, text, ast, timeout), scope, false) != timeout_param or sh_s_factory_symbol(checked, text, ast, field_node) != sh_binding_word(checked, field, 0) { return result; };
+    let provider = sh_s_lookup(checked, sh_s_factory_symbol(checked, text, ast, callee), scope, false);
+    let provider_decl = sh_binding_word(checked, provider, 4);
+    let physical = sh_binding_word(checked, provider, 3);
+    if not sh_s_factory_named(checked, provider, "sengoo_async_file_wait_readable__start") or sh_binding_word(checked, provider, 2) != 2 or sh_binding_word(checked, provider, 5) != 8 or sh_binding_word(checked, provider, 6) != -1 or not sh_s_factory_site(&checked.factory, ast, provider_decl) or sh_s_child_kind(ast, provider_decl, 40) >= 0 or sh_s_kind(checked, physical) != 11 or sh_s_data(checked, physical) != 1 or sh_s_flags(checked, physical) != 0 or sh_s_arity(checked, physical) != 3 { return result; };
+    i = 0;
+    while i < 3 { if not sh_s_intrinsic_i64(checked, sh_s_argument(checked, physical, i)) { return result; }; i = i + 1; };
+    if not sh_s_factory_syntax(checked, ast, declaration, owner, receiver_owner, output_owner, provider_decl) { return result; };
+    result.push(1);
+    result.push(binding);
+    result.push(declaration);
+    result.push(body);
+    result.push(statement);
+    result.push(call);
+    result.push(provider);
+    result.push(provider_decl);
+    result.push(physical);
+    result.push(self_param);
+    result.push(timeout_param);
+    result.push(receiver_owner);
+    result.push(output_owner);
+    result.push(field);
+    result.push(receiver);
+    result.push(future);
+    result.push(language);
+    result.push(11);
+    result.push(15);
+    result.push(16);
+    result.push(8);
+    result.push(0);
+    result.push(1);
+    result.push(8);
+    result;
+}
+
+def sh_s_factory_path(ast: &ShAst, node: i64) -> bool {
+    sh_ast_word(ast, node, 0) == 12 and sh_ast_word(ast, node, 6) == 1 and sh_ast_word(ast, sh_ast_child(ast, node, 0), 0) == 10;
+}
+
+def sh_factory_source_equal(a: &ShFactorySource, b: &ShFactorySource) -> bool {
+    if a.schema != b.schema or a.profile != b.profile or a.module != b.module or a.expanded_start != b.expanded_start or a.identity.as_str() != b.identity.as_str() or a.digest.as_str() != b.digest.as_str() or a.source.as_str() != b.source.as_str() or a.anchor.as_str() != b.anchor.as_str() or a.records.len() != b.records.len() { return false; };
+    let mut i = 0;
+    while i < a.records.len() { if a.records.get(i).unwrap_or(-1) != b.records.get(i).unwrap_or(-1) { return false; }; i = i + 1; };
+    true;
+}
+
+def sh_s_factory_symbol(checked: &ShChecked, text: &String, ast: &ShAst, node: i64) -> i64 {
+    let name = text.get(sh_ast_word(ast, node, 2), sh_ast_word(ast, node, 3));
+    if not name.is_ok() { return -1; };
+    let mut i = 0;
+    while i < sh_symbol_count(&checked.symbols) { if checked.symbols.names.get(i).text.as_str() == name.value.as_str() { return i; }; i = i + 1; };
+    -1;
+}
+
+def sh_s_factory_valid(checked: &ShChecked, text: &String, ast: &ShAst) -> bool {
+    if not sh_factory_source_valid(&checked.factory, text) { return false; };
+    let mut admitted = -1;
+    if checked.factory.profile == 1 { if checked.factory.records.len() != 24 { return false; }; admitted = checked.factory.records.get(1).unwrap_or(-1); let proof = sh_s_factory_proof(checked, text, ast, admitted); if proof.len() != 24 { return false; }; let mut i = 0; while i < 24 { if proof.get(i).unwrap_or(-1) != checked.factory.records.get(i).unwrap_or(-1) { return false; }; i = i + 1; }; let call = proof.get(5).unwrap_or(-1); let body = proof.get(3).unwrap_or(-1); let statement = proof.get(4).unwrap_or(-1); let handle = sh_ast_child(ast, call, 1); let receiver = sh_ast_child(ast, handle, 0); let timeout = sh_ast_child(ast, call, 2); if sh_node_binding(checked, call) != proof.get(6).unwrap_or(-1) or sh_node_callable_type(checked, call) != proof.get(8).unwrap_or(-1) or not sh_s_intrinsic_i64(checked, sh_node_type(checked, call)) or not sh_s_intrinsic_i64(checked, sh_node_type(checked, statement)) or sh_node_type(checked, body) != proof.get(15).unwrap_or(-1) or sh_node_binding(checked, receiver) != proof.get(9).unwrap_or(-1) or sh_node_binding(checked, timeout) != proof.get(10).unwrap_or(-1) or sh_node_binding(checked, handle) != proof.get(13).unwrap_or(-1) { return false; }; };
+    let mut binding = 0;
+    while binding < sh_binding_count(checked) { if sh_binding_word(checked, binding, 2) == 2 and (sh_binding_word(checked, binding, 5) & 4) == 0 { let signature = sh_binding_word(checked, binding, 3); let result = sh_s_argument(checked, signature, sh_s_arity(checked, signature) - 1); if sh_s_contains_future(checked, result, 0) and binding != admitted { return false; }; }; binding = binding + 1; };
+    true;
+}
+
+def sh_s_factory_parent(ast: &ShAst, node: i64) -> i64 {
+    let mut found = -1;
+    let mut p = 0;
+    while p < sh_ast_count(ast) { let mut i = 0; while i < sh_ast_word(ast, p, 6) { if sh_ast_child(ast, p, i) == node { if found >= 0 { return -1; }; found = p; }; i = i + 1; }; p = p + 1; };
+    found;
+}
+
+def sh_s_factory_tree(ast: &ShAst, node: i64, reference: &ShAst, expected: i64, delta: i64, depth: i64) -> bool {
+    if depth > 128 or node < 0 or expected < 0 or node >= sh_ast_count(ast) or expected >= sh_ast_count(reference) { return false; };
+    if sh_ast_word(ast, node, 0) != sh_ast_word(reference, expected, 0) or sh_ast_word(ast, node, 2) - delta != sh_ast_word(reference, expected, 2) or sh_ast_word(ast, node, 3) - delta != sh_ast_word(reference, expected, 3) or sh_ast_word(ast, node, 4) != sh_ast_word(reference, expected, 4) or sh_ast_word(ast, node, 6) != sh_ast_word(reference, expected, 6) { return false; };
+    let mut i = 0;
+    while i < sh_ast_word(ast, node, 6) { if not sh_s_factory_tree(ast, sh_ast_child(ast, node, i), reference, sh_ast_child(reference, expected, i), delta, depth + 1) { return false; }; i = i + 1; };
+    true;
+}
+
+def sh_s_factory_source_tree(ast: &ShAst, node: i64, reference: &ShAst, delta: i64) -> bool {
+    let mut i = 0;
+    while i < sh_ast_count(reference) { if sh_ast_word(reference, i, 2) == sh_ast_word(ast, node, 2) - delta and sh_ast_word(reference, i, 3) == sh_ast_word(ast, node, 3) - delta and sh_ast_word(reference, i, 0) == sh_ast_word(ast, node, 0) { return sh_s_factory_tree(ast, node, reference, i, delta, 0); }; i = i + 1; };
+    false;
+}
+
+def sh_s_factory_syntax(checked: &ShChecked, ast: &ShAst, declaration: i64, owner: i64, receiver_owner: i64, output_owner: i64, provider_decl: i64) -> bool {
+    let parsed = sh_parse(&checked.factory.source, checked.factory.module, 100000);
+    if parsed.error != 0 { return false; };
+    let impl_node = sh_binding_word(checked, owner, 4);
+    let receiver_node = sh_binding_word(checked, receiver_owner, 4);
+    let output_node = sh_binding_word(checked, output_owner, 4);
+    let foreign = sh_s_factory_parent(ast, provider_decl);
+    if sh_ast_word(ast, declaration, 0) != 20 or sh_ast_word(ast, declaration, 4) != 0 or sh_s_factory_parent(ast, declaration) != impl_node or sh_ast_word(ast, impl_node, 0) != 26 or sh_ast_word(ast, foreign, 0) != 31 or sh_ast_word(ast, receiver_node, 0) != 22 or sh_ast_word(ast, output_node, 0) != 22 { return false; };
+    if not sh_s_factory_source_tree(ast, impl_node, &parsed.ast, checked.factory.expanded_start) or not sh_s_factory_source_tree(ast, foreign, &parsed.ast, checked.factory.expanded_start) or not sh_s_factory_source_tree(ast, receiver_node, &parsed.ast, checked.factory.expanded_start) or not sh_s_factory_source_tree(ast, output_node, &parsed.ast, checked.factory.expanded_start) { return false; };
+    let mut binding = 0;
+    while binding < sh_binding_count(checked) { if sh_binding_word(checked, binding, 2) == 6 and (sh_binding_word(checked, binding, 6) == receiver_owner or sh_binding_word(checked, binding, 6) == output_owner) { let field = sh_binding_word(checked, binding, 4); let nominal = sh_binding_word(checked, sh_binding_word(checked, binding, 6), 4); if sh_s_factory_parent(ast, field) != nominal or sh_node_binding(checked, field) != binding { return false; }; }; binding = binding + 1; };
+    true;
+}
+
+def sh_print_name(code: i64) -> &str {
+    if code == 1 { "print"; } else { if code == 2 { "println"; } else { if code == 3 { "eprintln"; } else { ""; }; }; };
+}
+
+def sh_print_binding_valid(checked: &ShChecked, binding: i64, code: i64) -> bool {
+    if code < 1 or code > 3 or sh_binding_word(checked, binding, 2) != 13 or sh_binding_word(checked, binding, 1) != 0 or sh_binding_word(checked, binding, 4) != -1 or sh_binding_word(checked, binding, 5) != 4096 or sh_binding_word(checked, binding, 6) != -1 or sh_binding_word(checked, binding, 7) != code { return false; };
+    let symbol = sh_binding_word(checked, binding, 0);
+    let name = sh_symbol_text(&checked.symbols, symbol);
+    if not name.is_ok() or name.value.as_str() != sh_print_name(code) { return false; };
+    let ty = sh_binding_word(checked, binding, 3);
+    if sh_s_kind(checked, ty) != 11 or sh_s_data(checked, ty) != 0 or sh_s_flags(checked, ty) != 1 or sh_s_nominal(checked, ty) != -1 or sh_s_arity(checked, ty) != 1 or sh_s_argument(checked, ty, 0) != checked.unit_type { return false; };
+    let mut i = 0;
+    while i < sh_binding_count(checked) { if i != binding and sh_binding_word(checked, i, 2) == 13 and (sh_binding_word(checked, i, 7) == code or sh_binding_word(checked, i, 0) == symbol) { return false; }; i = i + 1; };
+    true;
+}
+
+def sh_print_call_valid(checked: &ShChecked, text: &String, ast: &ShAst, node: i64) -> bool {
+    if sh_ast_word(ast, node, 0) != 53 or sh_ast_word(ast, node, 6) != 2 { return false; };
+    let callee = sh_ast_child(ast, node, 0);
+    let argument = sh_ast_child(ast, node, 1);
+    let binding = sh_node_binding(checked, node);
+    let code = sh_binding_word(checked, binding, 7);
+    let name_node = sh_ast_child(ast, callee, 0);
+    if sh_ast_word(ast, callee, 0) != 12 or sh_ast_word(ast, callee, 6) != 1 or sh_ast_word(ast, name_node, 0) != 10 or sh_ast_word(ast, name_node, 6) != 0 or sh_node_binding(checked, name_node) != binding or sh_node_binding(checked, callee) != binding or not sh_print_binding_valid(checked, binding, code) { return false; };
+    let name = sh_s_name(text, ast, callee);
+    if not name.is_ok() or name.value.as_str() != sh_print_name(code) { return false; };
+    if sh_s_lookup(checked, sh_binding_word(checked, binding, 0), sh_node_scope(checked, callee), false) != binding { return false; };
+    let signature = sh_s_resolve(checked, sh_node_callable_type(checked, node));
+    let ty = sh_s_resolve(checked, sh_node_type(checked, argument));
+    if sh_s_kind(checked, signature) != 11 or sh_s_data(checked, signature) != 0 or sh_s_flags(checked, signature) != 0 or sh_s_nominal(checked, signature) != -1 or sh_s_arity(checked, signature) != 2 or sh_s_argument(checked, signature, 0) != ty or sh_s_argument(checked, signature, 1) != checked.unit_type or sh_s_resolve(checked, sh_node_type(checked, callee)) != signature or sh_node_type(checked, node) != checked.unit_type { return false; };
+    let argument_kind = sh_ast_word(ast, argument, 0);
+    let value_kind = sh_s_kind(checked, ty);
+    if argument_kind == 11 { let token = sh_ast_word(ast, argument, 4); if token == 2 and value_kind != 2 or token == 3 and value_kind != 3 or (token == sh_kind("true") or token == sh_kind("false")) and value_kind != 1 { return false; }; if token == 5 or token == 6 { if value_kind != 6 or sh_s_flags(checked, ty) != 0 or sh_s_kind(checked, sh_s_argument(checked, ty, 0)) != 5 { return false; }; }; };
+    if argument_kind == 12 { let local = sh_node_binding(checked, argument); let category = sh_binding_word(checked, local, 2); if (category == 0 or category == 1) and sh_s_resolve(checked, sh_binding_word(checked, local, 3)) != ty { return false; }; };
+    ty >= 0 and ty < sh_type_count(&checked.types) and value_kind != 18;
+}
+
+def sh_print_facts_valid(checked: &ShChecked, text: &String, ast: &ShAst) -> bool {
+    let mut code = 1;
+    while code <= 3 { let mut found = -1; let mut binding = 0; while binding < sh_binding_count(checked) { if sh_binding_word(checked, binding, 2) == 13 and sh_binding_word(checked, binding, 7) == code { if found >= 0 { return false; }; found = binding; }; binding = binding + 1; }; if not sh_print_binding_valid(checked, found, code) { return false; }; code = code + 1; };
+    let mut any = false;
+    let mut node = 0;
+    while node < sh_ast_count(ast) { let binding = sh_node_binding(checked, node); if sh_ast_word(ast, node, 0) == 53 and sh_binding_word(checked, binding, 2) == 13 and sh_binding_word(checked, binding, 7) >= 1 and sh_binding_word(checked, binding, 7) <= 3 { if not sh_print_call_valid(checked, text, ast, node) { return false; }; any = true; }; node = node + 1; };
+    if any { let parsed = sh_parse(text, sh_ast_word(ast, ast.root, 1), sh_ast_count(ast) + 1); if parsed.error != 0 or parsed.ast.root != ast.root or parsed.ast.words.len() != ast.words.len() or parsed.ast.edges.len() != ast.edges.len() { return false; }; let mut i = 0; while i < ast.words.len() { if ast.words.get(i).unwrap_or(-1) != parsed.ast.words.get(i).unwrap_or(-1) { return false; }; i = i + 1; }; i = 0; while i < ast.edges.len() { if ast.edges.get(i).unwrap_or(-1) != parsed.ast.edges.get(i).unwrap_or(-1) { return false; }; i = i + 1; }; };
+    true;
 }

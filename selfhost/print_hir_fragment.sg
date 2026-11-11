@@ -1,0 +1,93 @@
+import std::assert;
+
+extern "C" {
+    fn sengoo_string_live_handle_count() -> i64;
+    fn sengoo_buffer_live_handle_count() -> i64;
+    fn sengoo_opaque_live_handle_count() -> i64;
+}
+
+def print_probe_bad_binding(hir: &ShHir, call: i64, field: i64) {
+    let bad = sh_hir_clone(hir, 200000);
+    let binding = sh_node_binding(&bad.checked, call);
+    let callee = sh_ast_child(&bad.ast, call, 0);
+    let offset = binding * 8 + field;
+    let old = bad.checked.bindings.get(offset).unwrap_or(-1);
+    bad.checked.bindings.set(offset, if field == 0 { old + 1; } else { if field == 1 { 1; } else { if field == 2 { 2; } else { if field == 3 { bad.checked.unit_type; } else { if field == 4 { callee; } else { if field == 5 { 0; } else { if field == 6 { 0; } else { 2; }; }; }; }; }; }; });
+    assert_true(sh_hir_validate(&bad) != 0, "print-binding", field);
+    let rejected = sh_lower_hir(&bad, 1000);
+    assert_true(rejected.error != 0, "print-binding-lower", field);
+    ();
+}
+
+def print_probe_bad_fact(hir: &ShHir, call: i64, i: i64) {
+    let bad = sh_hir_clone(hir, 200000);
+    let callee = sh_ast_child(&bad.ast, call, 0);
+    let argument = sh_ast_child(&bad.ast, call, 1);
+    let binding = sh_node_binding(&bad.checked, call);
+    let signature = sh_node_callable_type(&bad.checked, call);
+    if i == 0 { bad.checked.resolution.set(call, binding + 1); (); };
+    if i == 1 { bad.checked.resolution.set(callee, binding + 1); (); };
+    if i == 2 { bad.checked.call_types.set(call, sh_binding_word(&bad.checked, binding, 3)); (); };
+    if i == 3 { bad.checked.node_types.set(argument, bad.checked.bool_type); (); };
+    if i == 4 { bad.checked.node_types.set(call, bad.checked.integer_type); (); };
+    if i == 5 { bad.checked.types.words.set(signature * 6 + 1, 1); (); };
+    if i == 6 { bad.checked.types.words.set(signature * 6 + 2, 1); (); };
+    if i == 7 { bad.ast.words.set(callee * 7, 11); (); };
+    if i == 8 { bad.source.clear(); bad.source.push_str("def sh_print_formal_hir()->i64{prant(42);42}"); (); };
+    if i == 9 { let wrong = sh_s_unary_type(&bad.checked, 6, 0, 0, bad.checked.str_type); let types = vec_new_i64(); types.push(wrong); types.push(bad.checked.unit_type); let callable = sh_s_type(&bad.checked, 11, 0, 0, -1, &types); bad.checked.call_types.set(call, callable); bad.checked.node_types.set(callee, callable); bad.checked.node_types.set(argument, wrong); (); };
+    if i == 10 { let wrong = bad.checked.integer_type; let types = vec_new_i64(); types.push(wrong); types.push(bad.checked.unit_type); let callable = sh_s_type(&bad.checked, 11, 0, 0, -1, &types); bad.checked.call_types.set(call, callable); bad.checked.node_types.set(callee, callable); bad.checked.node_types.set(argument, wrong); (); };
+    if i == 11 { let mut target = 0; while target < sh_binding_count(&bad.checked) { if sh_binding_word(&bad.checked, target, 2) == 13 and sh_binding_word(&bad.checked, target, 7) == 3 { break; }; target = target + 1; }; bad.checked.resolution.set(call, target); bad.checked.resolution.set(callee, target); bad.checked.resolution.set(sh_ast_child(&bad.ast, callee, 0), target); (); };
+    if i == 12 { let mut target = 0; while target < sh_binding_count(&bad.checked) { if sh_binding_word(&bad.checked, target, 2) == 13 and sh_binding_word(&bad.checked, target, 7) == 3 { break; }; target = target + 1; }; let old_symbol = sh_binding_word(&bad.checked, binding, 0); let other_symbol = sh_binding_word(&bad.checked, target, 0); bad.checked.bindings.set(binding * 8, other_symbol); bad.checked.bindings.set(binding * 8 + 7, 3); bad.checked.bindings.set(target * 8, old_symbol); bad.checked.bindings.set(target * 8 + 7, 1); (); };
+    assert_true(sh_hir_validate(&bad) != 0, "print-fact", i);
+    let rejected = sh_lower_hir(&bad, 1000);
+    assert_true(rejected.error != 0, "print-fact-lower", i);
+    ();
+}
+
+def print_probe_text_origin() {
+    let input = string_from_str("def message(text:&str){print(text);} def sh_print_formal_hir()->i64{42}");
+    assert_true(input.is_ok(), "print-text-input", 1);
+    let parsed = sh_parse(&input.value, 0, 1000);
+    let checked = sh_check(&input.value, &parsed.ast, 100);
+    let hir = sh_hir_lift(&input.value, &parsed.ast, &checked, 1000);
+    assert_eq_i64(hir.error, 0, "print-text", 1);
+    let mut call = -1;
+    let mut i = 0;
+    while i < sh_ast_count(&hir.ast) { if sh_ast_word(&hir.ast, i, 0) == 53 { call = i; }; i = i + 1; };
+    assert_true(call >= 0, "print-text", 2);
+    print_probe_bad_fact(&hir, call, 10);
+}
+
+def print_probe_scope() -> i64 {
+    let input = string_from_str("def sh_print_formal_hir()->i64{print(42);42}");
+    assert_true(input.is_ok(), "print-input", 1);
+    let parsed = sh_parse(&input.value, 0, 1000);
+    let checked = sh_check(&input.value, &parsed.ast, 100);
+    assert_eq_i64(checked.error, 0, "print-probe", 1);
+    let hir = sh_hir_lift(&input.value, &parsed.ast, &checked, 1000);
+    assert_eq_i64(hir.error, 0, "print-probe", 2);
+    let mut call = -1;
+    let mut i = 0;
+    while i < sh_ast_count(&hir.ast) { if sh_ast_word(&hir.ast, i, 0) == 53 { call = i; }; i = i + 1; };
+    assert_true(call >= 0, "print-probe", 3);
+    let image = sh_hir_encode(&hir, 200000);
+    assert_eq_i64(image.error, 0, "print-probe", 4);
+    let decoded = sh_hir_decode(&image.words, 200000);
+    assert_eq_i64(decoded.error, 0, "print-probe", 5);
+    let copy = sh_hir_clone(&hir, 200000);
+    assert_eq_i64(copy.error, 0, "print-probe", 6);
+    let good = sh_lower_hir(&copy, 1000);
+    assert_eq_i64(good.error, 0, "print-probe", 7);
+    let mut field = 0;
+    while field < 8 { print_probe_bad_binding(&hir, call, field); field = field + 1; };
+    i = 0;
+    while i < 13 { if i != 10 { print_probe_bad_fact(&hir, call, i); }; i = i + 1; };
+    print_probe_text_origin();
+    42;
+}
+
+def sh_print_formal_hir() -> i64 {
+    let mut i = 0;
+    while i < 3 { let strings = sengoo_string_live_handle_count(); let buffers = sengoo_buffer_live_handle_count(); let opaque = sengoo_opaque_live_handle_count(); assert_eq_i64(print_probe_scope(), 42, "print-scope", 1); assert_eq_i64(sengoo_string_live_handle_count(), strings, "print-resource", 1); assert_eq_i64(sengoo_buffer_live_handle_count(), buffers, "print-resource", 2); assert_eq_i64(sengoo_opaque_live_handle_count(), opaque, "print-resource", 3); i = i + 1; };
+    42;
+}

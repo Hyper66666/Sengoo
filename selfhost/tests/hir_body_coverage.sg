@@ -84,8 +84,8 @@ def hb_small() -> Result<bool, i64> {
     assert_eq_i64(sh_hir_validate(&clone), 0, "hb", 18);
     assert_true(sh_hir_checked_equal(&hir.checked, &clone.checked), "hb", 19);
     let oldschema = image.words.get(1).unwrap_or(-1);
-    assert_eq_i64(oldschema, 6, "hb", 20);
-    image.words.set(1, 5);
+    assert_eq_i64(oldschema, 7, "hb", 20);
+    image.words.set(1, 6);
     let old = sh_hir_decode(&image.words, 4000000);
     assert_eq_i64(old.error, 5502, "hb", 21);
     assert_true(sh_o_equal(&words, &hir.checked.types.words) and sh_o_equal(&arguments, &hir.checked.types.arguments), "hb", 22);

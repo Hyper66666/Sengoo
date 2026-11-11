@@ -84,7 +84,7 @@ def sh_nc_file(input: &str, output: &str, checked_arithmetic: bool) -> Result<i6
     if analyzed.error != 0 { return sh_nc_module_error(&graph, analyzed.error, ShSpan { source: analyzed.source, start: analyzed.start, end: analyzed.end }, if analyzed.front.error != 0 { "frontend"; } else { "semantics"; }); };
     let front = &analyzed.front;
     let checked = &analyzed.checked;
-    let mut lowered = sh_lower(&front.expanded.text, &front.parsed.ast, checked, 100000);
+    let mut lowered = if checked.factory.profile == 1 { sh_lower_factory_modules(&graph, &analyzed, 100000); } else { sh_lower(&front.expanded.text, &front.parsed.ast, checked, 100000); };
     if lowered.error != 0 { let span = sh_module_expanded_span(&graph, front, lowered.start, lowered.end); return sh_nc_module_error(&graph, lowered.error, span, "lowering"); };
     let physical = sh_module_mir_sources(&graph, front, &mut lowered.mir);
     if not physical.is_ok() { return sh_nc_module_error(&graph, physical.error, ShSpan { source: graph.root, start: 0, end: 0 }, "lowering"); };
