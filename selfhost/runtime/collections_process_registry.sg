@@ -1,0 +1,105 @@
+extern "C" {
+    unsafe fn sengoo_process_registry_address() -> * mut u8;
+    unsafe fn sengoo_process_registry_lock();
+    unsafe fn sengoo_process_registry_unlock();
+    unsafe fn sengoo_collections_word(state: * mut u8, index: i64) -> i64;
+    unsafe fn sengoo_collections_put(state: * mut u8, index: i64, value: i64);
+    unsafe fn sengoo_collections_pointer(state: * mut u8, index: i64) -> * mut u8;
+    unsafe fn sengoo_collections_pointer_put(state: * mut u8, index: i64, value: * mut u8);
+    unsafe fn sengoo_collections_null() -> * mut u8;
+    unsafe fn sengoo_collections_present(state: * mut u8) -> i64;
+} // Fixed process root: 8 words + 128 slots x 4 words = 4160 bytes.
+// Slot fields generation, kind, payload pointer, reserved.
+// Initialization and all registry decisions are SG. The C root starts zero.
+unsafe extern "C" fn sh_process_root() -> * mut u8 {
+    let state = sengoo_process_registry_address();
+    let magic = sengoo_collections_word(state, 0);
+    if magic == 0 {
+        let mut index = 0;
+        while index < 520 {
+            sengoo_collections_put(state, index, 0);
+            index = index + 1;
+        };
+        sengoo_collections_put(state, 1, 128);
+        sengoo_collections_put(state, 0, 1397184342);
+    };
+    state;
+}
+unsafe extern "C" fn sh_process_slot(state: * mut u8, handle: i64, kind: i64) -> i64 {
+    if sengoo_collections_word(state, 0) != 1397184342 or sengoo_collections_word(state, 1) != 128 or handle > - 4611686018427388161 or handle < - 4611686022722355072 or kind < 1 or kind > 2 {
+        return - 1;
+    };
+    let encoded = - handle - 4611686018427387904;
+    let index = encoded % 256;
+    let generation = encoded / 256;
+    if index < 1 or index > 128 or generation < 1 or generation > 16777215 {
+        return - 1;
+    };
+    let at = 8 + (index - 1) * 4;
+    if sengoo_collections_word(state, at) != generation or sengoo_collections_word(state, at + 1) != kind {
+        return - 1;
+    };
+    at;
+}
+pub unsafe extern "C" fn sengoo_sg_process_registry_new(kind: i64, value: * mut u8) -> i64 {
+    if kind < 1 or kind > 2 or sengoo_collections_present(value) == 0 {
+        return 0;
+    };
+    sengoo_process_registry_lock();
+    let state = sh_process_root();
+    let mut index = 0;
+    let mut handle = 0;
+    while index < 128 and handle == 0 {
+        let at = 8 + index * 4;
+        let generation = sengoo_collections_word(state, at);
+        if sengoo_collections_word(state, at + 1) == 0 and generation < 16777215 {
+            sengoo_collections_put(state, at, generation + 1);
+            sengoo_collections_put(state, at + 1, kind);
+            sengoo_collections_pointer_put(state, at + 2, value);
+            sengoo_collections_put(state, 2, sengoo_collections_word(state, 2) + 1);
+            handle = - 4611686018427387904 - (generation + 1) * 256 - index - 1;
+        };
+        index = index + 1;
+    };
+    sengoo_process_registry_unlock();
+    handle;
+}
+pub unsafe extern "C" fn sengoo_sg_process_registry_get(kind: i64, handle: i64) -> * mut u8 {
+    if kind < 1 or kind > 2 or handle > - 4611686018427388161 {
+        return sengoo_collections_null();
+    };
+    sengoo_process_registry_lock();
+    let state = sh_process_root();
+    let at = sh_process_slot(state, handle, kind);
+    let value = if at < 0 {
+        sengoo_collections_null();
+    } else {
+        sengoo_collections_pointer(state, at + 2);
+    };
+    sengoo_process_registry_unlock();
+    value;
+}
+pub unsafe extern "C" fn sengoo_sg_process_registry_take(kind: i64, handle: i64) -> * mut u8 {
+    if kind < 1 or kind > 2 or handle > - 4611686018427388161 {
+        return sengoo_collections_null();
+    };
+    sengoo_process_registry_lock();
+    let state = sh_process_root();
+    let at = sh_process_slot(state, handle, kind);
+    let mut value = sengoo_collections_null();
+    if at >= 0 {
+        value = sengoo_collections_pointer(state, at + 2);
+        sengoo_collections_put(state, at + 1, 0);
+        sengoo_collections_pointer_put(state, at + 2, sengoo_collections_null());
+        sengoo_collections_put(state, 2, sengoo_collections_word(state, 2) - 1);
+    };
+    sengoo_process_registry_unlock();
+    value;
+}
+pub unsafe extern "C" fn sengoo_sg_process_registry_live() -> i64 {
+    sengoo_process_registry_lock();
+    let state = sh_process_root();
+    let result = sengoo_collections_word(state, 2);
+    sengoo_process_registry_unlock();
+    result;
+}

@@ -1,0 +1,163 @@
+extern "C" {
+    unsafe fn sengoo_process_vec_context_address() -> * mut u8;
+    unsafe fn sengoo_process_registry_lock();
+    unsafe fn sengoo_process_registry_unlock();
+    unsafe fn sengoo_collections_word(value: * mut u8, index: i64) -> i64;
+    unsafe fn sengoo_collections_put(value: * mut u8, index: i64, number: i64);
+    unsafe fn sengoo_collections_allocate(bytes: i64, align: i64) -> * mut u8;
+    unsafe fn sengoo_collections_release(value: * mut u8);
+    unsafe fn sengoo_collections_present(value: * mut u8) -> i64;
+    unsafe fn sengoo_collections_null() -> * mut u8;
+    unsafe fn sengoo_sg_process_registry_new(kind: i64, value: * mut u8) -> i64;
+    unsafe fn sengoo_sg_process_registry_get(kind: i64, handle: i64) -> * mut u8;
+    unsafe fn sengoo_sg_process_registry_take(kind: i64, handle: i64) -> * mut u8;
+    unsafe fn sengoo_sg_collections_context_init(state: * mut u8, extent: i64, identity: i64) -> i64;
+    unsafe fn sengoo_sg_collections_vec_new(state: * mut u8, extent: i64, size: i64, align: i64, mover: i64,
+    dropper: i64) -> i64;
+    unsafe fn sengoo_sg_collections_vec_push(state: * mut u8, extent: i64, handle: i64, value: * mut u8) -> i64;
+    unsafe fn sengoo_sg_collections_vec_len(state: * mut u8, extent: i64, handle: i64) -> i64;
+    unsafe fn sengoo_sg_collections_vec_get(state: * mut u8, extent: i64, handle: i64, index: i64) -> * mut u8;
+    unsafe fn sengoo_sg_collections_vec_free(state: * mut u8, extent: i64, handle: i64) -> i64;
+}
+unsafe extern "C" fn sh_process_vec_context() -> * mut u8 {
+    sengoo_process_registry_lock();
+    let state = sengoo_process_vec_context_address();
+    if sengoo_collections_word(state, 0) == 0 {
+        sengoo_sg_collections_context_init(state, 12352, 1455194113);
+        ();
+    };
+    sengoo_process_registry_unlock();
+    state;
+}
+unsafe extern "C" fn sh_process_vec_inner(mapping: * mut u8) -> i64 {
+    if sengoo_collections_present(mapping) == 0 {
+        return 0;
+    };
+    if sengoo_collections_word(mapping, 0) != 1397184343 {
+        return 0;
+    };
+    let inner = sengoo_collections_word(mapping, 1);
+    if inner <= 0 or inner / 4294967296 != 1455194113 {
+        return 0;
+    };
+    inner;
+}
+pub unsafe extern "C" fn sengoo_sg_process_vec_new(size: i64, align: i64, mover: i64, dropper: i64) -> i64 {
+    let state = sh_process_vec_context();
+    let inner = sengoo_sg_collections_vec_new(state, 12352, size, align, mover, dropper);
+    if inner == 0 {
+        return 0;
+    };
+    let mapping = sengoo_collections_allocate(16, 8);
+    if sengoo_collections_present(mapping) == 0 {
+        sengoo_sg_collections_vec_free(state, 12352, inner);
+        return 0;
+    };
+    sengoo_collections_put(mapping, 0, 1397184343);
+    sengoo_collections_put(mapping, 1, inner);
+    let token = sengoo_sg_process_registry_new(1, mapping);
+    if token == 0 {
+        sengoo_collections_release(mapping);
+        sengoo_sg_collections_vec_free(state, 12352, inner);
+        ();
+    };
+    token;
+}
+pub unsafe extern "C" fn sengoo_sg_process_vec_push(token: i64, value: * mut u8) -> i64 {
+    let mapping = sengoo_sg_process_registry_get(1, token);
+    let inner = sh_process_vec_inner(mapping);
+    if inner == 0 {
+        return 2;
+    };
+    sengoo_sg_collections_vec_push(sh_process_vec_context(), 12352, inner, value);
+}
+pub unsafe extern "C" fn sengoo_sg_process_vec_len(token: i64) -> i64 {
+    let mapping = sengoo_sg_process_registry_get(1, token);
+    let inner = sh_process_vec_inner(mapping);
+    if inner == 0 {
+        return - 3;
+    };
+    sengoo_sg_collections_vec_len(sh_process_vec_context(), 12352, inner);
+}
+pub unsafe extern "C" fn sengoo_sg_process_vec_get(token: i64, index: i64) -> * mut u8 {
+    let mapping = sengoo_sg_process_registry_get(1, token);
+    let inner = sh_process_vec_inner(mapping);
+    if inner == 0 {
+        return sengoo_collections_null();
+    };
+    sengoo_sg_collections_vec_get(sh_process_vec_context(), 12352, inner, index);
+}
+pub unsafe extern "C" fn sengoo_sg_process_vec_free(token: i64) -> i64 {
+    let mapping = sengoo_sg_process_registry_take(1, token);
+    let inner = sh_process_vec_inner(mapping);
+    if inner == 0 {
+        return 3;
+    };
+    let status = sengoo_sg_collections_vec_free(sh_process_vec_context(), 12352, inner);
+    sengoo_collections_release(mapping);
+    status;
+}
+pub unsafe extern "C" fn sengoo_sg_process_words_new(length: i64) -> i64 {
+    if length < 0 or length > 8388606 {
+        return 0;
+    };
+    let value = sengoo_collections_allocate(16 + length * 8, 8);
+    if sengoo_collections_present(value) == 0 {
+        return 0;
+    };
+    sengoo_collections_put(value, 0, 1397184344);
+    sengoo_collections_put(value, 1, length);
+    let mut index = 0;
+    while index < length {
+        sengoo_collections_put(value, index + 2, 0);
+        index = index + 1;
+    };
+    let token = sengoo_sg_process_registry_new(2, value);
+    if token == 0 {
+        sengoo_collections_release(value);
+    };
+    token;
+}
+unsafe extern "C" fn sh_process_words(token: i64) -> * mut u8 {
+    let value = sengoo_sg_process_registry_get(2, token);
+    if sengoo_collections_present(value) == 0 {
+        return sengoo_collections_null();
+    };
+    if sengoo_collections_word(value, 0) != 1397184344 or sengoo_collections_word(value, 1) < 0 or sengoo_collections_word(value,
+    1) > 8388606 {
+        return sengoo_collections_null();
+    };
+    value;
+}
+pub unsafe extern "C" fn sengoo_sg_process_words_set(token: i64, index: i64, number: i64) -> i64 {
+    let value = sh_process_words(token);
+    if sengoo_collections_present(value) == 0 {
+        return 3;
+    };
+    if index < 0 or index >= sengoo_collections_word(value, 1) {
+        return 2;
+    };
+    sengoo_collections_put(value, index + 2, number);
+    0;
+}
+pub unsafe extern "C" fn sengoo_sg_process_words_get(token: i64, index: i64, fallback: i64) -> i64 {
+    let value = sh_process_words(token);
+    if sengoo_collections_present(value) == 0 or index < 0 {
+        return fallback;
+    };
+    if index >= sengoo_collections_word(value, 1) {
+        return fallback;
+    };
+    sengoo_collections_word(value, index + 2);
+}
+pub unsafe extern "C" fn sengoo_sg_process_words_free(token: i64) -> i64 {
+    let value = sengoo_sg_process_registry_take(2, token);
+    if sengoo_collections_present(value) == 0 {
+        return 3;
+    };
+    if sengoo_collections_word(value, 0) != 1397184344 {
+        return 2;
+    };
+    sengoo_collections_release(value);
+    0;
+}

@@ -1,0 +1,49 @@
+extern "C" {
+    unsafe fn sengoo_collections_allocate(bytes: i64, align: i64) -> * mut u8;
+    unsafe fn sengoo_collections_release(value: * mut u8);
+    unsafe fn sengoo_collections_present(value: * mut u8) -> i64;
+    unsafe fn sengoo_collections_fixture_move() -> i64;
+    unsafe fn sengoo_collections_fixture_drop() -> i64;
+    unsafe fn sengoo_collections_fixture_put(value: * mut u8, number: i64);
+    unsafe fn sengoo_collections_fixture_get(value: * mut u8) -> i64;
+    unsafe fn sengoo_sg_process_registry_live() -> i64;
+    unsafe fn sengoo_sg_process_vec_new(size: i64, align: i64, mover: i64, dropper: i64) -> i64;
+    unsafe fn sengoo_sg_process_vec_push(token: i64, value: * mut u8) -> i64;
+    unsafe fn sengoo_sg_process_vec_get(token: i64, index: i64) -> * mut u8;
+    unsafe fn sengoo_sg_process_vec_free(token: i64) -> i64;
+    unsafe fn sengoo_sg_process_words_new(length: i64) -> i64;
+    unsafe fn sengoo_sg_process_words_set(token: i64, index: i64, value: i64) -> i64;
+    unsafe fn sengoo_sg_process_words_get(token: i64, index: i64, fallback: i64) -> i64;
+    unsafe fn sengoo_sg_process_words_free(token: i64) -> i64;
+}
+pub unsafe extern "C" fn main() -> i64 {
+    let value = sengoo_collections_allocate(8, 8);
+    if sengoo_collections_present(value) == 0 {
+        return 1;
+    };
+    let vec = sengoo_sg_process_vec_new(8, 8, sengoo_collections_fixture_move(), sengoo_collections_fixture_drop());
+    let words = sengoo_sg_process_words_new(2);
+    let mut result = 1;
+    if vec < 0 and words < 0 {
+        sengoo_collections_fixture_put(value, 40);
+        let first = sengoo_sg_process_vec_push(vec, value);
+        sengoo_collections_fixture_put(value, 2);
+        let second = sengoo_sg_process_vec_push(vec, value);
+        let left = sengoo_sg_process_vec_get(vec, 0);
+        let right = sengoo_sg_process_vec_get(vec, 1);
+        if first == 0 and second == 0 and sengoo_collections_present(left) != 0 and sengoo_collections_present(right) != 0 {
+            let total = sengoo_collections_fixture_get(left) + sengoo_collections_fixture_get(right);
+            if sengoo_sg_process_words_set(words, 0, total) == 0 and sengoo_sg_process_words_get(words,
+            0, - 1) == 42 {
+                result = 42;
+            };
+        };
+    };
+    sengoo_sg_process_vec_free(vec);
+    sengoo_sg_process_words_free(words);
+    sengoo_collections_release(value);
+    if sengoo_sg_process_registry_live() != 0 {
+        return 1;
+    };
+    result;
+}
