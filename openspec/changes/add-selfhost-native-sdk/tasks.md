@@ -8,7 +8,8 @@
 ## Provider and lifecycle qualification
 
 - [ ] Bind registered String view ownership/resource execution to the selected manifest and provider.
-- [ ] Execute sleep and file-readiness start/poll/result/cancel/drop cases with explicitly selected development providers.
+- [x] Execute file-readiness start/poll/result/cancel/drop cases with the explicitly selected development provider (`verify_native_readiness_provider.py`, qualified04; see readiness-checkpoint.md).
+- [ ] Execute sleep start/poll/result/cancel/drop cases with the explicitly selected development provider.
 - [ ] Preserve physical C signatures separately from language view/Future signatures in M3 integration.
 - [ ] Inventory remaining SG runtime algorithm ports without treating development reference binaries as completed ports.
 
@@ -73,3 +74,11 @@ HIR integration, archive/static-library admission, native Future lifecycle
 execution, final permitted components and ordinary self-building remain open.
 This is explicitly development inventory admission, not a final SDK or complete
 M3/M7/self-hosting qualification.
+
+## Completed development file-readiness lifecycle checkpoint
+
+`readiness-checkpoint.md` records the formal source-bound lifecycle run and its
+limits. The named gate checks 1,600 measured resource scopes, sixteen ordered
+case completions and the actual linked provider's eight defined exports. It
+reuses the pinned admission report above for the identical catalog and source
+bytes. Sleep, SG Future lowering and final SDK qualification remain open.

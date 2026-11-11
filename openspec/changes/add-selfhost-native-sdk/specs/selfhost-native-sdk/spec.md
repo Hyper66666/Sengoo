@@ -46,6 +46,13 @@ and enumerate owner/lifecycle effects. M3 owns validating typed bridge facts.
 - **AND** its one-byte bool fields at offsets zero and one and i64 error at offset eight SHALL retain their declared roles
 - **AND** this SDK declaration SHALL NOT broaden arbitrary source aggregate FFI or authorize integer-to-reference casts
 
+#### Scenario: A development readiness provider executes its lifecycle
+- **WHEN** the reviewed readiness provider is rebuilt for development qualification
+- **THEN** the run SHALL bind the caller-pinned declaration-admission report, identical catalog and provider source bytes, actual linked provider, and physical C signatures
+- **AND** an independent native consumer SHALL exercise Pending to Ready, source-file closure, timeout and error outcomes, and alternative consuming result, cancel and drop operations
+- **AND** every measured scope SHALL restore independent OS-handle and allocation-count/byte observations after explicitly recorded initialization
+- **AND** a successful development run SHALL NOT qualify final SDK materialization, SG runtime algorithm migration or SG Future lowering
+
 ### Requirement: Final SDK materialization SHALL respect SG runtime ownership
 
 Development reference providers SHALL be separate from final SDK components.

@@ -98,3 +98,34 @@ one completed fixture ID with both expected error codes only after all that
 fixture's assertions pass. The Python runner checks the complete ordered unique
 list against every prepared fixture; process exit and an overall marker alone
 cannot establish that the external corpus ran.
+
+## Development readiness lifecycle execution
+
+`verify_native_readiness_provider.py` reuses a caller-pinned successful SG
+admission report for the identical catalog, prelude and all catalog source
+bytes. It captures unchanged runtime sources and derives a separate test Cargo
+workspace by changing only its member list. Its lock retains original dependency
+versions and checksums, adding the test consumer. The final build uses that lock
+and explicitly selected compiler binaries; C header closures are checked before
+and after compilation, and Cargo configuration candidates remain guarded.
+
+The Rust test supplies actual provider function pointers and an observing global
+allocator that delegates unchanged allocation behavior to `System`. Cargo
+artifact records, the actual compiler commands and defined archive symbols bind
+the consumer to the current provider build. The C consumer independently declares
+the physical ABI and checks the outcome layout with static assertions and output
+canaries. Unrelated generated-program dispatch link requirements are abort-only
+traps and supply no readiness implementation.
+
+Sixteen named cases cover disk readiness, real named-pipe Pending to data Ready,
+source closure with an independently retained registration, peer closure,
+timeouts and invalid arguments, and pending/ready consumption by result, cancel
+or drop. Each case has one initialization round followed by one hundred measured
+rounds. Win32 process handles and observed Rust allocation counts and bytes return
+exactly to each scope's baseline. Initialization permits normal registry-table
+capacity retention; the test does not claim zero cold-start heap retention.
+
+This is direct native execution of the existing Rust reference provider. It does
+not prove scheduler wakeup propagation or permit calls through already-consumed
+unsafe raw pointers. Sleep lifecycle, typed SG lowering, complete external build
+provenance, runtime algorithm ports and final SDK materialization remain separate.

@@ -47,5 +47,27 @@ A checkout with different source bytes must fail admission until those bytes
 have been explicitly reviewed and the development inventory regenerated. Git
 preserves the manifest itself byte for byte; the inventory is not a claim of
 cross-host source rebuilding or a clean-machine SDK qualification.
-Final SDK components, complete runtime migration, native async lifecycle and
-ordinary SG self-building remain separate open requirements.
+Final SDK components, complete runtime migration, sleep lifecycle, native SG
+Future lowering and ordinary SG self-building remain separate open requirements.
+
+The development file-readiness lifecycle has a separate execution gate:
+
+```text
+python selfhost/verify_native_readiness_provider.py --clang <verified-clang.exe> --admission-report target/selfhost/native-sdk/final-checkpoint/evidence.json --admission-pin c9ddf42b4ceacbc838e6b291c5f3348ef0d893f10cb27a8a1a53fae00fd9b8ee --output target/selfhost/native-readiness-provider/new-run
+```
+
+This requires Windows x64, the locked development compiler tools and the retained
+admission artifacts. It rebuilds unchanged Rust reference-runtime sources in a
+separate test workspace and calls their actual exports from an independent C
+consumer. Sixteen cases run one hundred measured rounds each, including real
+named-pipe Pending to Ready and source-close independence; OS handles and Rust
+allocation counts/bytes recover in every measured scope. Result uses an explicit
+alignment-eight output pointer and consumes the owned state, as do cancel and
+drop. No readiness algorithm is implemented in the test consumer.
+
+The successful source-bound report is
+`target/selfhost/native-readiness-provider/qualified04/evidence.json`, SHA-256
+`77c51f9c587dc8b72959c4b8b6e9cfa286d115a0500e2fffd3bc83dc6a76ab9e`.
+See `openspec/changes/add-selfhost-native-sdk/readiness-checkpoint.md` for the
+exact inputs, lifecycle cases and remaining provenance boundaries. This report
+does not add a binary to the ordinary catalog or change its final-mode rejection.
