@@ -1,0 +1,139 @@
+import std::collections;
+
+extern "C" {
+    fn opaque() -> i64;
+}
+
+def source_some_i64() -> i64 {
+    let values: Vec<i64> = vec_new();
+    values.push(40);
+    let iterator = values.iter();
+    let item: Option<&i64> = raw_vec_iter_next(iterator.handle);
+    if item.is_some { (*item.value) + 2; } else { -1; };
+}
+
+def source_some_bool() -> i64 {
+    let values: Vec<bool> = vec_new();
+    values.push(true);
+    let iterator = values.iter();
+    let item: Option<&bool> = raw_vec_iter_next(iterator.handle);
+    if item.is_some { if *item.value { 42; } else { -2; }; } else { -1; };
+}
+
+def source_none_i64() -> i64 {
+    let values: Vec<i64> = vec_new();
+    let iterator = values.iter();
+    raw_vec_iter_next_i64(iterator.handle, 42);
+}
+
+def source_none_bool() -> i64 {
+    let values: Vec<bool> = vec_new();
+    let iterator = values.iter();
+    raw_vec_iter_next_bool_i64(iterator.handle, 42);
+}
+
+def source_helper_i64() -> i64 {
+    let values: Vec<i64> = vec_new();
+    values.push(40);
+    let iterator = values.iter();
+    raw_vec_iter_next_i64(iterator.handle, -1) + 2;
+}
+
+def source_helper_bool() -> i64 {
+    let values: Vec<bool> = vec_new();
+    values.push(true);
+    let iterator = values.iter();
+    raw_vec_iter_next_bool_i64(iterator.handle, -1) + 41;
+}
+
+def negative_mutable() -> i64 {
+    let values: Vec<i64> = vec_new();
+    values.push(40);
+    let iterator = values.iter();
+    let mut item: Option<&i64> = raw_vec_iter_next(iterator.handle);
+    if item.is_some { item = raw_vec_iter_next(iterator.handle); *item.value; } else { -1; };
+}
+
+def negative_unguarded() -> i64 {
+    let values: Vec<i64> = vec_new();
+    values.push(40);
+    let iterator = values.iter();
+    let item = raw_vec_iter_next(iterator.handle);
+    *item.value;
+}
+
+def negative_invalidated() -> i64 {
+    let values: Vec<i64> = vec_new();
+    let iterator = values.iter();
+    values.push(40);
+    raw_vec_iter_next_i64(iterator.handle, -1);
+}
+
+def negative_unknown() -> i64 {
+    raw_vec_iter_next_i64(opaque(), -1);
+}
+
+def main() -> i64 {
+    42;
+}
+
+def source_reuse_i64() -> i64 {
+    let values: Vec<i64> = vec_new();
+    values.push(40);
+    let iterator = values.iter();
+    let first: Option<&i64> = raw_vec_iter_next(iterator.handle);
+    let read = if first.is_some { *first.value; } else { -1; };
+    let second: Option<&i64> = raw_vec_iter_next(iterator.handle);
+    if second.is_some { *second.value; } else { read + 2; };
+}
+
+struct SourceMoveOwner {
+    value: i64,
+}
+
+impl Drop for SourceMoveOwner {
+    def drop(&mut self) {
+    }
+}
+
+def negative_push_reuse() -> i64 {
+    let values: Vec<SourceMoveOwner> = vec_new();
+    let item = SourceMoveOwner { value: 40 };
+    values.push(item);
+    item.value;
+}
+
+def negative_fake() -> i64 {
+    let iterator: VecIter<i64> = VecIter { handle: opaque(), marker: 0 };
+    let item: Option<&i64> = raw_vec_iter_next(iterator.handle);
+    if item.is_some { *item.value; } else { -1; };
+}
+
+def negative_cross_t() -> i64 {
+    let values: Vec<bool> = vec_new();
+    let iterator = values.iter();
+    let item: Option<&i64> = raw_vec_iter_next(iterator.handle);
+    if item.is_some { *item.value; } else { -1; };
+}
+
+def negative_family() -> i64 {
+    let values: Vec<i64> = vec_new();
+    let item: Option<&i64> = raw_vec_iter_next(values.handle);
+    if item.is_some { *item.value; } else { -1; };
+}
+
+def negative_escape() -> &i64 {
+    let values: Vec<i64> = vec_new();
+    values.push(40);
+    let iterator = values.iter();
+    let item: Option<&i64> = raw_vec_iter_next(iterator.handle);
+    item.value;
+}
+
+def source_pure() -> i64 {
+    42;
+}
+
+def source_wrapper() -> i64 {
+    source_some_i64();
+}

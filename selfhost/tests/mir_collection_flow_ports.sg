@@ -1,0 +1,108 @@
+import selfhost_mir_lower;
+
+import std::assert;
+
+extern "C" {
+    fn sengoo_string_live_handle_count() -> i64;
+    fn sengoo_buffer_live_handle_count() -> i64;
+    fn sengoo_opaque_live_handle_count() -> i64;
+}
+
+def sh_fpt_scope() -> Result<bool, i64> {
+    let source = string_from_str("def main()->i64{42}")?;
+    let parsed = sh_parse(&source, 0, 1000);
+    assert_eq_i64(parsed.error, 0, "mir_collection_flow_ports.sg", 1);
+    let checked = sh_check(&source, &parsed.ast, 1000);
+    assert_eq_i64(checked.error, 0, "mir_collection_flow_ports.sg", 2);
+    let ownership = sh_check_ownership(&source, &parsed.ast, &checked, 1000);
+    assert_eq_i64(ownership.error, 0, "mir_collection_flow_ports.sg", 3);
+    let types = sh_fpt_copy(&checked.types.words);
+    let arguments = sh_fpt_copy(&checked.types.arguments);
+    let symbols = sh_symbol_count(&checked.symbols);
+    let roles = vec_new_i64();
+    roles.push(0);
+    roles.push(1);
+    roles.push(2);
+    let providers = vec_new_i64();
+    let mut at = 0;
+    while at < 6 { providers.push(-1); at = at + 1; };
+    let factories = vec_new_i64();
+    let hooks = vec_new_i64();
+    let roots = vec_new_i64();
+    roots.push(0);
+    roles.clear();
+    let rejected = sh_l_collection_flow_parts(&source, &parsed.ast, &checked, &ownership, 1, -1, -1, &roles, &providers, &factories, &hooks, &roots);
+    assert_eq_i64(rejected.error, 5008, "mir_collection_flow_ports.sg", 10);
+    assert_eq_i64(sh_mir_inst_count(&rejected.mir), 0, "mir_collection_flow_ports.sg", 30);
+    assert_eq_i64(sh_mir_fn_count(&rejected.mir), 0, "mir_collection_flow_ports.sg", 31);
+    roles.push(0);
+    roles.push(1);
+    roles.push(2);
+    providers.pop();
+    let rejected = sh_l_collection_flow_parts(&source, &parsed.ast, &checked, &ownership, 1, -1, -1, &roles, &providers, &factories, &hooks, &roots);
+    assert_eq_i64(rejected.error, 5008, "mir_collection_flow_ports.sg", 11);
+    assert_eq_i64(sh_mir_inst_count(&rejected.mir), 0, "mir_collection_flow_ports.sg", 30);
+    assert_eq_i64(sh_mir_fn_count(&rejected.mir), 0, "mir_collection_flow_ports.sg", 31);
+    providers.push(-1);
+    factories.push(0);
+    let rejected = sh_l_collection_flow_parts(&source, &parsed.ast, &checked, &ownership, 1, -1, -1, &roles, &providers, &factories, &hooks, &roots);
+    assert_eq_i64(rejected.error, 5008, "mir_collection_flow_ports.sg", 12);
+    assert_eq_i64(sh_mir_inst_count(&rejected.mir), 0, "mir_collection_flow_ports.sg", 30);
+    assert_eq_i64(sh_mir_fn_count(&rejected.mir), 0, "mir_collection_flow_ports.sg", 31);
+    factories.clear();
+    at = 0;
+    while at < 12 { factories.push(0); at = at + 1; };
+    let rejected = sh_l_collection_flow_parts(&source, &parsed.ast, &checked, &ownership, 1, -1, -1, &roles, &providers, &factories, &hooks, &roots);
+    assert_eq_i64(rejected.error, 5008, "mir_collection_flow_ports.sg", 13);
+    assert_eq_i64(sh_mir_inst_count(&rejected.mir), 0, "mir_collection_flow_ports.sg", 30);
+    assert_eq_i64(sh_mir_fn_count(&rejected.mir), 0, "mir_collection_flow_ports.sg", 31);
+    factories.clear();
+    hooks.push(0);
+    let rejected = sh_l_collection_flow_parts(&source, &parsed.ast, &checked, &ownership, 1, -1, -1, &roles, &providers, &factories, &hooks, &roots);
+    assert_eq_i64(rejected.error, 5008, "mir_collection_flow_ports.sg", 14);
+    assert_eq_i64(sh_mir_inst_count(&rejected.mir), 0, "mir_collection_flow_ports.sg", 30);
+    assert_eq_i64(sh_mir_fn_count(&rejected.mir), 0, "mir_collection_flow_ports.sg", 31);
+    hooks.clear();
+    at = 0;
+    while at < 18 { hooks.push(0); at = at + 1; };
+    let rejected = sh_l_collection_flow_parts(&source, &parsed.ast, &checked, &ownership, 1, -1, -1, &roles, &providers, &factories, &hooks, &roots);
+    assert_eq_i64(rejected.error, 5008, "mir_collection_flow_ports.sg", 15);
+    assert_eq_i64(sh_mir_inst_count(&rejected.mir), 0, "mir_collection_flow_ports.sg", 30);
+    assert_eq_i64(sh_mir_fn_count(&rejected.mir), 0, "mir_collection_flow_ports.sg", 31);
+    hooks.clear();
+    roots.clear();
+    let rejected = sh_l_collection_flow_parts(&source, &parsed.ast, &checked, &ownership, 1, -1, -1, &roles, &providers, &factories, &hooks, &roots);
+    assert_eq_i64(rejected.error, 5008, "mir_collection_flow_ports.sg", 16);
+    assert_eq_i64(sh_mir_inst_count(&rejected.mir), 0, "mir_collection_flow_ports.sg", 30);
+    assert_eq_i64(sh_mir_fn_count(&rejected.mir), 0, "mir_collection_flow_ports.sg", 31);
+    roots.push(0);
+    roots.push(0);
+    let rejected = sh_l_collection_flow_parts(&source, &parsed.ast, &checked, &ownership, 1, -1, -1, &roles, &providers, &factories, &hooks, &roots);
+    assert_eq_i64(rejected.error, 5008, "mir_collection_flow_ports.sg", 17);
+    assert_eq_i64(sh_mir_inst_count(&rejected.mir), 0, "mir_collection_flow_ports.sg", 30);
+    assert_eq_i64(sh_mir_fn_count(&rejected.mir), 0, "mir_collection_flow_ports.sg", 31);
+    roots.pop();
+    let wrong_mode = sh_l_collection_mode_parts(&source, &parsed.ast, &checked, &ownership, 1000, false, -1, -1, &roots, false, &roles, &providers, &factories, &hooks);
+    assert_eq_i64(wrong_mode.error, 5008, "mir_collection_flow_ports.sg", 40);
+    assert_eq_i64(sh_mir_fn_count(&wrong_mode.mir), 0, "mir_collection_flow_ports.sg", 41);
+    assert_true(sh_o_equal(&types, &checked.types.words) and sh_o_equal(&arguments, &checked.types.arguments), "mir_collection_flow_ports.sg", 42);
+    assert_eq_i64(sh_symbol_count(&checked.symbols), symbols, "mir_collection_flow_ports.sg", 43);
+    result_ok_bool(true);
+}
+
+def sh_fpt_copy(input: &Vec<i64>) -> Vec<i64> {
+    let output = vec_new_i64();
+    let mut at = 0;
+    while at < input.len() { output.push(sengoo_vec_get_or_default_i64(input.handle, at, -1)); at = at + 1; };
+    output;
+}
+
+def main() -> i64 {
+    let strings = sengoo_string_live_handle_count();
+    let buffers = sengoo_buffer_live_handle_count();
+    let opaque = sengoo_opaque_live_handle_count();
+    let mut round = 0;
+    while round < 100 { let result = sh_fpt_scope(); if not result.is_ok() { return result.error; }; assert_eq_i64(sengoo_string_live_handle_count(), strings, "mir_collection_flow_ports.sg", 50); assert_eq_i64(sengoo_buffer_live_handle_count(), buffers, "mir_collection_flow_ports.sg", 51); assert_eq_i64(sengoo_opaque_live_handle_count(), opaque, "mir_collection_flow_ports.sg", 52); round = round + 1; };
+    println("flow ports: 9 early rejections x100 first-resource scopes passed");
+    42;
+}

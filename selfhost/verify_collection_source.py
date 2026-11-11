@@ -33,6 +33,7 @@ def main():
     parser.add_argument('--skip-regressions', action='store_true', help='Development only; cannot produce a qualified result')
     parser.add_argument('--regression-parent', type=Path)
     parser.add_argument('--regression-parent-pin')
+    parser.add_argument('--profile', choices=['constructor', 'flow'], default='constructor')
     args = parser.parse_args()
     base = args.output.resolve()
     assert base.is_relative_to(ROOT / 'target')
@@ -50,6 +51,16 @@ def main():
 
     save()
     try:
+        flow = args.profile == 'flow'
+        test_name = 'collection_flow' if flow else 'collection_source'
+        fixture_name = 'collection_flow_source' if flow else 'collection_source_fixture'
+        selected_name = 'source_some_i64' if flow else 'source_i64'
+        if flow:
+            report.update(stage='fresh-source-scalar-collection-flow',
+                          limits=['Parameterless concrete SG roots returning i64; Vec elements i64/bool only',
+                                  'Actual source/provider/loan/effect/ownership proofs and strict optional physical MIR; owning HIR6',
+                                  'Saved MIR is not accepted; full owned new-authority wire and final runtime/self-build remain open'],
+                          ordinary_regressions_separately_required=True)
         parent_path = ROOT / 'target/selfhost/m3-collection-provider-ast-checkpoint/evidence.json'
         assert sha(parent_path) == 'a63152e01208dff39e1d5cbcbd326187901808c8f76fa0d3075a08e0a9fa1cd3'
         parent = json.loads(parent_path.read_bytes())
@@ -75,8 +86,10 @@ def main():
         provider_root = parent_path.parent / 'implementation'
         report['provider'] = dict(report=str(parent_path), sha256=sha(parent_path), root=str(provider_root),
                                   manifest_sha256=parent['provider_manifest_sha256'], object_sha256=parent['provider_object_sha256'])
-        entries = ['selfhost/tests/collection_source.sg', 'selfhost/tests/borrow.sg', 'selfhost/tests/mir.sg',
+        entries = ['selfhost/tests/' + test_name + '.sg', 'selfhost/tests/borrow.sg', 'selfhost/tests/mir.sg',
                    'selfhost/tests/handle_disarm_hir.sg', 'selfhost/tools/native.sg', 'selfhost/tools/semantic.sg']
+        if flow:
+            entries.append('selfhost/tests/collection_cleanup.sg')
         imported = {}
         for entry in entries:
             imported.update(closure(ROOT / entry))
@@ -90,6 +103,10 @@ def main():
             'selfhost/reference-baseline.lock', 'Cargo.toml', 'Cargo.lock', 'rust-toolchain.toml',
             'openspec/changes/add-selfhost-collection-intrinsics/source-constructor-checkpoint.md',
             'openspec/changes/add-selfhost-collection-intrinsics/specs/selfhost-source-collection-constructor/spec.md'])
+        if flow:
+            paths.update(ROOT / name for name in ['selfhost/tests/collection_flow_source.sg', 'selfhost/tests/collection_flow_probe.c',
+                'openspec/changes/add-selfhost-collection-intrinsics/source-flow-checkpoint.md',
+                'openspec/changes/add-selfhost-collection-intrinsics/specs/selfhost-source-collection-flow/spec.md'])
         for directory in ['tools/stdlib', 'runtime']:
             paths.update(p for p in (ROOT / directory).rglob('*') if p.is_file() and not set(p.relative_to(ROOT / directory).parts) & {'target', 'build', '__pycache__'})
         paths.update(p for p in (ROOT / 'openspec/changes/add-selfhost-handle-disarm').rglob('*.md') if p.name != 'tasks.md')
@@ -164,13 +181,21 @@ def main():
         invocations = [line for line in cargo_output.splitlines() if line.lstrip().startswith('Running ') and tools['rustc']['path'].casefold() in line.casefold()]
         assert len(invocations) >= 2 and 'source_constructor_rustc=' + tools['rustc']['path'] in cargo_output
         report['cargo_actual_rustc_invocations'] = invocations
-        for name in ['collection_source.sg', 'collection_source_fixture.sg']:
+        for name in [test_name + '.sg', fixture_name + '.sg']:
             run('format-' + name, [args.formatter.resolve(), '--check', captured / 'selfhost/tests' / name])
         run('format-source-module', [args.formatter.resolve(), '--check', captured / 'selfhost/src/collection_source.sg'])
+        if flow:
+            for name in ['collection_flow', 'collection_cleanup']:
+                run('format-' + name, [args.formatter.resolve(), '--check', captured / 'selfhost/src' / (name + '.sg')])
+            cleanup = base / 'cleanup.exe'
+            run('cleanup-tests-build', [args.seed.resolve(), '--runtime-mode', 'source-development', 'build', captured / 'selfhost/tests/collection_cleanup.sg', '--force-rebuild', '-O', '0', '-o', cleanup])
+            tested = run('cleanup-three-first-scopes', [cleanup], 42, True)
+            assert not tested.stdout and not tested.stderr
+            report['artifacts'][cleanup.name] = sha(cleanup)
         binary = base / 'constructor.exe'
-        run('source-tests-build', [args.seed.resolve(), '--runtime-mode', 'source-development', 'build', captured / 'selfhost/tests/collection_source.sg', '--force-rebuild', '-O', '0', '-o', binary])
+        run('source-tests-build', [args.seed.resolve(), '--runtime-mode', 'source-development', 'build', captured / 'selfhost/tests' / (test_name + '.sg'), '--force-rebuild', '-O', '0', '-o', binary])
         report['artifacts']['constructor.exe'] = sha(binary)
-        fixture = captured / 'selfhost/tests/collection_source_fixture.sg'
+        fixture = captured / 'selfhost/tests' / (fixture_name + '.sg')
 
         def invoke(name, mode, selected, obj):
             source = captured / 'selfhost/tests/collection_source_shapes.sg' if mode == 'shape-adt' else fixture
@@ -180,21 +205,26 @@ def main():
         objects = []
         for number in range(3):
             obj = base / ('source-' + str(number) + '.obj')
-            invoke('first-success-' + str(number), 'positive', 'source_i64', obj)
+            invoke('first-success-' + str(number), 'positive', selected_name, obj)
             objects.append(obj)
             report['artifacts'][obj.name] = sha(obj)
         assert len({obj.read_bytes() for obj in objects}) == 1
-        cases = [(mode, 'source_i64') for mode in ['installed', 'manifest', 'artifact', 'collection', 'option', 'bad-limit', 'bad-object-limit', 'empty-names', 'duplicate', 'nul-name']]
-        cases += [('shape', name) for name in ['missing', 'source_manual', 'source_wrapper', 'source_parameter', 'source_generic', 'source_other', 'source_local', 'source_branch']]
-        cases += [('empty-element', 'source_empty')]
-        cases += [('shape-adt', name) for name in ['source_class', 'source_nested_class', 'source_array_class', 'source_enum']]
+        cases = [(mode, selected_name) for mode in ['installed', 'manifest', 'artifact', 'collection', 'option', 'bad-limit', 'bad-object-limit', 'empty-names', 'duplicate', 'nul-name']]
+        if flow:
+            cases += [('shape', name) for name in ['missing', 'source_pure', 'source_wrapper', 'negative_escape']]
+            cases += [('expect6120', name) for name in ['negative_mutable', 'negative_invalidated', 'negative_fake', 'negative_cross_t', 'negative_family']]
+            cases += [('expect6124', 'negative_unguarded'), ('expect6121', 'negative_unknown'), ('expect6101', 'negative_push_reuse')]
+        else:
+            cases += [('shape', name) for name in ['missing', 'source_manual', 'source_wrapper', 'source_parameter', 'source_generic', 'source_other', 'source_local', 'source_branch']]
+            cases += [('empty-element', 'source_empty')]
+            cases += [('shape-adt', name) for name in ['source_class', 'source_nested_class', 'source_array_class', 'source_enum']]
         for mode, selected in cases:
             obj = base / ('rejected-' + mode + '-' + selected + '.obj')
             invoke('reject-' + mode + '-' + selected, mode, selected, obj)
             assert not obj.exists()
         run('object-inspection', [tools['llvm-readobj']['path'], '--file-headers', '--sections', '--symbols', '--relocations', '--unwind', objects[0]])
         run('object-disassembly', [tools['llvm-objdump']['path'], '-d', objects[0]])
-        csource = captured / 'selfhost/tests/collection_source_probe.c'
+        csource = captured / 'selfhost/tests' / (test_name + '_probe.c')
         flags = ['-std=c11', '-Wall', '-Wextra', '-Werror', '-Werror=date-time', '-O0', '-I', captured / 'tools/stdlib']
         before, after = base / 'before.d', base / 'after.d'
         run('c-headers', [args.clang.resolve(), *flags, '-M', '-MT', 'provider_dependency', '-MF', before, csource])
@@ -289,7 +319,7 @@ def main():
                                             unchanged_inputs=unchanged, observed_legacy_log_hashes=legacy_logs,
                                             scope='Ordinary compiler producer, harnesses, runtime and stdlib are byte-identical; only the separate fresh-source API/profile and its test/ledger changed.',
                                             receipt_limit='The nested source-native gate lacks per-stream producer hashes; its retained logs are observations after its terminal result.')
-        elif not args.skip_regressions:
+        elif not args.skip_regressions and not flow:
             report['regressions'] = {}
             for name, script, extra, wanted in [
                     ('mir', 'verify_mir.py', [], 'passed'),
@@ -306,8 +336,11 @@ def main():
                         assert not value, (name, key)
                 sources[str(evidence)] = sha(evidence)
                 report['regressions'][name] = dict(report=str(evidence), sha256=sha(evidence), result=child['result'], commands=len(child['steps']))
-        report.update(result='development-only' if args.skip_regressions else 'passed', first_call_resource_scopes=3 + len(cases), owning_drops=50000,
+        report.update(result='passed-fresh-scalar-flow-boundary' if flow and not args.skip_regressions else 'development-only' if args.skip_regressions else 'passed', first_call_resource_scopes=3 + len(cases), owning_drops=0 if flow else 50000,
                       raw_objects_byte_equal=True, rejected_source_cases=len(cases))
+        if flow:
+            report.update(machine_source_calls=7000, cleanup_template_first_scopes=3, source_functions=7,
+                          ordinary_regressions_scope='Required separate ordinary-lower report must bind this exact lowerer/closure before the integration checkpoint is closed.')
     except BaseException as error:
         report.update(result='failed', failure=repr(error))
         raise
@@ -323,7 +356,7 @@ def main():
         if any(report[k] for k in ['changed_sources', 'checkout_changes', 'changed_snapshots', 'changed_tools', 'changed_configs', 'changed_artifacts']):
             report.update(result='failed', guard_failure='qualified input, tool or output changed')
         save()
-    return 0 if report['result'] in ['passed', 'development-only'] else 1
+    return 0 if report['result'] in ['passed', 'development-only', 'passed-fresh-scalar-flow-boundary'] else 1
 
 
 if __name__ == '__main__':

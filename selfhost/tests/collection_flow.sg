@@ -1,0 +1,86 @@
+import selfhost_collection_flow;
+
+import std::args;
+
+import std::assert;
+
+extern "C" {
+    fn sengoo_string_live_handle_count() -> i64;
+    fn sengoo_buffer_live_handle_count() -> i64;
+    fn sengoo_opaque_live_handle_count() -> i64;
+    fn sengoo_file_snapshot_live_handle_count() -> i64;
+    fn sengoo_file_snapshot_live_bytes() -> i64;
+}
+
+def sh_cst_arg(index: i64) -> Result<String, i64> {
+    let bytes = ffi_buffer_new(arg_len(index)?)?;
+    let length = arg_copy(index, bytes)?;
+    string_from_utf8(bytes, length);
+}
+
+def sh_cst_add(names: &Vec<ShText>, name: &str) -> Result<bool, i64> {
+    let value = string_from_str(name)?;
+    let pushed = names.push(ShText { text: value });
+    if not pushed { return result_err_bool(5001); };
+    result_ok_bool(true);
+}
+
+def sh_cst_nul_name(names: &Vec<ShText>, name: &str) -> Result<bool, i64> {
+    let bytes = ffi_buffer_new(name.len() + 7)?;
+    bytes.append_str(name)?;
+    bytes.push_u8(0)?;
+    bytes.append_str("shadow")?;
+    let value = string_from_utf8(bytes, bytes.used_len())?;
+    assert_true(value.len() > value.as_str().len(), "collection_flow.sg", 10);
+    let pushed = names.push(ShText { text: value });
+    if not pushed { return result_err_bool(5001); };
+    result_ok_bool(true);
+}
+
+def sh_cst_scope() -> Result<bool, i64> {
+    let root = sh_cst_arg(0)?;
+    let manifest = sh_cst_arg(1)?;
+    let artifact = sh_cst_arg(2)?;
+    let source = sh_cst_arg(3)?;
+    let output = sh_cst_arg(4)?;
+    let mode = sh_cst_arg(5)?;
+    let selected = sh_cst_arg(6)?;
+    let colpath = path_join_string(root.as_str(), "tools/stdlib/collections.sg")?;
+    let optpath = path_join_string(root.as_str(), "tools/stdlib/option.sg")?;
+    let cols = file_snapshot_open(colpath.as_str(), 1048576)?;
+    let opts = file_snapshot_open(optpath.as_str(), 1048576)?;
+    let colsha = cols.sha256()?;
+    let optsha = opts.sha256()?;
+    let names: Vec<ShText> = vec_new();
+    if mode.as_str() != "empty-names" { if mode.as_str() == "nul-name" { sh_cst_nul_name(&names, selected.as_str())?; } else { sh_cst_add(&names, selected.as_str())?; }; if mode.as_str() == "positive" { sh_cst_add(&names, "source_some_bool")?; sh_cst_add(&names, "source_none_i64")?; sh_cst_add(&names, "source_none_bool")?; sh_cst_add(&names, "source_helper_i64")?; sh_cst_add(&names, "source_helper_bool")?; sh_cst_add(&names, "source_reuse_i64")?; (); }; if mode.as_str() == "duplicate" { sh_cst_add(&names, selected.as_str())?; (); }; };
+    let bad = "0000000000000000000000000000000000000000000000000000000000000000";
+    let actual_manifest = if mode.as_str() == "manifest" { bad; } else { manifest.as_str(); };
+    let actual_artifact = if mode.as_str() == "artifact" { bad; } else { artifact.as_str(); };
+    let actual_col = if mode.as_str() == "collection" { bad; } else { colsha.as_str(); };
+    let actual_opt = if mode.as_str() == "option" { bad; } else { optsha.as_str(); };
+    let development = mode.as_str() != "installed";
+    let items = if mode.as_str() == "bad-limit" { 0; } else { 100000; };
+    let maximum = if mode.as_str() == "bad-object-limit" { 67108865; } else { 16777216; };
+    let result = sh_collection_flow_source_object(source.as_str(), root.as_str(), actual_manifest, actual_artifact, actual_col, actual_opt, &names, items, maximum, development);
+    let expected = if mode.as_str() == "positive" { 0; } else if mode.as_str() == "installed" { 5410; } else if mode.as_str() == "manifest" or mode.as_str() == "artifact" { 5402; } else if mode.as_str() == "collection" or mode.as_str() == "option" { 5951; } else if mode.as_str() == "bad-limit" or mode.as_str() == "bad-object-limit" { 5001; } else if mode.as_str() == "expect6120" { 6120; } else if mode.as_str() == "expect6121" { 6121; } else if mode.as_str() == "expect6124" { 6124; } else if mode.as_str() == "expect6101" { 6101; } else { 5008; };
+    if result.error != expected { println(mode.as_str()); println(selected.as_str()); println(result.error); println(expected); };
+    assert_eq_i64(result.error, expected, "collection_flow.sg", 1);
+    assert_true(result.is_ok() == (expected == 0), "collection_flow.sg", 2);
+    if expected == 0 { let bytes = sh_binary_buffer(&result.value)?; let written = file_write_str_raw(sengoo_stdlib_str_ptr(output.as_str()), bytes.ptr(), bytes.used_len())?; assert_eq_i64(written, bytes.used_len(), "collection_flow.sg", 3); (); };
+    result_ok_bool(true);
+}
+
+def main() -> i64 {
+    let strings = sengoo_string_live_handle_count();
+    let buffers = sengoo_buffer_live_handle_count();
+    let opaque = sengoo_opaque_live_handle_count();
+    let files = sengoo_file_snapshot_live_handle_count();
+    let bytes = sengoo_file_snapshot_live_bytes();
+    { let result = sh_cst_scope(); if not result.is_ok() { println(result.error); return 65; }; };
+    assert_eq_i64(sengoo_string_live_handle_count(), strings, "collection_flow.sg", 4);
+    assert_eq_i64(sengoo_buffer_live_handle_count(), buffers, "collection_flow.sg", 5);
+    assert_eq_i64(sengoo_opaque_live_handle_count(), opaque, "collection_flow.sg", 6);
+    assert_eq_i64(sengoo_file_snapshot_live_handle_count(), files, "collection_flow.sg", 7);
+    assert_eq_i64(sengoo_file_snapshot_live_bytes(), bytes, "collection_flow.sg", 8);
+    42;
+}

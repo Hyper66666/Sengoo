@@ -1,0 +1,134 @@
+import selfhost_collection_source;
+
+import selfhost_semantic_collection_effect_ownership;
+
+def sh_cf_primitive(checked: &ShChecked, input: i64) -> bool {
+    let ty = sh_s_resolve(checked, input);
+    sh_s_kind(checked, ty) == 1 or sh_o_i64(checked, ty);
+}
+
+def sh_cf_roots(analyzed: &ShModuleChecked, names: &Vec<ShText>, roots: &Vec<i64>, maximum: i64) -> i64 {
+    if names.len() < 1 or names.len() > maximum { return 5008; };
+    let mut index = 0;
+    while index < names.len() { if names.get(index).text.len() != names.get(index).text.as_str().len() { return 5008; }; let function = sh_cs_root(analyzed, names.get(index).text.as_str()); let signature = sh_s_resolve(&analyzed.checked, sh_binding_word(&analyzed.checked, function, 3)); if function < 0 or sh_cb_in(roots, function) or sh_hir_function_body_state(&analyzed.front.parsed.ast, &analyzed.checked, function) != 1 or sh_s_kind(&analyzed.checked, signature) != 11 or sh_s_data(&analyzed.checked, signature) != 0 or sh_s_flags(&analyzed.checked, signature) != 0 or sh_s_arity(&analyzed.checked, signature) != 1 or not sh_o_i64(&analyzed.checked, sh_s_argument(&analyzed.checked, signature, 0)) { return 5008; }; if not roots.push(function) { return 5001; }; index = index + 1; };
+    0;
+}
+
+def sh_cf_option(handles: &ShCollectionHandles, checked: &ShChecked, receipt: i64) -> i64 {
+    if receipt < 0 or receipt >= handles.receipts.len() / 16 { return -1; };
+    let obligation = sh_ch_at(&handles.receipts, receipt, 16, 12);
+    let callable = sh_ch_at(&handles.obligations, obligation, 12, 11);
+    if sh_ch_at(&handles.obligations, obligation, 12, 9) != 1 or sh_s_kind(checked, callable) != 11 or sh_s_arity(checked, callable) != 2 { return -1; };
+    sh_s_resolve(checked, sh_s_argument(checked, callable, 1));
+}
+
+def sh_cf_sites(effects: &ShCollectionEffects, nll: &ShLoanLiveness, loans: &ShBackingLoans, analyzed: &ShModuleChecked, roots: &Vec<i64>) -> Result<Vec<i64>, i64> {
+    let sites = vec_new_i64();
+    let raw = sh_collection_effect_sites(effects, nll, loans, roots);
+    if not raw.is_ok() { return result_err_with(sites, raw.error); };
+    let checked = &analyzed.checked;
+    let mut row = 0;
+    while row < raw.value.len() / 7 { let call = sh_ch_at(&raw.value, row, 7, 0); let kind = sh_ch_at(&raw.value, row, 7, 1); let element = sh_ch_at(&raw.value, row, 7, 4); let option = if kind == 2 { sh_cf_option(&effects.handles, checked, sh_ch_at(&raw.value, row, 7, 6)); } else if kind == 4 { sh_s_resolve(checked, sh_node_type(checked, call)); } else { -1; }; if not sh_cf_primitive(checked, element) or kind < 2 or kind > 4 or (kind != 3 and sh_bl_option_ref(loans, checked, option) != element) or (kind == 4 and sh_ch_at(&raw.value, row, 7, 2) != effects.handles.raw_next) { return result_err_with(sites, 5008); }; let mut column = 0; while column < 7 { if not sites.push(sh_ch_at(&raw.value, row, 7, column)) { return result_err_with(sites, 5001); }; column = column + 1; }; if not (sites.push(option) and sites.push(0)) { return result_err_with(sites, 5001); }; row = row + 1; };
+    result_ok_with(sites, 0);
+}
+
+def sh_cf_factory(effects: &ShCollectionEffects, origins: &ShOriginFacts, analyzed: &ShModuleChecked, node: i64) -> bool {
+    let ast = &analyzed.front.parsed.ast;
+    let checked = &analyzed.checked;
+    let binding = sh_node_binding(checked, node);
+    let signature = sh_s_resolve(checked, sh_node_callable_type(checked, node));
+    let callee = sh_ast_child(ast, node, 0);
+    let receiver = sh_ast_child(ast, callee, 0);
+    let result = sh_s_resolve(checked, sh_node_type(checked, node));
+    let actual = sh_s_resolve(checked, sh_node_type(checked, receiver));
+    let element = sh_o_element(checked, result);
+    let token = sh_nll_node(&effects.adjusted, node, 0);
+    let parent = sh_nll_node(&effects.adjusted, receiver, 0);
+    let mut found = 0;
+    let mut row = 0;
+    while row < origins.factories.len() / 6 { if sh_origin_word(&origins.factories, row, 6, 0) == binding { found = found + 1; }; row = row + 1; };
+    if found != 1 or sh_ast_word(ast, node, 0) != 53 or sh_ast_word(ast, node, 6) != 1 or sh_ast_word(ast, callee, 0) != 55 or sh_s_kind(checked, signature) != 11 or sh_s_flags(checked, signature) != 0 or sh_s_data(checked, signature) != 0 or sh_s_arity(checked, signature) != 2 or sh_s_kind(checked, sh_s_argument(checked, signature, 0)) != 6 or sh_o_role(origins, checked, actual) != 1 or not (sh_o_role(origins, checked, result) == 2 or sh_o_role(origins, checked, result) == 3) or not sh_cf_primitive(checked, element) or sh_o_element(checked, actual) != element or token < 0 or parent < 0 { return false; };
+    if sh_nll_token(&effects.adjusted, token, 0) != sh_ch_owner(checked, node) or sh_nll_token(&effects.adjusted, token, 1) != sh_nll_token(&effects.adjusted, parent, 1) or sh_nll_token(&effects.adjusted, token, 2) != element or sh_nll_token(&effects.adjusted, token, 3) != node or sh_nll_token(&effects.adjusted, token, 5) != parent or sh_nll_token(&effects.adjusted, token, 6) != 1 or sh_nll_token(&effects.adjusted, token, 7) != 1 or sh_nll_token(&effects.adjusted, parent, 7) != 0 or not sh_ce_live_at(effects, receiver, parent) { return false; };
+    true;
+}
+
+def sh_cf_profile(effects: &ShCollectionEffects, origins: &ShOriginFacts, loans: &ShBackingLoans, analyzed: &ShModuleChecked, roots: &Vec<i64>, sites: &Vec<i64>) -> i64 {
+    let checked = &analyzed.checked;
+    let ast = &analyzed.front.parsed.ast;
+    let mut row = 0;
+    while row < sh_binding_count(checked) { if (sh_binding_word(checked, row, 2) == 0 or sh_binding_word(checked, row, 2) == 1) and sh_cb_in(roots, sh_binding_word(checked, row, 6)) { let ty = sh_s_resolve(checked, sh_binding_word(checked, row, 3)); let kind = sh_s_kind(checked, ty); if kind == 12 { let role = sh_o_role(origins, checked, ty); if role >= 1 and role <= 3 { if not sh_cf_primitive(checked, sh_o_element(checked, ty)) { return 5008; }; } else { if not sh_cf_primitive(checked, sh_bl_option_ref(loans, checked, ty)) { return 5008; }; }; } else { if not (kind >= 1 and kind <= 4 or kind == 6 and sh_cf_primitive(checked, sh_s_argument(checked, ty, 0))) { return 5008; }; }; }; row = row + 1; };
+    let mut root = 0;
+    while root < roots.len() { let function = sh_origin_at(roots, root); let mut constructors = 0; let mut node = 0; while node < sh_ast_count(ast) { if sh_ast_word(ast, node, 0) == 53 and sh_ch_owner(checked, node) == function { let binding = sh_node_binding(checked, node); let mut permissions = 0; if binding == sh_origin_at(&origins.canonical, 3) { let ty = sh_s_resolve(checked, sh_node_type(checked, node)); if sh_ast_word(ast, node, 6) != 1 or sh_o_role(origins, checked, ty) != 1 or not sh_cf_primitive(checked, sh_o_element(checked, ty)) { return 5008; }; constructors = constructors + 1; permissions = permissions + 1; }; if sh_cf_factory(effects, origins, analyzed, node) { permissions = permissions + 1; }; let mut site = 0; while site < sites.len() / 9 { if sh_origin_word(sites, site, 9, 0) == node { if sh_origin_word(sites, site, 9, 2) != binding or sh_origin_word(sites, site, 9, 3) != sh_node_callable_type(checked, node) { return 5008; }; permissions = permissions + 1; }; site = site + 1; }; if permissions != 1 { return 5008; }; }; node = node + 1; }; if constructors < 1 { return 5008; }; root = root + 1; };
+    0;
+}
+
+def sh_collection_flow_source_object(entry: &str, provider_root: &str, manifest_pin: &str, artifact_pin: &str, collection_pin: &str, option_pin: &str, names: &Vec<ShText>, max_items: i64, maximum: i64, development: bool) -> Result<ShBinary, i64> {
+    if not development { return sh_coff_error(5410); };
+    if max_items < 1 or max_items > 100000 or maximum < 1 or maximum > 67108864 { return sh_coff_error(5001); };
+    let manifest = path_join_string(provider_root, "selfhost/sdk/collections_x64_abi1/manifest.json")?;
+    let library = path_join_string(provider_root, "tools/stdlib")?;
+    let prelude = path_join_string(provider_root, "selfhost/sdk/collections_x64_abi1/prelude.sg")?;
+    let collection = path_join_string(library.as_str(), "collections.sg")?;
+    let option = path_join_string(library.as_str(), "option.sg")?;
+    let colfile = file_snapshot_open(collection.as_str(), 1048576)?;
+    let optfile = file_snapshot_open(option.as_str(), 1048576)?;
+    let colsha = colfile.sha256()?;
+    let optsha = optfile.sha256()?;
+    if colsha.as_str() != collection_pin or optsha.as_str() != option_pin { return sh_coff_error(5951); };
+    let identity = colfile.identity()?;
+    let option_identity = optfile.identity()?;
+    let provider = sh_collection_provider_load(provider_root, manifest.as_str(), manifest_pin, artifact_pin, "x86_64-pc-windows-msvc", 1, development);
+    if provider.error != 0 { return sh_coff_error(provider.error); };
+    let graph = sh_cs_graph(entry, library.as_str(), &prelude, 16777216);
+    if graph.error != 0 { return sh_coff_error(graph.error); };
+    let analyzed = sh_modules_check(&graph, max_items, 1000);
+    if analyzed.error != 0 { return sh_coff_error(analyzed.error); };
+    let prepared = sh_collection_ownership_finalize(&analyzed.checked, &analyzed.front.parsed.ast, 100000, 1000000);
+    if prepared.error != 0 { return sh_coff_error(prepared.error); };
+    let mapping = sh_collection_provider_map(&provider, provider_root, &graph, &analyzed, manifest_pin, artifact_pin, identity.as_str(), collection_pin, "x86_64-pc-windows-msvc", 1, development);
+    if mapping.error != 0 { return sh_coff_error(mapping.error); };
+    let proto = "fn sengoo_raw_vec_iter_new(handle: i64) -> i64;";
+    let origins = sh_origins_analyze(&graph, &analyzed, identity.as_str(), collection_pin, proto, max_items);
+    if origins.error != 0 { return sh_coff_error(origins.error); };
+    let loans = sh_loans_analyze(&origins, &graph, &analyzed, identity.as_str(), collection_pin, proto, option_identity.as_str(), option_pin, max_items, 1);
+    if loans.error != 0 { return sh_coff_error(loans.error); };
+    let nll = sh_loan_liveness(&origins, &loans, &graph, &analyzed, identity.as_str(), collection_pin, proto, option_identity.as_str(), option_pin, 20000);
+    if nll.error != 0 { return sh_coff_error(nll.error); };
+    let handles = sh_collection_handles(&provider, &mapping, provider_root, manifest_pin, artifact_pin, &origins, &loans, &nll, &graph, &analyzed, identity.as_str(), collection_pin, proto, option_identity.as_str(), option_pin, max_items, development);
+    if handles.error != 0 { return sh_coff_error(handles.error); };
+    let roots = vec_new_i64();
+    let selected = sh_cf_roots(&analyzed, names, &roots, max_items);
+    if selected != 0 { return sh_coff_error(selected); };
+    let effects = sh_collection_effects(&provider, &mapping, provider_root, manifest_pin, artifact_pin, &origins, &loans, &nll, &handles, &graph, &analyzed, identity.as_str(), collection_pin, proto, option_identity.as_str(), option_pin, 20000, development);
+    if effects.error != 0 { return sh_coff_error(effects.error); };
+    let scoped = sh_check_ownership_collection_effect_functions(&provider, &mapping, provider_root, manifest_pin, artifact_pin, &origins, &loans, &nll, &handles, &effects, &graph, &analyzed, identity.as_str(), collection_pin, proto, option_identity.as_str(), option_pin, &roots, 1000, development);
+    if scoped.error != 0 { return sh_coff_error(scoped.error); };
+    let sites = sh_cf_sites(&effects, &nll, &loans, &analyzed, &roots);
+    if not sites.is_ok() { return sh_coff_error(sites.error); };
+    let profile = sh_cf_profile(&effects, &origins, &loans, &analyzed, &roots, &sites.value);
+    if profile != 0 { return sh_coff_error(profile); };
+    let facts = sh_hir_origins_capture(&graph, &analyzed, identity.as_str(), collection_pin, proto, option_identity.as_str(), option_pin, max_items);
+    if facts.error != 0 { return sh_coff_error(facts.error); };
+    let hir = sh_hir_lift_modules(&graph, &analyzed, &scoped.ownership, &facts, identity.as_str(), collection_pin, proto, option_identity.as_str(), option_pin, max_items);
+    if hir.error != 0 { return sh_coff_error(hir.error); };
+    let validated = sh_hir_validate_modules(&hir, &graph, &analyzed, &scoped.ownership, identity.as_str(), collection_pin, proto, option_identity.as_str(), option_pin);
+    if validated != 0 { return sh_coff_error(validated); };
+    let roles = vec_new_i64();
+    let providers = vec_new_i64();
+    let mut row = 0;
+    while row < 3 { if not roles.push(sh_origin_at(&origins.canonical, row)) { return sh_coff_error(5001); }; row = row + 1; };
+    row = 0;
+    while row < 6 { if not providers.push(sh_ch_at(&mapping.rows, row, 8, 2)) { return sh_coff_error(5001); }; row = row + 1; };
+    let lowered = sh_l_collection_flow_parts(&hir.source, &hir.ast, &hir.checked, &hir.ownership, max_items, sh_origin_at(&origins.canonical, 3), sh_ch_at(&mapping.rows, 0, 8, 2), &roles, &providers, &origins.factories, &sites.value, &roots);
+    if lowered.error != 0 { return sh_coff_error(lowered.error); };
+    let mut original = sh_hir_origins_module_input(&graph, &analyzed, 4000000);
+    if original.error != 0 { return sh_coff_error(original.error); };
+    let owner = sh_hir_ownership_input(&scoped.ownership);
+    if owner.error != 0 { return sh_coff_error(owner.error); };
+    sh_ho_put_vector(&mut original, &owner.words, 4000000);
+    if original.error != 0 { return sh_coff_error(original.error); };
+    if not sh_o_equal(&original.words, &hir.origins.module_input) { return sh_coff_error(5509); };
+    let replay = sh_collection_effect_ownership_validate(&scoped, &provider, &mapping, provider_root, manifest_pin, artifact_pin, &origins, &loans, &nll, &handles, &effects, &graph, &analyzed, identity.as_str(), collection_pin, proto, option_identity.as_str(), option_pin, &roots, 1000, development);
+    if replay != 0 { return sh_coff_error(replay); };
+    sh_native_optional_physical_object(&lowered.mir, maximum, true);
+}

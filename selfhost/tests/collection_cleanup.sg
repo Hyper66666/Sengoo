@@ -1,0 +1,146 @@
+import selfhost_collection_cleanup;
+
+import std::assert;
+
+extern "C" {
+    fn sengoo_string_live_handle_count() -> i64;
+    fn sengoo_buffer_live_handle_count() -> i64;
+    fn sengoo_opaque_live_handle_count() -> i64;
+}
+
+def sh_clt_fn(mir: &ShMir, name: &str, parameters: &Vec<i64>, result: i64, abi: i64, foreign: bool) -> Result<i64, i64> {
+    let args = vec_new_i64();
+    let mut i = 0;
+    while i < parameters.len() { args.push(sh_cc_at(parameters, i)); i = i + 1; };
+    args.push(result);
+    let signature = sh_type_intern(&mir.types, 11, abi, 0, -1, &args)?;
+    let text = string_from_str(name)?;
+    sh_mir_add_function(mir, &text, signature, if foreign { 1; } else { 0; }, -1, 0, 0);
+}
+
+def sh_clt_words(output: &Vec<i64>, words: &Vec<i64>) -> Result<i64, i64> {
+    sh_clt_push(output, words.handle)?;
+    sh_clt_push(output, words.marker)?;
+    sh_clt_push(output, words.len())?;
+    let mut index = 0;
+    while index < words.len() { sh_clt_push(output, sengoo_vec_get_or_default_i64(words.handle, index, -1))?; index = index + 1; };
+    sh_i64_ok(0);
+}
+
+def sh_clt_state(mir: &ShMir) -> Result<Vec<i64>, i64> {
+    let output = vec_new_i64();
+    sh_clt_push(&output, mir.schema)?;
+    sh_clt_push(&output, mir.target)?;
+    sh_clt_push(&output, mir.runtime_abi)?;
+    sh_clt_push(&output, mir.pointer_width)?;
+    sh_clt_push(&output, mir.limit)?;
+    sh_clt_push(&output, mir.types.limit)?;
+    sh_clt_push(&output, mir.symbols.limit)?;
+    sh_clt_push(&output, mir.symbols.names.handle)?;
+    sh_clt_push(&output, mir.symbols.names.marker)?;
+    sh_clt_words(&output, &mir.types.words)?;
+    sh_clt_words(&output, &mir.types.arguments)?;
+    sh_clt_words(&output, &mir.functions)?;
+    sh_clt_words(&output, &mir.locals)?;
+    sh_clt_words(&output, &mir.scopes)?;
+    sh_clt_words(&output, &mir.blocks)?;
+    sh_clt_words(&output, &mir.instructions)?;
+    sh_clt_words(&output, &mir.operands)?;
+    sh_clt_words(&output, &mir.parameters)?;
+    sh_clt_words(&output, &mir.terminators)?;
+    sh_clt_words(&output, &mir.edges)?;
+    sh_clt_words(&output, &mir.layouts)?;
+    sh_clt_words(&output, &mir.fields)?;
+    sh_clt_words(&output, &mir.instances)?;
+    sh_clt_words(&output, &mir.substitutions)?;
+    sh_clt_words(&output, &mir.parents)?;
+    sh_clt_words(&output, &mir.drop_glues)?;
+    sh_clt_words(&output, &mir.sources)?;
+    sh_clt_words(&output, &mir.spans)?;
+    sh_clt_push(&output, sh_symbol_count(&mir.symbols))?;
+    let mut index = 0;
+    while index < sh_symbol_count(&mir.symbols) { sh_clt_push(&output, mir.symbols.names.get(index).text.handle)?; let name = sh_symbol_text(&mir.symbols, index)?; let bytes = sh_lex_bytes(&name)?; sh_clt_push(&output, name.len())?; let mut at = 0; while at < name.len() { sh_clt_push(&output, sh_lex_byte(&bytes, at))?; at = at + 1; }; index = index + 1; };
+    Result { is_ok: true, value: output, error: 0 };
+}
+
+def sh_clt_equal(before: &Vec<i64>, after: &Vec<i64>) {
+    assert_eq_i64(before.len(), after.len(), "collection_callbacks.sg", 70);
+    let mut index = 0;
+    while index < before.len() { assert_eq_i64(sengoo_vec_get_or_default_i64(before.handle, index, -1), sengoo_vec_get_or_default_i64(after.handle, index, -2), "collection_callbacks.sg", 71); index = index + 1; };
+    ();
+}
+
+def sh_clt_push(values: &Vec<i64>, value: i64) -> Result<i64, i64> {
+    if not values.push(value) { return sh_i64_error(5001); };
+    sh_i64_ok(0);
+}
+
+def sh_clt_poison(mir: &ShMir, words: &Vec<i64>, index: i64, replacement: i64, function: i64, vector: i64, provider: i64) -> Result<bool, i64> {
+    let saved = sh_cc_at(words, index);
+    assert_true(saved != replacement, "cleanup", 1);
+    words.set(index, replacement);
+    let before = sh_clt_state(mir)?;
+    assert_eq_i64(sh_collection_cleanup_validate(mir, function, vector, provider), 5432, "cleanup", 2);
+    let after = sh_clt_state(mir)?;
+    sh_clt_equal(&before, &after);
+    words.set(index, saved);
+    assert_eq_i64(sh_collection_cleanup_validate(mir, function, vector, provider), 0, "cleanup", 3);
+    result_ok_bool(true);
+}
+
+def sh_clt_scope() -> Result<bool, i64> {
+    let mir = sh_mir_new(10000);
+    let empty = vec_new_i64();
+    let args = vec_new_i64();
+    let integer = sh_type_primitive(&mir.types, 2, 64, 1)?;
+    let unit = sh_type_primitive(&mir.types, 0, 0, 0)?;
+    let name = string_from_str("CleanupVector")?;
+    let symbol = sh_intern(&mir.symbols, &name)?;
+    args.push(integer);
+    let vector = sh_type_intern(&mir.types, 12, 0, 0, symbol, &args)?;
+    args.clear();
+    args.push(integer);
+    args.push(integer);
+    let offsets = vec_new_i64();
+    offsets.push(0);
+    offsets.push(8);
+    sh_mir_add_layout(&mir, vector, -1, &args, &offsets, -1, 16, 8)?;
+    args.clear();
+    args.push(integer);
+    let provider = sh_clt_fn(&mir, "cleanup_provider", &args, integer, 1, true)?;
+    let cleanup = sh_collection_cleanup_function(&mir, vector, provider)?;
+    let before = sh_clt_state(&mir)?;
+    assert_eq_i64(sh_collection_cleanup_validate(&mir, cleanup, vector, provider), 0, "cleanup", 4);
+    let after = sh_clt_state(&mir)?;
+    sh_clt_equal(&before, &after);
+    let mut column = 0;
+    while column < 8 { let replacement = if column == 4 { 0; } else { -2; }; sh_clt_poison(&mir, &mir.functions, cleanup * 8 + column, replacement, cleanup, vector, provider)?; column = column + 1; };
+    let block = sh_mir_fn(&mir, cleanup, 2);
+    column = 0;
+    while column < 8 { sh_clt_poison(&mir, &mir.blocks, block * 8 + column, -2, cleanup, vector, provider)?; column = column + 1; };
+    let term = sh_mir_block(&mir, block, 4);
+    column = 0;
+    while column < 10 { sh_clt_poison(&mir, &mir.terminators, term * 10 + column, -2, cleanup, vector, provider)?; column = column + 1; };
+    let mut instruction = 0;
+    while instruction < sh_mir_inst_count(&mir) { column = 0; while column < 12 { if column != 4 { sh_clt_poison(&mir, &mir.instructions, instruction * 12 + column, -2, cleanup, vector, provider)?; (); }; column = column + 1; }; instruction = instruction + 1; };
+    column = 0;
+    while column < mir.operands.len() { sh_clt_poison(&mir, &mir.operands, column, -2, cleanup, vector, provider)?; column = column + 1; };
+    sh_clt_poison(&mir, &mir.functions, provider * 8 + 2, block, cleanup, vector, provider)?;
+    sh_clt_poison(&mir, &mir.functions, provider * 8 + 7, 0, cleanup, vector, provider)?;
+    sh_clt_poison(&mir, &mir.fields, 1, 8, cleanup, vector, provider)?;
+    sh_clt_poison(&mir, &mir.fields, 3, 0, cleanup, vector, provider)?;
+    assert_true(mir.instructions.push(7), "cleanup", 5);
+    assert_eq_i64(sh_collection_cleanup_validate(&mir, cleanup, vector, provider), 5432, "cleanup", 6);
+    mir.instructions.pop();
+    assert_eq_i64(sh_collection_cleanup_validate(&mir, cleanup, vector, provider), 0, "cleanup", 7);
+    result_ok_bool(true);
+}
+
+def main() -> i64 {
+    let strings = sengoo_string_live_handle_count();
+    let buffers = sengoo_buffer_live_handle_count();
+    let opaque = sengoo_opaque_live_handle_count();
+    let mut scope = 0;
+    while scope < 3 { { let result = sh_clt_scope(); if not result.is_ok() { println(result.error); return 65; }; }; assert_eq_i64(sengoo_string_live_handle_count(), strings, "cleanup", 8); assert_eq_i64(sengoo_buffer_live_handle_count(), buffers, "cleanup", 9); assert_eq_i64(sengoo_opaque_live_handle_count(), opaque, "cleanup", 10); scope = scope + 1; };
+    42;
+}

@@ -8,6 +8,12 @@ import selfhost_hir;
 
 import selfhost_collection_callbacks;
 
+import selfhost_collection_cleanup;
+
+import selfhost_collection_push;
+
+import selfhost_mir_optional;
+
 struct ShMirLower {
     mir: ShMir,
     type_map: Vec<i64>,
@@ -25,6 +31,15 @@ struct ShMirLower {
     jobs: Vec<i64>,
     job_substitutions: Vec<i64>,
     collection_enabled: bool,
+    collection_flow: bool,
+    collection_roles: Vec<i64>,
+    collection_providers: Vec<i64>,
+    collection_factories: Vec<i64>,
+    collection_hooks: Vec<i64>,
+    consumed_temporaries: Vec<i64>,
+    cleanup_types: Vec<i64>,
+    cleanup_functions: Vec<i64>,
+    cleanup_providers: Vec<i64>,
     collection_constructor: i64,
     collection_provider: i64,
     collection_sites: Vec<i64>,
@@ -148,6 +163,7 @@ def sh_l_instance(lower: &mut ShMirLower, text: &String, ast: &ShAst, checked: &
 }
 
 def sh_l_drop_function(lower: &ShMirLower, checked: &ShChecked, ty: i64) -> i64 {
+    if lower.collection_flow { let mut cleanup = 0; while cleanup < lower.cleanup_types.len() { if sh_cc_at(&lower.cleanup_types, cleanup) == ty { return sh_cc_at(&lower.cleanup_functions, cleanup); }; cleanup = cleanup + 1; }; };
     let mut record = 0;
     while record < checked.constraints.len() { if checked.constraints.get(record + 2).unwrap_or(0) == -2 { let target = checked.constraints.get(record).unwrap_or(-1); let name = sh_symbol_text(&checked.symbols, checked.constraints.get(record + 1).unwrap_or(-1)); if sh_s_nominal(checked, sh_s_resolve(checked, target)) == sh_s_nominal(checked, sh_s_resolve(checked, ty)) and name.is_ok() and sh_s_text_equal(&name.value, "Drop") { let owner = checked.constraints.get(record + 3).unwrap_or(-1); let mut binding = 0; while binding < sh_binding_count(checked) { if sh_binding_word(checked, binding, 2) == 2 and sh_binding_word(checked, binding, 6) == owner { let method = sh_symbol_text(&checked.symbols, sh_binding_word(checked, binding, 0)); if method.is_ok() and sh_s_text_equal(&method.value, "drop") { let function = lower.functions.get(binding).unwrap_or(-1); return if function >= 0 { function; } else { -2; }; }; }; binding = binding + 1; }; }; }; record = record + 4; };
     -1;
@@ -191,6 +207,7 @@ def sh_l_drop_glue(lower: &mut ShMirLower, text: &String, ast: &ShAst, checked: 
     if sh_mir_drop_kind(&lower.mir, ty) >= 0 { return; };
     let owner = sh_adt_binding(checked, adt);
     if owner < 0 { let row = vec_new_i64(); row.push(ty); row.push(4); row.push(-1); let stored = sh_mir_record(&lower.mir, &lower.mir.drop_glues, 3, &row); if not stored.is_ok() { lower.error = stored.error; }; return; };
+    if lower.collection_flow { sh_l_flow_cleanup_prepare(lower, checked, adt); if lower.error != 0 { return; }; };
     let destructor = sh_l_drop_function(lower, checked, adt);
     let mut nested = false;
     if destructor >= 0 { let mut binding = 0; while binding < sh_binding_count(checked) { if lower.functions.get(binding).unwrap_or(-1) == destructor { let body = sh_s_child_kind(ast, sh_binding_word(checked, binding, 4), 40); nested = sh_l_drop_nested(checked, ast, body, 0); break; }; binding = binding + 1; }; };
@@ -267,7 +284,8 @@ def sh_l_term(lower: &mut ShMirLower, ast: &ShAst, node: i64, kind: i64, value: 
 def sh_l_edge(lower: &mut ShMirLower, ast: &ShAst, node: i64, term: i64, target: i64, value: i64) -> i64 {
     let operands = vec_new_i64();
     if value >= 0 { operands.push(value); (); };
-    let result = sh_mir_add_edge(&lower.mir, term, target, &operands, 0, 0);
+    let discriminator = if lower.collection_flow and sh_mir_term(&lower.mir, term, 2) == 2 and sh_mir_term(&lower.mir, term, 5) == 0 { 1; } else { 0; };
+    let result = sh_mir_add_edge(&lower.mir, term, target, &operands, discriminator, 0);
     sh_l_store(lower, ast, node, result);
 }
 
@@ -310,9 +328,9 @@ def sh_l_ownership_place(lower: &mut ShMirLower, checked: &ShChecked, ast: &ShAs
 def sh_l_actions_phase(lower: &mut ShMirLower, checked: &ShChecked, ast: &ShAst, ownership: &ShOwnership, node: i64, phase: i64) {
     if lower.block < 0 or lower.error != 0 { return; };
     let mut missing = 0;
-    while missing < sh_ownership_action_count(ownership) { let kind = sh_ownership_action(ownership, missing, 2); if sh_ownership_action(ownership, missing, 0) == node and ((kind == 3 and phase == 1) or (kind == 6 and phase == 2) or (kind == 7 and phase == 3) or (kind == 1 or kind == 2) and phase == 0) { let binding = sh_ownership_action(ownership, missing, 1); let local = if binding >= 0 { sh_l_local(lower, checked, ast, binding); } else { lower.temporaries.get(-binding - 1).unwrap_or(-1); }; if local < 0 { sh_l_fail(lower, ast, node, 5008); return; }; }; missing = missing + 1; };
+    while missing < sh_ownership_action_count(ownership) { if lower.collection_flow and sh_l_flow_consumed_action(lower, ownership, missing) { missing = missing + 1; continue; }; let kind = sh_ownership_action(ownership, missing, 2); if sh_ownership_action(ownership, missing, 0) == node and ((kind == 3 and phase == 1) or (kind == 6 and phase == 2) or (kind == 7 and phase == 3) or (kind == 1 or kind == 2) and phase == 0) { let binding = sh_ownership_action(ownership, missing, 1); let local = if binding >= 0 { sh_l_local(lower, checked, ast, binding); } else { lower.temporaries.get(-binding - 1).unwrap_or(-1); }; if local < 0 { sh_l_fail(lower, ast, node, 5008); return; }; }; missing = missing + 1; };
     let mut i = 0;
-    while i < sh_ownership_action_count(ownership) { if sh_ownership_action(ownership, i, 0) == node { let kind = sh_ownership_action(ownership, i, 2); let binding = sh_ownership_action(ownership, i, 1); let local = if binding >= 0 { sh_l_local(lower, checked, ast, binding); } else { lower.temporaries.get(-binding - 1).unwrap_or(-1); }; if local >= 0 and ((kind == 3 and phase == 1) or (kind == 6 and phase == 2) or (kind == 7 and phase == 3) or (kind == 1 or kind == 2) and phase == 0) { let unit_ty = sh_l_type(lower, checked, checked.unit_type, 0); let operands = vec_new_i64(); if kind == 3 or kind == 6 or kind == 7 { let cleanup = sh_l_block(lower, ast, node, true); let term = sh_l_term(lower, ast, node, 1, -1); sh_l_edge(lower, ast, node, term, cleanup, -1); lower.block = cleanup; let path = sh_ownership_action_path(ownership, i); if path >= 0 and sh_ownership_path_word(ownership, path, 1) >= 0 and sh_ownership_action(ownership, i, 4) != 0 { sh_l_fail(lower, ast, node, 5008); return; }; let address = if path >= 0 { sh_l_ownership_place(lower, checked, ast, ownership, node, path, 0); } else { sh_l_address(lower, checked, ast, node, local, true); }; operands.push(address); let drop_type = sh_mir_type_arg(&lower.mir, sh_mir_value_type(&lower.mir, address), 0); sh_l_emit(lower, ast, node, 21, unit_ty, &operands, if path >= 0 { -1; } else { local; }, drop_type, sh_ownership_action(ownership, i, 4)); (); } else { let action_path = sh_ownership_action_path(ownership, i); if action_path < 0 or sh_ownership_path_word(ownership, action_path, 1) < 0 { sh_l_emit(lower, ast, node, 25, unit_ty, &operands, local, if kind == 1 { 1; } else { 0; }, 0); (); }; }; }; }; i = i + 1; };
+    while i < sh_ownership_action_count(ownership) { if lower.collection_flow and sh_l_flow_consumed_action(lower, ownership, i) { i = i + 1; continue; }; if sh_ownership_action(ownership, i, 0) == node { let kind = sh_ownership_action(ownership, i, 2); let binding = sh_ownership_action(ownership, i, 1); let local = if binding >= 0 { sh_l_local(lower, checked, ast, binding); } else { lower.temporaries.get(-binding - 1).unwrap_or(-1); }; if local >= 0 and ((kind == 3 and phase == 1) or (kind == 6 and phase == 2) or (kind == 7 and phase == 3) or (kind == 1 or kind == 2) and phase == 0) { let unit_ty = sh_l_type(lower, checked, checked.unit_type, 0); let operands = vec_new_i64(); if kind == 3 or kind == 6 or kind == 7 { let cleanup = sh_l_block(lower, ast, node, true); let term = sh_l_term(lower, ast, node, 1, -1); sh_l_edge(lower, ast, node, term, cleanup, -1); lower.block = cleanup; let path = sh_ownership_action_path(ownership, i); if path >= 0 and sh_ownership_path_word(ownership, path, 1) >= 0 and sh_ownership_action(ownership, i, 4) != 0 { sh_l_fail(lower, ast, node, 5008); return; }; let address = if path >= 0 { sh_l_ownership_place(lower, checked, ast, ownership, node, path, 0); } else { sh_l_address(lower, checked, ast, node, local, true); }; operands.push(address); let drop_type = sh_mir_type_arg(&lower.mir, sh_mir_value_type(&lower.mir, address), 0); sh_l_emit(lower, ast, node, 21, unit_ty, &operands, if path >= 0 { -1; } else { local; }, drop_type, sh_ownership_action(ownership, i, 4)); (); } else { let action_path = sh_ownership_action_path(ownership, i); if action_path < 0 or sh_ownership_path_word(ownership, action_path, 1) < 0 { sh_l_emit(lower, ast, node, 25, unit_ty, &operands, local, if kind == 1 { 1; } else { 0; }, 0); (); }; }; }; }; i = i + 1; };
 }
 
 def sh_l_actions(lower: &mut ShMirLower, checked: &ShChecked, ast: &ShAst, ownership: &ShOwnership, node: i64, drops: bool) {
@@ -539,6 +557,7 @@ def sh_l_call(lower: &mut ShMirLower, text: &String, ast: &ShAst, checked: &ShCh
     let binding = sh_l_resolved_callable(lower, checked, ast, node, concrete);
     let mut function = lower.functions.get(binding).unwrap_or(-1);
     if lower.collection_enabled and binding == lower.collection_constructor { return sh_l_constructor(lower, checked, ast, node, concrete, ty); };
+    if lower.collection_flow { return sh_l_flow_call(lower, text, ast, checked, ownership, node, binding, concrete, ty); };
     if function < 0 and sh_binding_word(checked, binding, 2) == 2 { function = sh_l_instance(lower, text, ast, checked, node, binding, concrete); };
     let constructor = sh_binding_word(checked, binding, 2) == 5;
     let operands = vec_new_i64();
@@ -808,8 +827,11 @@ def sh_l_expr_inner(lower: &mut ShMirLower, text: &String, ast: &ShAst, checked:
     sh_l_fail(lower, ast, node, 5008);
 }
 
-def sh_l_collection_parts(text: &String, ast: &ShAst, checked: &ShChecked, ownership: &ShOwnership, max_items: i64, enabled: bool, constructor: i64, provider: i64, roots: &Vec<i64>) -> ShLowered {
-    let mut lower = ShMirLower { mir: sh_mir_new(max_items), type_map: vec_new_i64(), functions: vec_new_i64(), locals: vec_new_i64(), scopes: vec_new_i64(), addresses: vec_new_i64(), temporaries: vec_new_i64(), loops: vec_new_i64(), try_blocks: vec_new_i64(), generic_keys: vec_new_i64(), generic_values: vec_new_i64(), template_types: vec_new_i64(), class_symbols: vec_new_i64(), jobs: vec_new_i64(), job_substitutions: vec_new_i64(), collection_enabled: enabled, collection_constructor: constructor, collection_provider: provider, collection_sites: vec_new_i64(), callback_elements: vec_new_i64(), callback_moving: vec_new_i64(), callback_dropping: vec_new_i64(), function: -1, block: -1, scope: -1, depth: 0, error: 0, start: 0, end: 0 };
+def sh_l_collection_mode_parts(text: &String, ast: &ShAst, checked: &ShChecked, ownership: &ShOwnership, max_items: i64, enabled: bool, constructor: i64, provider: i64, roots: &Vec<i64>, flow: bool, roles: &Vec<i64>, providers: &Vec<i64>, factories: &Vec<i64>, hooks: &Vec<i64>) -> ShLowered {
+    if not flow and (roles.len() != 0 or providers.len() != 0 or factories.len() != 0 or hooks.len() != 0) { return ShLowered { mir: sh_mir_new(max_items), error: 5008, start: 0, end: 0 }; };
+    if flow and (not enabled or max_items < 1 or roles.len() != 3 or providers.len() != 6 or factories.len() % 6 != 0 or factories.len() / 6 > max_items or hooks.len() % 9 != 0 or hooks.len() / 9 > max_items or roots.len() < 1 or roots.len() > max_items) { return ShLowered { mir: sh_mir_new(max_items), error: 5008, start: 0, end: 0 }; };
+    let mut lower = ShMirLower { mir: sh_mir_new(max_items), type_map: vec_new_i64(), functions: vec_new_i64(), locals: vec_new_i64(), scopes: vec_new_i64(), addresses: vec_new_i64(), temporaries: vec_new_i64(), loops: vec_new_i64(), try_blocks: vec_new_i64(), generic_keys: vec_new_i64(), generic_values: vec_new_i64(), template_types: vec_new_i64(), class_symbols: vec_new_i64(), jobs: vec_new_i64(), job_substitutions: vec_new_i64(), collection_enabled: enabled, collection_flow: flow, collection_roles: sh_l_flow_copy(roles), collection_providers: sh_l_flow_copy(providers), collection_factories: sh_l_flow_copy(factories), collection_hooks: sh_l_flow_copy(hooks), consumed_temporaries: vec_new_i64(), cleanup_types: vec_new_i64(), cleanup_functions: vec_new_i64(), cleanup_providers: vec_new_i64(), collection_constructor: constructor, collection_provider: provider, collection_sites: vec_new_i64(), callback_elements: vec_new_i64(), callback_moving: vec_new_i64(), callback_dropping: vec_new_i64(), function: -1, block: -1, scope: -1, depth: 0, error: 0, start: 0, end: 0 };
+    if lower.collection_roles.len() != roles.len() or lower.collection_providers.len() != providers.len() or lower.collection_factories.len() != factories.len() or lower.collection_hooks.len() != hooks.len() { return ShLowered { mir: lower.mir, error: 5001, start: 0, end: 0 }; };
     if not sh_mir_limit(&lower.mir) { return ShLowered { mir: lower.mir, error: 5001, start: 0, end: 0 }; };
     if checked.error != 0 { return ShLowered { mir: lower.mir, error: checked.error, start: checked.start, end: checked.end }; };
     if ownership.error != 0 { return ShLowered { mir: lower.mir, error: ownership.error, start: ownership.start, end: ownership.end }; };
@@ -831,10 +853,21 @@ def sh_l_collection_parts(text: &String, ast: &ShAst, checked: &ShChecked, owner
     while lower.error == 0 and job < lower.jobs.len() / 5 { let function = lower.jobs.get(job * 5).unwrap_or(-1); let binding = lower.jobs.get(job * 5 + 1).unwrap_or(-1); lower.generic_keys.clear(); lower.generic_values.clear(); let first = lower.jobs.get(job * 5 + 3).unwrap_or(-1); let count = lower.jobs.get(job * 5 + 4).unwrap_or(0); let mut pair = 0; while pair < count { lower.generic_keys.push(lower.job_substitutions.get((first + pair) * 2).unwrap_or(-1)); lower.generic_values.push(lower.job_substitutions.get((first + pair) * 2 + 1).unwrap_or(-1)); pair = pair + 1; }; if not sh_l_deferred(&mut lower, checked, ast, binding) { break; }; let contract = sh_l_contract(ast, sh_binding_word(checked, binding, 4)); if contract >= 0 { sh_l_fail(&mut lower, ast, contract, 5008); break; }; let mut reset = 0; while reset < lower.locals.len() { lower.locals.set(reset, -1); reset = reset + 1; }; reset = 0; while reset < lower.scopes.len() { lower.scopes.set(reset, -1); reset = reset + 1; }; reset = 0; while reset < lower.temporaries.len() { lower.temporaries.set(reset, -1); reset = reset + 1; }; if sh_mir_fn(&lower.mir, function, 3) % 2 == 0 { let node = sh_binding_word(checked, binding, 4); let body = sh_s_child_kind(ast, node, 40); lower.function = function; let root_scope = sh_mir_add_scope(&lower.mir, function, -1, 0); lower.scope = sh_l_store(&mut lower, ast, node, root_scope); lower.scopes.set(sh_binding_word(checked, binding, 7), lower.scope); lower.block = sh_l_block(&mut lower, ast, node, false); let mut local_binding = 0; while lower.error == 0 and local_binding < sh_binding_count(checked) { let kind = sh_binding_word(checked, local_binding, 2); if (kind == 0 or kind == 1) and sh_binding_word(checked, local_binding, 6) == binding { let declaration = sh_binding_word(checked, local_binding, 4); let ty_input = sh_binding_word(checked, local_binding, 3); let ty = sh_l_type(&mut lower, checked, ty_input, 0); let needs_drop = sh_ownership_needs_drop(text, ast, checked, ty_input) and not sh_ownership_parameter_borrowed(ownership, local_binding); let local_scope = sh_l_scope(&mut lower, checked, ast, sh_binding_word(checked, local_binding, 1), declaration, 0); let added = sh_mir_add_local(&lower.mir, function, ty, sh_binding_word(checked, local_binding, 0), if kind == 1 { 1; } else { 0; }, if needs_drop { 3; } else { 1; }, local_scope, if kind == 1 { sh_binding_word(checked, local_binding, 7); } else { -1; }, sh_ast_word(ast, declaration, 1), sh_ast_word(ast, declaration, 2), sh_ast_word(ast, declaration, 3)); let local = sh_l_store(&mut lower, ast, declaration, added); lower.locals.set(local_binding, local); if kind == 1 { let operands = vec_new_i64(); let value = sh_l_emit(&mut lower, ast, declaration, 1, ty, &operands, sh_binding_word(checked, local_binding, 7), 0, 0); let address = sh_l_address(&mut lower, checked, ast, declaration, local, true); operands.push(address); operands.push(value); let unit_ty = sh_l_type(&mut lower, checked, checked.unit_type, 0); sh_l_emit(&mut lower, ast, declaration, 15, unit_ty, &operands, 0, 0, 0); operands.clear(); sh_l_emit(&mut lower, ast, declaration, 25, unit_ty, &operands, local, 1, 0); (); }; }; local_binding = local_binding + 1; }; let mut result = sh_l_expr(&mut lower, text, ast, checked, ownership, body); let signature = sh_mir_fn(&lower.mir, function, 1); let returned = sh_mir_type_arg(&lower.mir, signature, sh_mir_type_word(&lower.mir, signature, 5) - 1); if lower.error == 0 and lower.block >= 0 and sh_mir_type_word(&lower.mir, sh_mir_value_type(&lower.mir, result), 0) == 0 and sh_mir_type_word(&lower.mir, returned, 0) == 2 { let name = sh_symbol_text(&lower.mir.symbols, sh_mir_fn(&lower.mir, function, 0)); if name.is_ok() and sh_s_text_equal(&name.value, "main") and sh_binding_word(checked, binding, 1) == 0 { let empty = vec_new_i64(); result = sh_l_emit(&mut lower, ast, node, 4, returned, &empty, 0, 0, 0); }; }; let return_kind = sh_mir_type_word(&lower.mir, returned, 0); if lower.error == 0 and lower.block >= 0 { if return_kind == 0 { result = sh_l_unit(&mut lower, checked, ast, node); }; sh_l_actions(&mut lower, checked, ast, ownership, node, true); sh_l_term(&mut lower, ast, node, 3, result); (); }; }; job = job + 1; };
     let mut source_job = 0;
     while enabled and lower.error == 0 and source_job < lower.jobs.len() / 5 { let binding = sh_mir_word(&lower.jobs, 5, source_job, 1); let concrete = sh_mir_word(&lower.jobs, 5, source_job, 2); if sengoo_vec_contains_i64(roots.handle, binding) == 0 or sh_hir_function_body_state(ast, checked, binding) != 1 or concrete != sh_s_resolve(checked, sh_binding_word(checked, binding, 3)) { lower.error = 5008; }; source_job = source_job + 1; };
-    if lower.error == 0 { let validation = sh_mir_validate(&lower.mir); if validation.error != 0 { lower.error = validation.error; lower.start = validation.start; lower.end = validation.end; }; };
+    if lower.error == 0 { let validation = if flow { sh_mir_validate_optional_physical(&lower.mir); } else { sh_mir_validate(&lower.mir); }; if validation.error != 0 { lower.error = validation.error; lower.start = validation.start; lower.end = validation.end; }; };
     let mut generated = 0;
-    while enabled and lower.error == 0 and generated < lower.callback_elements.len() { let element = sh_cc_at(&lower.callback_elements, generated); let layout = sh_target_layout(&lower.mir, element, 1048576); let callbacks = ShCollectionCallbacks { schema: 1, element: element, size: sh_layout_at(&layout.sizes, element), alignment: sh_layout_at(&layout.alignments, element), moving: sh_cc_at(&lower.callback_moving, generated), dropping: sh_cc_at(&lower.callback_dropping, generated), error: layout.error }; lower.error = sh_collection_callbacks_validate(&lower.mir, &callbacks); generated = generated + 1; };
+    while enabled and lower.error == 0 and generated < lower.callback_elements.len() { let element = sh_cc_at(&lower.callback_elements, generated); let layout = sh_target_layout(&lower.mir, element, 1048576); let callbacks = ShCollectionCallbacks { schema: 1, element: element, size: sh_layout_at(&layout.sizes, element), alignment: sh_layout_at(&layout.alignments, element), moving: sh_cc_at(&lower.callback_moving, generated), dropping: sh_cc_at(&lower.callback_dropping, generated), error: layout.error }; lower.error = if flow { sh_l_flow_callbacks_valid(&lower.mir, &callbacks); } else { sh_collection_callbacks_validate(&lower.mir, &callbacks); }; generated = generated + 1; };
+    let mut cleanup = 0;
+    while flow and lower.error == 0 and cleanup < lower.cleanup_types.len() { let programty = sh_cc_at(&lower.cleanup_types, cleanup); let mirty = sh_l_type(&mut lower, checked, programty, 0); lower.error = sh_collection_cleanup_validate(&lower.mir, sh_cc_at(&lower.cleanup_functions, cleanup), mirty, sh_cc_at(&lower.cleanup_providers, cleanup)); cleanup = cleanup + 1; };
     ShLowered { mir: lower.mir, error: lower.error, start: lower.start, end: lower.end };
+}
+
+def sh_l_collection_parts(text: &String, ast: &ShAst, checked: &ShChecked, ownership: &ShOwnership, max_items: i64, enabled: bool, constructor: i64, provider: i64, roots: &Vec<i64>) -> ShLowered {
+    let empty = vec_new_i64();
+    sh_l_collection_mode_parts(text, ast, checked, ownership, max_items, enabled, constructor, provider, roots, false, &empty, &empty, &empty, &empty);
+}
+
+def sh_l_collection_flow_parts(text: &String, ast: &ShAst, checked: &ShChecked, ownership: &ShOwnership, max_items: i64, constructor: i64, provider: i64, roles: &Vec<i64>, providers: &Vec<i64>, factories: &Vec<i64>, hooks: &Vec<i64>, roots: &Vec<i64>) -> ShLowered {
+    sh_l_collection_mode_parts(text, ast, checked, ownership, max_items, true, constructor, provider, roots, true, roles, providers, factories, hooks);
 }
 
 def sh_l_declare(lower: &mut ShMirLower, name: &String, signature: i64, flags: i64, file: i64, start: i64, end: i64) -> Result<i64, i64> {
@@ -849,6 +882,7 @@ def sh_l_constructor(lower: &mut ShMirLower, checked: &ShChecked, ast: &ShAst, n
     let program_vector = sh_s_argument(checked, concrete, 0);
     if sh_s_kind(checked, program_vector) != 12 or sh_s_arity(checked, program_vector) != 1 or sh_l_has_parameter(checked, program_vector, 0) { return sh_l_fail(lower, ast, node, 5430); };
     let program_element = sh_s_argument(checked, program_vector, 0);
+    if lower.collection_flow and not sh_l_flow_element(checked, program_element) { return sh_l_fail(lower, ast, node, 5008); };
     let element = sh_l_type(lower, checked, program_element, 0);
     let provider = lower.functions.get(lower.collection_provider).unwrap_or(-1);
     if element < 0 or provider < 0 { return sh_l_fail(lower, ast, node, 5430); };
@@ -883,4 +917,118 @@ def sh_lower(text: &String, ast: &ShAst, checked: &ShChecked, max_items: i64) ->
     if max_items < 0 or max_items > 100000 { return ShLowered { mir: sh_mir_new(max_items), error: 5001, start: 0, end: 0 }; };
     let hir = sh_hir_lift(text, ast, checked, max_items);
     sh_lower_hir(&hir, max_items);
+}
+
+def sh_l_flow_copy(input: &Vec<i64>) -> Vec<i64> {
+    let out = vec_new_i64();
+    let mut at = 0;
+    while at < input.len() { if not out.push(sh_cc_at(input, at)) { out.clear(); return out; }; at = at + 1; };
+    out;
+}
+
+def sh_l_flow_element(checked: &ShChecked, ty: i64) -> bool {
+    let actual = sh_s_resolve(checked, ty);
+    sh_s_kind(checked, actual) == 1 or sh_s_kind(checked, actual) == 2 and sh_s_data(checked, actual) == 64 and sh_s_flags(checked, actual) == 1;
+}
+
+def sh_l_flow_callbacks_valid(mir: &ShMir, callbacks: &ShCollectionCallbacks) -> i64 {
+    if callbacks.schema != 1 or callbacks.error != 0 or callbacks.size < 1 or callbacks.size > 1048576 or callbacks.alignment < 1 or callbacks.alignment > 8 or callbacks.moving == callbacks.dropping or not sh_mir_concrete_type(mir, callbacks.element, 0) { return 5431; };
+    let layout = sh_target_layout(mir, callbacks.element, 1048576);
+    if layout.error != 0 or sh_layout_at(&layout.sizes, callbacks.element) != callbacks.size or sh_layout_at(&layout.alignments, callbacks.element) != callbacks.alignment or not sh_cc_body_valid(mir, callbacks.moving, callbacks.element, callbacks.size, true) or not sh_cc_body_valid(mir, callbacks.dropping, callbacks.element, callbacks.size, false) { return 5431; };
+    0;
+}
+
+def sh_l_flow_cleanup_prepare(lower: &mut ShMirLower, checked: &ShChecked, ty: i64) {
+    if sh_s_kind(checked, ty) != 12 or sh_l_has_parameter(checked, ty, 0) { return; };
+    let mut prior = 0;
+    while prior < lower.cleanup_types.len() { if sh_cc_at(&lower.cleanup_types, prior) == ty { return; }; prior = prior + 1; };
+    let owner = sh_adt_binding(checked, ty);
+    let mut role = 0;
+    let mut selected = -1;
+    while role < 3 { if sh_cc_at(&lower.collection_roles, role) == owner { selected = role; }; role = role + 1; };
+    if selected < 0 { return; };
+    if sh_s_arity(checked, ty) != 1 or not sh_l_flow_element(checked, sh_s_argument(checked, ty, 0)) { return; };
+    sh_l_layout(lower, checked, ty, owner, -1);
+    if lower.error != 0 { return; };
+    let provider = lower.functions.get(sh_cc_at(&lower.collection_providers, if selected == 0 { 4; } else { 3; })).unwrap_or(-1);
+    let mirty = sh_l_type(lower, checked, ty, 0);
+    let result = sh_collection_cleanup_function(&lower.mir, mirty, provider);
+    if not result.is_ok() { lower.error = result.error; return; };
+    let row = sh_mir_layout_id(&lower.mir, mirty);
+    if row < 0 or not lower.mir.layouts.set(row * 7 + 4, result.value) or not (lower.cleanup_types.push(ty) and lower.cleanup_functions.push(result.value) and lower.cleanup_providers.push(provider)) { lower.error = 5001; };
+    ();
+}
+
+def sh_l_flow_consumed_action(lower: &ShMirLower, ownership: &ShOwnership, action: i64) -> bool {
+    let kind = sh_ownership_action(ownership, action, 2);
+    let root = sh_ownership_action(ownership, action, 1);
+    if root >= 0 or not (kind == 3 or kind == 6 or kind == 7) or sengoo_vec_contains_i64(lower.consumed_temporaries.handle, -root - 1) == 0 { return false; };
+    let path = sh_ownership_action_path(ownership, action);
+    path < 0 or sh_ownership_path_word(ownership, path, 1) < 0;
+}
+
+def sh_l_flow_handle(lower: &mut ShMirLower, text: &String, ast: &ShAst, checked: &ShChecked, ownership: &ShOwnership, node: i64) -> i64 {
+    let callee = sh_ast_child(ast, node, 0);
+    if sh_ast_word(ast, callee, 0) != 55 { return sh_l_expr(lower, text, ast, checked, ownership, sh_ast_child(ast, node, 1)); };
+    let base = sh_ast_child(ast, callee, 0);
+    let source_type = sh_s_resolve(checked, sh_node_type(checked, base));
+    let receiver = if sh_s_kind(checked, source_type) == 6 { sh_l_expr(lower, text, ast, checked, ownership, base); } else { sh_l_place(lower, text, ast, checked, ownership, base, false); };
+    let integer = sh_l_type(lower, checked, checked.integer_type, 0);
+    let args = vec_new_i64();
+    args.push(integer);
+    let reference = sh_type_intern(&lower.mir.types, 6, 0, 0, -1, &args);
+    if not reference.is_ok() { return sh_l_fail(lower, ast, node, reference.error); };
+    args.clear();
+    args.push(receiver);
+    let field = sh_l_emit(lower, ast, node, 17, reference.value, &args, 0, -1, 0);
+    args.clear();
+    args.push(field);
+    sh_l_emit(lower, ast, node, 14, integer, &args, 0, 0, 0);
+}
+
+def sh_l_flow_call(lower: &mut ShMirLower, text: &String, ast: &ShAst, checked: &ShChecked, ownership: &ShOwnership, node: i64, binding: i64, signature: i64, ty: i64) -> i64 {
+    let mut factory = 0;
+    while factory < lower.collection_factories.len() / 6 { if sh_mir_word(&lower.collection_factories, 6, factory, 0) == binding { let callee = sh_ast_child(ast, node, 0); let receiver = sh_ast_child(ast, callee, 0); let actual = sh_s_argument(checked, signature, 0); let returned = sh_s_argument(checked, signature, 1); let base = if sh_s_kind(checked, actual) == 6 { sh_s_argument(checked, actual, 0); } else { -1; }; let element = sh_s_argument(checked, base, 0); if sh_ast_word(ast, callee, 0) != 55 or sh_ast_word(ast, node, 6) != 1 or sh_s_kind(checked, actual) != 6 or sh_s_arity(checked, signature) != 2 or sh_s_kind(checked, base) != 12 or sh_adt_binding(checked, base) != sh_cc_at(&lower.collection_roles, 0) or sh_s_argument(checked, returned, 0) != element or not sh_l_flow_element(checked, element) { return sh_l_fail(lower, ast, node, 5008); }; let integer = sh_l_type(lower, checked, checked.integer_type, 0); let args = vec_new_i64(); let required = sh_l_type(lower, checked, actual, 0); let raw = if sh_s_kind(checked, sh_node_type(checked, receiver)) == 6 { sh_l_expr(lower, text, ast, checked, ownership, receiver); } else { sh_l_place(lower, text, ast, checked, ownership, receiver, false); }; let reference = sh_l_coerce(lower, ast, receiver, raw, required); args.push(integer); let fieldtype = sh_type_intern(&lower.mir.types, 6, 0, 0, -1, &args); if not fieldtype.is_ok() { return sh_l_fail(lower, ast, node, fieldtype.error); }; args.clear(); args.push(reference); let address = sh_l_emit(lower, ast, node, 17, fieldtype.value, &args, 0, -1, 0); args.clear(); args.push(address); let handle = sh_l_emit(lower, ast, node, 14, integer, &args, 0, 0, 0); args.clear(); args.push(handle); let provider = lower.functions.get(sh_cc_at(&lower.collection_providers, 1)).unwrap_or(-1); if provider < 0 { return sh_l_fail(lower, ast, node, 5008); }; let created = sh_l_emit(lower, ast, node, 20, integer, &args, provider, 1, 0); args.clear(); let marker = sh_l_emit(lower, ast, node, 4, integer, &args, 0, 0, 0); args.push(created); args.push(marker); return sh_l_emit(lower, ast, node, 16, ty, &args, 0, 0, 0); }; factory = factory + 1; };
+    let mut row = 0;
+    let mut selected = -1;
+    while row < lower.collection_hooks.len() / 9 { if sh_mir_word(&lower.collection_hooks, 9, row, 0) == node { if selected >= 0 { return sh_l_fail(lower, ast, node, 5008); }; selected = row; }; row = row + 1; };
+    if selected < 0 { return sh_l_fail(lower, ast, node, 5008); };
+    row = selected;
+    let kind = sh_mir_word(&lower.collection_hooks, 9, row, 1);
+    let element = sh_mir_word(&lower.collection_hooks, 9, row, 4);
+    if sh_mir_word(&lower.collection_hooks, 9, row, 2) != binding or sh_mir_word(&lower.collection_hooks, 9, row, 3) != signature or not sh_l_flow_element(checked, element) or sh_mir_word(&lower.collection_hooks, 9, row, 8) != 0 { return sh_l_fail(lower, ast, node, 5008); };
+    if kind == 3 { return sh_l_flow_push(lower, text, ast, checked, ownership, node, row); };
+    if kind != 2 and kind != 4 { return sh_l_fail(lower, ast, node, 5008); };
+    let program_option = sh_mir_word(&lower.collection_hooks, 9, row, 7);
+    let owner = sh_adt_binding(checked, program_option);
+    if sh_s_kind(checked, program_option) != 12 or sh_s_arity(checked, program_option) != 1 or sh_s_kind(checked, sh_s_argument(checked, program_option, 0)) != 6 or sh_s_flags(checked, sh_s_argument(checked, program_option, 0)) != 0 or sh_s_argument(checked, sh_s_argument(checked, program_option, 0), 0) != element { return sh_l_fail(lower, ast, node, 5008); };
+    let option = sh_l_type(lower, checked, program_option, 0);
+    sh_l_layout(lower, checked, program_option, owner, -1);
+    let handle = sh_l_flow_handle(lower, text, ast, checked, ownership, node);
+    let provider = lower.functions.get(sh_mir_word(&lower.collection_hooks, 9, row, 5)).unwrap_or(-1);
+    if kind == 4 { if program_option != sh_s_resolve(checked, sh_node_type(checked, node)) { return sh_l_fail(lower, ast, node, 5008); }; let result = sh_optional_emit(&lower.mir, lower.block, provider, handle, option, sh_ast_word(ast, node, 1), sh_ast_word(ast, node, 2), sh_ast_word(ast, node, 3)); if result.error != 0 { return sh_l_fail(lower, ast, node, result.error); }; return result.value; };
+    if sh_ast_word(ast, node, 6) != 3 { return sh_l_fail(lower, ast, node, 5008); };
+    let fallback = sh_l_expr(lower, text, ast, checked, ownership, sh_ast_child(ast, node, 2));
+    let result = sh_optional_scalar_emit(&lower.mir, lower.block, provider, handle, option, fallback, sh_ast_word(ast, node, 1), sh_ast_word(ast, node, 2), sh_ast_word(ast, node, 3));
+    if result.error != 0 { return sh_l_fail(lower, ast, node, result.error); };
+    lower.block = result.block;
+    result.value;
+}
+
+def sh_l_flow_push(lower: &mut ShMirLower, text: &String, ast: &ShAst, checked: &ShChecked, ownership: &ShOwnership, node: i64, row: i64) -> i64 {
+    if sh_mir_word(&lower.collection_hooks, 9, row, 7) != -1 { return sh_l_fail(lower, ast, node, 5008); };
+    let callee = sh_ast_child(ast, node, 0);
+    let method = sh_ast_word(ast, callee, 0) == 55;
+    if sh_ast_word(ast, node, 6) != if method { 2; } else { 3; } { return sh_l_fail(lower, ast, node, 5008); };
+    let argument = sh_ast_child(ast, node, if method { 1; } else { 2; });
+    if sh_s_resolve(checked, sh_node_type(checked, argument)) != sh_mir_word(&lower.collection_hooks, 9, row, 4) { return sh_l_fail(lower, ast, node, 5008); };
+    let handle = sh_l_flow_handle(lower, text, ast, checked, ownership, node);
+    let value = sh_l_expr(lower, text, ast, checked, ownership, argument);
+    let provider = lower.functions.get(sh_mir_word(&lower.collection_hooks, 9, row, 5)).unwrap_or(-1);
+    let result = sh_collection_push_emit(&lower.mir, lower.block, provider, handle, value, sh_ast_word(ast, node, 1), sh_ast_word(ast, node, 2), sh_ast_word(ast, node, 3));
+    if result.error != 0 or result.consumed != 1 { return sh_l_fail(lower, ast, node, if result.error != 0 { result.error; } else { 5008; }); };
+    lower.block = result.block;
+    let temp = lower.temporaries.get(argument).unwrap_or(-1);
+    if temp >= 0 { let mut action = 0; while action < sh_ownership_action_count(ownership) { if sh_ownership_action(ownership, action, 1) == -argument - 1 { let path = sh_ownership_action_path(ownership, action); if path >= 0 and sh_ownership_path_word(ownership, path, 1) >= 0 { return sh_l_fail(lower, ast, node, 5008); }; }; action = action + 1; }; if not lower.consumed_temporaries.push(argument) { return sh_l_fail(lower, ast, node, 5001); }; let empty = vec_new_i64(); let unit = sh_l_type(lower, checked, checked.unit_type, 0); sh_l_emit(lower, ast, node, 25, unit, &empty, temp, 0, 0); (); };
+    result.value;
 }
