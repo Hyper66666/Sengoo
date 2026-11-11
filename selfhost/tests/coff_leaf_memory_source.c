@@ -1,0 +1,1 @@
+typedef long long i64;typedef unsigned char u8;extern u8 sengoo_runtime_memory_read_u8(const u8*,i64);static u8 state[4097];int main(void){if(sengoo_runtime_memory_read_u8(state,0)!=0||sengoo_runtime_memory_read_u8(state,4096)!=0)return 61;state[0]=40;state[4096]=2;return sengoo_runtime_memory_read_u8(state,0)+sengoo_runtime_memory_read_u8(state,4096);}

@@ -83,7 +83,10 @@ try:
  def reject(label,sdk_object,mode,expected):
   outimage=base/'rejected.exe';outpdb=base/'rejected.pdb';outimage.write_bytes(sentinel);outpdb.write_bytes(sentinel);out=run('reject-'+label,[binary,paths[0],paths[2],sdk_object,base/'reject-main.obj',base/'reject-worker.obj',outimage,outpdb,mode,fixed.as_posix()],'pure',65);assert out.strip()==str(expected).encode()and outimage.read_bytes()==outpdb.read_bytes()==sentinel,(label,out);negatives.append({'name':label,'code':expected,'first_call_resource_scopes':5})
  for n in range(1,22):reject('state-'+str(n),sdk,chr(64+n),7333 if n in [2,19]else 7303 if n==3 else 7331)
- reject('raw-clang-aux-coff',base/'sdk/historical.raw.obj','@',7203)
+ # Standard section/file auxiliaries now pass COFF admission. The unchanged raw
+ # clang object still carries the absolute @feat.00 symbol, which the existing
+ # no-debug PDB public catalog rejects at its independent 7333 boundary.
+ reject('raw-clang-absolute-public',base/'sdk/historical.raw.obj','@',7333)
  raw=sdk.read_bytes();count=int.from_bytes(raw[2:4],'little');section=next(20+n*40 for n in range(count)if raw[20+n*40:28+n*40].rstrip(b'\0')==b'.rdata')
  for name,encoded in [('unknown-debug',b'.debugX'),('single-debug-S',b'.debug$S'),('single-debug-T',b'.debug$T')]:
   changed=bytearray(raw);changed[section:section+8]=encoded.ljust(8,b'\0');changed[section+36:section+40]=int.from_bytes(fresh[0][0][20+3*40+36:20+3*40+40],'little').to_bytes(4,'little') if name!='unknown-debug'else raw[section+36:section+40];path=base/(name+'.obj');path.write_bytes(changed);inputs[str(path)]=sha(path);reject(name,path,'@',7333)

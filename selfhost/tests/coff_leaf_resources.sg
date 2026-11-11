@@ -1,0 +1,55 @@
+import selfhost_link_pe;
+
+import selfhost_link_archive;
+
+import std::args;
+
+import std::assert;
+
+import std::io;
+
+extern "C" {
+    fn sengoo_string_live_handle_count() -> i64;
+    fn sengoo_buffer_live_handle_count() -> i64;
+    fn sengoo_opaque_live_handle_count() -> i64;
+    fn sengoo_file_snapshot_live_handle_count() -> i64;
+    fn sengoo_file_snapshot_live_bytes() -> i64;
+}
+
+def leaf_argument(i: i64) -> Result<String, i64> {
+    let b = ffi_buffer_new(arg_len(i).unwrap_or(0))?;
+    let n = arg_copy(i, b)?;
+    string_from_utf8(b, n);
+}
+
+def leaf_scope() -> Result<i64, i64> {
+    let object_path = leaf_argument(0)?;
+    let library_path = leaf_argument(1)?;
+    let object = sh_link_load(object_path.as_str(), 67108864)?;
+    let library = sh_link_load(library_path.as_str(), 67108864)?;
+    let mut link = sh_link_new(67108864);
+    sh_link_coff(&mut link, &object)?;
+    let libs = sh_link_libraries_new(67108864);
+    sh_link_library_add(&libs, &library)?;
+    let entry = string_from_str("main")?;
+    sh_link_libraries_resolve(&mut link, &libs, &entry)?;
+    let image = sh_link_pe(&mut link, &entry)?;
+    assert_true(sh_binary_len(&image) > 1024, "leaf_resources", 1);
+    let mut arg = 2;
+    while arg < args_len() { let path = leaf_argument(arg)?; let kind = leaf_argument(arg + 1)?; let raw = sh_link_load(path.as_str(), 67108864)?; let mut rejected = sh_link_new(67108864); let result = sh_link_coff(&mut rejected, &raw); let code = if kind.as_str() == "M" { 7201; } else { if kind.as_str() == "C" { 7202; } else { 7203; }; }; assert_true(not result.is_ok() and result.error == code, "leaf_resources", 2); arg = arg + 2; };
+    sh_i64_ok(0);
+}
+
+def leaf_run() -> Result<i64, i64> {
+    if args_len() < 2 or args_len() % 2 != 0 { return sh_i64_ok(64); };
+    let mut round = 0;
+    while round < 5 { let s = sengoo_string_live_handle_count(); let b = sengoo_buffer_live_handle_count(); let o = sengoo_opaque_live_handle_count(); let f = sengoo_file_snapshot_live_handle_count(); let n = sengoo_file_snapshot_live_bytes(); leaf_scope()?; assert_eq_i64(sengoo_string_live_handle_count(), s, "leaf_resources", 3); assert_eq_i64(sengoo_buffer_live_handle_count(), b, "leaf_resources", 3); assert_eq_i64(sengoo_opaque_live_handle_count(), o, "leaf_resources", 3); assert_eq_i64(sengoo_file_snapshot_live_handle_count(), f, "leaf_resources", 3); assert_eq_i64(sengoo_file_snapshot_live_bytes(), n, "leaf_resources", 3); round = round + 1; };
+    println("leaf profile: five first-call resource scopes passed");
+    sh_i64_ok(0);
+}
+
+def main() -> i64 {
+    let r = leaf_run();
+    if not r.is_ok() { println(r.error); return 65; };
+    r.value;
+}
