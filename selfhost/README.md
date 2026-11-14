@@ -19,6 +19,17 @@ frozen Rust reference compiler. The newer `tools/native.sg` path implements SG
 source-to-object compilation in SG. Rust/clang are still used to build that
 development executable, and clang independently links verification artifacts.
 
+The current bridge is HIR schema seven. The bounded AsyncFile factory gate
+checks retained standard-library sources, exact factory facts and restricted
+buffer observation; the print lowerer supports signed i64 and shared str.
+Their integrated gate and independent audit are recorded in
+`openspec/changes/add-selfhost-async-file-factory-contract/checkpoint.md`.
+The compiler's full self-input currently completes semantics and ownership,
+then rejects HIR lifting with resource error 5501. A standard file import reaches
+the separate conditional field cleanup refusal (5008) in `String.unwrap_or`.
+Neither path produces a self-hosted compiler object. The registered
+`add-selfhost-conditional-field-cleanup` change tracks the cleanup work.
+
 The prior Agent SDK/ownership implementation was committed and pushed to
 `main` as `cc70247ec5bd9531bea751a08288980da40ecc68` before this work started.
 The local seed and formatter still report embedded revision `ea803f1913f9`.

@@ -42,3 +42,16 @@ and records `reference_source_gap=true` and `result_equal=false`. The adjacent
 `array-tuple-read` case retains a single loop binding and reads `.0/.1`; it must
 execute 42 through both compilers. Independent original reference failures are
 retained under `target/selfhost/m4-new-reference-development/`.
+
+## User-defined print: builtin selected instead of resolved function
+
+The print gate's `shadow` case declares `def print(x:i64)->i64{x+1}` and
+returns `print(41)` from `main`. The resolved user function must return 42
+without output. The SG candidate does so; the frozen Windows reference instead
+prints `41\r\n` and returns zero. This is a named reference difference, not an output
+parity pass. The gate requires both exact outcomes and fails if either changes.
+The original observation and input hashes are retained in
+`target/selfhost/print-intrinsics-prototype/run07/outputs04/evidence.json`.
+The production verification owner is `add-selfhost-print-intrinsics`;
+`selfhost/async_factory_print_checks.py` reruns the case against the integrated
+compiler. This does not qualify unsupported print argument types or close M6.

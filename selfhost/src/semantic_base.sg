@@ -1,3 +1,5 @@
+import selfhost_semantic_factory_source;
+
 import selfhost_parser;
 
 import selfhost_types;
@@ -13,6 +15,7 @@ struct ShDiagnostic {
 }
 
 struct ShChecked {
+    factory: ShFactorySource,
     types: ShTypes,
     symbols: ShSymbols,
     node_types: Vec<i64>,
@@ -322,7 +325,7 @@ def sh_s_new(ast: &ShAst, maximum: i64) -> ShChecked {
     let never = sh_type_primitive(&types, 17, 0, 0).unwrap_or(-1);
     let error = sh_type_primitive(&types, 18, 0, 0).unwrap_or(-1);
     let diagnostics: Vec<ShDiagnostic> = vec_new();
-    let mut result = ShChecked { types: types, symbols: sh_symbols_new(1000000), node_types: vec_new_i64(), call_types: vec_new_i64(), deferred_types: vec_new_i64(), builtin_calls: vec_new_i64(), resolution: vec_new_i64(), node_scopes: vec_new_i64(), bindings: vec_new_i64(), scopes: vec_new_i64(), diagnostics: diagnostics, substitutions: vec_new_i64(), generic_parameters: vec_new_i64(), constraints: vec_new_i64(), trait_types: vec_new_i64(), class_parents: vec_new_i64(), propagation: vec_new_i64(), loop_values: vec_new_i64(), async_depth: 0, unsafe_depth: 0, error: 0, start: 0, end: 0, diagnostic_limit: maximum, current_scope: 0, current_owner: -1, current_return: -1, loop_depth: 0, depth: 0, unit_type: unit, bool_type: boolean, integer_type: integer, float_type: floating, char_type: character, str_type: string, never_type: never, error_type: error };
+    let mut result = ShChecked { factory: sh_factory_source_empty(), types: types, symbols: sh_symbols_new(1000000), node_types: vec_new_i64(), call_types: vec_new_i64(), deferred_types: vec_new_i64(), builtin_calls: vec_new_i64(), resolution: vec_new_i64(), node_scopes: vec_new_i64(), bindings: vec_new_i64(), scopes: vec_new_i64(), diagnostics: diagnostics, substitutions: vec_new_i64(), generic_parameters: vec_new_i64(), constraints: vec_new_i64(), trait_types: vec_new_i64(), class_parents: vec_new_i64(), propagation: vec_new_i64(), loop_values: vec_new_i64(), async_depth: 0, unsafe_depth: 0, error: 0, start: 0, end: 0, diagnostic_limit: maximum, current_scope: 0, current_owner: -1, current_return: -1, loop_depth: 0, depth: 0, unit_type: unit, bool_type: boolean, integer_type: integer, float_type: floating, char_type: character, str_type: string, never_type: never, error_type: error };
     sh_s_scope(&result, -1, -1, 0);
     let mut index = 0;
     while index < sh_ast_count(ast) { if not result.node_types.push(-1) or not result.call_types.push(-1) or not result.resolution.push(-1) or not result.node_scopes.push(-1) { result.error = 5117; return result; }; index = index + 1; };

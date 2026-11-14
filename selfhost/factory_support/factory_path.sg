@@ -1,0 +1,3 @@
+extern "C" {
+    fn sengoo_factory_path_equal(left: i64, left_bytes: i64, right: i64, right_bytes: i64) -> i64;
+}

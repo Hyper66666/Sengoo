@@ -734,7 +734,7 @@ def sh_mt_operator_hir() -> Result<bool, i64> {
     if hir.error != 0 { println("operator HIR setup"); println(hir.error); return result_err_bool(hir.error); };
     let image = sh_hir_encode(&hir, 1000000);
     let restored = sh_hir_decode(&image.words, 1000000);
-    assert_eq_i64(restored.schema, 6, "operator.sg", 6);
+    assert_eq_i64(restored.schema, 7, "operator.sg", 6);
     assert_eq_i64(restored.error, 0, "operator.sg", 7);
     let direct = sh_lower_hir(&hir, 10000);
     let decoded = sh_lower_hir(&restored, 10000);
@@ -895,7 +895,7 @@ def sh_mt_hir() -> Result<bool, i64> {
     image.words.set(1, 99);
     let bad_version = sh_hir_decode(&image.words, 1000000);
     assert_eq_i64(bad_version.error, 5502, "mir.sg", 436);
-    image.words.set(1, 5);
+    image.words.set(1, 7);
     image.words.push(123);
     let trailing = sh_hir_decode(&image.words, 1000000);
     assert_eq_i64(trailing.error, 5502, "mir.sg", 437);

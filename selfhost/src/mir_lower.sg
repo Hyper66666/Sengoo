@@ -550,6 +550,9 @@ def sh_l_builtin_pointer(lower: &mut ShMirLower, text: &String, ast: &ShAst, che
 }
 
 def sh_l_call(lower: &mut ShMirLower, text: &String, ast: &ShAst, checked: &ShChecked, ownership: &ShOwnership, node: i64, ty: i64) -> i64 {
+    if checked.factory.records.len() == 24 and sh_node_binding(checked, node) == checked.factory.records.get(1).unwrap_or(-1) { return sh_l_fail(lower, ast, node, 5003); };
+    let print_binding = sh_node_binding(checked, node);
+    if sh_binding_word(checked, print_binding, 2) == 13 and sh_binding_word(checked, print_binding, 7) >= 1 and sh_binding_word(checked, print_binding, 7) <= 3 { return sh_l_print(lower, text, ast, checked, ownership, node, ty); };
     let builtin = sh_builtin_call_for_node(checked, node);
     if builtin >= 0 { return sh_l_builtin_pointer(lower, text, ast, checked, ownership, node, builtin, ty); };
     let declared = sh_node_callable_type(checked, node);
@@ -1031,4 +1034,38 @@ def sh_l_flow_push(lower: &mut ShMirLower, text: &String, ast: &ShAst, checked: 
     let temp = lower.temporaries.get(argument).unwrap_or(-1);
     if temp >= 0 { let mut action = 0; while action < sh_ownership_action_count(ownership) { if sh_ownership_action(ownership, action, 1) == -argument - 1 { let path = sh_ownership_action_path(ownership, action); if path >= 0 and sh_ownership_path_word(ownership, path, 1) >= 0 { return sh_l_fail(lower, ast, node, 5008); }; }; action = action + 1; }; if not lower.consumed_temporaries.push(argument) { return sh_l_fail(lower, ast, node, 5001); }; let empty = vec_new_i64(); let unit = sh_l_type(lower, checked, checked.unit_type, 0); sh_l_emit(lower, ast, node, 25, unit, &empty, temp, 0, 0); (); };
     result.value;
+}
+
+def sh_lower_factory_modules(graph: &ShModules, analyzed: &ShModuleChecked, maximum: i64) -> ShLowered {
+    let hir = sh_hir_lift_factory_modules(graph, analyzed, maximum);
+    if hir.error != 0 { return ShLowered { mir: sh_mir_new(maximum), error: hir.error, start: hir.start, end: hir.end }; };
+    let valid = sh_hir_validate_modules(&hir, graph, analyzed, &hir.ownership, "", "", "", "", "");
+    if valid != 0 or hir.origins.present != 0 { return ShLowered { mir: sh_mir_new(maximum), error: if valid != 0 { valid; } else { 5008; }, start: hir.start, end: hir.end }; };
+    sh_lower_parts(&hir.source, &hir.ast, &hir.checked, &hir.ownership, maximum);
+}
+
+def sh_l_print(lower: &mut ShMirLower, text: &String, ast: &ShAst, checked: &ShChecked, ownership: &ShOwnership, node: i64, ty: i64) -> i64 {
+    if not sh_print_call_valid(checked, text, ast, node) { return sh_l_fail(lower, ast, node, 5504); };
+    let argument = sh_ast_child(ast, node, 1);
+    let input = sh_l_node_type(lower, checked, ast, argument);
+    let kind = sh_mir_type_word(&lower.mir, input, 0);
+    let integer = kind == 2 and sh_mir_type_word(&lower.mir, input, 1) == 64 and sh_mir_type_word(&lower.mir, input, 2) == 1;
+    let text_input = kind == 6 and sh_mir_type_word(&lower.mir, input, 1) == 0 and sh_mir_type_word(&lower.mir, input, 2) == 0 and sh_mir_type_word(&lower.mir, sh_mir_type_arg(&lower.mir, input, 0), 0) == 5;
+    if not integer and not text_input { return sh_l_fail(lower, ast, node, 5008); };
+    let code = sh_binding_word(checked, sh_node_binding(checked, node), 7);
+    let name = string_from_str(if code == 3 { if integer { "sengoo_eprint_i64"; } else { "sengoo_eprint_str"; }; } else { if integer { "sengoo_print_i64"; } else { "sengoo_print_str"; }; });
+    if not name.is_ok() { return sh_l_fail(lower, ast, node, 5001); };
+    let types = vec_new_i64();
+    types.push(input);
+    types.push(ty);
+    let signature = sh_type_intern(&lower.mir.types, 11, 1, 0, -1, &types);
+    if not signature.is_ok() { return sh_l_fail(lower, ast, node, 5003); };
+    let mut function = -1;
+    let mut i = 0;
+    while i < sh_mir_fn_count(&lower.mir) { let existing = sh_symbol_text(&lower.mir.symbols, sh_mir_fn(&lower.mir, i, 0)); if not existing.is_ok() { return sh_l_fail(lower, ast, node, 5003); }; if existing.value.as_str() == name.value.as_str() { if function >= 0 or sh_mir_fn(&lower.mir, i, 1) != signature.value or sh_mir_fn(&lower.mir, i, 3) != 1 { return sh_l_fail(lower, ast, node, 5009); }; function = i; }; i = i + 1; };
+    if function < 0 { let created = sh_mir_add_function(&lower.mir, &name.value, signature.value, 1, sh_ast_word(ast, node, 1), sh_ast_word(ast, node, 2), sh_ast_word(ast, node, 3)); function = sh_l_store(lower, ast, node, created); };
+    let value = sh_l_expr(lower, text, ast, checked, ownership, argument);
+    let operands = vec_new_i64();
+    operands.push(value);
+    sh_l_emit(lower, ast, node, 20, ty, &operands, function, 1, 0);
 }

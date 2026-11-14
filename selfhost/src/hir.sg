@@ -192,7 +192,7 @@ def sh_hir_validate_ownership_links(hir: &ShHir) -> i64 {
 }
 
 def sh_hir_validate(hir: &ShHir) -> i64 {
-    if hir.schema != 6 or hir.target != 1 or hir.runtime_abi != 1 or hir.pointer_width != 64 { return 5502; };
+    if hir.schema != 7 or hir.target != 1 or hir.runtime_abi != 1 or hir.pointer_width != 64 { return 5502; };
     if hir.limit < 0 or hir.limit > 100000 or hir.source.len() > hir.limit * 128 { return 5501; };
     if hir.error != 0 or hir.checked.error != 0 or hir.ownership.error != 0 { return 5502; };
     if hir.start < 0 or hir.end < hir.start or hir.end > hir.source.len() { return 5502; };
@@ -240,8 +240,10 @@ def sh_hir_validate(hir: &ShHir) -> i64 {
     if hir.checked.builtin_calls.len() % 6 != 0 or hir.checked.builtin_calls.len() > hir.limit * 6 { return 5503; };
     index = 0;
     while index < sh_builtin_call_count(&hir.checked) { if not sh_builtin_call_valid(&hir.checked, &hir.source, &hir.ast, index) { return 5503; }; let mut previous = 0; while previous < index { if sh_builtin_call_word(&hir.checked, previous, 0) == sh_builtin_call_word(&hir.checked, index, 0) { return 5503; }; previous = previous + 1; }; index = index + 1; };
+    if not sh_s_factory_valid(&hir.checked, &hir.source, &hir.ast) or not sh_hir_factory_witness(hir) { return 5504; };
     let calls = sh_hir_validate_calls(hir);
     if calls != 0 { return calls; };
+    if not sh_print_facts_valid(&hir.checked, &hir.source, &hir.ast) { return 5504; };
     let ownership_links = sh_hir_validate_ownership_links(hir);
     if ownership_links != 0 { return ownership_links; };
     if not sh_ownership_observed_contracts_valid(&hir.ownership, &hir.checked, &hir.ast) { return 5506; };
@@ -303,14 +305,14 @@ def sh_hir_take_text(reader: &mut ShHirReader, maximum: i64) -> String {
 
 def sh_hir_empty_checked(limit: i64) -> ShChecked {
     let diagnostics: Vec<ShDiagnostic> = vec_new();
-    ShChecked { types: sh_types_new(limit), symbols: sh_symbols_new(limit), node_types: vec_new_i64(), resolution: vec_new_i64(), call_types: vec_new_i64(), deferred_types: vec_new_i64(), builtin_calls: vec_new_i64(), node_scopes: vec_new_i64(), bindings: vec_new_i64(), scopes: vec_new_i64(), diagnostics: diagnostics, substitutions: vec_new_i64(), generic_parameters: vec_new_i64(), constraints: vec_new_i64(), trait_types: vec_new_i64(), class_parents: vec_new_i64(), propagation: vec_new_i64(), loop_values: vec_new_i64(), async_depth: 0, unsafe_depth: 0, error: 0, start: 0, end: 0, diagnostic_limit: limit, current_scope: 0, current_owner: -1, current_return: -1, loop_depth: 0, depth: 0, unit_type: -1, bool_type: -1, integer_type: -1, float_type: -1, char_type: -1, str_type: -1, never_type: -1, error_type: -1 };
+    ShChecked { factory: sh_factory_source_empty(), types: sh_types_new(limit), symbols: sh_symbols_new(limit), node_types: vec_new_i64(), resolution: vec_new_i64(), call_types: vec_new_i64(), deferred_types: vec_new_i64(), builtin_calls: vec_new_i64(), node_scopes: vec_new_i64(), bindings: vec_new_i64(), scopes: vec_new_i64(), diagnostics: diagnostics, substitutions: vec_new_i64(), generic_parameters: vec_new_i64(), constraints: vec_new_i64(), trait_types: vec_new_i64(), class_parents: vec_new_i64(), propagation: vec_new_i64(), loop_values: vec_new_i64(), async_depth: 0, unsafe_depth: 0, error: 0, start: 0, end: 0, diagnostic_limit: limit, current_scope: 0, current_owner: -1, current_return: -1, loop_depth: 0, depth: 0, unit_type: -1, bool_type: -1, integer_type: -1, float_type: -1, char_type: -1, str_type: -1, never_type: -1, error_type: -1 };
 }
 
 def sh_hir_snapshot_checked(input: &ShChecked, limit: i64, error: &mut i64) -> ShChecked {
     let symbols = sh_symbols_new(input.symbols.limit);
     let mut index = 0;
     while index < sh_symbol_count(&input.symbols) { let name = sh_symbol_text(&input.symbols, index); if not name.is_ok() { *error = 5504; break; }; let stored = sh_intern(&symbols, &name.value); if not stored.is_ok() or stored.value != index { *error = 5504; break; }; index = index + 1; };
-    ShChecked { types: ShTypes { words: sh_hir_words(&input.types.words, limit * 8, error), arguments: sh_hir_words(&input.types.arguments, limit * 8, error), limit: input.types.limit }, symbols: symbols, node_types: sh_hir_words(&input.node_types, limit * 8, error), resolution: sh_hir_words(&input.resolution, limit * 8, error), call_types: sh_hir_words(&input.call_types, limit * 8, error), deferred_types: sh_hir_words(&input.deferred_types, limit * 8, error), builtin_calls: sh_hir_words(&input.builtin_calls, limit * 8, error), node_scopes: sh_hir_words(&input.node_scopes, limit * 8, error), bindings: sh_hir_words(&input.bindings, limit * 8, error), scopes: sh_hir_words(&input.scopes, limit * 8, error), diagnostics: sh_hir_diagnostics(&input.diagnostics, limit, error), substitutions: sh_hir_words(&input.substitutions, limit * 8, error), generic_parameters: sh_hir_words(&input.generic_parameters, limit * 8, error), constraints: sh_hir_words(&input.constraints, limit * 8, error), trait_types: sh_hir_words(&input.trait_types, limit * 8, error), class_parents: sh_hir_words(&input.class_parents, limit * 8, error), propagation: sh_hir_words(&input.propagation, limit * 8, error), loop_values: sh_hir_words(&input.loop_values, limit * 8, error), async_depth: input.async_depth, unsafe_depth: input.unsafe_depth, error: input.error, start: input.start, end: input.end, diagnostic_limit: input.diagnostic_limit, current_scope: input.current_scope, current_owner: input.current_owner, current_return: input.current_return, loop_depth: input.loop_depth, depth: input.depth, unit_type: input.unit_type, bool_type: input.bool_type, integer_type: input.integer_type, float_type: input.float_type, char_type: input.char_type, str_type: input.str_type, never_type: input.never_type, error_type: input.error_type };
+    ShChecked { factory: sh_factory_source_clone(&input.factory), types: ShTypes { words: sh_hir_words(&input.types.words, limit * 8, error), arguments: sh_hir_words(&input.types.arguments, limit * 8, error), limit: input.types.limit }, symbols: symbols, node_types: sh_hir_words(&input.node_types, limit * 8, error), resolution: sh_hir_words(&input.resolution, limit * 8, error), call_types: sh_hir_words(&input.call_types, limit * 8, error), deferred_types: sh_hir_words(&input.deferred_types, limit * 8, error), builtin_calls: sh_hir_words(&input.builtin_calls, limit * 8, error), node_scopes: sh_hir_words(&input.node_scopes, limit * 8, error), bindings: sh_hir_words(&input.bindings, limit * 8, error), scopes: sh_hir_words(&input.scopes, limit * 8, error), diagnostics: sh_hir_diagnostics(&input.diagnostics, limit, error), substitutions: sh_hir_words(&input.substitutions, limit * 8, error), generic_parameters: sh_hir_words(&input.generic_parameters, limit * 8, error), constraints: sh_hir_words(&input.constraints, limit * 8, error), trait_types: sh_hir_words(&input.trait_types, limit * 8, error), class_parents: sh_hir_words(&input.class_parents, limit * 8, error), propagation: sh_hir_words(&input.propagation, limit * 8, error), loop_values: sh_hir_words(&input.loop_values, limit * 8, error), async_depth: input.async_depth, unsafe_depth: input.unsafe_depth, error: input.error, start: input.start, end: input.end, diagnostic_limit: input.diagnostic_limit, current_scope: input.current_scope, current_owner: input.current_owner, current_return: input.current_return, loop_depth: input.loop_depth, depth: input.depth, unit_type: input.unit_type, bool_type: input.bool_type, integer_type: input.integer_type, float_type: input.float_type, char_type: input.char_type, str_type: input.str_type, never_type: input.never_type, error_type: input.error_type };
 }
 
 def sh_hir_empty_ownership(limit: i64) -> ShOwnership {
@@ -318,10 +320,11 @@ def sh_hir_empty_ownership(limit: i64) -> ShOwnership {
 }
 
 def sh_hir_empty(limit: i64) -> ShHir {
-    ShHir { schema: 6, target: 1, runtime_abi: 1, pointer_width: 64, limit: limit, source: string_new(), ast: ShAst { words: vec_new_i64(), edges: vec_new_i64(), root: -1 }, checked: sh_hir_empty_checked(limit), ownership: sh_hir_empty_ownership(limit), origins: sh_hir_origins_absent(limit), error: 0, start: 0, end: 0 };
+    ShHir { schema: 7, target: 1, runtime_abi: 1, pointer_width: 64, limit: limit, source: string_new(), ast: ShAst { words: vec_new_i64(), edges: vec_new_i64(), root: -1 }, checked: sh_hir_empty_checked(limit), ownership: sh_hir_empty_ownership(limit), origins: sh_hir_origins_absent(limit), error: 0, start: 0, end: 0 };
 }
 
 def sh_hir_lift(text: &String, ast: &ShAst, checked: &ShChecked, limit: i64) -> ShHir {
+    if checked.factory.profile != 0 { let mut failed = sh_hir_empty(limit); failed.error = 5509; return failed; };
     if limit < 0 or limit > 100000 { let mut failed = sh_hir_empty(0); failed.error = 5501; return failed; };
     if checked.error != 0 { let mut failed = sh_hir_empty(limit); failed.error = checked.error; failed.start = checked.start; failed.end = checked.end; return failed; };
     let mut error = 0;
@@ -340,7 +343,7 @@ def sh_hir_lift(text: &String, ast: &ShAst, checked: &ShChecked, limit: i64) -> 
     let snapshot = sh_hir_snapshot_checked(checked, limit, &mut error);
     let ast_words = sh_hir_words(&ast.words, limit * 8, &mut error);
     let ast_edges = sh_hir_words(&ast.edges, limit * 8, &mut error);
-    let mut hir = ShHir { schema: 6, target: 1, runtime_abi: 1, pointer_width: 64, limit: limit, source: source.value, ast: ShAst { words: ast_words, edges: ast_edges, root: ast.root }, checked: snapshot, ownership: ownership, origins: sh_hir_origins_absent(limit), error: error, start: 0, end: 0 };
+    let mut hir = ShHir { schema: 7, target: 1, runtime_abi: 1, pointer_width: 64, limit: limit, source: source.value, ast: ShAst { words: ast_words, edges: ast_edges, root: ast.root }, checked: snapshot, ownership: ownership, origins: sh_hir_origins_absent(limit), error: error, start: 0, end: 0 };
     if checked.error != 0 { hir.error = checked.error; hir.start = checked.start; hir.end = checked.end; } else { if hir.ownership.error != 0 { hir.error = hir.ownership.error; hir.start = hir.ownership.start; hir.end = hir.ownership.end; } else { if hir.error == 0 { hir.error = sh_hir_validate(&hir); }; }; };
     hir;
 }
@@ -352,7 +355,7 @@ def sh_hir_encode(hir: &ShHir, maximum: i64) -> ShHirImage {
     output.error = sh_hir_input_budget(&hir.source, &hir.ast, &hir.checked, &hir.ownership, &hir.origins, hir.limit, 0, maximum);
     if output.error != 0 { return output; };
     sh_hir_put(&mut output, 1397180489, maximum);
-    sh_hir_put(&mut output, 6, maximum);
+    sh_hir_put(&mut output, 7, maximum);
     sh_hir_put(&mut output, 1, maximum);
     sh_hir_put(&mut output, 1, maximum);
     sh_hir_put(&mut output, 64, maximum);
@@ -383,6 +386,15 @@ def sh_hir_encode(hir: &ShHir, maximum: i64) -> ShHirImage {
     sh_hir_put_vector(&mut output, &hir.checked.class_parents, maximum);
     sh_hir_put_vector(&mut output, &hir.checked.propagation, maximum);
     sh_hir_put_vector(&mut output, &hir.checked.loop_values, maximum);
+    sh_hir_put(&mut output, hir.checked.factory.schema, maximum);
+    sh_hir_put(&mut output, hir.checked.factory.profile, maximum);
+    sh_hir_put(&mut output, hir.checked.factory.module, maximum);
+    sh_hir_put(&mut output, hir.checked.factory.expanded_start, maximum);
+    sh_hir_put_text(&mut output, &hir.checked.factory.identity, maximum);
+    sh_hir_put_text(&mut output, &hir.checked.factory.digest, maximum);
+    sh_hir_put_text(&mut output, &hir.checked.factory.source, maximum);
+    sh_hir_put_text(&mut output, &hir.checked.factory.anchor, maximum);
+    sh_hir_put_vector(&mut output, &hir.checked.factory.records, maximum);
     sh_hir_put(&mut output, sh_symbol_count(&hir.checked.symbols), maximum);
     let mut index = 0;
     while output.error == 0 and index < sh_symbol_count(&hir.checked.symbols) { let name = sh_symbol_text(&hir.checked.symbols, index); if not name.is_ok() { output.error = 5504; break; }; sh_hir_put_text(&mut output, &name.value, maximum); index = index + 1; };
@@ -451,7 +463,7 @@ def sh_hir_decode(words: &Vec<i64>, maximum: i64) -> ShHir {
     let pointer = sh_hir_take(&mut reader);
     let limit = sh_hir_take(&mut reader);
     let root = sh_hir_take(&mut reader);
-    if magic != 1397180489 or schema != 6 or target != 1 or abi != 1 or pointer != 64 or limit < 0 or limit > 100000 or maximum < 0 or maximum > 4000000 { reader.error = 5502; };
+    if magic != 1397180489 or schema != 7 or target != 1 or abi != 1 or pointer != 64 or limit < 0 or limit > 100000 or maximum < 0 or maximum > 4000000 { reader.error = 5502; };
     if reader.error != 0 { let mut failed = sh_hir_empty(0); failed.error = reader.error; return failed; };
     let hir_error = sh_hir_take(&mut reader);
     let hir_start = sh_hir_take(&mut reader);
@@ -480,6 +492,16 @@ def sh_hir_decode(words: &Vec<i64>, maximum: i64) -> ShHir {
     let class_parents = sh_hir_take_vector(&mut reader, limit * 8);
     let propagation = sh_hir_take_vector(&mut reader, limit * 8);
     let loop_values = sh_hir_take_vector(&mut reader, limit * 8);
+    let f_schema = sh_hir_take(&mut reader);
+    let f_profile = sh_hir_take(&mut reader);
+    let f_module = sh_hir_take(&mut reader);
+    let f_start = sh_hir_take(&mut reader);
+    let f_identity = sh_hir_take_text(&mut reader, 4096);
+    let f_digest = sh_hir_take_text(&mut reader, 64);
+    let f_source = sh_hir_take_text(&mut reader, 65536);
+    let f_anchor = sh_hir_take_text(&mut reader, 64);
+    let f_records = sh_hir_take_vector(&mut reader, 24);
+    let factory = ShFactorySource { schema: f_schema, profile: f_profile, module: f_module, expanded_start: f_start, identity: f_identity, digest: f_digest, source: f_source, anchor: f_anchor, records: f_records };
     let symbols = sh_symbols_new(symbols_limit);
     let names = sh_hir_take(&mut reader);
     let mut index = 0;
@@ -541,7 +563,7 @@ def sh_hir_decode(words: &Vec<i64>, maximum: i64) -> ShHir {
     let origins = sh_hir_origins_decode(&origin_words, 4000000);
     if reader.error == 0 and origins.error != 0 { reader.error = origins.error; };
     if reader.position != reader.words.len() { reader.error = 5502; };
-    let checked = ShChecked { types: ShTypes { words: types_words, arguments: types_arguments, limit: types_limit }, symbols: symbols, node_types: node_types, resolution: resolution, call_types: call_types, deferred_types: deferred_types, builtin_calls: builtin_calls, node_scopes: node_scopes, bindings: bindings, scopes: scopes, diagnostics: diagnostics, substitutions: substitutions, generic_parameters: generic_parameters, constraints: constraints, trait_types: trait_types, class_parents: class_parents, propagation: propagation, loop_values: loop_values, async_depth: c_async_depth, unsafe_depth: c_unsafe_depth, error: c_error, start: c_start, end: c_end, diagnostic_limit: c_diagnostic_limit, current_scope: c_current_scope, current_owner: c_current_owner, current_return: c_current_return, loop_depth: c_loop_depth, depth: c_depth, unit_type: c_unit_type, bool_type: c_bool_type, integer_type: c_integer_type, float_type: c_float_type, char_type: c_char_type, str_type: c_str_type, never_type: c_never_type, error_type: c_error_type };
+    let checked = ShChecked { factory: factory, types: ShTypes { words: types_words, arguments: types_arguments, limit: types_limit }, symbols: symbols, node_types: node_types, resolution: resolution, call_types: call_types, deferred_types: deferred_types, builtin_calls: builtin_calls, node_scopes: node_scopes, bindings: bindings, scopes: scopes, diagnostics: diagnostics, substitutions: substitutions, generic_parameters: generic_parameters, constraints: constraints, trait_types: trait_types, class_parents: class_parents, propagation: propagation, loop_values: loop_values, async_depth: c_async_depth, unsafe_depth: c_unsafe_depth, error: c_error, start: c_start, end: c_end, diagnostic_limit: c_diagnostic_limit, current_scope: c_current_scope, current_owner: c_current_owner, current_return: c_current_return, loop_depth: c_loop_depth, depth: c_depth, unit_type: c_unit_type, bool_type: c_bool_type, integer_type: c_integer_type, float_type: c_float_type, char_type: c_char_type, str_type: c_str_type, never_type: c_never_type, error_type: c_error_type };
     let ownership = ShOwnership { diagnostics: owned_diagnostics, actions: owned_actions, action_paths: owned_action_paths, paths: owned_paths, state: owned_state, loans: owned_loans, loan_parents: owned_loan_parents, access_mode: owned_access_mode, last_uses: owned_last_uses, loops: owned_loops, definitions: owned_definitions, contracts: owned_contracts, projection_context: owned_projection_context, try_scopes: owned_try_scopes, error: owned_error, start: owned_start, end: owned_end, limit: owned_limit, function: owned_function, scope: owned_scope, flow: owned_flow, depth: owned_depth };
     let mut hir = ShHir { schema: schema, target: target, runtime_abi: abi, pointer_width: pointer, limit: limit, source: source, ast: ShAst { words: ast_words, edges: ast_edges, root: root }, checked: checked, ownership: ownership, origins: origins, error: if reader.error != 0 { reader.error; } else { hir_error; }, start: hir_start, end: hir_end };
     if hir.error == 0 { hir.error = sh_hir_validate(&hir); };
@@ -552,7 +574,9 @@ def sh_hir_input_budget(text: &String, ast: &ShAst, checked: &ShChecked, ownersh
     if maximum < 0 or maximum > 4000000 { return 5501; };
     if limit < 0 or limit > 100000 { return 5501; };
     if checked.types.limit < 0 or checked.types.limit > 1000000 or checked.symbols.limit < 0 or checked.symbols.limit > 1000000 or sh_type_count(&checked.types) > limit or sh_symbol_count(&checked.symbols) > limit or text.len() > limit * 128 or ownership.limit < 1 or ownership.limit > 1000000 { return 5501; };
-    let mut total = 78;
+    let mut total = 91;
+    let factory_budget = sh_factory_wire_payload(&checked.factory);
+    if factory_budget < 0 or not sh_ho_add_budget(&mut total, factory_budget, maximum) { return 5501; };
     let source_utf8 = sh_ho_text_count(text);
     if not source_utf8.is_ok() { return source_utf8.error; };
     if not sh_ho_add_budget(&mut total, source_utf8.value, maximum) { return 5501; };
@@ -618,6 +642,7 @@ def sh_hir_ownership_copy(input: &ShOwnership, limit: i64, error: &mut i64) -> S
 }
 
 def sh_hir_checked_equal(left: &ShChecked, right: &ShChecked) -> bool {
+    if not sh_factory_source_equal(&left.factory, &right.factory) { return false; };
     if left.types.limit != right.types.limit or not sh_o_equal(&left.types.words, &right.types.words) or not sh_o_equal(&left.types.arguments, &right.types.arguments) { return false; };
     if left.symbols.limit != right.symbols.limit or sh_symbol_count(&left.symbols) != sh_symbol_count(&right.symbols) { return false; };
     let mut symbol = 0;
@@ -694,6 +719,7 @@ def sh_hir_lift_modules(graph: &ShModules, analyzed: &ShModuleChecked, actual_ow
     let mut failed = sh_hir_empty(limit);
     if limit < 0 or limit > 100000 { failed.error = 5501; return failed; };
     if graph.error != 0 or analyzed.error != 0 or analyzed.front.error != 0 or analyzed.checked.error != 0 { failed.error = 5509; return failed; };
+    if not sh_factory_modules_bound(graph, analyzed) { failed.error = 5509; return failed; };
     let owner_words = sh_hir_ownership_word_count(actual_ownership);
     if not owner_words.is_ok() { failed.error = owner_words.error; return failed; };
     let input_budget = sh_hir_input_budget(&analyzed.front.expanded.text, &analyzed.front.parsed.ast, &analyzed.checked, actual_ownership, input, limit, owner_words.value + 1, 4000000);
@@ -720,13 +746,14 @@ def sh_hir_lift_modules(graph: &ShModules, analyzed: &ShModuleChecked, actual_ow
     let copied_ownership = sh_hir_ownership_copy(actual_ownership, limit, &mut error);
     let mut copied_origins = sh_hir_origins_clone(input, 4000000);
     copied_origins.module_input = witness.words;
-    let mut hir = ShHir { schema: 6, target: 1, runtime_abi: 1, pointer_width: 64, limit: limit, source: copied_source.value, ast: ShAst { words: copied_ast_words, edges: copied_ast_edges, root: analyzed.front.parsed.ast.root }, checked: copied_checked, ownership: copied_ownership, origins: copied_origins, error: error, start: 0, end: 0 };
+    let mut hir = ShHir { schema: 7, target: 1, runtime_abi: 1, pointer_width: 64, limit: limit, source: copied_source.value, ast: ShAst { words: copied_ast_words, edges: copied_ast_edges, root: analyzed.front.parsed.ast.root }, checked: copied_checked, ownership: copied_ownership, origins: copied_origins, error: error, start: 0, end: 0 };
     if hir.error == 0 { hir.error = sh_hir_validate(&hir); };
     hir;
 }
 
 def sh_hir_validate_modules(hir: &ShHir, graph: &ShModules, analyzed: &ShModuleChecked, actual_ownership: &ShOwnership, identity: &str, digest: &str, prototype: &str, option_identity: &str, option_digest: &str) -> i64 {
     let structural = sh_hir_validate(hir);
+    if not sh_factory_modules_bound(graph, analyzed) { return 5509; };
     if structural != 0 { return structural; };
     if hir.source.as_str() != analyzed.front.expanded.text.as_str() or hir.ast.root != analyzed.front.parsed.ast.root or not sh_o_equal(&hir.ast.words, &analyzed.front.parsed.ast.words) or not sh_o_equal(&hir.ast.edges, &analyzed.front.parsed.ast.edges) or not sh_hir_checked_equal(&hir.checked, &analyzed.checked) or not sh_hir_ownership_equal(&hir.ownership, actual_ownership) { return 5509; };
     if hir.origins.present == 0 and sh_hir_origins_module_candidate_site(graph, analyzed) >= 0 { return 5008; };
@@ -803,4 +830,67 @@ def sh_hir_ownership_input(input: &ShOwnership) -> ShHirOriginsImage {
     sh_ho_put(&mut output, input.flow, 4000000);
     sh_ho_put(&mut output, input.depth, 4000000);
     output;
+}
+
+def sh_factory_wire_payload(factory: &ShFactorySource) -> i64 {
+    let a = sh_ho_text_count(&factory.identity);
+    let b = sh_ho_text_count(&factory.digest);
+    let c = sh_ho_text_count(&factory.source);
+    let d = sh_ho_text_count(&factory.anchor);
+    if not a.is_ok() or not b.is_ok() or not c.is_ok() or not d.is_ok() or factory.records.len() > 24 { return -1; };
+    a.value + b.value + c.value + d.value + factory.records.len();
+}
+
+def sh_hir_factory_witness(hir: &ShHir) -> bool {
+    let factory = &hir.checked.factory;
+    if factory.profile == 0 { return true; };
+    if hir.origins.module_input.len() == 0 { return false; };
+    let mut error = 0;
+    let copy = sh_ho_words(&hir.origins.module_input, 4000000, &mut error);
+    let mut reader = ShHirOriginsReader { words: copy, position: 0, maximum: 4000000, error: error };
+    if sh_ho_take(&mut reader) != 1 { return false; };
+    let mut i = 0;
+    while i < 9 { sh_ho_take(&mut reader); i = i + 1; };
+    let library = sh_ho_take_text(&mut reader, 16777216);
+    let joined = sh_ho_take_text(&mut reader, 16777216);
+    if library.len() == 0 { return false; };
+    let count = sh_ho_take(&mut reader);
+    if count < 1 or count > 1024 or factory.module >= count { return false; };
+    i = 0;
+    while i < count { let source = sh_ho_take(&mut reader); let standard = sh_ho_take(&mut reader); let path = sh_ho_take_text(&mut reader, 32768); let identity = sh_ho_take_text(&mut reader, 4096); let physical_identity = sh_ho_take_text(&mut reader, 4096); let physical_path = sh_ho_take_text(&mut reader, 32768); let digest = sh_ho_take_text(&mut reader, 64); let length = sh_ho_take(&mut reader); if i == factory.module and (source != i or standard != 1 or identity.as_str() != factory.identity.as_str() or physical_identity.as_str() != factory.identity.as_str() or path.as_str() != physical_path.as_str() or digest.as_str() != factory.digest.as_str() or length != factory.source.len()) { return false; }; i = i + 1; };
+    if sh_ho_take(&mut reader) != count { return false; };
+    i = 0;
+    while i < count { let source = sh_ho_take_text(&mut reader, 16777216); if i == factory.module and source.as_str() != factory.source.as_str() { return false; }; i = i + 1; };
+    let states = sh_ho_take_vector(&mut reader, 1024);
+    let edges = sh_ho_take_vector(&mut reader, 4000000);
+    let order = sh_ho_take_vector(&mut reader, 1024);
+    let local_order = sh_ho_take_vector(&mut reader, 1024);
+    if states.len() != count or order.len() != count or edges.len() % 4 != 0 or local_order.len() > count { return false; };
+    let symbol_limit = sh_ho_take(&mut reader);
+    let symbols = sh_ho_take(&mut reader);
+    if symbol_limit < 0 or symbol_limit > 1000000 or symbols < 0 or symbols > 1024 { return false; };
+    let mut file_symbol = -1;
+    i = 0;
+    while i < symbols { let name = sh_ho_take_text(&mut reader, 4096); if name.as_str() == "file" { if file_symbol >= 0 { return false; }; file_symbol = i; }; i = i + 1; };
+    let requests = sh_ho_take_vector(&mut reader, 4000000);
+    let standard_ids = sh_ho_take_vector(&mut reader, 1024);
+    let mapping = sh_ho_take_vector(&mut reader, 5120);
+    if file_symbol < 0 or standard_ids.get(file_symbol).unwrap_or(-1) != factory.module or requests.len() % 4 != 0 or mapping.len() != count * 5 { return false; };
+    let mut found = false;
+    i = 0;
+    while i < mapping.len() { if mapping.get(i + 2).unwrap_or(-1) == factory.module { if found or mapping.get(i + 3).unwrap_or(-1) != 0 or mapping.get(i + 4).unwrap_or(-1) != factory.source.len() { return false; }; let source = joined.get(mapping.get(i).unwrap_or(-1), mapping.get(i + 1).unwrap_or(-1)); if not source.is_ok() or source.value.as_str() != factory.source.as_str() { return false; }; found = true; }; i = i + 5; };
+    reader.error == 0 and found;
+}
+
+def sh_factory_modules_bound(graph: &ShModules, analyzed: &ShModuleChecked) -> bool {
+    let expected = sh_module_factory_source(graph, &analyzed.front);
+    let actual = &analyzed.checked.factory;
+    expected.schema == actual.schema and expected.profile == actual.profile and expected.module == actual.module and expected.expanded_start == actual.expanded_start and expected.identity.as_str() == actual.identity.as_str() and expected.digest.as_str() == actual.digest.as_str() and expected.source.as_str() == actual.source.as_str() and expected.anchor.as_str() == actual.anchor.as_str();
+}
+
+def sh_hir_lift_factory_modules(graph: &ShModules, analyzed: &ShModuleChecked, limit: i64) -> ShHir {
+    if not sh_factory_modules_bound(graph, analyzed) { let mut failed = sh_hir_empty(limit); failed.error = 5509; return failed; };
+    let ownership = sh_check_ownership(&analyzed.front.expanded.text, &analyzed.front.parsed.ast, &analyzed.checked, 100);
+    let absent = sh_hir_origins_capture_absent(graph, analyzed, limit);
+    sh_hir_lift_modules(graph, analyzed, &ownership, &absent, "", "", "", "", "", limit);
 }

@@ -1,0 +1,558 @@
+import selfhost_hir;
+
+import std::assert;
+
+import std::io;
+
+def factory_round() -> i64 {
+    let empty = string_new();
+    let entry = factory_fixture("main42.sg");
+    let library = factory_fixture("stdlib");
+    let graph = sh_modules_load(entry.as_str(), library.as_str(), &empty, 128, 16777216);
+    let analyzed = sh_modules_check(&graph, 100000, 1000);
+    assert_eq_i64(analyzed.error, 0, "factory", 1);
+    let mut hir = sh_hir_lift_factory_modules(&graph, &analyzed, 100000);
+    assert_eq_i64(hir.error, 0, "factory", 2);
+    assert_eq_i64(sh_hir_validate_modules(&hir, &graph, &analyzed, &hir.ownership, "", "", "", "", ""), 0, "factory", 3);
+    let image = sh_hir_encode(&hir, 4000000);
+    assert_eq_i64(image.error, 0, "factory", 4);
+    let exact = sh_hir_encode(&hir, image.words.len());
+    assert_eq_i64(exact.error, 0, "factory", 5);
+    let short = sh_hir_encode(&hir, image.words.len() - 1);
+    assert_true(short.error != 0, "factory", 6);
+    let roundtrip = sh_hir_decode(&image.words, 4000000);
+    assert_eq_i64(roundtrip.error, 0, "factory", 7);
+    assert_true(sh_hir_checked_equal(&hir.checked, &roundtrip.checked), "factory", 8);
+    let clone = sh_hir_clone(&hir, 4000000);
+    assert_eq_i64(clone.error, 0, "factory", 9);
+    assert_true(clone.checked.factory.records.handle != hir.checked.factory.records.handle and clone.checked.factory.source.handle != hir.checked.factory.source.handle, "factory", 10);
+    image.words.set(1, 6);
+    let old = sh_hir_decode(&image.words, 4000000);
+    assert_true(old.error != 0, "factory", 11);
+    image.words.set(1, 7);
+    let mut i = 0;
+    while i < 24 { let value = hir.checked.factory.records.get(i).unwrap_or(-1); hir.checked.factory.records.set(i, value + 1); assert_true(sh_hir_validate(&hir) != 0, "factory-word", i); hir.checked.factory.records.set(i, value); i = i + 1; };
+    println("24 fact mutations rejected");
+    let tail = hir.checked.factory.records.pop().unwrap_or(-1);
+    assert_true(sh_hir_validate(&hir) != 0, "factory", 12);
+    hir.checked.factory.records.push(tail);
+    hir.checked.factory.records.push(1);
+    assert_true(sh_hir_validate(&hir) != 0, "factory", 13);
+    hir.checked.factory.records.pop();
+    let declaration = hir.checked.factory.records.get(2).unwrap_or(-1);
+    let kind = hir.ast.words.get(declaration * 7).unwrap_or(-1);
+    hir.ast.words.set(declaration * 7, 21);
+    assert_true(sh_hir_validate(&hir) != 0, "factory", 14);
+    hir.ast.words.set(declaration * 7, kind);
+    hir.ast.words.set(declaration * 7 + 4, 4);
+    assert_true(sh_hir_validate(&hir) != 0, "factory", 15);
+    hir.ast.words.set(declaration * 7 + 4, 0);
+    let identity = hir.checked.factory.identity.clone().value;
+    hir.checked.factory.identity = string_from_str("invented-physical-identity").value;
+    hir.checked.factory.anchor = sh_factory_source_anchor(&hir.checked.factory).value;
+    assert_true(sh_hir_validate(&hir) != 0, "factory", 16);
+    hir.checked.factory.identity = identity;
+    hir.checked.factory.anchor = sh_factory_source_anchor(&hir.checked.factory).value;
+    assert_eq_i64(sh_hir_validate(&hir), 0, "factory", 17);
+    hir.checked.factory.schema = 2;
+    assert_true(sh_hir_validate(&hir) != 0, "factory-source", 1);
+    hir.checked.factory.schema = 1;
+    hir.checked.factory.profile = 0;
+    assert_true(sh_hir_validate(&hir) != 0, "factory-source", 2);
+    hir.checked.factory.profile = 1;
+    let module = hir.checked.factory.module;
+    hir.checked.factory.module = module + 1;
+    hir.checked.factory.anchor = sh_factory_source_anchor(&hir.checked.factory).value;
+    assert_true(sh_hir_validate(&hir) != 0, "factory-source", 3);
+    hir.checked.factory.module = module;
+    let start = hir.checked.factory.expanded_start;
+    hir.checked.factory.expanded_start = start + 1;
+    hir.checked.factory.anchor = sh_factory_source_anchor(&hir.checked.factory).value;
+    assert_true(sh_hir_validate(&hir) != 0, "factory-source", 4);
+    hir.checked.factory.expanded_start = start;
+    hir.checked.factory.anchor = sh_factory_source_anchor(&hir.checked.factory).value;
+    let digest = hir.checked.factory.digest.clone().value;
+    hir.checked.factory.digest = string_from_str("wrong").value;
+    assert_true(sh_hir_validate(&hir) != 0, "factory-source", 5);
+    hir.checked.factory.digest = digest;
+    let content = hir.checked.factory.source.clone().value;
+    hir.checked.factory.source = string_from_str("wrong").value;
+    assert_true(sh_hir_validate(&hir) != 0, "factory-source", 6);
+    hir.checked.factory.source = content;
+    hir.checked.factory.anchor = string_from_str("wrong").value;
+    assert_true(sh_hir_validate(&hir) != 0, "factory-source", 7);
+    hir.checked.factory.anchor = sh_factory_source_anchor(&hir.checked.factory).value;
+    let original_record = analyzed.checked.factory.records.get(0).unwrap_or(-1);
+    analyzed.checked.factory.records.set(0, 99);
+    assert_eq_i64(sh_hir_validate(&hir), 0, "factory-owned", 1);
+    assert_true(sh_hir_validate_modules(&hir, &graph, &analyzed, &hir.ownership, "", "", "", "", "") != 0, "factory-owned", 2);
+    analyzed.checked.factory.records.set(0, original_record);
+    assert_eq_i64(sh_hir_validate_modules(&hir, &graph, &analyzed, &hir.ownership, "", "", "", "", ""), 0, "factory-owned", 3);
+    let rejected = sh_hir_lift(&analyzed.front.expanded.text, &analyzed.front.parsed.ast, &analyzed.checked, 100000);
+    assert_true(rejected.error != 0, "factory", 18);
+    println("HIR7 roundtrip, clone, bounds and provenance checks passed");
+    42;
+}
+
+extern "C" {
+    fn sengoo_string_live_handle_count() -> i64;
+    fn sengoo_buffer_live_handle_count() -> i64;
+    fn sengoo_opaque_live_handle_count() -> i64;
+    fn sengoo_file_snapshot_live_handle_count() -> i64;
+    fn sengoo_file_snapshot_live_bytes() -> i64;
+    fn sengoo_async_factory_test_handle_count() -> i64;
+}
+
+def joint_factory_hir() -> i64 {
+    let strings = sengoo_string_live_handle_count();
+    let buffers = sengoo_buffer_live_handle_count();
+    let opaque = sengoo_opaque_live_handle_count();
+    let snapshots = sengoo_file_snapshot_live_handle_count();
+    let bytes = sengoo_file_snapshot_live_bytes();
+    let handles = sengoo_async_factory_test_handle_count();
+    let mut round = 0;
+    while round < 3 { assert_eq_i64(factory_round(), 42, "resource", 0); assert_eq_i64(sengoo_string_live_handle_count(), strings, "resource", 1); assert_eq_i64(sengoo_buffer_live_handle_count(), buffers, "resource", 2); assert_eq_i64(sengoo_opaque_live_handle_count(), opaque, "resource", 3); assert_eq_i64(sengoo_file_snapshot_live_handle_count(), snapshots, "resource", 4); assert_eq_i64(sengoo_file_snapshot_live_bytes(), bytes, "resource", 5); assert_eq_i64(sengoo_async_factory_test_handle_count(), handles, "resource", 6); round = round + 1; };
+    42;
+}
+
+import selfhost_hir;
+
+import std::assert;
+
+def forged_graph() -> i64 {
+    let empty = string_new();
+    let entry = factory_fixture("same-bytes-nonstandard-module.sg");
+    let library = factory_fixture("stdlib");
+    let graph = sh_modules_load(entry.as_str(), library.as_str(), &empty, 128, 16777216);
+    assert_eq_i64(graph.error, 0, "graph-control", 1);
+    let before = sh_modules_check(&graph, 100000, 100);
+    assert_true(before.error != 0 and before.checked.factory.profile == 0, "graph-control", 2);
+    let mut local = -1;
+    let mut i = 0;
+    while i < graph.units.len() { let digest = sh_compiler_snapshot_string(&graph.snapshots, graph.units.get(i).snapshot, 0); if digest.is_ok() and digest.value.as_str() == sh_factory_profile_digest(1) { local = i; }; i = i + 1; };
+    assert_true(local >= 0 and graph.units.get(local).standard == 0, "graph-control", 3);
+    let unit = ShModuleUnit { snapshot: graph.units.get(local).snapshot, path: graph.units.get(local).path.clone().value, identity: graph.units.get(local).identity.clone().value, source: local, standard: 1 };
+    graph.units.set(local, unit);
+    let name = string_from_str("file").value;
+    let symbol = sh_intern(&graph.requested, &name).value;
+    while graph.standard_ids.len() <= symbol { graph.standard_ids.push(-1); };
+    graph.standard_ids.set(symbol, local);
+    graph.requests.push(symbol);
+    graph.requests.push(graph.root);
+    graph.requests.push(0);
+    graph.requests.push(15);
+    let after = sh_modules_check(&graph, 100000, 100);
+    println(before.error);
+    println(before.checked.factory.profile);
+    println(after.error);
+    println(after.checked.factory.profile);
+    println(after.checked.factory.records.len());
+    assert_true(after.error != 0 and after.checked.factory.profile == 0, "selection-reject", 1);
+    println(sh_factory_modules_bound(&graph, &after));
+    assert_true(not sh_factory_selected_request(&graph, local, "file", 0), "selection", 1);
+    42;
+}
+
+def selected(entry: &str, library: &str) {
+    let empty = string_new();
+    let graph = sh_modules_load(entry, library, &empty, 128, 16777216);
+    if graph.error != 0 { println(entry); println(graph.error); };
+    assert_eq_i64(graph.error, 0, "selection-positive", 1);
+    let file = string_from_str("file").value;
+    let symbol = sh_module_symbol(&graph.requested, &file);
+    let module = graph.standard_ids.get(symbol).unwrap_or(-1);
+    if not sh_factory_selected_request(&graph, module, "file", 0) { println(entry); println(library); };
+    assert_true(sh_factory_selected_request(&graph, module, "file", 0), "selection-positive", 2);
+    ();
+}
+
+def positive_cases() -> i64 {
+    assert_eq_i64(forged_graph(), 42, "selection", 2);
+    let entry = factory_fixture("main42.sg");
+    let group = factory_fixture("group.sg");
+    let stream = factory_fixture("stream.sg");
+    let library = factory_fixture("stdlib");
+    let relocated = factory_fixture("relocated standard 世界");
+    selected(entry.as_str(), library.as_str());
+    selected(group.as_str(), library.as_str());
+    selected(stream.as_str(), library.as_str());
+    selected(entry.as_str(), relocated.as_str());
+    let uppercase = str_to_ascii_upper(library.as_str()).value;
+    let relative = factory_arg(2).value;
+    let trailing = library.clone().value;
+    trailing.push_str("/");
+    let unicode_exact = factory_fixture("stdlib-éя");
+    let unicode_case = factory_fixture("stdlib-ÉЯ");
+    path_case("ascii-case", entry.as_str(), uppercase.as_str());
+    path_case("relative", entry.as_str(), relative.as_str());
+    path_case("trailing", entry.as_str(), trailing.as_str());
+    path_case("unicode-exact", entry.as_str(), unicode_exact.as_str());
+    path_case("unicode-case", entry.as_str(), unicode_case.as_str());
+    println("selected source requests passed");
+    42;
+}
+
+def path_case(label: &str, entry: &str, library: &str) {
+    let empty = string_new();
+    let graph = sh_modules_load(entry, library, &empty, 128, 16777216);
+    println(label);
+    println(graph.error);
+    assert_eq_i64(graph.error, 0, "path-cases", 1);
+    let file = string_from_str("file").value;
+    let symbol = sh_module_symbol(&graph.requested, &file);
+    let module = graph.standard_ids.get(symbol).unwrap_or(-1);
+    assert_true(sh_factory_selected_request(&graph, module, "file", 0), "path-cases", 2);
+    println(true);
+    ();
+}
+
+def mark_standard(graph: &ShModules, module: i64) {
+    let unit = ShModuleUnit { snapshot: graph.units.get(module).snapshot, path: graph.units.get(module).path.clone().value, identity: graph.units.get(module).identity.clone().value, source: module, standard: 1 };
+    graph.units.set(module, unit);
+    ();
+}
+
+def request_id(graph: &ShModules, name: &str, module: i64) -> i64 {
+    let text = string_from_str(name).value;
+    let symbol = sh_intern(&graph.requested, &text).value;
+    while graph.standard_ids.len() <= symbol { graph.standard_ids.push(-1); };
+    graph.standard_ids.set(symbol, module);
+    symbol;
+}
+
+def request_row(graph: &ShModules, symbol: i64, importer: i64, start: i64, end: i64) {
+    graph.requests.push(symbol);
+    graph.requests.push(importer);
+    graph.requests.push(start);
+    graph.requests.push(end);
+    ();
+}
+
+def controls(mode: i64) {
+    let path = factory_fixture("selection-");
+    path.push_str(if mode == 0 { "realstd-shadow"; } else if mode == 1 { "aliased-file"; } else { "aliased-stream"; });
+    path.push_str(".sg");
+    let library = factory_fixture("stdlib");
+    let config = string_from_str("alias_file=").value;
+    config.push_str(library.as_str());
+    config.push_str("/file.sg;alias_stream=");
+    config.push_str(library.as_str());
+    config.push_str("/stream.sg");
+    let graph = sh_modules_load(path.as_str(), library.as_str(), &config, 128, 16777216);
+    assert_eq_i64(graph.error, 0, "source-controls", 1);
+    let mut file = -1;
+    let mut stream = -1;
+    let mut i = 0;
+    while i < graph.units.len() { let unit = graph.units.get(i); if mode == 0 { if unit.standard == 0 and i != graph.root { file = i; }; } else { if sh_factory_selected_path(&graph, i, "file") { file = i; }; if sh_factory_selected_path(&graph, i, "stream") { stream = i; }; }; i = i + 1; };
+    assert_true(file >= 0, "source-controls", 2);
+    mark_standard(&graph, file);
+    let symbol = request_id(&graph, "file", file);
+    if mode == 0 { assert_true(not sh_factory_selected_path(&graph, file, "file"), "source-controls", 3); } else if mode == 1 { request_row(&graph, symbol, graph.root, 0, 15); assert_true(sh_factory_selected_path(&graph, file, "file"), "source-controls", 4); } else { assert_true(stream >= 0, "source-controls", 5); mark_standard(&graph, stream); let ss = request_id(&graph, "stream", stream); request_row(&graph, ss, graph.root, 0, 15); request_row(&graph, symbol, stream, 0, 0); assert_true(sh_factory_selected_path(&graph, file, "file") and sh_factory_selected_path(&graph, stream, "stream"), "source-controls", 6); };
+    assert_true(not sh_factory_selected_request(&graph, file, "file", 0), "source-controls", 7);
+    println(mode);
+    println("coherent source forgery rejected");
+    ();
+}
+
+def joint_source_selection() -> i64 {
+    assert_eq_i64(positive_cases(), 42, "selection", 20);
+    controls(0);
+    controls(1);
+    controls(2);
+    42;
+}
+
+import selfhost_borrow;
+
+import std::assert;
+
+def contract(source: &str, accepted: bool) {
+    let text = string_from_str(source).value;
+    let parsed = sh_parse(&text, 0, 10000);
+    assert_eq_i64(parsed.error, 0, "observer", 1);
+    let checked = sh_check(&text, &parsed.ast, 100);
+    let mut i = 0;
+    let mut seen = 0;
+    while i < sh_binding_count(&checked) { if sh_binding_word(&checked, i, 2) == 2 and sh_s_factory_named(&checked, i, "sengoo_async_file_read_into") { assert_true(sh_b_async_file_read_contract(&checked, &parsed.ast, i, 1) == accepted, "observer", 2); assert_true(not sh_b_async_file_read_contract(&checked, &parsed.ast, i, 0), "observer", 3); assert_true(not sh_b_async_file_read_contract(&checked, &parsed.ast, i, 2), "observer", 4); let ty = sh_binding_word(&checked, i, 3); checked.types.words.set(ty * 6 + 2, 1); assert_true(not sh_b_async_file_read_contract(&checked, &parsed.ast, i, 1), "observer", 5); checked.types.words.set(ty * 6 + 2, 0); let original_flags = sh_binding_word(&checked, i, 5); if sh_s_child_kind(&parsed.ast, sh_binding_word(&checked, i, 4), 40) >= 0 { sh_s_binding_set(&checked, i, 5, 8); assert_true(not sh_b_async_file_read_contract(&checked, &parsed.ast, i, 1), "observer", 7); sh_s_binding_set(&checked, i, 5, original_flags); (); }; seen = seen + 1; }; i = i + 1; };
+    assert_eq_i64(seen, 1, "observer", 6);
+    ();
+}
+
+def ownership(declaration: &str, body: &str, expected: i64) {
+    let source = string_from_str("struct Buffer{handle:i64} impl Drop for Buffer{def drop(&mut self){}} extern \"C\"{fn sengoo_ffi_buffer_ptr(value:i64)->i64;fn sengoo_ffi_buffer_len(value:i64)->i64;fn retain(value:i64)->i64;} ").value;
+    source.push_str(declaration);
+    source.push_str(" def wrapper(buffer:Buffer)->i64{");
+    source.push_str(body);
+    source.push_str("} def run(){let buffer=Buffer{handle:1};wrapper(buffer);wrapper(buffer);();}");
+    let parsed = sh_parse(&source, 0, 10000);
+    assert_eq_i64(parsed.error, 0, "observer-body", 1);
+    let checked = sh_check(&source, &parsed.ast, 100);
+    assert_eq_i64(checked.error, 0, "observer-body", 2);
+    let owned = sh_check_ownership(&source, &parsed.ast, &checked, 100);
+    if owned.error != expected { println(body); println(owned.error); };
+    assert_eq_i64(owned.error, expected, "observer-body", 3);
+    ();
+}
+
+def joint_observer() -> i64 {
+    contract("extern \"C\" {fn sengoo_async_file_read_into(h:i64,b:i64,n:i64)->i64;}", true);
+    contract("def sengoo_async_file_read_into(h:i64,b:i64,n:i64)->i64{n}", false);
+    contract("extern \"C\" {fn sengoo_async_file_read_into(h:i64,b:i64)->i64;}", false);
+    contract("extern \"C\" {fn sengoo_async_file_read_into(h:i64,b:i64,n:i64)->bool;}", false);
+    contract("extern \"C\" {fn sengoo_async_file_read_into(h:i64,b:u64,n:i64)->i64;}", false);
+    contract("extern \"C\" {fn sengoo_async_file_read_into(h:i64,b:i32,n:i64)->i64;}", false);
+    let valid = "extern \"C\"{fn sengoo_async_file_read_into(h:i64,b:i64,n:i64)->i64;}";
+    ownership(valid, "sengoo_async_file_read_into(0,sengoo_ffi_buffer_ptr(buffer.handle),sengoo_ffi_buffer_len(buffer.handle))", 0);
+    ownership(valid, "sengoo_async_file_read_into(sengoo_ffi_buffer_ptr(buffer.handle),0,0)", 6101);
+    ownership(valid, "sengoo_async_file_read_into(0,0,sengoo_ffi_buffer_ptr(buffer.handle))", 6101);
+    ownership(valid, "sengoo_async_file_read_into(0,sengoo_ffi_buffer_ptr(buffer.handle),0);sengoo_ffi_buffer_ptr(buffer.handle)", 6101);
+    ownership(valid, "sengoo_async_file_read_into(0,sengoo_ffi_buffer_ptr(buffer.handle),0);retain(sengoo_ffi_buffer_ptr(buffer.handle))", 6101);
+    ownership(valid, "let raw=sengoo_ffi_buffer_ptr(buffer.handle);retain(raw);sengoo_async_file_read_into(0,sengoo_ffi_buffer_ptr(buffer.handle),0)", 6101);
+    ownership("def sengoo_async_file_read_into(h:i64,b:i64,n:i64)->i64{b}", "sengoo_async_file_read_into(0,sengoo_ffi_buffer_ptr(buffer.handle),0)", 6101);
+    ownership("extern \"C\"{fn sengoo_async_file_read_into(h:i64,b:i64)->i64;}", "sengoo_async_file_read_into(0,sengoo_ffi_buffer_ptr(buffer.handle))", 6101);
+    42;
+}
+
+import selfhost_mir_lower;
+
+import std::assert;
+
+def joint_identity() -> i64 {
+    let empty = string_new();
+    let entry = factory_fixture("main42.sg");
+    let library = factory_fixture("stdlib");
+    let graph = sh_modules_load(entry.as_str(), library.as_str(), &empty, 128, 16777216);
+    let analyzed = sh_modules_check(&graph, 100000, 100);
+    assert_eq_i64(analyzed.error, 0, "identity-control", 1);
+    let mut hir = sh_hir_lift_factory_modules(&graph, &analyzed, 100000);
+    assert_eq_i64(hir.error, 0, "identity-control", 2);
+    let mut encoded = ShHirOriginsImage { words: vec_new_i64(), error: 0 };
+    sh_ho_put_text(&mut encoded, &hir.checked.factory.identity, 4096);
+    assert_eq_i64(encoded.error, 0, "identity-control", 3);
+    let mut i = 0;
+    let mut matches = 0;
+    while i + encoded.words.len() <= hir.origins.module_input.len() { let mut equal = true; let mut j = 0; while j < encoded.words.len() { if encoded.words.get(j).unwrap_or(-1) != hir.origins.module_input.get(i + j).unwrap_or(-1) { equal = false; }; j = j + 1; }; if equal { hir.origins.module_input.set(i + 2, 120); matches = matches + 1; }; i = i + 1; };
+    assert_eq_i64(matches, 2, "identity-control", 4);
+    let rest = hir.checked.factory.identity.get(1, hir.checked.factory.identity.len()).value;
+    let forged = string_from_str("x").value;
+    forged.push_str(rest.as_str());
+    hir.checked.factory.identity = forged;
+    hir.checked.factory.anchor = sh_factory_source_anchor(&hir.checked.factory).value;
+    let structural = sh_hir_validate(&hir);
+    let physical = sh_hir_validate_modules(&hir, &graph, &analyzed, &hir.ownership, "", "", "", "", "");
+    let lowered = sh_lower_hir(&hir, 100000);
+    println(structural);
+    println(physical);
+    println(lowered.error);
+    assert_true(physical != 0, "identity-control", 5);
+    assert_true(lowered.error != 0, "identity-control", 6);
+    42;
+}
+
+import selfhost_semantic_modules;
+
+import std::io;
+
+import std::args;
+
+def factory_arg(index: i64) -> Result<String, i64> {
+    let n = arg_len(index)?;
+    let b = ffi_buffer_new(n)?;
+    let c = arg_copy(index, b)?;
+    string_from_utf8(b, c);
+}
+
+def joint_semantic_probe() -> i64 {
+    let empty = string_new();
+    let entry = factory_arg(1);
+    let stdlib = factory_arg(2);
+    if not entry.is_ok() or not stdlib.is_ok() { return 64; };
+    let graph = sh_modules_load(entry.value.as_str(), stdlib.value.as_str(), &empty, 128, 16777216);
+    let analyzed = sh_modules_check(&graph, 100000, 1000);
+    println(graph.error);
+    println(analyzed.error);
+    println(analyzed.checked.factory.profile);
+    println(analyzed.checked.factory.records.len());
+    let mut i = 0;
+    while i < analyzed.checked.diagnostics.len() { let d = analyzed.checked.diagnostics.get(i); println(d.code); println(d.start); i = i + 1; };
+    if analyzed.error != 0 { return 65; };
+    if not sh_s_factory_valid(&analyzed.checked, &analyzed.front.expanded.text, &analyzed.front.parsed.ast) { return 66; };
+    42;
+}
+
+import selfhost_native_driver;
+
+import std::args;
+
+import std::io;
+
+def joint_native_main() -> i64 {
+    if args_len() < 2 or args_len() > 3 { io_stderr_write("usage: SG native development preview INPUT OUTPUT.obj [--wrap]\n"); return 64; };
+    let input = sh_nc_argument(0);
+    let output = sh_nc_argument(1);
+    if not input.is_ok() or not output.is_ok() { return 64; };
+    if args_len() == 3 { let mode = sh_nc_argument(2); if not mode.is_ok() or not sh_s_text_equal(&mode.value, "--wrap") { return 64; }; };
+    let result = sh_nc_file(input.value.as_str(), output.value.as_str(), args_len() == 2);
+    if not result.is_ok() { sh_nc_error(result.error, 0, 0, "input-output"); return 66; };
+    result.value;
+}
+
+import std::assert;
+
+extern "C" {
+}
+
+def print_probe_bad_binding(hir: &ShHir, call: i64, field: i64) {
+    let bad = sh_hir_clone(hir, 200000);
+    let binding = sh_node_binding(&bad.checked, call);
+    let callee = sh_ast_child(&bad.ast, call, 0);
+    let offset = binding * 8 + field;
+    let old = bad.checked.bindings.get(offset).unwrap_or(-1);
+    bad.checked.bindings.set(offset, if field == 0 { old + 1; } else { if field == 1 { 1; } else { if field == 2 { 2; } else { if field == 3 { bad.checked.unit_type; } else { if field == 4 { callee; } else { if field == 5 { 0; } else { if field == 6 { 0; } else { 2; }; }; }; }; }; }; });
+    assert_true(sh_hir_validate(&bad) != 0, "print-binding", field);
+    let rejected = sh_lower_hir(&bad, 1000);
+    assert_true(rejected.error != 0, "print-binding-lower", field);
+    ();
+}
+
+def print_probe_bad_fact(hir: &ShHir, call: i64, i: i64) {
+    let bad = sh_hir_clone(hir, 200000);
+    let callee = sh_ast_child(&bad.ast, call, 0);
+    let argument = sh_ast_child(&bad.ast, call, 1);
+    let binding = sh_node_binding(&bad.checked, call);
+    let signature = sh_node_callable_type(&bad.checked, call);
+    if i == 0 { bad.checked.resolution.set(call, binding + 1); (); };
+    if i == 1 { bad.checked.resolution.set(callee, binding + 1); (); };
+    if i == 2 { bad.checked.call_types.set(call, sh_binding_word(&bad.checked, binding, 3)); (); };
+    if i == 3 { bad.checked.node_types.set(argument, bad.checked.bool_type); (); };
+    if i == 4 { bad.checked.node_types.set(call, bad.checked.integer_type); (); };
+    if i == 5 { bad.checked.types.words.set(signature * 6 + 1, 1); (); };
+    if i == 6 { bad.checked.types.words.set(signature * 6 + 2, 1); (); };
+    if i == 7 { bad.ast.words.set(callee * 7, 11); (); };
+    if i == 8 { bad.source.clear(); bad.source.push_str("def sh_print_formal_hir()->i64{prant(42);42}"); (); };
+    if i == 9 { let wrong = sh_s_unary_type(&bad.checked, 6, 0, 0, bad.checked.str_type); let types = vec_new_i64(); types.push(wrong); types.push(bad.checked.unit_type); let callable = sh_s_type(&bad.checked, 11, 0, 0, -1, &types); bad.checked.call_types.set(call, callable); bad.checked.node_types.set(callee, callable); bad.checked.node_types.set(argument, wrong); (); };
+    if i == 10 { let wrong = bad.checked.integer_type; let types = vec_new_i64(); types.push(wrong); types.push(bad.checked.unit_type); let callable = sh_s_type(&bad.checked, 11, 0, 0, -1, &types); bad.checked.call_types.set(call, callable); bad.checked.node_types.set(callee, callable); bad.checked.node_types.set(argument, wrong); (); };
+    if i == 11 { let mut target = 0; while target < sh_binding_count(&bad.checked) { if sh_binding_word(&bad.checked, target, 2) == 13 and sh_binding_word(&bad.checked, target, 7) == 3 { break; }; target = target + 1; }; bad.checked.resolution.set(call, target); bad.checked.resolution.set(callee, target); bad.checked.resolution.set(sh_ast_child(&bad.ast, callee, 0), target); (); };
+    if i == 12 { let mut target = 0; while target < sh_binding_count(&bad.checked) { if sh_binding_word(&bad.checked, target, 2) == 13 and sh_binding_word(&bad.checked, target, 7) == 3 { break; }; target = target + 1; }; let old_symbol = sh_binding_word(&bad.checked, binding, 0); let other_symbol = sh_binding_word(&bad.checked, target, 0); bad.checked.bindings.set(binding * 8, other_symbol); bad.checked.bindings.set(binding * 8 + 7, 3); bad.checked.bindings.set(target * 8, old_symbol); bad.checked.bindings.set(target * 8 + 7, 1); (); };
+    assert_true(sh_hir_validate(&bad) != 0, "print-fact", i);
+    let rejected = sh_lower_hir(&bad, 1000);
+    assert_true(rejected.error != 0, "print-fact-lower", i);
+    ();
+}
+
+def print_probe_text_origin() {
+    let input = string_from_str("def message(text:&str){print(text);} def sh_print_formal_hir()->i64{42}");
+    assert_true(input.is_ok(), "print-text-input", 1);
+    let parsed = sh_parse(&input.value, 0, 1000);
+    let checked = sh_check(&input.value, &parsed.ast, 100);
+    let hir = sh_hir_lift(&input.value, &parsed.ast, &checked, 1000);
+    assert_eq_i64(hir.error, 0, "print-text", 1);
+    let mut call = -1;
+    let mut i = 0;
+    while i < sh_ast_count(&hir.ast) { if sh_ast_word(&hir.ast, i, 0) == 53 { call = i; }; i = i + 1; };
+    assert_true(call >= 0, "print-text", 2);
+    print_probe_bad_fact(&hir, call, 10);
+}
+
+def print_probe_scope() -> i64 {
+    let input = string_from_str("def sh_print_formal_hir()->i64{print(42);42}");
+    assert_true(input.is_ok(), "print-input", 1);
+    let parsed = sh_parse(&input.value, 0, 1000);
+    let checked = sh_check(&input.value, &parsed.ast, 100);
+    assert_eq_i64(checked.error, 0, "print-probe", 1);
+    let hir = sh_hir_lift(&input.value, &parsed.ast, &checked, 1000);
+    assert_eq_i64(hir.error, 0, "print-probe", 2);
+    let mut call = -1;
+    let mut i = 0;
+    while i < sh_ast_count(&hir.ast) { if sh_ast_word(&hir.ast, i, 0) == 53 { call = i; }; i = i + 1; };
+    assert_true(call >= 0, "print-probe", 3);
+    let image = sh_hir_encode(&hir, 200000);
+    assert_eq_i64(image.error, 0, "print-probe", 4);
+    let decoded = sh_hir_decode(&image.words, 200000);
+    assert_eq_i64(decoded.error, 0, "print-probe", 5);
+    let copy = sh_hir_clone(&hir, 200000);
+    assert_eq_i64(copy.error, 0, "print-probe", 6);
+    let good = sh_lower_hir(&copy, 1000);
+    assert_eq_i64(good.error, 0, "print-probe", 7);
+    let mut field = 0;
+    while field < 8 { print_probe_bad_binding(&hir, call, field); field = field + 1; };
+    i = 0;
+    while i < 13 { if i != 10 { print_probe_bad_fact(&hir, call, i); }; i = i + 1; };
+    print_probe_text_origin();
+    42;
+}
+
+def sh_print_formal_hir() -> i64 {
+    let mut i = 0;
+    while i < 3 { let strings = sengoo_string_live_handle_count(); let buffers = sengoo_buffer_live_handle_count(); let opaque = sengoo_opaque_live_handle_count(); assert_eq_i64(print_probe_scope(), 42, "print-scope", 1); assert_eq_i64(sengoo_string_live_handle_count(), strings, "print-resource", 1); assert_eq_i64(sengoo_buffer_live_handle_count(), buffers, "print-resource", 2); assert_eq_i64(sengoo_opaque_live_handle_count(), opaque, "print-resource", 3); i = i + 1; };
+    42;
+}
+
+def main() -> i64 {
+    if args_len() > 0 { let mode = sh_nc_argument(0); if mode.is_ok() { if mode.value.as_str() == "--trace-self-input" { return factory_trace_main(); }; if mode.value.as_str() == "--factory-hir" { return joint_factory_hir(); }; if mode.value.as_str() == "--source-selection" { return joint_source_selection(); }; if mode.value.as_str() == "--observer" { return joint_observer(); }; if mode.value.as_str() == "--identity" { return joint_identity(); }; if mode.value.as_str() == "--semantic" { return joint_semantic_probe(); }; if mode.value.as_str() == "--print-hir" { return sh_print_formal_hir(); }; }; };
+    joint_native_main();
+}
+
+def factory_fixture(name: &str) -> String {
+    let root = factory_arg(1).value;
+    path_join_string(root.as_str(), name).value;
+}
+
+def factory_trace_file(input: &str, output: &str, checked_arithmetic: bool) -> Result<i64, i64> {
+    let library = sh_nc_environment("SENGOO_STDLIB")?;
+    if library.len() == 0 { library.push_str("tools/stdlib")?; (); };
+    let map = sh_nc_environment("SENGOO_MODULE_MAP")?;
+    io_stderr_write("factory-stage:modules\n");
+    let graph = sh_modules_load(input, library.as_str(), &map, 1024, 16777216);
+    if graph.error != 0 { return sh_nc_module_error(&graph, graph.error, ShSpan { source: graph.source, start: graph.start, end: graph.end }, if graph.error >= 5201 and graph.error <= 5207 { "modules"; } else { "frontend"; }); };
+    io_stderr_write("factory-stage:semantics\n");
+    let analyzed = sh_modules_check(&graph, 1000000, 1000);
+    if analyzed.error != 0 { return sh_nc_module_error(&graph, analyzed.error, ShSpan { source: analyzed.source, start: analyzed.start, end: analyzed.end }, if analyzed.front.error != 0 { "frontend"; } else { "semantics"; }); };
+    io_stderr_write("factory-stage:semantics-complete\n");
+    let front = &analyzed.front;
+    let checked = &analyzed.checked;
+    let mut lowered = if checked.factory.profile == 1 { factory_trace_lower(&graph, &analyzed, 100000); } else { sh_lower(&front.expanded.text, &front.parsed.ast, checked, 100000); };
+    if lowered.error != 0 { let span = sh_module_expanded_span(&graph, front, lowered.start, lowered.end); return sh_nc_module_error(&graph, lowered.error, span, "lowering"); };
+    io_stderr_write("factory-stage:source-mapping\n");
+    let physical = sh_module_mir_sources(&graph, front, &mut lowered.mir);
+    if not physical.is_ok() { return sh_nc_module_error(&graph, physical.error, ShSpan { source: graph.root, start: 0, end: 0 }, "lowering"); };
+    io_stderr_write("factory-stage:object\n");
+    let object = sh_native_object(&lowered.mir, 67108864, checked_arithmetic);
+    if not object.is_ok() { return sh_nc_module_error(&graph, object.error, ShSpan { source: graph.root, start: 0, end: 0 }, "native"); };
+    if not sh_modules_unchanged(&graph) { return sh_nc_module_error(&graph, 5206, ShSpan { source: graph.root, start: 0, end: 0 }, "modules"); };
+    let bytes = sh_binary_buffer(&object.value)?;
+    file_write_str_raw(sengoo_stdlib_str_ptr(output), bytes.ptr(), bytes.used_len())?;
+    io_stdout_write("{\"schema_version\":1,\"ok\":true,\"phase\":\"object\"}\n")?;
+    sh_i64_ok(0);
+}
+
+def factory_trace_lift(graph: &ShModules, analyzed: &ShModuleChecked, limit: i64) -> ShHir {
+    io_stderr_write("factory-stage:factory-source-bound\n");
+    if not sh_factory_modules_bound(graph, analyzed) { let mut failed = sh_hir_empty(limit); failed.error = 5509; return failed; };
+    io_stderr_write("factory-stage:ownership\n");
+    let ownership = sh_check_ownership(&analyzed.front.expanded.text, &analyzed.front.parsed.ast, &analyzed.checked, 100);
+    io_stderr_write("factory-stage:module-witness\n");
+    let absent = sh_hir_origins_capture_absent(graph, analyzed, limit);
+    io_stderr_write("factory-stage:hir-lift\n");
+    sh_hir_lift_modules(graph, analyzed, &ownership, &absent, "", "", "", "", "", limit);
+}
+
+def factory_trace_lower(graph: &ShModules, analyzed: &ShModuleChecked, maximum: i64) -> ShLowered {
+    let hir = factory_trace_lift(graph, analyzed, maximum);
+    if hir.error != 0 { return ShLowered { mir: sh_mir_new(maximum), error: hir.error, start: hir.start, end: hir.end }; };
+    io_stderr_write("factory-stage:hir-validate\n");
+    let valid = sh_hir_validate_modules(&hir, graph, analyzed, &hir.ownership, "", "", "", "", "");
+    if valid != 0 or hir.origins.present != 0 { return ShLowered { mir: sh_mir_new(maximum), error: if valid != 0 { valid; } else { 5008; }, start: hir.start, end: hir.end }; };
+    io_stderr_write("factory-stage:mir-lower\n");
+    sh_lower_parts(&hir.source, &hir.ast, &hir.checked, &hir.ownership, maximum);
+}
+
+def factory_trace_main() -> i64 {
+    if args_len() != 3 { return 64; };
+    let input = sh_nc_argument(1);
+    let output = sh_nc_argument(2);
+    if not input.is_ok() or not output.is_ok() { return 64; };
+    let result = factory_trace_file(input.value.as_str(), output.value.as_str(), true);
+    if not result.is_ok() { sh_nc_error(result.error, 0, 0, "input-output"); return 66; };
+    result.value;
+}

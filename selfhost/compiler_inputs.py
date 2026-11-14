@@ -11,6 +11,7 @@ import re
 
 
 ALIASES = {
+    "selfhost_factory_path": "selfhost/factory_support/factory_path.sg",
     "selfhost_compiler_source_snapshot": "selfhost/compiler_support/source_snapshot.sg",
     "selfhost_compiler_snapshot_sha": "selfhost/runtime/sha256.sg",
     "selfhost_compiler_snapshot_utf8": "selfhost/runtime/utf8.sg",
@@ -34,7 +35,7 @@ def compiler_closure(root: Path, entries) -> dict[Path, str]:
     root = Path(root).resolve()
     pending = [Path(path).resolve() for path in entries]
     found = {}
-    package = root / "selfhost/compiler_support"
+    packages = {root / "selfhost/compiler_support", root / "selfhost/factory_support"}
     while pending:
         path = pending.pop()
         if path in found:
@@ -46,7 +47,8 @@ def compiler_closure(root: Path, entries) -> dict[Path, str]:
         if path.suffix != ".sg":
             continue
         pending.extend(resolve_module(root, name) for name in IMPORT.findall(raw.decode("utf8")))
-        if path.parent == package:
+        if path.parent in packages:
+            package = path.parent
             # The seed discovers this native directory from the package manifest.
             # Retain its actual sources rather than recording only the SG alias.
             pending.append(package / "Sengoo.toml")
